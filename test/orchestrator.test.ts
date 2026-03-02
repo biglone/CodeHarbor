@@ -69,4 +69,47 @@ describe("Orchestrator", () => {
     expect(executor.callCount).toBe(1);
     expect(channel.sent).toHaveLength(1);
   });
+
+  it("prunes stale session locks", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    const channel = new FakeChannel();
+    const executor = new FakeExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      lockTtlMs: 1_000,
+      lockPruneIntervalMs: 1,
+    });
+
+    const room = "!room:example.com";
+    await orchestrator.handleMessage({
+      channel: "matrix",
+      conversationId: room,
+      senderId: "@alice:example.com",
+      eventId: "$event-1",
+      text: "first",
+    });
+    await orchestrator.handleMessage({
+      channel: "matrix",
+      conversationId: room,
+      senderId: "@bob:example.com",
+      eventId: "$event-2",
+      text: "second",
+    });
+
+    expect((orchestrator as any).sessionLocks.size).toBe(2);
+
+    vi.setSystemTime(new Date("2026-01-01T00:00:02Z"));
+    await orchestrator.handleMessage({
+      channel: "matrix",
+      conversationId: room,
+      senderId: "@carol:example.com",
+      eventId: "$event-3",
+      text: "third",
+    });
+
+    expect((orchestrator as any).sessionLocks.size).toBe(1);
+    vi.useRealTimers();
+  });
 });

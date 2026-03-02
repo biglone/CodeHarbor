@@ -6,18 +6,39 @@ import { Logger } from "./logger";
 import { InboundMessage } from "./types";
 import { StateStore } from "./store/state-store";
 
+interface OrchestratorOptions {
+  lockTtlMs?: number;
+  lockPruneIntervalMs?: number;
+}
+
+interface SessionLockEntry {
+  mutex: Mutex;
+  lastUsedAt: number;
+}
+
 export class Orchestrator {
   private readonly channel: MatrixChannel;
   private readonly executor: CodexExecutor;
   private readonly stateStore: StateStore;
   private readonly logger: Logger;
-  private readonly sessionLocks = new Map<string, Mutex>();
+  private readonly sessionLocks = new Map<string, SessionLockEntry>();
+  private readonly lockTtlMs: number;
+  private readonly lockPruneIntervalMs: number;
+  private lastLockPruneAt = 0;
 
-  constructor(channel: MatrixChannel, executor: CodexExecutor, stateStore: StateStore, logger: Logger) {
+  constructor(
+    channel: MatrixChannel,
+    executor: CodexExecutor,
+    stateStore: StateStore,
+    logger: Logger,
+    options?: OrchestratorOptions,
+  ) {
     this.channel = channel;
     this.executor = executor;
     this.stateStore = stateStore;
     this.logger = logger;
+    this.lockTtlMs = options?.lockTtlMs ?? 30 * 60 * 1000;
+    this.lockPruneIntervalMs = options?.lockPruneIntervalMs ?? 5 * 60 * 1000;
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
@@ -54,12 +75,35 @@ export class Orchestrator {
   }
 
   private getLock(key: string): Mutex {
-    let mutex = this.sessionLocks.get(key);
-    if (!mutex) {
-      mutex = new Mutex();
-      this.sessionLocks.set(key, mutex);
+    const now = Date.now();
+    if (now - this.lastLockPruneAt >= this.lockPruneIntervalMs) {
+      this.lastLockPruneAt = now;
+      this.pruneSessionLocks(now);
     }
-    return mutex;
+
+    let entry = this.sessionLocks.get(key);
+    if (!entry) {
+      entry = {
+        mutex: new Mutex(),
+        lastUsedAt: now,
+      };
+      this.sessionLocks.set(key, entry);
+    }
+    entry.lastUsedAt = now;
+    return entry.mutex;
+  }
+
+  private pruneSessionLocks(now: number): void {
+    const expireBefore = now - this.lockTtlMs;
+    for (const [sessionKey, entry] of this.sessionLocks.entries()) {
+      if (entry.lastUsedAt >= expireBefore) {
+        continue;
+      }
+      if (entry.mutex.isLocked()) {
+        continue;
+      }
+      this.sessionLocks.delete(sessionKey);
+    }
   }
 }
 
