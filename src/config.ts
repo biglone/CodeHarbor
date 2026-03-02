@@ -25,6 +25,11 @@ const configSchema = z
       .default("200")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    MAX_SESSION_AGE_DAYS: z
+      .string()
+      .default("30")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     REPLY_CHUNK_SIZE: z
       .string()
       .default("3500")
@@ -43,6 +48,7 @@ const configSchema = z
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,
     statePath: path.resolve(v.STATE_PATH),
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
+    maxSessionAgeDays: v.MAX_SESSION_AGE_DAYS,
     replyChunkSize: v.REPLY_CHUNK_SIZE,
     logLevel: v.LOG_LEVEL,
   }));

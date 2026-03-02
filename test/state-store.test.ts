@@ -10,7 +10,7 @@ describe("StateStore", () => {
   it("stores and reads codex session id", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-"));
     const file = path.join(dir, "state.json");
-    const store = new StateStore(file, 5);
+    const store = new StateStore(file, 5, 30);
 
     expect(store.getCodexSessionId("s1")).toBeNull();
     store.setCodexSessionId("s1", "thread-1");
@@ -20,7 +20,7 @@ describe("StateStore", () => {
   it("deduplicates events and trims history", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-"));
     const file = path.join(dir, "state.json");
-    const store = new StateStore(file, 2);
+    const store = new StateStore(file, 2, 30);
 
     expect(store.markEventIfNew("s1", "e1")).toBe(true);
     expect(store.markEventIfNew("s1", "e1")).toBe(false);
@@ -29,5 +29,27 @@ describe("StateStore", () => {
 
     // e1 should be trimmed; a fresh insert should now pass
     expect(store.markEventIfNew("s1", "e1")).toBe(true);
+  });
+
+  it("prunes expired sessions when ttl is reached", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-"));
+    const file = path.join(dir, "state.json");
+    const stale = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        sessions: {
+          old: {
+            codexSessionId: "thread-1",
+            processedEventIds: ["e1"],
+            updatedAt: stale,
+          },
+        },
+      }),
+    );
+
+    const store = new StateStore(file, 2, 1);
+    expect(store.getCodexSessionId("old")).toBeNull();
+    await store.flush();
   });
 });

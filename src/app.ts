@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 export class CodeHarborApp {
   private readonly config: AppConfig;
   private readonly logger: Logger;
+  private readonly stateStore: StateStore;
   private readonly channel: MatrixChannel;
   private readonly orchestrator: Orchestrator;
 
@@ -20,7 +21,11 @@ export class CodeHarborApp {
     this.config = config;
     this.logger = new Logger(config.logLevel);
 
-    const stateStore = new StateStore(config.statePath, config.maxProcessedEventsPerSession);
+    this.stateStore = new StateStore(
+      config.statePath,
+      config.maxProcessedEventsPerSession,
+      config.maxSessionAgeDays,
+    );
     const executor = new CodexExecutor({
       bin: config.codexBin,
       model: config.codexModel,
@@ -29,7 +34,7 @@ export class CodeHarborApp {
     });
 
     this.channel = new MatrixChannel(config, this.logger);
-    this.orchestrator = new Orchestrator(this.channel, executor, stateStore, this.logger);
+    this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger);
   }
 
   async start(): Promise<void> {
@@ -44,7 +49,11 @@ export class CodeHarborApp {
 
   async stop(): Promise<void> {
     this.logger.info("CodeHarbor stopping.");
-    await this.channel.stop();
+    try {
+      await this.channel.stop();
+    } finally {
+      await this.stateStore.flush();
+    }
   }
 }
 
