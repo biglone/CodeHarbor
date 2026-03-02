@@ -95,7 +95,8 @@ node dist/cli.js start
 - `MATRIX_COMMAND_PREFIX=!code`
   - optional explicit trigger in group rooms (can be empty to disable prefix trigger)
 - `MATRIX_PROGRESS_UPDATES=true`
-  - emit stage progress updates as Matrix `m.notice` messages (for example reasoning/thinking snippets)
+  - emit stage progress updates (for example reasoning/thinking snippets)
+  - in group rooms, progress is coalesced into a single editable status message to reduce notice spam
 - `MATRIX_PROGRESS_MIN_INTERVAL_MS=2500`
   - minimum interval between progress updates to avoid room spam
 - `MATRIX_TYPING_TIMEOUT_MS=10000`

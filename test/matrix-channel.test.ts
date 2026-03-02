@@ -6,6 +6,9 @@ const createClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("matrix-js-sdk", () => ({
   createClient: createClientMock,
+  EventType: {
+    RoomMessage: "m.room.message",
+  },
   RoomEvent: {
     Timeline: "Room.timeline",
   },
@@ -23,7 +26,8 @@ class FakeMatrixClient extends EventEmitter {
   startClient = vi.fn((_options?: unknown) => {});
   stopClient = vi.fn(() => {});
   sendTextMessage = vi.fn(async () => {});
-  sendNotice = vi.fn(async () => {});
+  sendNotice = vi.fn(async () => ({ event_id: "$notice-default" }));
+  sendEvent = vi.fn(async () => ({ event_id: "$edited" }));
   sendTyping = vi.fn(async () => ({}));
   joinRoom = vi.fn(async (_roomId: string) => {});
   getRooms = vi.fn(() => [] as Array<{ roomId: string; getMyMembership: () => string }>);
@@ -134,6 +138,28 @@ describe("MatrixChannel", () => {
       mentionsBot: true,
       repliesToBot: false,
     });
+
+    await channel.stop();
+  });
+
+  it("edits existing group progress notice instead of sending new notice", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    client.sendNotice.mockResolvedValue({ event_id: "$notice-1" });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    const firstId = await channel.upsertProgressNotice("!room:example.com", "[CodeHarbor] thinking 1", null);
+    const secondId = await channel.upsertProgressNotice("!room:example.com", "[CodeHarbor] thinking 2", firstId);
+
+    expect(firstId).toBe("$notice-1");
+    expect(secondId).toBe("$edited");
+    expect(client.sendNotice).toHaveBeenCalledTimes(1);
+    expect(client.sendEvent).toHaveBeenCalledTimes(1);
 
     await channel.stop();
   });

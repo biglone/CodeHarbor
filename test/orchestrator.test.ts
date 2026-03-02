@@ -7,6 +7,7 @@ class FakeChannel {
   sent: Array<{ conversationId: string; text: string }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
   typing: Array<{ conversationId: string; isTyping: boolean; timeoutMs: number }> = [];
+  upserts: Array<{ conversationId: string; text: string; replaceEventId: string | null }> = [];
 
   async sendMessage(conversationId: string, text: string): Promise<void> {
     this.sent.push({ conversationId, text });
@@ -18,6 +19,11 @@ class FakeChannel {
 
   async setTyping(conversationId: string, isTyping: boolean, timeoutMs: number): Promise<void> {
     this.typing.push({ conversationId, isTyping, timeoutMs });
+  }
+
+  async upsertProgressNotice(conversationId: string, text: string, replaceEventId: string | null): Promise<string> {
+    this.upserts.push({ conversationId, text, replaceEventId });
+    return replaceEventId ?? `$notice-${this.upserts.length}`;
   }
 }
 
@@ -136,6 +142,7 @@ describe("Orchestrator", () => {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       sessionActiveWindowMinutes: 20,
+      progressUpdatesEnabled: true,
     });
 
     await orchestrator.handleMessage(makeInbound({ text: "hello" }));
@@ -152,6 +159,7 @@ describe("Orchestrator", () => {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       sessionActiveWindowMinutes: 20,
+      progressUpdatesEnabled: true,
     });
 
     await orchestrator.handleMessage(
@@ -164,6 +172,7 @@ describe("Orchestrator", () => {
     expect(executor.callCount).toBe(1);
     expect(channel.sent[0]?.text).toBe("ok:请帮我优化这段代码");
     expect(channel.typing.some((entry) => entry.isTyping)).toBe(true);
+    expect(channel.upserts).toHaveLength(0);
   });
 
   it("processes group messages when bot is mentioned", async () => {
@@ -174,6 +183,7 @@ describe("Orchestrator", () => {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       sessionActiveWindowMinutes: 20,
+      progressUpdatesEnabled: true,
     });
 
     await orchestrator.handleMessage(
@@ -185,6 +195,7 @@ describe("Orchestrator", () => {
 
     expect(executor.callCount).toBe(1);
     expect(channel.sent[0]?.text).toBe("ok:修复这个 bug");
+    expect(channel.upserts.length).toBeGreaterThan(0);
   });
 
   it("supports /status and /stop control commands", async () => {

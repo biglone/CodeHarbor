@@ -100,11 +100,13 @@ export class Orchestrator {
       const stopTyping = this.startTypingHeartbeat(message.conversationId);
       let lastProgressAt = 0;
       let lastProgressText = "";
+      let progressNoticeEventId: string | null = null;
 
       try {
         const result = await this.executor.execute(route.prompt, previousCodexSessionId, (progress) => {
           void this.handleProgress(
             message.conversationId,
+            message.isDirectMessage,
             progress,
             () => lastProgressAt,
             (next) => {
@@ -114,6 +116,10 @@ export class Orchestrator {
             (next) => {
               lastProgressText = next;
             },
+            () => progressNoticeEventId,
+            (next) => {
+              progressNoticeEventId = next;
+            },
           );
         });
 
@@ -121,9 +127,16 @@ export class Orchestrator {
           this.stateStore.setCodexSessionId(sessionKey, result.sessionId);
         }
         await this.channel.sendMessage(message.conversationId, result.reply);
+        await this.finishProgress(message.conversationId, message.isDirectMessage, "处理完成", progressNoticeEventId);
         this.stateStore.markEventProcessed(sessionKey, message.eventId);
       } catch (error) {
         this.logger.error("Failed to execute codex request", error);
+        await this.finishProgress(
+          message.conversationId,
+          message.isDirectMessage,
+          `处理失败: ${formatError(error)}`,
+          progressNoticeEventId,
+        );
         try {
           await this.channel.sendMessage(
             message.conversationId,
@@ -235,11 +248,14 @@ export class Orchestrator {
 
   private async handleProgress(
     conversationId: string,
+    isDirectMessage: boolean,
     progress: CodexProgressEvent,
     getLastProgressAt: () => number,
     setLastProgressAt: (next: number) => void,
     getLastProgressText: () => string,
     setLastProgressText: (next: string) => void,
+    getProgressNoticeEventId: () => string | null,
+    setProgressNoticeEventId: (next: string) => void,
   ): Promise<void> {
     if (!this.progressUpdatesEnabled) {
       return;
@@ -260,10 +276,53 @@ export class Orchestrator {
 
     setLastProgressAt(now);
     setLastProgressText(progressText);
+    await this.sendProgressUpdate(
+      conversationId,
+      isDirectMessage,
+      `[CodeHarbor] ${progressText}`,
+      getProgressNoticeEventId,
+      setProgressNoticeEventId,
+    );
+  }
+
+  private async finishProgress(
+    conversationId: string,
+    isDirectMessage: boolean,
+    summary: string,
+    progressNoticeEventId: string | null,
+  ): Promise<void> {
+    if (!this.progressUpdatesEnabled) {
+      return;
+    }
+    await this.sendProgressUpdate(
+      conversationId,
+      isDirectMessage,
+      `[CodeHarbor] ${summary}`,
+      () => progressNoticeEventId,
+      () => undefined,
+    );
+  }
+
+  private async sendProgressUpdate(
+    conversationId: string,
+    isDirectMessage: boolean,
+    text: string,
+    getProgressNoticeEventId: () => string | null,
+    setProgressNoticeEventId: (next: string) => void,
+  ): Promise<void> {
     try {
-      await this.channel.sendNotice(conversationId, `[CodeHarbor] ${progressText}`);
+      if (isDirectMessage) {
+        await this.channel.sendNotice(conversationId, text);
+        return;
+      }
+      const eventId = await this.channel.upsertProgressNotice(
+        conversationId,
+        text,
+        getProgressNoticeEventId(),
+      );
+      setProgressNoticeEventId(eventId);
     } catch (error) {
-      this.logger.debug("Failed to send progress update", { conversationId, progress, error });
+      this.logger.debug("Failed to send progress update", { conversationId, text, error });
     }
   }
 

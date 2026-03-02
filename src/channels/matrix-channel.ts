@@ -1,6 +1,7 @@
 import {
   ClientEvent,
   createClient,
+  EventType,
   MatrixClient,
   type MatrixEvent,
   RoomEvent,
@@ -66,6 +67,43 @@ export class MatrixChannel {
     for (const chunk of splitText(text, this.chunkSize)) {
       await this.client.sendNotice(conversationId, chunk);
     }
+  }
+
+  async upsertProgressNotice(conversationId: string, text: string, replaceEventId: string | null): Promise<string> {
+    if (!this.started) {
+      throw new Error("Matrix channel not started.");
+    }
+
+    const normalized = splitText(text, this.chunkSize)[0] ?? "";
+    if (!normalized.trim()) {
+      throw new Error("Progress notice cannot be empty.");
+    }
+
+    if (!replaceEventId) {
+      const response = await this.client.sendNotice(conversationId, normalized);
+      return response.event_id;
+    }
+
+    const content = {
+      msgtype: "m.notice",
+      body: `* ${normalized}`,
+      "m.new_content": {
+        msgtype: "m.notice",
+        body: normalized,
+      },
+      "m.relates_to": {
+        rel_type: "m.replace",
+        event_id: replaceEventId,
+      },
+    } as const;
+
+    const sendEditEvent = this.client.sendEvent as unknown as (
+      roomId: string,
+      eventType: string,
+      payload: Record<string, unknown>,
+    ) => Promise<{ event_id: string }>;
+    const response = await sendEditEvent(conversationId, EventType.RoomMessage, content as Record<string, unknown>);
+    return response.event_id;
   }
 
   async setTyping(conversationId: string, isTyping: boolean, timeoutMs: number): Promise<void> {
