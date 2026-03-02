@@ -30,8 +30,9 @@ export class MatrixChannel {
     this.handler = handler;
     this.client.on("Room.timeline", this.onTimeline);
     this.client.on("RoomMember.membership", this.onMembership);
+    const readyPromise = this.waitUntilReady();
     this.client.startClient({ initialSyncLimit: 10 });
-    await this.waitUntilReady();
+    await readyPromise;
     await this.joinPendingInvites();
     this.started = true;
     this.logger.info("Matrix channel ready.");
@@ -117,6 +118,12 @@ export class MatrixChannel {
 
   private async waitUntilReady(timeoutMs = 60_000): Promise<void> {
     await new Promise<void>((resolve, reject) => {
+      const currentState = this.client.getSyncState();
+      if (currentState === "PREPARED" || currentState === "SYNCING") {
+        resolve();
+        return;
+      }
+
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error("Matrix sync timeout."));
