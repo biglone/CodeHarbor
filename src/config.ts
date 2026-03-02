@@ -19,6 +19,11 @@ const configSchema = z
       .string()
       .default("false")
       .transform((v) => v.toLowerCase() === "true"),
+    CODEX_EXEC_TIMEOUT_MS: z
+      .string()
+      .default("600000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
       .string()
@@ -46,6 +51,7 @@ const configSchema = z
     codexModel: v.CODEX_MODEL?.trim() || null,
     codexWorkdir: path.resolve(v.CODEX_WORKDIR),
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,
+    codexExecTimeoutMs: v.CODEX_EXEC_TIMEOUT_MS,
     statePath: path.resolve(v.STATE_PATH),
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
     maxSessionAgeDays: v.MAX_SESSION_AGE_DAYS,

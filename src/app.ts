@@ -31,6 +31,7 @@ export class CodeHarborApp {
       model: config.codexModel,
       workdir: config.codexWorkdir,
       dangerousBypass: config.codexDangerousBypass,
+      timeoutMs: config.codexExecTimeoutMs,
     });
 
     this.channel = new MatrixChannel(config, this.logger);

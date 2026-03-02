@@ -8,6 +8,7 @@ export interface CodexExecutorOptions {
   model: string | null;
   workdir: string;
   dangerousBypass: boolean;
+  timeoutMs: number;
 }
 
 interface CodexJsonEvent {
@@ -37,6 +38,8 @@ export class CodexExecutor {
     let stderr = "";
     let resolvedThreadId: string | null = sessionId;
     let latestMessage = "";
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | null = null;
 
     const lineReader = readline.createInterface({ input: child.stdout });
     lineReader.on("line", (line) => {
@@ -56,15 +59,37 @@ export class CodexExecutor {
       stderr += chunk.toString("utf8");
     });
 
+    const timeoutTimer =
+      this.options.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            child.kill("SIGTERM");
+            killTimer = setTimeout(() => {
+              child.kill("SIGKILL");
+            }, 5_000);
+            killTimer.unref?.();
+          }, this.options.timeoutMs)
+        : null;
+    timeoutTimer?.unref?.();
+
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("close", (code) => resolve(code ?? 1));
     });
 
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+    }
+    if (killTimer) {
+      clearTimeout(killTimer);
+    }
     lineReader.close();
 
+    if (timedOut) {
+      throw new Error(`codex execution timed out after ${this.options.timeoutMs}ms`);
+    }
     if (exitCode !== 0) {
-      throw new Error(`codex exited with code ${exitCode}: ${stderr.trim()}`);
+      throw new Error(`codex exited with code ${exitCode}: ${stderr.trim() || "<no stderr output>"}`);
     }
     if (!resolvedThreadId) {
       throw new Error("codex did not return thread_id.");
