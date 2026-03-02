@@ -4,6 +4,9 @@ export interface InboundMessage {
   senderId: string;
   eventId: string;
   text: string;
+  isDirectMessage: boolean;
+  mentionsBot: boolean;
+  repliesToBot: boolean;
 }
 
 export interface CodexExecutionResult {
@@ -14,6 +17,7 @@ export interface CodexExecutionResult {
 export interface SessionState {
   codexSessionId: string | null;
   processedEventIds: string[];
+  activeUntil: string | null;
   updatedAt: string;
 }
 

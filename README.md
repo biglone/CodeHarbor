@@ -8,7 +8,8 @@ Users send messages in Matrix, CodeHarbor routes each message to a Codex session
 - Matrix channel adapter (receive + reply)
 - Session-to-Codex mapping via persistent local state
 - Duplicate Matrix event protection
-- Prefix-based trigger (default `!code`)
+- Context-aware trigger (DM direct chat + group mention/reply + active session window)
+- Control commands (`/status`, `/reset`, `/stop`)
 - NPM-distributed CLI (`codeharbor`)
 
 ## Architecture
@@ -72,15 +73,27 @@ node dist/cli.js start
 
 ## Message Rules
 
-- `MATRIX_COMMAND_PREFIX=!code`
-  - `!code fix this bug` -> processed
-  - `hello` -> ignored
-- `MATRIX_COMMAND_PREFIX=` (empty)
-  - all text messages are processed
+- Direct Message (DM)
+  - all text messages are processed by default (no prefix required)
+- Group Room
+  - processed when **any** condition matches:
+    - message mentions bot user id
+    - message replies to a bot message
+    - sender has an active conversation window
+    - optional explicit prefix match (`MATRIX_COMMAND_PREFIX`)
+- Active Conversation Window
+  - each successful request activates the sender's conversation in that room
+  - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
+- Control commands
+  - `/status` show current trigger/session status
+  - `/reset` clear bound Codex session and keep conversation active
+  - `/stop` deactivate conversation and clear bound Codex session
 - `MAX_SESSION_AGE_DAYS=30`
   - session metadata older than this TTL is pruned from `state.json`
 - `MAX_SESSIONS=5000`
   - when session count exceeds the limit, least-recently-updated sessions are pruned
+- `MATRIX_COMMAND_PREFIX=!code`
+  - optional explicit trigger in group rooms (can be empty to disable prefix trigger)
 - `MATRIX_PROGRESS_UPDATES=true`
   - emit stage progress updates as Matrix `m.notice` messages (for example reasoning/thinking snippets)
 - `MATRIX_PROGRESS_MIN_INTERVAL_MS=2500`

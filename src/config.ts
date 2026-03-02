@@ -59,6 +59,11 @@ const configSchema = z
       .default("10000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    SESSION_ACTIVE_WINDOW_MINUTES: z
+      .string()
+      .default("20")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -84,6 +89,7 @@ const configSchema = z
     matrixProgressUpdates: v.MATRIX_PROGRESS_UPDATES,
     matrixProgressMinIntervalMs: v.MATRIX_PROGRESS_MIN_INTERVAL_MS,
     matrixTypingTimeoutMs: v.MATRIX_TYPING_TIMEOUT_MS,
+    sessionActiveWindowMinutes: v.SESSION_ACTIVE_WINDOW_MINUTES,
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,
   }));

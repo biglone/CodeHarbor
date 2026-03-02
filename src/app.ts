@@ -40,6 +40,9 @@ export class CodeHarborApp {
       progressUpdatesEnabled: config.matrixProgressUpdates,
       progressMinIntervalMs: config.matrixProgressMinIntervalMs,
       typingTimeoutMs: config.matrixTypingTimeoutMs,
+      commandPrefix: config.matrixCommandPrefix,
+      matrixUserId: config.matrixUserId,
+      sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     });
   }
 

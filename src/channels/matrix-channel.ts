@@ -13,7 +13,7 @@ import {
 import { AppConfig } from "../config";
 import { Logger } from "../logger";
 import { InboundMessage } from "../types";
-import { extractCommandText, splitText } from "../utils/message";
+import { splitText } from "../utils/message";
 
 export type InboundHandler = (message: InboundMessage) => Promise<void>;
 
@@ -118,22 +118,29 @@ export class MatrixChannel {
       return;
     }
 
-    const commandText = extractCommandText(content.body, this.config.matrixCommandPrefix);
-    if (!commandText) {
-      return;
-    }
-
     const eventId = event.getId();
     if (!eventId || typeof eventId !== "string") {
       return;
     }
+
+    const text = content.body.trim();
+    if (!text) {
+      return;
+    }
+
+    const isDirectMessage = isDirectRoom(room);
+    const mentionsBot = checkMentionsBot(content, text, this.config.matrixUserId);
+    const repliesToBot = checkRepliesToBot(content, room, this.config.matrixUserId);
 
     const inbound: InboundMessage = {
       channel: "matrix",
       conversationId: room.roomId,
       senderId,
       eventId,
-      text: commandText,
+      text,
+      isDirectMessage,
+      mentionsBot,
+      repliesToBot,
     };
 
     void this.handler(inbound).catch((error) => {
@@ -192,4 +199,39 @@ export class MatrixChannel {
       await this.joinInvitedRoom(room.roomId);
     }
   }
+}
+
+function isDirectRoom(room: Room): boolean {
+  return room.getJoinedMemberCount() <= 2;
+}
+
+function checkMentionsBot(content: Record<string, unknown>, body: string, botUserId: string): boolean {
+  const mentions = content["m.mentions"];
+  if (mentions && typeof mentions === "object") {
+    const userIds = (mentions as { user_ids?: unknown }).user_ids;
+    if (Array.isArray(userIds) && userIds.some((userId) => userId === botUserId)) {
+      return true;
+    }
+  }
+  return body.includes(botUserId);
+}
+
+function checkRepliesToBot(content: Record<string, unknown>, room: Room, botUserId: string): boolean {
+  const relatesTo = content["m.relates_to"];
+  if (!relatesTo || typeof relatesTo !== "object") {
+    return false;
+  }
+
+  const inReplyTo = (relatesTo as { "m.in_reply_to"?: unknown })["m.in_reply_to"];
+  if (!inReplyTo || typeof inReplyTo !== "object") {
+    return false;
+  }
+
+  const eventId = (inReplyTo as { event_id?: unknown }).event_id;
+  if (typeof eventId !== "string" || !eventId) {
+    return false;
+  }
+
+  const repliedEvent = room.findEventById(eventId);
+  return repliedEvent?.getSender() === botUserId;
 }

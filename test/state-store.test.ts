@@ -92,4 +92,21 @@ describe("StateStore", () => {
     expect(store.getCodexSessionId("newest")).toBe("thread-newest");
     await store.flush();
   });
+
+  it("tracks session activation window and status", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-"));
+    const file = path.join(dir, "state.json");
+    const store = new StateStore(file, 10, 30, 100);
+
+    expect(store.isSessionActive("s1")).toBe(false);
+    store.activateSession("s1", 60_000);
+    expect(store.isSessionActive("s1")).toBe(true);
+
+    const status = store.getSessionStatus("s1");
+    expect(status.isActive).toBe(true);
+    expect(status.activeUntil).not.toBeNull();
+
+    store.deactivateSession("s1");
+    expect(store.isSessionActive("s1")).toBe(false);
+  });
 });

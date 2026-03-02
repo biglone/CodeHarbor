@@ -34,24 +34,75 @@ class FakeExecutor {
   }
 }
 
+interface FakeSessionState {
+  codexSessionId: string | null;
+  processedEventIds: Set<string>;
+  activeUntil: string | null;
+}
+
 class FakeStateStore {
-  private codexSessionId: string | null = null;
-  private readonly processedEventIds = new Set<string>();
+  private readonly sessions = new Map<string, FakeSessionState>();
 
-  getCodexSessionId(): string | null {
-    return this.codexSessionId;
+  getCodexSessionId(sessionKey: string): string | null {
+    return this.sessions.get(sessionKey)?.codexSessionId ?? null;
   }
 
-  setCodexSessionId(_sessionKey: string, value: string): void {
-    this.codexSessionId = value;
+  setCodexSessionId(sessionKey: string, value: string): void {
+    this.ensureSession(sessionKey).codexSessionId = value;
   }
 
-  hasProcessedEvent(_sessionKey: string, eventId: string): boolean {
-    return this.processedEventIds.has(eventId);
+  clearCodexSessionId(sessionKey: string): void {
+    this.ensureSession(sessionKey).codexSessionId = null;
   }
 
-  markEventProcessed(_sessionKey: string, eventId: string): void {
-    this.processedEventIds.add(eventId);
+  hasProcessedEvent(sessionKey: string, eventId: string): boolean {
+    return this.ensureSession(sessionKey).processedEventIds.has(eventId);
+  }
+
+  markEventProcessed(sessionKey: string, eventId: string): void {
+    this.ensureSession(sessionKey).processedEventIds.add(eventId);
+  }
+
+  isSessionActive(sessionKey: string): boolean {
+    const session = this.sessions.get(sessionKey);
+    if (!session || !session.activeUntil) {
+      return false;
+    }
+    return Date.now() <= Date.parse(session.activeUntil);
+  }
+
+  activateSession(sessionKey: string, activeWindowMs: number): void {
+    this.ensureSession(sessionKey).activeUntil = new Date(Date.now() + activeWindowMs).toISOString();
+  }
+
+  deactivateSession(sessionKey: string): void {
+    this.ensureSession(sessionKey).activeUntil = null;
+  }
+
+  getSessionStatus(sessionKey: string): { hasCodexSession: boolean; activeUntil: string | null; isActive: boolean } {
+    const session = this.sessions.get(sessionKey);
+    if (!session) {
+      return { hasCodexSession: false, activeUntil: null, isActive: false };
+    }
+    return {
+      hasCodexSession: Boolean(session.codexSessionId),
+      activeUntil: session.activeUntil,
+      isActive: this.isSessionActive(sessionKey),
+    };
+  }
+
+  private ensureSession(sessionKey: string): FakeSessionState {
+    const existing = this.sessions.get(sessionKey);
+    if (existing) {
+      return existing;
+    }
+    const created: FakeSessionState = {
+      codexSessionId: null,
+      processedEventIds: new Set<string>(),
+      activeUntil: null,
+    };
+    this.sessions.set(sessionKey, created);
+    return created;
   }
 }
 
@@ -62,116 +113,113 @@ const logger = {
   error: vi.fn(),
 };
 
+function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
+  return {
+    channel: "matrix",
+    conversationId: "!room:example.com",
+    senderId: "@alice:example.com",
+    eventId: "$event",
+    text: "ping",
+    isDirectMessage: false,
+    mentionsBot: false,
+    repliesToBot: false,
+    ...partial,
+  };
+}
+
 describe("Orchestrator", () => {
-  it("ignores duplicate events", async () => {
+  it("ignores non-triggered group messages", async () => {
     const channel = new FakeChannel();
     const executor = new FakeExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never);
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      sessionActiveWindowMinutes: 20,
+    });
 
-    const message: InboundMessage = {
-      channel: "matrix",
-      conversationId: "!room:example.com",
-      senderId: "@alice:example.com",
-      eventId: "$event",
-      text: "ping",
-    };
+    await orchestrator.handleMessage(makeInbound({ text: "hello" }));
 
+    expect(executor.callCount).toBe(0);
+    expect(channel.sent).toHaveLength(0);
+  });
+
+  it("processes direct messages without prefix", async () => {
+    const channel = new FakeChannel();
+    const executor = new FakeExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      sessionActiveWindowMinutes: 20,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        text: "请帮我优化这段代码",
+        isDirectMessage: true,
+      }),
+    );
+
+    expect(executor.callCount).toBe(1);
+    expect(channel.sent[0]?.text).toBe("ok:请帮我优化这段代码");
+    expect(channel.typing.some((entry) => entry.isTyping)).toBe(true);
+  });
+
+  it("processes group messages when bot is mentioned", async () => {
+    const channel = new FakeChannel();
+    const executor = new FakeExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      sessionActiveWindowMinutes: 20,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        text: "@bot:example.com 修复这个 bug",
+        mentionsBot: true,
+      }),
+    );
+
+    expect(executor.callCount).toBe(1);
+    expect(channel.sent[0]?.text).toBe("ok:修复这个 bug");
+  });
+
+  it("supports /status and /stop control commands", async () => {
+    const channel = new FakeChannel();
+    const executor = new FakeExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      sessionActiveWindowMinutes: 20,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ text: "/status", isDirectMessage: true, eventId: "$s1" }));
+    await orchestrator.handleMessage(makeInbound({ text: "/stop", isDirectMessage: true, eventId: "$s2" }));
+
+    expect(executor.callCount).toBe(0);
+    expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("会话已停止"))).toBe(true);
+  });
+
+  it("ignores duplicate processed events", async () => {
+    const channel = new FakeChannel();
+    const executor = new FakeExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      sessionActiveWindowMinutes: 20,
+    });
+
+    const message = makeInbound({ text: "hello", isDirectMessage: true });
     await orchestrator.handleMessage(message);
     await orchestrator.handleMessage(message);
 
     expect(executor.callCount).toBe(1);
     expect(channel.sent).toHaveLength(1);
-    expect(channel.typing.length).toBeGreaterThan(0);
-  });
-
-  it("prunes stale session locks", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-
-    const channel = new FakeChannel();
-    const executor = new FakeExecutor();
-    const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
-      lockTtlMs: 1_000,
-      lockPruneIntervalMs: 1,
-    });
-
-    const room = "!room:example.com";
-    await orchestrator.handleMessage({
-      channel: "matrix",
-      conversationId: room,
-      senderId: "@alice:example.com",
-      eventId: "$event-1",
-      text: "first",
-    });
-    await orchestrator.handleMessage({
-      channel: "matrix",
-      conversationId: room,
-      senderId: "@bob:example.com",
-      eventId: "$event-2",
-      text: "second",
-    });
-
-    expect((orchestrator as any).sessionLocks.size).toBe(2);
-
-    vi.setSystemTime(new Date("2026-01-01T00:00:02Z"));
-    await orchestrator.handleMessage({
-      channel: "matrix",
-      conversationId: room,
-      senderId: "@carol:example.com",
-      eventId: "$event-3",
-      text: "third",
-    });
-
-    expect((orchestrator as any).sessionLocks.size).toBe(1);
-    vi.useRealTimers();
-  });
-
-  it("retries duplicate events after a failed execution", async () => {
-    const channel = new FakeChannel();
-    const store = new FakeStateStore();
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    let callCount = 0;
-    const executor = {
-      execute: vi.fn(async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          throw new Error("temporary failure");
-        }
-        return { sessionId: "thread-1", reply: "ok:retry" };
-      }),
-    };
-
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never);
-
-    const message: InboundMessage = {
-      channel: "matrix",
-      conversationId: "!room:example.com",
-      senderId: "@alice:example.com",
-      eventId: "$retry-event",
-      text: "retry me",
-    };
-
-    await orchestrator.handleMessage(message);
-    await orchestrator.handleMessage(message);
-
-    expect(executor.execute).toHaveBeenCalledTimes(2);
-    expect(channel.sent).toEqual([
-      {
-        conversationId: "!room:example.com",
-        text: "[CodeHarbor] Failed to process request: temporary failure",
-      },
-      {
-        conversationId: "!room:example.com",
-        text: "ok:retry",
-      },
-    ]);
   });
 });

@@ -38,7 +38,8 @@ export class StateStore {
   }
 
   getCodexSessionId(sessionKey: string): string | null {
-    return this.ensureSession(sessionKey).codexSessionId;
+    const session = this.data.sessions[sessionKey];
+    return session?.codexSessionId ?? null;
   }
 
   setCodexSessionId(sessionKey: string, codexSessionId: string): void {
@@ -49,9 +50,71 @@ export class StateStore {
     this.schedulePersist();
   }
 
-  hasProcessedEvent(sessionKey: string, eventId: string): boolean {
+  clearCodexSessionId(sessionKey: string): void {
     this.maybePruneExpiredSessions();
     const session = this.ensureSession(sessionKey);
+    session.codexSessionId = null;
+    session.updatedAt = new Date().toISOString();
+    this.schedulePersist();
+  }
+
+  isSessionActive(sessionKey: string, now = Date.now()): boolean {
+    this.maybePruneExpiredSessions();
+    const session = this.data.sessions[sessionKey];
+    if (!session || !session.activeUntil) {
+      return false;
+    }
+    const activeUntilTs = Date.parse(session.activeUntil);
+    if (!Number.isFinite(activeUntilTs)) {
+      return false;
+    }
+    return now <= activeUntilTs;
+  }
+
+  activateSession(sessionKey: string, activeWindowMs: number): void {
+    this.maybePruneExpiredSessions();
+    const session = this.ensureSession(sessionKey);
+    const activeUntil = new Date(Date.now() + Math.max(0, activeWindowMs)).toISOString();
+    session.activeUntil = activeUntil;
+    session.updatedAt = new Date().toISOString();
+    this.schedulePersist();
+  }
+
+  deactivateSession(sessionKey: string): void {
+    this.maybePruneExpiredSessions();
+    const session = this.data.sessions[sessionKey];
+    if (!session) {
+      return;
+    }
+    session.activeUntil = null;
+    session.updatedAt = new Date().toISOString();
+    this.schedulePersist();
+  }
+
+  getSessionStatus(sessionKey: string): { hasCodexSession: boolean; activeUntil: string | null; isActive: boolean } {
+    this.maybePruneExpiredSessions();
+    const session = this.data.sessions[sessionKey];
+    if (!session) {
+      return {
+        hasCodexSession: false,
+        activeUntil: null,
+        isActive: false,
+      };
+    }
+    const isActive = session.activeUntil ? this.isSessionActive(sessionKey) : false;
+    return {
+      hasCodexSession: Boolean(session.codexSessionId),
+      activeUntil: session.activeUntil,
+      isActive,
+    };
+  }
+
+  hasProcessedEvent(sessionKey: string, eventId: string): boolean {
+    this.maybePruneExpiredSessions();
+    const session = this.data.sessions[sessionKey];
+    if (!session) {
+      return false;
+    }
     return session.processedEventIds.includes(eventId);
   }
 
@@ -84,6 +147,7 @@ export class StateStore {
       this.data.sessions[sessionKey] = {
         codexSessionId: null,
         processedEventIds: [],
+        activeUntil: null,
         updatedAt: new Date().toISOString(),
       };
     }
@@ -102,6 +166,7 @@ export class StateStore {
       if (!parsed.sessions || typeof parsed.sessions !== "object") {
         throw new Error("Malformed state data.");
       }
+      normalizeState(parsed);
       return parsed;
     } catch {
       this.writeFile(EMPTY_STATE);
@@ -221,4 +286,21 @@ export class StateStore {
 function parseUpdatedAt(updatedAt: string): number {
   const timestamp = Date.parse(updatedAt);
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function normalizeState(state: StateData): void {
+  for (const session of Object.values(state.sessions)) {
+    if (!Array.isArray(session.processedEventIds)) {
+      session.processedEventIds = [];
+    }
+    if (typeof session.codexSessionId !== "string" && session.codexSessionId !== null) {
+      session.codexSessionId = null;
+    }
+    if (typeof session.updatedAt !== "string") {
+      session.updatedAt = new Date().toISOString();
+    }
+    if (typeof session.activeUntil !== "string" && session.activeUntil !== null) {
+      session.activeUntil = null;
+    }
+  }
 }

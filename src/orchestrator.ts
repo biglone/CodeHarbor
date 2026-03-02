@@ -3,8 +3,9 @@ import { Mutex } from "async-mutex";
 import { MatrixChannel } from "./channels/matrix-channel";
 import { CodexExecutor, type CodexProgressEvent } from "./executor/codex-executor";
 import { Logger } from "./logger";
-import { InboundMessage } from "./types";
 import { StateStore } from "./store/state-store";
+import { InboundMessage } from "./types";
+import { extractCommandText } from "./utils/message";
 
 interface OrchestratorOptions {
   lockTtlMs?: number;
@@ -12,12 +13,20 @@ interface OrchestratorOptions {
   progressUpdatesEnabled?: boolean;
   progressMinIntervalMs?: number;
   typingTimeoutMs?: number;
+  commandPrefix?: string;
+  matrixUserId?: string;
+  sessionActiveWindowMinutes?: number;
 }
 
 interface SessionLockEntry {
   mutex: Mutex;
   lastUsedAt: number;
 }
+
+type RouteDecision =
+  | { kind: "ignore" }
+  | { kind: "execute"; prompt: string }
+  | { kind: "command"; command: "status" | "stop" | "reset" };
 
 export class Orchestrator {
   private readonly channel: MatrixChannel;
@@ -30,6 +39,9 @@ export class Orchestrator {
   private readonly progressUpdatesEnabled: boolean;
   private readonly progressMinIntervalMs: number;
   private readonly typingTimeoutMs: number;
+  private readonly commandPrefix: string;
+  private readonly matrixUserId: string;
+  private readonly sessionActiveWindowMs: number;
   private lastLockPruneAt = 0;
 
   constructor(
@@ -48,6 +60,10 @@ export class Orchestrator {
     this.progressUpdatesEnabled = options?.progressUpdatesEnabled ?? false;
     this.progressMinIntervalMs = options?.progressMinIntervalMs ?? 2_500;
     this.typingTimeoutMs = options?.typingTimeoutMs ?? 10_000;
+    this.commandPrefix = (options?.commandPrefix ?? "").trim();
+    this.matrixUserId = options?.matrixUserId ?? "";
+    const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
+    this.sessionActiveWindowMs = Math.max(1, sessionActiveWindowMinutes) * 60_000;
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
@@ -60,10 +76,25 @@ export class Orchestrator {
         return;
       }
 
+      const route = this.routeMessage(message, sessionKey);
+      if (route.kind === "ignore") {
+        return;
+      }
+
+      if (route.kind === "command") {
+        await this.handleControlCommand(route.command, sessionKey, message);
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        return;
+      }
+
+      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
       this.logger.info("Processing message", {
         sessionKey,
         hasCodexSession: Boolean(previousCodexSessionId),
+        isDirectMessage: message.isDirectMessage,
+        mentionsBot: message.mentionsBot,
+        repliesToBot: message.repliesToBot,
       });
 
       const stopTyping = this.startTypingHeartbeat(message.conversationId);
@@ -71,7 +102,7 @@ export class Orchestrator {
       let lastProgressText = "";
 
       try {
-        const result = await this.executor.execute(message.text, previousCodexSessionId, (progress) => {
+        const result = await this.executor.execute(route.prompt, previousCodexSessionId, (progress) => {
           void this.handleProgress(
             message.conversationId,
             progress,
@@ -85,6 +116,7 @@ export class Orchestrator {
             },
           );
         });
+
         if (!previousCodexSessionId || previousCodexSessionId !== result.sessionId) {
           this.stateStore.setCodexSessionId(sessionKey, result.sessionId);
         }
@@ -104,6 +136,70 @@ export class Orchestrator {
         await stopTyping();
       }
     });
+  }
+
+  private routeMessage(message: InboundMessage, sessionKey: string): RouteDecision {
+    const incoming = message.text.trim();
+    if (!incoming) {
+      return { kind: "ignore" };
+    }
+
+    const prefixTriggered = this.commandPrefix.length > 0;
+    const prefixedText = prefixTriggered ? extractCommandText(incoming, this.commandPrefix) : null;
+    const activeSession = this.stateStore.isSessionActive(sessionKey);
+    const conversationalTrigger =
+      message.isDirectMessage || message.mentionsBot || message.repliesToBot || activeSession;
+
+    if (!conversationalTrigger && prefixedText === null) {
+      return { kind: "ignore" };
+    }
+
+    let normalized = prefixedText ?? incoming;
+    if (prefixedText === null && message.mentionsBot) {
+      normalized = stripLeadingBotMention(normalized, this.matrixUserId);
+    }
+    normalized = normalized.trim();
+    if (!normalized) {
+      return { kind: "ignore" };
+    }
+
+    const command = parseControlCommand(normalized);
+    if (command) {
+      return { kind: "command", command };
+    }
+    return { kind: "execute", prompt: normalized };
+  }
+
+  private async handleControlCommand(command: "status" | "stop" | "reset", sessionKey: string, message: InboundMessage): Promise<void> {
+    if (command === "stop") {
+      this.stateStore.deactivateSession(sessionKey);
+      this.stateStore.clearCodexSessionId(sessionKey);
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
+      );
+      return;
+    }
+
+    if (command === "reset") {
+      this.stateStore.clearCodexSessionId(sessionKey);
+      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
+      );
+      return;
+    }
+
+    const status = this.stateStore.getSessionStatus(sessionKey);
+    const scope = message.isDirectMessage ? "私聊（免前缀）" : "群聊（提及/回复/激活窗口触发）";
+    const activeUntil = status.activeUntil ?? "未激活";
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] 当前状态\n- 会话类型: ${scope}\n- 激活中: ${
+        status.isActive ? "是" : "否"
+      }\n- activeUntil: ${activeUntil}\n- 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}`,
+    );
   }
 
   private startTypingHeartbeat(conversationId: string): () => Promise<void> {
@@ -231,4 +327,31 @@ function mapProgressText(progress: CodexProgressEvent): string | null {
     return `阶段完成: ${progress.message}`;
   }
   return null;
+}
+
+function parseControlCommand(text: string): "status" | "stop" | "reset" | null {
+  const command = text.split(/\s+/, 1)[0].toLowerCase();
+  if (command === "/status") {
+    return "status";
+  }
+  if (command === "/stop") {
+    return "stop";
+  }
+  if (command === "/reset") {
+    return "reset";
+  }
+  return null;
+}
+
+function stripLeadingBotMention(text: string, matrixUserId: string): string {
+  if (!matrixUserId) {
+    return text;
+  }
+  const escapedUserId = escapeRegex(matrixUserId);
+  const mentionPattern = new RegExp(`^\\s*(?:<)?${escapedUserId}(?:>)?[\\s,:，：-]*`, "i");
+  return text.replace(mentionPattern, "").trim();
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
