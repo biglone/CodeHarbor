@@ -1,0 +1,76 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+import { MatrixChannel } from "./channels/matrix-channel";
+import { AppConfig } from "./config";
+import { CodexExecutor } from "./executor/codex-executor";
+import { Logger } from "./logger";
+import { Orchestrator } from "./orchestrator";
+import { StateStore } from "./store/state-store";
+
+const execFileAsync = promisify(execFile);
+
+export class CodeHarborApp {
+  private readonly config: AppConfig;
+  private readonly logger: Logger;
+  private readonly channel: MatrixChannel;
+  private readonly orchestrator: Orchestrator;
+
+  constructor(config: AppConfig) {
+    this.config = config;
+    this.logger = new Logger(config.logLevel);
+
+    const stateStore = new StateStore(config.statePath, config.maxProcessedEventsPerSession);
+    const executor = new CodexExecutor({
+      bin: config.codexBin,
+      model: config.codexModel,
+      workdir: config.codexWorkdir,
+      dangerousBypass: config.codexDangerousBypass,
+    });
+
+    this.channel = new MatrixChannel(config, this.logger);
+    this.orchestrator = new Orchestrator(this.channel, executor, stateStore, this.logger);
+  }
+
+  async start(): Promise<void> {
+    this.logger.info("CodeHarbor starting", {
+      matrixHomeserver: this.config.matrixHomeserver,
+      workdir: this.config.codexWorkdir,
+      prefix: this.config.matrixCommandPrefix || "<none>",
+    });
+    await this.channel.start(this.orchestrator.handleMessage.bind(this.orchestrator));
+    this.logger.info("CodeHarbor is running.");
+  }
+
+  async stop(): Promise<void> {
+    this.logger.info("CodeHarbor stopping.");
+    await this.channel.stop();
+  }
+}
+
+export async function runDoctor(config: AppConfig): Promise<void> {
+  const logger = new Logger(config.logLevel);
+  logger.info("Doctor check started");
+
+  try {
+    const { stdout } = await execFileAsync(config.codexBin, ["--version"]);
+    logger.info("codex available", { version: stdout.trim() });
+  } catch (error) {
+    logger.error("codex unavailable", error);
+    throw error;
+  }
+
+  try {
+    const response = await fetch(`${config.matrixHomeserver}/_matrix/client/versions`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as { versions?: string[] };
+    logger.info("matrix reachable", { versions: body.versions ?? [] });
+  } catch (error) {
+    logger.error("matrix unreachable", error);
+    throw error;
+  }
+
+  logger.info("Doctor check passed");
+}
