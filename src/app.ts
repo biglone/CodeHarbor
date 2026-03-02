@@ -71,7 +71,15 @@ export async function runDoctor(config: AppConfig): Promise<void> {
   }
 
   try {
-    const response = await fetch(`${config.matrixHomeserver}/_matrix/client/versions`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.doctorHttpTimeoutMs);
+    timer.unref?.();
+
+    const response = await fetch(`${config.matrixHomeserver}/_matrix/client/versions`, {
+      signal: controller.signal,
+    }).finally(() => {
+      clearTimeout(timer);
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }

@@ -40,6 +40,11 @@ const configSchema = z
       .default("3500")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    DOCTOR_HTTP_TIMEOUT_MS: z
+      .string()
+      .default("10000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((v) => ({
@@ -56,6 +61,7 @@ const configSchema = z
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
     maxSessionAgeDays: v.MAX_SESSION_AGE_DAYS,
     replyChunkSize: v.REPLY_CHUNK_SIZE,
+    doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,
   }));
 
