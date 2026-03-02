@@ -11,6 +11,10 @@ describe("extractCommandText", () => {
     expect(extractCommandText("hello", "!code")).toBeNull();
   });
 
+  it("returns null when message only starts with prefix token", () => {
+    expect(extractCommandText("!codefix this", "!code")).toBeNull();
+  });
+
   it("accepts all text when prefix is empty", () => {
     expect(extractCommandText(" hello ", "")).toBe("hello");
   });

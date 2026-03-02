@@ -46,8 +46,7 @@ export class Orchestrator {
     const lock = this.getLock(sessionKey);
 
     await lock.runExclusive(async () => {
-      const isNew = this.stateStore.markEventIfNew(sessionKey, message.eventId);
-      if (!isNew) {
+      if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
         this.logger.debug("Duplicate event ignored", { eventId: message.eventId });
         return;
       }
@@ -64,12 +63,17 @@ export class Orchestrator {
           this.stateStore.setCodexSessionId(sessionKey, result.sessionId);
         }
         await this.channel.sendMessage(message.conversationId, result.reply);
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
       } catch (error) {
         this.logger.error("Failed to execute codex request", error);
-        await this.channel.sendMessage(
-          message.conversationId,
-          `[CodeHarbor] Failed to process request: ${formatError(error)}`,
-        );
+        try {
+          await this.channel.sendMessage(
+            message.conversationId,
+            `[CodeHarbor] Failed to process request: ${formatError(error)}`,
+          );
+        } catch (sendError) {
+          this.logger.error("Failed to send error reply to Matrix", sendError);
+        }
       }
     });
   }

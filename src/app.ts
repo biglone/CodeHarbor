@@ -25,6 +25,7 @@ export class CodeHarborApp {
       config.statePath,
       config.maxProcessedEventsPerSession,
       config.maxSessionAgeDays,
+      config.maxSessions,
     );
     const executor = new CodexExecutor({
       bin: config.codexBin,

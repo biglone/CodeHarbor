@@ -12,6 +12,11 @@ export function extractCommandText(rawText: string, prefix: string): string | nu
     return null;
   }
 
+  const nextChar = incoming.slice(prefix.length, prefix.length + 1);
+  if (nextChar && !/\s/.test(nextChar)) {
+    return null;
+  }
+
   const stripped = incoming.slice(prefix.length).trim();
   return stripped.length > 0 ? stripped : null;
 }

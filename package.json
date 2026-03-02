@@ -19,8 +19,10 @@
     "dev": "tsx src/cli.ts start",
     "start": "node dist/cli.js start",
     "doctor": "node dist/cli.js doctor",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:legacy": ".venv/bin/python -m pytest -q tests"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",

@@ -1,4 +1,14 @@
-import { createClient, MatrixClient } from "matrix-js-sdk";
+import {
+  ClientEvent,
+  createClient,
+  MatrixClient,
+  type MatrixEvent,
+  RoomEvent,
+  type RoomMember,
+  RoomMemberEvent,
+  type Room,
+  SyncState,
+} from "matrix-js-sdk";
 
 import { AppConfig } from "../config";
 import { Logger } from "../logger";
@@ -28,8 +38,8 @@ export class MatrixChannel {
 
   async start(handler: InboundHandler): Promise<void> {
     this.handler = handler;
-    this.client.on("Room.timeline", this.onTimeline);
-    this.client.on("RoomMember.membership", this.onMembership);
+    this.client.on(RoomEvent.Timeline, this.onTimeline);
+    this.client.on(RoomMemberEvent.Membership, this.onMembership);
     const readyPromise = this.waitUntilReady();
     this.client.startClient({ initialSyncLimit: 10 });
     await readyPromise;
@@ -44,26 +54,18 @@ export class MatrixChannel {
     }
 
     for (const chunk of splitText(text, this.chunkSize)) {
-      await this.client.sendEvent(
-        conversationId,
-        "m.room.message",
-        {
-          msgtype: "m.text",
-          body: chunk,
-        },
-        "",
-      );
+      await this.client.sendTextMessage(conversationId, chunk);
     }
   }
 
   async stop(): Promise<void> {
-    this.client.removeListener("Room.timeline", this.onTimeline);
-    this.client.removeListener("RoomMember.membership", this.onMembership);
+    this.client.removeListener(RoomEvent.Timeline, this.onTimeline);
+    this.client.removeListener(RoomMemberEvent.Membership, this.onMembership);
     this.client.stopClient();
     this.started = false;
   }
 
-  private readonly onMembership = (_event: any, member: any): void => {
+  private readonly onMembership = (_event: MatrixEvent, member: RoomMember): void => {
     if (!member || member.membership !== "invite") {
       return;
     }
@@ -77,14 +79,19 @@ export class MatrixChannel {
     void this.joinInvitedRoom(member.roomId);
   };
 
-  private readonly onTimeline = (event: any, room: any, toStartOfTimeline: boolean): void => {
+  private readonly onTimeline = (
+    event: MatrixEvent,
+    room: Room | undefined,
+    toStartOfTimeline?: boolean,
+  ): void => {
     if (!this.handler || !room || toStartOfTimeline) {
       return;
     }
     if (event.getType() !== "m.room.message") {
       return;
     }
-    if (event.getSender() === this.config.matrixUserId) {
+    const senderId = event.getSender();
+    if (!senderId || senderId === this.config.matrixUserId) {
       return;
     }
 
@@ -106,7 +113,7 @@ export class MatrixChannel {
     const inbound: InboundMessage = {
       channel: "matrix",
       conversationId: room.roomId,
-      senderId: event.getSender(),
+      senderId,
       eventId,
       text: commandText,
     };
@@ -129,7 +136,7 @@ export class MatrixChannel {
         reject(new Error("Matrix sync timeout."));
       }, timeoutMs);
 
-      const onSync = (state: string): void => {
+      const onSync = (state: SyncState): void => {
         if (state === "PREPARED" || state === "SYNCING") {
           cleanup();
           resolve();
@@ -141,10 +148,10 @@ export class MatrixChannel {
 
       const cleanup = (): void => {
         clearTimeout(timer);
-        this.client.removeListener("sync", onSync);
+        this.client.removeListener(ClientEvent.Sync, onSync);
       };
 
-      this.client.on("sync", onSync);
+      this.client.on(ClientEvent.Sync, onSync);
     });
   }
 

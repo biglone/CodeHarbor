@@ -22,7 +22,7 @@ class FakeExecutor {
 
 class FakeStateStore {
   private codexSessionId: string | null = null;
-  private readonly eventIds = new Set<string>();
+  private readonly processedEventIds = new Set<string>();
 
   getCodexSessionId(): string | null {
     return this.codexSessionId;
@@ -32,12 +32,12 @@ class FakeStateStore {
     this.codexSessionId = value;
   }
 
-  markEventIfNew(_sessionKey: string, eventId: string): boolean {
-    if (this.eventIds.has(eventId)) {
-      return false;
-    }
-    this.eventIds.add(eventId);
-    return true;
+  hasProcessedEvent(_sessionKey: string, eventId: string): boolean {
+    return this.processedEventIds.has(eventId);
+  }
+
+  markEventProcessed(_sessionKey: string, eventId: string): void {
+    this.processedEventIds.add(eventId);
   }
 }
 
@@ -111,5 +111,52 @@ describe("Orchestrator", () => {
 
     expect((orchestrator as any).sessionLocks.size).toBe(1);
     vi.useRealTimers();
+  });
+
+  it("retries duplicate events after a failed execution", async () => {
+    const channel = new FakeChannel();
+    const store = new FakeStateStore();
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    let callCount = 0;
+    const executor = {
+      execute: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new Error("temporary failure");
+        }
+        return { sessionId: "thread-1", reply: "ok:retry" };
+      }),
+    };
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never);
+
+    const message: InboundMessage = {
+      channel: "matrix",
+      conversationId: "!room:example.com",
+      senderId: "@alice:example.com",
+      eventId: "$retry-event",
+      text: "retry me",
+    };
+
+    await orchestrator.handleMessage(message);
+    await orchestrator.handleMessage(message);
+
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(channel.sent).toEqual([
+      {
+        conversationId: "!room:example.com",
+        text: "[CodeHarbor] Failed to process request: temporary failure",
+      },
+      {
+        conversationId: "!room:example.com",
+        text: "ok:retry",
+      },
+    ]);
   });
 });

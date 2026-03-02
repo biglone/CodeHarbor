@@ -35,6 +35,11 @@ const configSchema = z
       .default("30")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    MAX_SESSIONS: z
+      .string()
+      .default("5000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     REPLY_CHUNK_SIZE: z
       .string()
       .default("3500")
@@ -60,6 +65,7 @@ const configSchema = z
     statePath: path.resolve(v.STATE_PATH),
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
     maxSessionAgeDays: v.MAX_SESSION_AGE_DAYS,
+    maxSessions: v.MAX_SESSIONS,
     replyChunkSize: v.REPLY_CHUNK_SIZE,
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,

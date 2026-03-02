@@ -23,7 +23,8 @@ Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume
 
 - Primary runtime: TypeScript/Node (`src/`, `dist/`, `npm run ...`)
 - Legacy/reference implementation: Python (`app/`, `tests/`)
-- New features and fixes should target the TypeScript runtime first.
+- New features and fixes target the TypeScript runtime.
+- Python code is kept as legacy reference only (maintenance mode).
 
 ## Prerequisites
 
@@ -78,15 +79,26 @@ node dist/cli.js start
   - all text messages are processed
 - `MAX_SESSION_AGE_DAYS=30`
   - session metadata older than this TTL is pruned from `state.json`
+- `MAX_SESSIONS=5000`
+  - when session count exceeds the limit, least-recently-updated sessions are pruned
 
 ## Tests
 
 ```bash
+npm run typecheck
 npm test
 ```
 
 Python legacy tests (optional, requires Python env + pytest):
 
 ```bash
-python -m pytest -q
+./.venv/bin/python -m pytest -q tests
+# or
+python3 -m pytest -q tests
 ```
+
+## Legacy Runtime
+
+- Legacy Python runtime exists in `app/` and `tests/`.
+- It is not part of default release/CI gates.
+- Use `npm run test:legacy` for optional regression checks.

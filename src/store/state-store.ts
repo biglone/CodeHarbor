@@ -10,6 +10,7 @@ export class StateStore {
   private readonly filePath: string;
   private readonly maxProcessedEventsPerSession: number;
   private readonly maxSessionAgeMs: number;
+  private readonly maxSessions: number;
   private readonly persistDebounceMs: number;
   private data: StateData;
   private lastPruneAt = 0;
@@ -21,15 +22,17 @@ export class StateStore {
     filePath: string,
     maxProcessedEventsPerSession: number,
     maxSessionAgeDays: number,
+    maxSessions: number,
     persistDebounceMs = 30,
   ) {
     this.filePath = filePath;
     this.maxProcessedEventsPerSession = maxProcessedEventsPerSession;
     this.maxSessionAgeMs = maxSessionAgeDays * ONE_DAY_MS;
+    this.maxSessions = maxSessions;
     this.persistDebounceMs = persistDebounceMs;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     this.data = this.load();
-    if (this.pruneExpiredSessions()) {
+    if (this.pruneSessions()) {
       this.schedulePersist();
     }
   }
@@ -46,13 +49,18 @@ export class StateStore {
     this.schedulePersist();
   }
 
-  markEventIfNew(sessionKey: string, eventId: string): boolean {
+  hasProcessedEvent(sessionKey: string, eventId: string): boolean {
+    this.maybePruneExpiredSessions();
+    const session = this.ensureSession(sessionKey);
+    return session.processedEventIds.includes(eventId);
+  }
+
+  markEventProcessed(sessionKey: string, eventId: string): void {
     this.maybePruneExpiredSessions();
     const session = this.ensureSession(sessionKey);
     if (session.processedEventIds.includes(eventId)) {
-      return false;
+      return;
     }
-
     session.processedEventIds.push(eventId);
     if (session.processedEventIds.length > this.maxProcessedEventsPerSession) {
       const offset = session.processedEventIds.length - this.maxProcessedEventsPerSession;
@@ -60,7 +68,6 @@ export class StateStore {
     }
     session.updatedAt = new Date().toISOString();
     this.schedulePersist();
-    return true;
   }
 
   async flush(): Promise<void> {
@@ -109,9 +116,20 @@ export class StateStore {
       return;
     }
     this.lastPruneAt = now;
-    if (this.pruneExpiredSessions(now)) {
+    if (this.pruneSessions(now)) {
       this.schedulePersist();
     }
+  }
+
+  private pruneSessions(now = Date.now()): boolean {
+    let changed = false;
+    if (this.pruneExpiredSessions(now)) {
+      changed = true;
+    }
+    if (this.pruneExcessSessions()) {
+      changed = true;
+    }
+    return changed;
   }
 
   private pruneExpiredSessions(now = Date.now()): boolean {
@@ -131,6 +149,29 @@ export class StateStore {
       }
     }
     return changed;
+  }
+
+  private pruneExcessSessions(): boolean {
+    if (this.maxSessions <= 0) {
+      return false;
+    }
+
+    const sessionEntries = Object.entries(this.data.sessions);
+    if (sessionEntries.length <= this.maxSessions) {
+      return false;
+    }
+
+    sessionEntries.sort((left, right) => {
+      const leftUpdatedAt = parseUpdatedAt(left[1].updatedAt);
+      const rightUpdatedAt = parseUpdatedAt(right[1].updatedAt);
+      return leftUpdatedAt - rightUpdatedAt;
+    });
+
+    const removeCount = sessionEntries.length - this.maxSessions;
+    for (let i = 0; i < removeCount; i += 1) {
+      delete this.data.sessions[sessionEntries[i][0]];
+    }
+    return true;
   }
 
   private schedulePersist(): void {
@@ -175,4 +216,9 @@ export class StateStore {
     await fs.promises.writeFile(tmpPath, serialized);
     await fs.promises.rename(tmpPath, this.filePath);
   }
+}
+
+function parseUpdatedAt(updatedAt: string): number {
+  const timestamp = Date.parse(updatedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }

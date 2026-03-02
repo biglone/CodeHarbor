@@ -6,6 +6,15 @@ const createClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("matrix-js-sdk", () => ({
   createClient: createClientMock,
+  RoomEvent: {
+    Timeline: "Room.timeline",
+  },
+  RoomMemberEvent: {
+    Membership: "RoomMember.membership",
+  },
+  ClientEvent: {
+    Sync: "sync",
+  },
 }));
 
 import { MatrixChannel } from "../src/channels/matrix-channel";
@@ -13,7 +22,7 @@ import { MatrixChannel } from "../src/channels/matrix-channel";
 class FakeMatrixClient extends EventEmitter {
   startClient = vi.fn((_options?: unknown) => {});
   stopClient = vi.fn(() => {});
-  sendEvent = vi.fn(async () => {});
+  sendTextMessage = vi.fn(async () => {});
   joinRoom = vi.fn(async (_roomId: string) => {});
   getRooms = vi.fn(() => [] as Array<{ roomId: string; getMyMembership: () => string }>);
   getSyncState = vi.fn(() => null as string | null);
