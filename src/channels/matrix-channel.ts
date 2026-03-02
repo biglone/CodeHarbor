@@ -58,6 +58,24 @@ export class MatrixChannel {
     }
   }
 
+  async sendNotice(conversationId: string, text: string): Promise<void> {
+    if (!this.started) {
+      throw new Error("Matrix channel not started.");
+    }
+
+    for (const chunk of splitText(text, this.chunkSize)) {
+      await this.client.sendNotice(conversationId, chunk);
+    }
+  }
+
+  async setTyping(conversationId: string, isTyping: boolean, timeoutMs: number): Promise<void> {
+    if (!this.started) {
+      throw new Error("Matrix channel not started.");
+    }
+    const safeTimeout = Math.max(0, timeoutMs);
+    await this.client.sendTyping(conversationId, isTyping, safeTimeout);
+  }
+
   async stop(): Promise<void> {
     this.client.removeListener(RoomEvent.Timeline, this.onTimeline);
     this.client.removeListener(RoomMemberEvent.Membership, this.onMembership);

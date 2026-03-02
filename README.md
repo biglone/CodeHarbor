@@ -81,6 +81,12 @@ node dist/cli.js start
   - session metadata older than this TTL is pruned from `state.json`
 - `MAX_SESSIONS=5000`
   - when session count exceeds the limit, least-recently-updated sessions are pruned
+- `MATRIX_PROGRESS_UPDATES=true`
+  - emit stage progress updates as Matrix `m.notice` messages (for example reasoning/thinking snippets)
+- `MATRIX_PROGRESS_MIN_INTERVAL_MS=2500`
+  - minimum interval between progress updates to avoid room spam
+- `MATRIX_TYPING_TIMEOUT_MS=10000`
+  - typing indicator timeout; CodeHarbor refreshes typing state while handling a request
 
 ## Tests
 

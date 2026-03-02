@@ -34,6 +34,7 @@ describe("CodexExecutor", () => {
   it("returns thread id and final assistant message", async () => {
     const child = createFakeChildProcess();
     spawnMock.mockReturnValue(child);
+    const progressEvents: Array<{ stage: string; message?: string }> = [];
 
     const executor = new CodexExecutor({
       bin: "codex",
@@ -43,8 +44,12 @@ describe("CodexExecutor", () => {
       timeoutMs: 1_000,
     });
 
-    const resultPromise = executor.execute("hello", null);
+    const resultPromise = executor.execute("hello", null, (event) => {
+      progressEvents.push(event);
+    });
     child.stdout.write('{"type":"thread.started","thread_id":"thread-1"}\n');
+    child.stdout.write('{"type":"turn.started"}\n');
+    child.stdout.write('{"type":"item.completed","item":{"type":"reasoning","text":"  thinking  "}}\n');
     child.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"  hi there  "}}\n');
     setImmediate(() => child.emit("close", 0));
 
@@ -52,6 +57,13 @@ describe("CodexExecutor", () => {
       sessionId: "thread-1",
       reply: "hi there",
     });
+    expect(progressEvents).toEqual(
+      expect.arrayContaining([
+        { stage: "thread_started", message: "thread-1" },
+        { stage: "turn_started" },
+        { stage: "reasoning", message: "thinking" },
+      ]),
+    );
   });
 
   it("throws stderr when codex exits with non-zero code", async () => {

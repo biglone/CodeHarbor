@@ -5,16 +5,30 @@ import { InboundMessage } from "../src/types";
 
 class FakeChannel {
   sent: Array<{ conversationId: string; text: string }> = [];
+  notices: Array<{ conversationId: string; text: string }> = [];
+  typing: Array<{ conversationId: string; isTyping: boolean; timeoutMs: number }> = [];
 
   async sendMessage(conversationId: string, text: string): Promise<void> {
     this.sent.push({ conversationId, text });
+  }
+
+  async sendNotice(conversationId: string, text: string): Promise<void> {
+    this.notices.push({ conversationId, text });
+  }
+
+  async setTyping(conversationId: string, isTyping: boolean, timeoutMs: number): Promise<void> {
+    this.typing.push({ conversationId, isTyping, timeoutMs });
   }
 }
 
 class FakeExecutor {
   callCount = 0;
 
-  async execute(text: string, sessionId: string | null): Promise<{ sessionId: string; reply: string }> {
+  async execute(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+  ): Promise<{ sessionId: string; reply: string }> {
     this.callCount += 1;
     return { sessionId: sessionId ?? "thread-1", reply: `ok:${text}` };
   }
@@ -68,6 +82,7 @@ describe("Orchestrator", () => {
 
     expect(executor.callCount).toBe(1);
     expect(channel.sent).toHaveLength(1);
+    expect(channel.typing.length).toBeGreaterThan(0);
   });
 
   it("prunes stale session locks", async () => {

@@ -41,7 +41,11 @@ const config = {
   statePath: "data/state.json",
   maxProcessedEventsPerSession: 200,
   maxSessionAgeDays: 30,
+  maxSessions: 5000,
   replyChunkSize: 3500,
+  matrixProgressUpdates: true,
+  matrixProgressMinIntervalMs: 2500,
+  matrixTypingTimeoutMs: 10_000,
   doctorHttpTimeoutMs: 10_000,
   logLevel: "info",
 };

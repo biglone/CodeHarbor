@@ -36,7 +36,11 @@ export class CodeHarborApp {
     });
 
     this.channel = new MatrixChannel(config, this.logger);
-    this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger);
+    this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger, {
+      progressUpdatesEnabled: config.matrixProgressUpdates,
+      progressMinIntervalMs: config.matrixProgressMinIntervalMs,
+      typingTimeoutMs: config.matrixTypingTimeoutMs,
+    });
   }
 
   async start(): Promise<void> {

@@ -11,6 +11,13 @@ export interface CodexExecutorOptions {
   timeoutMs: number;
 }
 
+export interface CodexProgressEvent {
+  stage: "thread_started" | "turn_started" | "reasoning" | "turn_completed" | "item_completed";
+  message?: string;
+}
+
+export type CodexProgressHandler = (event: CodexProgressEvent) => void;
+
 interface CodexJsonEvent {
   type?: string;
   thread_id?: string;
@@ -27,7 +34,11 @@ export class CodexExecutor {
     this.options = options;
   }
 
-  async execute(prompt: string, sessionId: string | null): Promise<CodexExecutionResult> {
+  async execute(
+    prompt: string,
+    sessionId: string | null,
+    onProgress?: CodexProgressHandler,
+  ): Promise<CodexExecutionResult> {
     const args = buildCodexArgs(prompt, sessionId, this.options);
     const child = spawn(this.options.bin, args, {
       cwd: this.options.workdir,
@@ -49,9 +60,27 @@ export class CodexExecutor {
       }
       if (event.type === "thread.started" && event.thread_id) {
         resolvedThreadId = event.thread_id;
+        onProgress?.({ stage: "thread_started", message: event.thread_id });
+      }
+      if (event.type === "turn.started") {
+        onProgress?.({ stage: "turn_started" });
       }
       if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
         latestMessage = event.item.text.trim();
+      }
+      if (event.type === "item.completed" && event.item?.type === "reasoning" && event.item.text) {
+        onProgress?.({ stage: "reasoning", message: event.item.text.trim() });
+      }
+      if (
+        event.type === "item.completed" &&
+        event.item?.type &&
+        event.item?.type !== "agent_message" &&
+        event.item?.type !== "reasoning"
+      ) {
+        onProgress?.({ stage: "item_completed", message: event.item.type });
+      }
+      if (event.type === "turn.completed") {
+        onProgress?.({ stage: "turn_completed" });
       }
     });
 
