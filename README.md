@@ -19,6 +19,12 @@ Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume
                                           -> StateStore (state.json)
 ```
 
+## Implementation Status
+
+- Primary runtime: TypeScript/Node (`src/`, `dist/`, `npm run ...`)
+- Legacy/reference implementation: Python (`app/`, `tests/`)
+- New features and fixes should target the TypeScript runtime first.
+
 ## Prerequisites
 
 - Node.js 20+
@@ -70,9 +76,17 @@ node dist/cli.js start
   - `hello` -> ignored
 - `MATRIX_COMMAND_PREFIX=` (empty)
   - all text messages are processed
+- `MAX_SESSION_AGE_DAYS=30`
+  - session metadata older than this TTL is pruned from `state.json`
 
 ## Tests
 
 ```bash
 npm test
+```
+
+Python legacy tests (optional, requires Python env + pytest):
+
+```bash
+python -m pytest -q
 ```
