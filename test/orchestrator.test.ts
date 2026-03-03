@@ -304,4 +304,75 @@ describe("Orchestrator", () => {
     expect(executor.calls).toHaveLength(1);
     expect(executor.calls[0]?.workdir).toBe("/tmp/project-b");
   });
+
+  it("ignores group messages when room config is disabled", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const configService = {
+      resolveRoomConfig: vi.fn().mockReturnValue({
+        source: "room",
+        enabled: false,
+        triggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+        workdir: "/tmp/disabled-room",
+      }),
+    };
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      configService: configService as never,
+      defaultCodexWorkdir: "/tmp/default",
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: false,
+        mentionsBot: true,
+        text: "@bot:example.com 请处理",
+        eventId: "$disabled-room",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(0);
+    expect(channel.sent).toHaveLength(0);
+  });
+
+  it("applies roomTriggerPolicies override when config service is absent", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      defaultGroupTriggerPolicy: {
+        allowMention: false,
+        allowReply: false,
+        allowActiveWindow: false,
+        allowPrefix: false,
+      },
+      roomTriggerPolicies: {
+        "!room:example.com": {
+          allowPrefix: true,
+        },
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: false,
+        text: "!code do this",
+        eventId: "$room-policy",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    expect(channel.sent[0]?.text).toBe("ok:do this");
+  });
 });

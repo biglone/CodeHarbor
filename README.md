@@ -78,7 +78,7 @@ Trigger rules:
   - examples: `release v0.1.1`, `chore: release 0.1.2`
 - `workflow_dispatch` -> manual publish from GitHub Actions UI
 
-The workflow runs `typecheck`, `test`, `build`, then publishes with:
+The workflow runs `typecheck`, `test`, `build`, `node dist/cli.js --help`, `npm pack --dry-run`, then publishes with:
 
 ```bash
 npm publish --access public
@@ -86,11 +86,23 @@ npm publish --access public
 
 If the same package version already exists on npm, publish is skipped automatically.
 
+Release checklist (recommended):
+
+1. Update version in `package.json` (`npm version patch|minor|major`).
+2. Push to `main` with `[publish-npm]` or `release vX.Y.Z` in commit message.
+3. Verify workflow status in GitHub Actions.
+4. Verify package on npm:
+
+```bash
+npm view codeharbor version
+```
+
 ## Planning Docs
 
 - `REQUIREMENTS.md`: current baseline + next-stage requirements
 - `TASK_LIST.md`: implementation task breakdown and status
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
+- `docs/RELEASE.md`: release process and CI/publish policy
 
 ## Quick Start
 
@@ -178,6 +190,15 @@ Access control options:
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
 
 Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
+
+### Admin UI Quick Walkthrough
+
+1. Start server: `codeharbor admin serve`.
+2. Open `/settings/global`, set `Admin Token` (if enabled), then click `Save Auth`.
+3. Adjust global fields and click `Save Global Config` (UI shows restart-required warning).
+4. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
+5. Open `/health` to run connectivity checks (`codex` + Matrix).
+6. Open `/audit` to verify config revisions (actor/summary/payload).
 
 ## Startup Preflight
 

@@ -30,3 +30,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: CLI smoke test
+        run: node dist/cli.js --help > /dev/null
+
+      - name: Package dry-run
+        run: npm pack --dry-run

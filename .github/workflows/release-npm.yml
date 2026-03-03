@@ -75,6 +75,14 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm run build
 
+      - name: CLI smoke test
+        if: steps.intent.outputs.publish == 'true'
+        run: node dist/cli.js --help > /dev/null
+
+      - name: Package dry-run
+        if: steps.intent.outputs.publish == 'true'
+        run: npm pack --dry-run
+
       - name: Resolve package metadata
         if: steps.intent.outputs.publish == 'true'
         id: package

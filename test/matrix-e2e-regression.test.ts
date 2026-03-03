@@ -108,6 +108,7 @@ type ScenarioInput = {
   prompt: string;
   sessionId: string | null;
   onProgress?: (event: { stage: string; message?: string }) => void;
+  startOptions?: { workdir?: string };
 };
 
 type ScenarioOutput = {
@@ -116,7 +117,7 @@ type ScenarioOutput = {
 };
 
 class ScriptedExecutor {
-  calls: Array<{ prompt: string; sessionId: string | null }> = [];
+  calls: Array<{ prompt: string; sessionId: string | null; workdir: string | null }> = [];
   private scenario: (input: ScenarioInput) => ScenarioOutput;
 
   constructor(scenario?: (input: ScenarioInput) => ScenarioOutput) {
@@ -132,9 +133,14 @@ class ScriptedExecutor {
     this.scenario = next;
   }
 
-  startExecution(prompt: string, sessionId: string | null, onProgress?: (event: { stage: string; message?: string }) => void): ScenarioOutput {
-    this.calls.push({ prompt, sessionId });
-    return this.scenario({ prompt, sessionId, onProgress });
+  startExecution(
+    prompt: string,
+    sessionId: string | null,
+    onProgress?: (event: { stage: string; message?: string }) => void,
+    startOptions?: { workdir?: string },
+  ): ScenarioOutput {
+    this.calls.push({ prompt, sessionId, workdir: startOptions?.workdir ?? null });
+    return this.scenario({ prompt, sessionId, onProgress, startOptions });
   }
 }
 
@@ -293,6 +299,111 @@ describe("Matrix e2e regression", () => {
 
     expect(executor.calls).toHaveLength(1);
     expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(true);
+  });
+
+  it("routes concurrent multi-room requests to mapped workdirs", async () => {
+    const channel = new FakeChannel();
+    const store = new InMemoryStateStore();
+    const releases: Array<() => void> = [];
+    const executor = new ScriptedExecutor((input) => {
+      const result = new Promise<{ sessionId: string; reply: string }>((resolve) => {
+        releases.push(() => {
+          resolve({
+            sessionId: input.sessionId ?? `thread-${releases.length + 1}`,
+            reply: `ok:${input.prompt}`,
+          });
+        });
+      });
+      return {
+        result,
+        cancel: () => {},
+      };
+    });
+    const configService = {
+      resolveRoomConfig: vi.fn((roomId: string) => ({
+        source: "room",
+        enabled: true,
+        triggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+        workdir: roomId === "!room-a:example.com" ? "/tmp/project-a" : "/tmp/project-b",
+      })),
+    };
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      configService: configService as never,
+      defaultCodexWorkdir: "/tmp/default",
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 100,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 2,
+        maxConcurrentPerRoom: 2,
+      },
+    });
+
+    const requestA = orchestrator.handleMessage(
+      makeInbound({
+        conversationId: "!room-a:example.com",
+        text: "@bot:example.com task a",
+        mentionsBot: true,
+      }),
+    );
+    const requestB = orchestrator.handleMessage(
+      makeInbound({
+        conversationId: "!room-b:example.com",
+        text: "@bot:example.com task b",
+        mentionsBot: true,
+      }),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(executor.calls).toHaveLength(2);
+    expect(executor.calls.map((call) => call.workdir).sort()).toEqual(["/tmp/project-a", "/tmp/project-b"]);
+
+    for (const release of releases) {
+      release();
+    }
+    await Promise.all([requestA, requestB]);
+
+    expect(channel.sent).toEqual(
+      expect.arrayContaining([
+        { conversationId: "!room-a:example.com", text: "ok:task a" },
+        { conversationId: "!room-b:example.com", text: "ok:task b" },
+      ]),
+    );
+  });
+
+  it("keeps status and reset command flow stable", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first task" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/reset" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second task" }));
+
+    expect(executor.calls).toHaveLength(2);
+    expect(executor.calls[0]?.sessionId).toBeNull();
+    expect(executor.calls[1]?.sessionId).toBeNull();
+    expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
   it("returns failure message when executor errors", async () => {
