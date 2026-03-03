@@ -1,4 +1,5 @@
 import { Mutex } from "async-mutex";
+import fs from "node:fs/promises";
 
 import { MatrixChannel } from "./channels/matrix-channel";
 import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
@@ -183,6 +184,7 @@ export class Orchestrator {
       preserveWhitespace: false,
       disableReplyChunkSplit: false,
       progressThrottleMs: 300,
+      fetchMedia: false,
     };
     const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
     this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;
@@ -278,6 +280,7 @@ export class Orchestrator {
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
       const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
+      const imagePaths = collectImagePaths(message);
       this.logger.info("Processing message", {
         requestId,
         sessionKey,
@@ -332,6 +335,7 @@ export class Orchestrator {
           },
           {
             passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
+            imagePaths,
           },
         );
 
@@ -417,6 +421,7 @@ export class Orchestrator {
         }
         rateDecision.release?.();
         await stopTyping();
+        await cleanupAttachmentFiles(imagePaths);
       }
     });
   }
@@ -665,7 +670,8 @@ export class Orchestrator {
         const size = attachment.sizeBytes === null ? "unknown" : `${attachment.sizeBytes}`;
         const mime = attachment.mimeType ?? "unknown";
         const source = attachment.mxcUrl ?? "none";
-        return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source}`;
+        const local = attachment.localPath ?? "none";
+        return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source} local=${local}`;
       })
       .join("\n");
 
@@ -715,6 +721,29 @@ function formatError(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function collectImagePaths(message: InboundMessage): string[] {
+  const seen = new Set<string>();
+  for (const attachment of message.attachments) {
+    if (attachment.kind !== "image" || !attachment.localPath) {
+      continue;
+    }
+    seen.add(attachment.localPath);
+  }
+  return [...seen];
+}
+
+async function cleanupAttachmentFiles(imagePaths: string[]): Promise<void> {
+  await Promise.all(
+    imagePaths.map(async (imagePath) => {
+      try {
+        await fs.unlink(imagePath);
+      } catch {
+        // Ignore cleanup failure: temp files are best-effort.
+      }
+    }),
+  );
 }
 
 function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): string | null {

@@ -79,6 +79,7 @@ const config = {
     preserveWhitespace: false,
     disableReplyChunkSplit: false,
     progressThrottleMs: 300,
+    fetchMedia: false,
   },
   doctorHttpTimeoutMs: 10_000,
   logLevel: "info",
@@ -158,6 +159,7 @@ describe("MatrixChannel", () => {
     };
 
     client.emit("Room.timeline", event, room, false);
+    await Promise.resolve();
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0]).toMatchObject({
@@ -204,6 +206,7 @@ describe("MatrixChannel", () => {
     };
 
     client.emit("Room.timeline", event, room, false);
+    await Promise.resolve();
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0]).toMatchObject({
@@ -215,6 +218,7 @@ describe("MatrixChannel", () => {
           mxcUrl: "mxc://example.com/abc123",
           mimeType: "image/png",
           sizeBytes: 4096,
+          localPath: null,
         },
       ],
     });

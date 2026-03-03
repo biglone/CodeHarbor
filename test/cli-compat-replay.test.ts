@@ -149,6 +149,7 @@ describe("CLI compat replay", () => {
         preserveWhitespace: true,
         disableReplyChunkSplit: true,
         progressThrottleMs: 0,
+        fetchMedia: false,
       },
       matrixUserId: "@bot:example.com",
       commandPrefix: "!code",
@@ -171,6 +172,7 @@ describe("CLI compat replay", () => {
         preserveWhitespace: true,
         disableReplyChunkSplit: true,
         progressThrottleMs: 0,
+        fetchMedia: false,
       },
       matrixUserId: "@bot:example.com",
       commandPrefix: "!code",
@@ -199,6 +201,7 @@ describe("CLI compat replay", () => {
         preserveWhitespace: true,
         disableReplyChunkSplit: true,
         progressThrottleMs: 0,
+        fetchMedia: false,
       },
       matrixUserId: "@bot:example.com",
       commandPrefix: "!code",
@@ -211,6 +214,7 @@ describe("CLI compat replay", () => {
         mxcUrl: "mxc://example.com/abc",
         mimeType: "image/png",
         sizeBytes: 1024,
+        localPath: "/tmp/diagram.png",
       },
     ];
 

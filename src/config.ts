@@ -21,6 +21,7 @@ export interface CliCompatConfig {
   preserveWhitespace: boolean;
   disableReplyChunkSplit: boolean;
   progressThrottleMs: number;
+  fetchMedia: boolean;
 }
 
 const configSchema = z
@@ -154,6 +155,10 @@ const configSchema = z
       .default("300")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().nonnegative()),
+    CLI_COMPAT_FETCH_MEDIA: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -206,6 +211,7 @@ const configSchema = z
       preserveWhitespace: v.CLI_COMPAT_PRESERVE_WHITESPACE,
       disableReplyChunkSplit: v.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT,
       progressThrottleMs: v.CLI_COMPAT_PROGRESS_THROTTLE_MS,
+      fetchMedia: v.CLI_COMPAT_FETCH_MEDIA,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,

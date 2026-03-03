@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import {
   ClientEvent,
   createClient,
@@ -24,6 +28,7 @@ export class MatrixChannel {
   private readonly chunkSize: number;
   private readonly splitReplies: boolean;
   private readonly preserveWhitespace: boolean;
+  private readonly fetchMedia: boolean;
   private readonly client: MatrixClient;
   private handler: InboundHandler | null = null;
   private started = false;
@@ -34,6 +39,7 @@ export class MatrixChannel {
     this.chunkSize = config.replyChunkSize;
     this.splitReplies = !config.cliCompat.disableReplyChunkSplit;
     this.preserveWhitespace = config.cliCompat.preserveWhitespace;
+    this.fetchMedia = config.cliCompat.fetchMedia;
     this.client = createClient({
       baseUrl: config.matrixHomeserver,
       accessToken: config.matrixAccessToken,
@@ -184,23 +190,51 @@ export class MatrixChannel {
     const mentionsBot = checkMentionsBot(content, text, this.config.matrixUserId);
     const repliesToBot = checkRepliesToBot(content, room, this.config.matrixUserId);
 
-    const inbound: InboundMessage = {
-      requestId: buildRequestId(eventId),
-      channel: "matrix",
-      conversationId: room.roomId,
+    void this.dispatchInbound({
       senderId,
+      roomId: room.roomId,
       eventId,
       text,
       attachments,
       isDirectMessage,
       mentionsBot,
       repliesToBot,
-    };
-
-    void this.handler(inbound).catch((error) => {
-      this.logger.error("Unhandled inbound processing error", error);
     });
   };
+
+  private async dispatchInbound(params: {
+    senderId: string;
+    roomId: string;
+    eventId: string;
+    text: string;
+    attachments: InboundAttachment[];
+    isDirectMessage: boolean;
+    mentionsBot: boolean;
+    repliesToBot: boolean;
+  }): Promise<void> {
+    if (!this.handler) {
+      return;
+    }
+    const hydratedAttachments = await this.hydrateAttachments(params.attachments, params.eventId);
+    const inbound: InboundMessage = {
+      requestId: buildRequestId(params.eventId),
+      channel: "matrix",
+      conversationId: params.roomId,
+      senderId: params.senderId,
+      eventId: params.eventId,
+      text: params.text,
+      attachments: hydratedAttachments,
+      isDirectMessage: params.isDirectMessage,
+      mentionsBot: params.mentionsBot,
+      repliesToBot: params.repliesToBot,
+    };
+
+    try {
+      await this.handler(inbound);
+    } catch (error) {
+      this.logger.error("Unhandled inbound processing error", error);
+    }
+  }
 
   private async waitUntilReady(timeoutMs = 60_000): Promise<void> {
     await new Promise<void>((resolve, reject) => {
@@ -252,6 +286,87 @@ export class MatrixChannel {
       }
       await this.joinInvitedRoom(room.roomId);
     }
+  }
+
+  private async hydrateAttachments(
+    attachments: InboundAttachment[],
+    eventId: string,
+  ): Promise<InboundAttachment[]> {
+    if (!this.fetchMedia || attachments.length === 0) {
+      return attachments;
+    }
+
+    const hydrated = await Promise.all(
+      attachments.map(async (attachment, index) => {
+        if (attachment.kind !== "image" || !attachment.mxcUrl) {
+          return attachment;
+        }
+        try {
+          const localPath = await this.downloadMxcAttachment(
+            attachment.mxcUrl,
+            attachment.name,
+            attachment.mimeType,
+            eventId,
+            index,
+          );
+          return {
+            ...attachment,
+            localPath,
+          };
+        } catch (error) {
+          this.logger.warn("Failed to hydrate attachment", {
+            eventId,
+            mxcUrl: attachment.mxcUrl,
+            error,
+          });
+          return attachment;
+        }
+      }),
+    );
+
+    return hydrated;
+  }
+
+  private async downloadMxcAttachment(
+    mxcUrl: string,
+    fileName: string,
+    mimeType: string | null,
+    eventId: string,
+    index: number,
+  ): Promise<string> {
+    const parsed = parseMxcUrl(mxcUrl);
+    if (!parsed) {
+      throw new Error(`Unsupported MXC URL: ${mxcUrl}`);
+    }
+
+    const mediaUrls = [
+      `${this.config.matrixHomeserver}/_matrix/media/v3/download/${encodeURIComponent(parsed.serverName)}/${encodeURIComponent(parsed.mediaId)}`,
+      `${this.config.matrixHomeserver}/_matrix/media/r0/download/${encodeURIComponent(parsed.serverName)}/${encodeURIComponent(parsed.mediaId)}`,
+    ];
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.config.matrixAccessToken}`,
+    };
+
+    let response: Response | null = null;
+    for (const url of mediaUrls) {
+      const candidate = await fetch(url, { headers });
+      if (candidate.ok) {
+        response = candidate;
+        break;
+      }
+    }
+    if (!response) {
+      throw new Error(`Failed to download media for ${mxcUrl}`);
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const extension = resolveFileExtension(fileName, mimeType);
+    const directory = path.join(os.tmpdir(), "codeharbor-media");
+    await fs.mkdir(directory, { recursive: true });
+    const safeEventId = sanitizeFilename(eventId);
+    const targetPath = path.join(directory, `${safeEventId}-${index}${extension}`);
+    await fs.writeFile(targetPath, bytes);
+    return targetPath;
   }
 }
 
@@ -324,6 +439,42 @@ function extractAttachments(content: Record<string, unknown>): InboundAttachment
       mxcUrl: directUrl ?? encryptedUrl,
       mimeType,
       sizeBytes,
+      localPath: null,
     },
   ];
+}
+
+function parseMxcUrl(mxcUrl: string): { serverName: string; mediaId: string } | null {
+  if (!mxcUrl.startsWith("mxc://")) {
+    return null;
+  }
+  const stripped = mxcUrl.slice("mxc://".length);
+  const slashIndex = stripped.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === stripped.length - 1) {
+    return null;
+  }
+  const serverName = stripped.slice(0, slashIndex);
+  const mediaId = stripped.slice(slashIndex + 1);
+  return { serverName, mediaId };
+}
+
+function sanitizeFilename(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
+}
+
+function resolveFileExtension(fileName: string, mimeType: string | null): string {
+  const ext = path.extname(fileName).trim();
+  if (ext) {
+    return ext;
+  }
+  if (mimeType === "image/png") {
+    return ".png";
+  }
+  if (mimeType === "image/jpeg") {
+    return ".jpg";
+  }
+  if (mimeType === "image/webp") {
+    return ".webp";
+  }
+  return ".bin";
 }

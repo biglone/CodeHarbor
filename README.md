@@ -116,6 +116,8 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - optionally send one full message chunk to Matrix without auto split
 - `CLI_COMPAT_PROGRESS_THROTTLE_MS`
   - lower update throttle for near-real-time progress
+- `CLI_COMPAT_FETCH_MEDIA=true|false`
+  - download Matrix `mxc://` media (image) to temp file and pass it to codex via `--image`
 
 Note: execution still uses `codex exec/resume` per request; compatibility mode focuses on behavior parity and reduced middleware interference.
 
@@ -149,6 +151,12 @@ Use these to align runtime with your terminal CLI profile:
 - `CODEX_APPROVAL_POLICY`
 - `CODEX_EXTRA_ARGS`
 - `CODEX_EXTRA_ENV_JSON`
+
+When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor will:
+
+1. download `mxc://` media to a temp file
+2. pass local file paths as `--image` to codex exec
+3. best-effort cleanup temp files after the request
 
 ## Progress + Output
 

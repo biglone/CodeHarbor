@@ -4,6 +4,7 @@ export interface InboundAttachment {
   mxcUrl: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
+  localPath: string | null;
 }
 
 export interface InboundMessage {
