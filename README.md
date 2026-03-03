@@ -75,7 +75,7 @@ npm install
 2. Configure environment:
 
 ```bash
-cp .env.example .env
+codeharbor init
 ```
 
 Required values:
@@ -99,8 +99,20 @@ node dist/cli.js start
 
 ## Commands
 
+- `codeharbor init`: guided setup for `.env` (supports `--force` to overwrite directly)
 - `codeharbor start`: start service
 - `codeharbor doctor`: check `codex` and Matrix connectivity
+
+## Startup Preflight
+
+Before `codeharbor start` and `codeharbor doctor`, CodeHarbor runs a preflight check for:
+
+- required Matrix env vars
+- `CODEX_BIN` availability
+- `CODEX_WORKDIR` validity
+- `.env` presence warning
+
+If any check fails, it prints actionable fix commands (for example `codeharbor init`).
 
 ## Message Rules
 
