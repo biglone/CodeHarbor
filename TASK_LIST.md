@@ -22,7 +22,7 @@
 | T3.1 | 新增配置持久化表（`room_settings` / `config_revisions`）与迁移脚本 | 3h | P0 | T2.2 | ✅ |
 | T3.2 | 实现配置服务层（读取、校验、保存、回滚） | 4h | P0 | T3.1 | ✅ |
 | T3.3 | Orchestrator 接入 room 级 workdir 路由 | 4h | P0 | T3.2 | ✅ |
-| T3.4 | 实现 `codeharbor admin serve`（配置 UI 后端接口） | 4h | P0 | T3.2 | ⬜ |
+| T3.4 | 实现 `codeharbor admin serve`（配置 UI 后端接口） | 4h | P0 | T3.2 | ✅ |
 | T3.5 | 实现管理 UI 页面（全局配置/房间配置/健康检查） | 6h | P0 | T3.4 | ⬜ |
 | T3.6 | 实现配置变更审计展示 | 2h | P1 | T3.2 | ⬜ |
 | T3.7 | 补充访问控制（本地令牌或白名单） | 3h | P0 | T3.4 | ⬜ |

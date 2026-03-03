@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 
-import { CodeHarborApp, runDoctor } from "./app";
+import { CodeHarborAdminApp, CodeHarborApp, runDoctor } from "./app";
 import { loadConfig } from "./config";
 import { runInitCommand } from "./init";
 import { formatPreflightReport, runStartupPreflight } from "./preflight";
@@ -60,6 +60,34 @@ program
     await runDoctor(config);
   });
 
+const admin = program.command("admin").description("Admin utilities");
+
+admin
+  .command("serve")
+  .description("Start admin config API server")
+  .option("--host <host>", "override admin bind host")
+  .option("--port <port>", "override admin bind port")
+  .action(async (options: { host?: string; port?: string }) => {
+    const config = loadConfig();
+    const host = options.host?.trim() || config.adminBindHost;
+    const port = options.port ? parsePortOption(options.port, config.adminPort) : config.adminPort;
+
+    const app = new CodeHarborAdminApp(config, { host, port });
+    await app.start();
+
+    const stop = async (): Promise<void> => {
+      await app.stop();
+      process.exit(0);
+    };
+
+    process.once("SIGINT", () => {
+      void stop();
+    });
+    process.once("SIGTERM", () => {
+      void stop();
+    });
+  });
+
 if (process.argv.length <= 2) {
   process.argv.push("start");
 }
@@ -86,4 +114,13 @@ async function loadConfigWithPreflight(commandName: string): Promise<ReturnType<
     process.stderr.write("Fix: run \"codeharbor init\" and then retry.\n");
     return null;
   }
+}
+
+function parsePortOption(raw: string, fallback: number): number {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65_535) {
+    process.stderr.write(`Invalid --port value: ${raw}; fallback to ${fallback}\n`);
+    return fallback;
+  }
+  return parsed;
 }

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { AdminServer } from "./admin-server";
 import { MatrixChannel } from "./channels/matrix-channel";
 import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
@@ -74,6 +75,51 @@ export class CodeHarborApp {
     this.logger.info("CodeHarbor stopping.");
     try {
       await this.channel.stop();
+    } finally {
+      await this.stateStore.flush();
+    }
+  }
+}
+
+export class CodeHarborAdminApp {
+  private readonly config: AppConfig;
+  private readonly logger: Logger;
+  private readonly stateStore: StateStore;
+  private readonly configService: ConfigService;
+  private readonly adminServer: AdminServer;
+
+  constructor(config: AppConfig, options?: { host?: string; port?: number }) {
+    this.config = config;
+    this.logger = new Logger(config.logLevel);
+    this.stateStore = new StateStore(
+      config.stateDbPath,
+      config.legacyStateJsonPath,
+      config.maxProcessedEventsPerSession,
+      config.maxSessionAgeDays,
+      config.maxSessions,
+    );
+    this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
+    this.adminServer = new AdminServer(config, this.logger, this.stateStore, this.configService, {
+      host: options?.host ?? config.adminBindHost,
+      port: options?.port ?? config.adminPort,
+      adminToken: config.adminToken,
+    });
+  }
+
+  async start(): Promise<void> {
+    await this.adminServer.start();
+    const address = this.adminServer.getAddress();
+    this.logger.info("CodeHarbor admin server started", {
+      host: address?.host ?? this.config.adminBindHost,
+      port: address?.port ?? this.config.adminPort,
+      tokenProtected: Boolean(this.config.adminToken),
+    });
+  }
+
+  async stop(): Promise<void> {
+    this.logger.info("CodeHarbor admin server stopping.");
+    try {
+      await this.adminServer.stop();
     } finally {
       await this.stateStore.flush();
     }

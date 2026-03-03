@@ -166,6 +166,13 @@ const configSchema = z
       .default("10000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    ADMIN_BIND_HOST: z.string().default("127.0.0.1"),
+    ADMIN_PORT: z
+      .string()
+      .default("8787")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(1).max(65535)),
+    ADMIN_TOKEN: z.string().default(""),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((v) => ({
@@ -217,6 +224,9 @@ const configSchema = z
       recordPath: v.CLI_COMPAT_RECORD_PATH.trim() ? path.resolve(v.CLI_COMPAT_RECORD_PATH) : null,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
+    adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
+    adminPort: v.ADMIN_PORT,
+    adminToken: v.ADMIN_TOKEN.trim() || null,
     logLevel: v.LOG_LEVEL,
   }));
 
