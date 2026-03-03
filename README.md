@@ -115,6 +115,8 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 - `REQUIREMENTS.md`: current baseline + next-stage requirements
 - `TASK_LIST.md`: implementation task breakdown and status
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
+- `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
+- `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
 - `docs/RELEASE.md`: release process and CI/publish policy
 
 ## Quick Start
@@ -152,13 +154,43 @@ npm run build
 node dist/cli.js start
 ```
 
+## Configuration Baseline
+
+Use this layered reference to avoid mixing boot-only and runtime tuning items:
+
+- [`docs/CONFIG_CATALOG.md`](docs/CONFIG_CATALOG.md)
+
+It documents:
+
+- which keys are required vs optional
+- which keys can be edited in Admin UI
+- whether changes are immediate or restart-scoped
+- recommended profiles for local/internal/public deployment
+
 ## Commands
 
 - `codeharbor init`: guided setup for `.env` (supports `--force` to overwrite directly)
 - `codeharbor start`: start service
 - `codeharbor doctor`: check `codex` and Matrix connectivity
 - `codeharbor admin serve`: start admin UI + config API server
+- `codeharbor config export`: export current config snapshot as JSON
+- `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
+- `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
 - `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
+
+### Config Backup Script
+
+Create a timestamped snapshot in `backups/config` and keep latest 20 by default:
+
+```bash
+./scripts/backup-config.sh
+```
+
+Custom directory and retention:
+
+```bash
+./scripts/backup-config.sh --dir /var/backups/codeharbor --keep 30
+```
 
 ## Admin UI And API
 
@@ -172,6 +204,13 @@ Optional overrides:
 
 ```bash
 codeharbor admin serve --host 127.0.0.1 --port 8787
+```
+
+If you bind Admin to a non-loopback host and `ADMIN_TOKEN` is empty, startup is rejected by default.
+Explicit bypass exists but is not recommended:
+
+```bash
+codeharbor admin serve --host 0.0.0.0 --allow-insecure-no-token
 ```
 
 Open these UI routes in browser:
@@ -213,6 +252,15 @@ Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as resta
 4. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
 5. Open `/health` to run connectivity checks (`codex` + Matrix).
 6. Open `/audit` to verify config revisions (actor/summary/payload).
+
+## Standalone Admin Deployment
+
+`codeharbor admin serve` can run as an independent service on target servers without browser/desktop.
+Access can come from your local browser through a gateway (for example Cloudflare Tunnel).
+
+See:
+
+- [`docs/ADMIN_STANDALONE_DEPLOY.md`](docs/ADMIN_STANDALONE_DEPLOY.md)
 
 ## Startup Preflight
 

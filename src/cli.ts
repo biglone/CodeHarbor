@@ -3,7 +3,9 @@
 import { Command } from "commander";
 
 import { CodeHarborAdminApp, CodeHarborApp, runDoctor } from "./app";
+import { isNonLoopbackHost } from "./utils/admin-host";
 import { loadConfig } from "./config";
+import { runConfigExportCommand, runConfigImportCommand } from "./config-snapshot";
 import { runInitCommand } from "./init";
 import { formatPreflightReport, runStartupPreflight } from "./preflight";
 
@@ -61,16 +63,34 @@ program
   });
 
 const admin = program.command("admin").description("Admin utilities");
+const configCommand = program.command("config").description("Config snapshot utilities");
 
 admin
   .command("serve")
   .description("Start admin config API server")
   .option("--host <host>", "override admin bind host")
   .option("--port <port>", "override admin bind port")
-  .action(async (options: { host?: string; port?: string }) => {
+  .option(
+    "--allow-insecure-no-token",
+    "allow serving admin API without ADMIN_TOKEN on non-loopback host (not recommended)",
+  )
+  .action(async (options: { host?: string; port?: string; allowInsecureNoToken?: boolean }) => {
     const config = loadConfig();
     const host = options.host?.trim() || config.adminBindHost;
     const port = options.port ? parsePortOption(options.port, config.adminPort) : config.adminPort;
+    const allowInsecureNoToken = options.allowInsecureNoToken ?? false;
+
+    if (!config.adminToken && !allowInsecureNoToken && isNonLoopbackHost(host)) {
+      process.stderr.write(
+        [
+          "Refusing to start admin server on non-loopback host without ADMIN_TOKEN.",
+          "Fix: set ADMIN_TOKEN in .env, or explicitly pass --allow-insecure-no-token.",
+          "",
+        ].join("\n"),
+      );
+      process.exitCode = 1;
+      return;
+    }
 
     const app = new CodeHarborAdminApp(config, { host, port });
     await app.start();
@@ -86,6 +106,36 @@ admin
     process.once("SIGTERM", () => {
       void stop();
     });
+  });
+
+configCommand
+  .command("export")
+  .description("Export config snapshot as JSON")
+  .option("-o, --output <path>", "write snapshot to file instead of stdout")
+  .action(async (options: { output?: string }) => {
+    try {
+      await runConfigExportCommand({ outputPath: options.output });
+    } catch (error) {
+      process.stderr.write(`Config export failed: ${formatError(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
+
+configCommand
+  .command("import")
+  .description("Import config snapshot from JSON")
+  .argument("<file>", "snapshot file path")
+  .option("--dry-run", "validate snapshot without writing changes")
+  .action(async (file: string, options: { dryRun?: boolean }) => {
+    try {
+      await runConfigImportCommand({
+        filePath: file,
+        dryRun: options.dryRun ?? false,
+      });
+    } catch (error) {
+      process.stderr.write(`Config import failed: ${formatError(error)}\n`);
+      process.exitCode = 1;
+    }
   });
 
 if (process.argv.length <= 2) {
@@ -123,4 +173,11 @@ function parsePortOption(raw: string, fallback: number): number {
     return fallback;
   }
   return parsed;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
