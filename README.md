@@ -55,6 +55,26 @@ Linux one-command install (creates `/opt/codeharbor`, sets ownership, installs l
 curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/install-linux.sh | bash
 ```
 
+Linux easy mode (install + write `.env` + enable/start systemd in one run):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/install-linux-easy.sh | bash -s -- \
+  --matrix-homeserver https://matrix.example.com \
+  --matrix-user-id @bot:example.com \
+  --matrix-access-token 'your-token'
+```
+
+Enable Admin service at install time:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/install-linux-easy.sh | bash -s -- \
+  --matrix-homeserver https://matrix.example.com \
+  --matrix-user-id @bot:example.com \
+  --matrix-access-token 'your-token' \
+  --enable-admin-service \
+  --admin-token 'replace-with-strong-token'
+```
+
 Run local script with custom options:
 
 ```bash
@@ -198,6 +218,7 @@ It documents:
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
 - `scripts/install-linux.sh`: Linux bootstrap installer (creates runtime dir + installs npm package)
+- `scripts/install-linux-easy.sh`: one-shot Linux install + config + systemd auto-start
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
 - `scripts/install-backup-timer.sh`: install/update user-level systemd timer for automatic backups
 - `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
