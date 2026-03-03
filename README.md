@@ -86,6 +86,12 @@ npm publish --access public
 
 If the same package version already exists on npm, publish is skipped automatically.
 
+## Planning Docs
+
+- `REQUIREMENTS.md`: current baseline + next-stage requirements
+- `TASK_LIST.md`: implementation task breakdown and status
+- `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
+
 ## Quick Start
 
 For local development from source:
