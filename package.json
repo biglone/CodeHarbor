@@ -56,7 +56,10 @@
     "test:legacy": ".venv/bin/python -m pytest -q tests",
     "prepare": "npm run build",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test:coverage && npm run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test:coverage": "vitest run test --coverage"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",
@@ -66,11 +69,16 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@types/node": "^24.4.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^10.0.2",
+    "globals": "^17.4.0",
     "tsup": "^8.5.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^3.2.4"
   }
 }

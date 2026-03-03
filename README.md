@@ -117,6 +117,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
 - `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
+- `docs/BACKUP_AUTOMATION.md`: scheduled config backup and restore operations
 - `docs/RELEASE.md`: release process and CI/publish policy
 
 ## Quick Start
@@ -176,6 +177,7 @@ It documents:
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
+- `scripts/install-backup-timer.sh`: install/update user-level systemd timer for automatic backups
 - `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
 
 ### Config Backup Script
@@ -191,6 +193,16 @@ Custom directory and retention:
 ```bash
 ./scripts/backup-config.sh --dir /var/backups/codeharbor --keep 30
 ```
+
+Install/update automatic backup timer:
+
+```bash
+./scripts/install-backup-timer.sh --schedule "*-*-* 03:30:00" --dir /var/backups/codeharbor --keep 30
+```
+
+Full guide:
+
+- [`docs/BACKUP_AUTOMATION.md`](docs/BACKUP_AUTOMATION.md)
 
 ## Admin UI And API
 
@@ -241,6 +253,7 @@ Access control options:
 
 - `ADMIN_TOKEN`: require bearer token for `/api/admin/*`
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
+- `ADMIN_ALLOWED_ORIGINS`: optional CORS origin allowlist for browser-based cross-origin admin access
 
 Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
 

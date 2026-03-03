@@ -30,6 +30,7 @@ interface AdminServerOptions {
   port: number;
   adminToken: string | null;
   adminIpAllowlist?: string[];
+  adminAllowedOrigins?: string[];
   cwd?: string;
   checkCodex?: (bin: string) => Promise<CodexHealthResult>;
   checkMatrix?: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
@@ -58,6 +59,7 @@ export class AdminServer {
   private readonly port: number;
   private readonly adminToken: string | null;
   private readonly adminIpAllowlist: string[];
+  private readonly adminAllowedOrigins: string[];
   private readonly cwd: string;
   private readonly checkCodex: (bin: string) => Promise<CodexHealthResult>;
   private readonly checkMatrix: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
@@ -79,6 +81,7 @@ export class AdminServer {
     this.port = options.port;
     this.adminToken = options.adminToken;
     this.adminIpAllowlist = normalizeAllowlist(options.adminIpAllowlist ?? []);
+    this.adminAllowedOrigins = normalizeOriginAllowlist(options.adminAllowedOrigins ?? []);
     this.cwd = options.cwd ?? process.cwd();
     this.checkCodex = options.checkCodex ?? defaultCheckCodex;
     this.checkMatrix = options.checkMatrix ?? defaultCheckMatrix;
@@ -141,7 +144,9 @@ export class AdminServer {
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
-      this.setCorsHeaders(res);
+      this.setSecurityHeaders(res);
+      const corsDecision = this.resolveCors(req);
+      this.setCorsHeaders(res, corsDecision);
 
       if (!this.isClientAllowed(req)) {
         this.sendJson(res, 403, {
@@ -151,7 +156,22 @@ export class AdminServer {
         return;
       }
 
+      if (url.pathname.startsWith("/api/admin/") && corsDecision.origin && !corsDecision.allowed) {
+        this.sendJson(res, 403, {
+          ok: false,
+          error: "Forbidden by ADMIN_ALLOWED_ORIGINS.",
+        });
+        return;
+      }
+
       if (req.method === "OPTIONS") {
+        if (corsDecision.origin && !corsDecision.allowed) {
+          this.sendJson(res, 403, {
+            ok: false,
+            error: "Forbidden by ADMIN_ALLOWED_ORIGINS.",
+          });
+          return;
+        }
         res.writeHead(204);
         res.end();
         return;
@@ -517,10 +537,50 @@ export class AdminServer {
     fs.writeFileSync(envPath, next, "utf8");
   }
 
-  private setCorsHeaders(res: http.ServerResponse): void {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+  private resolveCors(req: http.IncomingMessage): { origin: string | null; allowed: boolean } {
+    const origin = normalizeOriginHeader(req.headers.origin);
+    if (!origin) {
+      return { origin: null, allowed: true };
+    }
+    if (isSameOriginRequest(req, origin)) {
+      return { origin, allowed: true };
+    }
+    if (this.adminAllowedOrigins.includes("*")) {
+      return { origin, allowed: true };
+    }
+    if (this.adminAllowedOrigins.length === 0) {
+      return { origin, allowed: false };
+    }
+    return {
+      origin,
+      allowed: this.adminAllowedOrigins.includes(origin),
+    };
+  }
+
+  private setCorsHeaders(
+    res: http.ServerResponse,
+    corsDecision: { origin: string | null; allowed: boolean },
+  ): void {
+    if (!corsDecision.origin || !corsDecision.allowed) {
+      return;
+    }
+    res.setHeader("Access-Control-Allow-Origin", corsDecision.origin);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token, X-Admin-Actor");
     res.setHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS");
+    appendVaryHeader(res, "Origin");
+  }
+
+  private setSecurityHeaders(res: http.ServerResponse): void {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    );
   }
 
   private sendHtml(res: http.ServerResponse, html: string): void {
@@ -610,6 +670,17 @@ function normalizeAllowlist(entries: string[]): string[] {
   return [...output];
 }
 
+function normalizeOriginAllowlist(entries: string[]): string[] {
+  const output = new Set<string>();
+  for (const entry of entries) {
+    const normalized = normalizeOrigin(entry);
+    if (normalized) {
+      output.add(normalized);
+    }
+  }
+  return [...output];
+}
+
 function normalizeRemoteAddress(value: string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -627,6 +698,49 @@ function normalizeRemoteAddress(value: string | null | undefined): string | null
     return withoutZone.slice("::ffff:".length);
   }
   return withoutZone;
+}
+
+function normalizeOriginHeader(value: string | string[] | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const raw = Array.isArray(value) ? value[0] ?? "" : value;
+  return normalizeOrigin(raw);
+}
+
+function normalizeOrigin(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed === "*") {
+    return "*";
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isSameOriginRequest(req: http.IncomingMessage, origin: string): boolean {
+  const host = normalizeHeaderValue(req.headers.host);
+  if (!host) {
+    return false;
+  }
+  const forwardedProto = normalizeHeaderValue(req.headers["x-forwarded-proto"]);
+  const protocol = forwardedProto || "http";
+  return origin === `${protocol}://${host}`.toLowerCase();
+}
+
+function appendVaryHeader(res: http.ServerResponse, headerName: string): void {
+  const current = res.getHeader("Vary");
+  const existing = typeof current === "string" ? current.split(",").map((v) => v.trim()).filter(Boolean) : [];
+  if (!existing.includes(headerName)) {
+    existing.push(headerName);
+  }
+  res.setHeader("Vary", existing.join(", "));
 }
 
 function renderAdminConsoleHtml(): string {

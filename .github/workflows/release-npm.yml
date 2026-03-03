@@ -67,9 +67,17 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm run typecheck
 
+      - name: Lint
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run lint
+
       - name: Unit tests
         if: steps.intent.outputs.publish == 'true'
         run: npm test
+
+      - name: Coverage checks
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run test:coverage
 
       - name: Admin UI e2e tests
         if: steps.intent.outputs.publish == 'true'

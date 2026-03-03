@@ -18,12 +18,14 @@ For any non-local access, set:
 - `ADMIN_BIND_HOST=127.0.0.1`
 - `ADMIN_PORT=8787`
 - `ADMIN_TOKEN=<a-long-random-token>`
+- `ADMIN_ALLOWED_ORIGINS=https://admin.example.com` (when browser UI is served from a separate origin)
 
 Why this baseline:
 
 - Local bind prevents accidental direct internet exposure.
 - Public access is delegated to the gateway/tunnel layer.
 - Token protects `/api/admin/*` operations.
+- Origin allowlist limits browser-based cross-origin access to trusted admin domains.
 
 ## 3) Start Admin Service Only
 

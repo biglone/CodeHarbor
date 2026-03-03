@@ -104,6 +104,7 @@ export class CodeHarborAdminApp {
       port: options?.port ?? config.adminPort,
       adminToken: config.adminToken,
       adminIpAllowlist: config.adminIpAllowlist,
+      adminAllowedOrigins: config.adminAllowedOrigins,
     });
   }
 

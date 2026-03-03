@@ -73,6 +73,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     adminPort: 0,
     adminToken: null,
     adminIpAllowlist: [],
+    adminAllowedOrigins: [],
     logLevel: "info",
   };
 }
@@ -269,5 +270,49 @@ describe("AdminServer", () => {
 
     const blockedUi = await fetchJson(`${baseUrl}/`);
     expect(blockedUi.status).toBe(403);
+  });
+
+  it("applies security headers and enforces ADMIN_ALLOWED_ORIGINS for API", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    config.adminAllowedOrigins = ["https://admin.example.com"];
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "secret-token",
+      adminAllowedOrigins: config.adminAllowedOrigins,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const allowed = await fetch(`${baseUrl}/api/admin/config/global`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: "https://admin.example.com",
+      },
+    });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://admin.example.com");
+    expect(allowed.headers.get("x-frame-options")).toBe("DENY");
+    expect(allowed.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(allowed.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+
+    const blocked = await fetch(`${baseUrl}/api/admin/config/global`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: "https://evil.example.com",
+      },
+    });
+    expect(blocked.status).toBe(403);
+    const blockedBody = (await blocked.json()) as { error?: string };
+    expect(blockedBody.error).toContain("ADMIN_ALLOWED_ORIGINS");
   });
 });

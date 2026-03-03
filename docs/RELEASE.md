@@ -10,11 +10,13 @@ On `push` to `main` and pull requests, CI runs:
 
 1. `npm ci`
 2. `npm run typecheck`
-3. `npm test`
-4. `npm run test:e2e`
-5. `npm run build`
-6. `node dist/cli.js --help` (CLI smoke check)
-7. `npm pack --dry-run` (package integrity check)
+3. `npm run lint`
+4. `npm test`
+5. `npm run test:coverage`
+6. `npm run test:e2e`
+7. `npm run build`
+8. `node dist/cli.js --help` (CLI smoke check)
+9. `npm pack --dry-run` (package integrity check)
 
 ## npm Publish Triggers
 
@@ -33,13 +35,39 @@ If the version already exists on npm, publish is skipped.
 ## Release Steps
 
 1. Ensure working tree is clean and tests pass locally.
-2. Bump version:
+2. Export a pre-release config snapshot backup:
+   - `./scripts/backup-config.sh`
+3. Optionally validate latest snapshot:
+   - `codeharbor config import <snapshot-file> --dry-run`
+4. Bump version:
    - `npm version patch` or `npm version minor` or `npm version major`
-3. Push commit to `main` with a publish-trigger message.
-4. Wait for `Release NPM` workflow to finish.
-5. Verify:
+5. Push commit to `main` with a publish-trigger message.
+6. Wait for `Release NPM` workflow to finish.
+7. Verify:
    - `npm view codeharbor version`
    - `npm install -g codeharbor@<version>`
+
+## Rollback Playbook
+
+If release regression impacts runtime behavior:
+
+1. Revert to previous known-good package version or commit.
+2. Restore config from snapshot:
+   - `codeharbor config import <snapshot-file> --dry-run`
+   - `codeharbor config import <snapshot-file>`
+3. Restart services.
+4. Confirm health:
+   - Admin UI `/health`
+   - `codeharbor doctor`
+   - Matrix end-to-end smoke message
+
+## Backup Automation
+
+For periodic snapshot backups:
+
+- Manual: `./scripts/backup-config.sh`
+- Automated timer: `./scripts/install-backup-timer.sh`
+- Full guide: `docs/BACKUP_AUTOMATION.md`
 
 ## Required Secret
 

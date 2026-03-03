@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { SessionState, StateData } from "../types";
+import { StateData } from "../types";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;

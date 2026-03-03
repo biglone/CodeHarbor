@@ -56,6 +56,7 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "ADMIN_PORT",
   "ADMIN_TOKEN",
   "ADMIN_IP_ALLOWLIST",
+  "ADMIN_ALLOWED_ORIGINS",
   "LOG_LEVEL",
 ] as const;
 
@@ -161,6 +162,7 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     ADMIN_PORT: integerStringSchema("ADMIN_PORT", 1, 65_535),
     ADMIN_TOKEN: z.string(),
     ADMIN_IP_ALLOWLIST: z.string(),
+    ADMIN_ALLOWED_ORIGINS: z.string().default(""),
     LOG_LEVEL: z.enum(LOG_LEVELS),
   })
   .strict();
@@ -368,6 +370,7 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     ADMIN_PORT: String(config.adminPort),
     ADMIN_TOKEN: config.adminToken ?? "",
     ADMIN_IP_ALLOWLIST: config.adminIpAllowlist.join(","),
+    ADMIN_ALLOWED_ORIGINS: config.adminAllowedOrigins.join(","),
     LOG_LEVEL: config.logLevel,
   };
 }
@@ -378,7 +381,9 @@ function parseJsonFile(filePath: string): unknown {
     return JSON.parse(raw) as unknown;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to parse snapshot JSON: ${message}`);
+    throw new Error(`Failed to parse snapshot JSON: ${message}`, {
+      cause: error,
+    });
   }
 }
 

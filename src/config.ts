@@ -174,6 +174,7 @@ const configSchema = z
       .pipe(z.number().int().min(1).max(65535)),
     ADMIN_TOKEN: z.string().default(""),
     ADMIN_IP_ALLOWLIST: z.string().default(""),
+    ADMIN_ALLOWED_ORIGINS: z.string().default(""),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((v) => ({
@@ -229,6 +230,7 @@ const configSchema = z
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,
     adminIpAllowlist: parseCsvList(v.ADMIN_IP_ALLOWLIST),
+    adminAllowedOrigins: parseCsvList(v.ADMIN_ALLOWED_ORIGINS),
     logLevel: v.LOG_LEVEL,
   }));
 

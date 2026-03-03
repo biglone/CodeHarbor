@@ -86,6 +86,7 @@ These must be valid before `codeharbor start`.
 | `ADMIN_PORT` | No | `8787` | No | Restart | Admin listener port |
 | `ADMIN_TOKEN` | No (functional), **Yes (public exposure)** | empty | UI can set header only | Restart | API bearer auth. Required for non-loopback/public usage |
 | `ADMIN_IP_ALLOWLIST` | No | empty | No | Restart | Optional client IP allowlist |
+| `ADMIN_ALLOWED_ORIGINS` | No | empty | No | Restart | Optional browser origin allowlist for CORS (`https://admin.example.com`) |
 | `LOG_LEVEL` | No | `info` | No | Restart | Logger level |
 
 ## Recommended Operating Profiles
