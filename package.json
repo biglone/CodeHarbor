@@ -1,6 +1,6 @@
 {
   "name": "codeharbor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Instant-messaging bridge for Codex CLI sessions",
   "license": "MIT",
   "main": "dist/cli.js",
