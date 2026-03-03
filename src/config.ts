@@ -173,6 +173,7 @@ const configSchema = z
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(1).max(65535)),
     ADMIN_TOKEN: z.string().default(""),
+    ADMIN_IP_ALLOWLIST: z.string().default(""),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((v) => ({
@@ -227,6 +228,7 @@ const configSchema = z
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,
+    adminIpAllowlist: parseCsvList(v.ADMIN_IP_ALLOWLIST),
     logLevel: v.LOG_LEVEL,
   }));
 
@@ -324,4 +326,11 @@ function parseExtraEnv(raw: string): Record<string, string> {
     output[key] = value;
   }
   return output;
+}
+
+function parseCsvList(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }

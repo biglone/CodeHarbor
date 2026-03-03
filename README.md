@@ -132,9 +132,9 @@ node dist/cli.js start
 - `codeharbor init`: guided setup for `.env` (supports `--force` to overwrite directly)
 - `codeharbor start`: start service
 - `codeharbor doctor`: check `codex` and Matrix connectivity
-- `codeharbor admin serve`: start admin config API server
+- `codeharbor admin serve`: start admin UI + config API server
 
-## Admin API
+## Admin UI And API
 
 Start server:
 
@@ -147,6 +147,13 @@ Optional overrides:
 ```bash
 codeharbor admin serve --host 127.0.0.1 --port 8787
 ```
+
+Open these UI routes in browser:
+
+- `/` or `/settings/global`
+- `/settings/rooms`
+- `/health`
+- `/audit`
 
 Main endpoints:
 
@@ -165,7 +172,12 @@ When `ADMIN_TOKEN` is set, requests must include:
 Authorization: Bearer <ADMIN_TOKEN>
 ```
 
-Note: current `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
+Access control options:
+
+- `ADMIN_TOKEN`: require bearer token for `/api/admin/*`
+- `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
+
+Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
 
 ## Startup Preflight
 

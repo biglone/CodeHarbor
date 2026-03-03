@@ -72,6 +72,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     adminBindHost: "127.0.0.1",
     adminPort: 0,
     adminToken: null,
+    adminIpAllowlist: [],
     logLevel: "info",
   };
 }
@@ -81,6 +82,14 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{ status: num
   return {
     status: response.status,
     body: (await response.json()) as unknown,
+  };
+}
+
+async function fetchText(url: string, init?: RequestInit): Promise<{ status: number; body: string }> {
+  const response = await fetch(url, init);
+  return {
+    status: response.status,
+    body: await response.text(),
   };
 }
 
@@ -147,6 +156,7 @@ describe("AdminServer", () => {
     const audit = await fetchJson(`${baseUrl}/api/admin/audit?limit=5`);
     expect(audit.status).toBe(200);
     expect(JSON.stringify(audit.body)).toContain("bind room");
+    expect(JSON.stringify(audit.body)).toContain("createdAtIso");
   });
 
   it("requires token when ADMIN_TOKEN is configured", async () => {
@@ -177,6 +187,10 @@ describe("AdminServer", () => {
       },
     });
     expect(authorized.status).toBe(200);
+
+    const ui = await fetchText(`${baseUrl}/`);
+    expect(ui.status).toBe(200);
+    expect(ui.body).toContain("CodeHarbor Admin Console");
   });
 
   it("writes supported global config changes into .env", async () => {
@@ -228,5 +242,32 @@ describe("AdminServer", () => {
     expect(envRaw).toContain('MATRIX_COMMAND_PREFIX="!ai"');
     expect(envRaw).toContain(`CODEX_WORKDIR=${dir}`);
     expect(envRaw).toContain("RATE_LIMIT_MAX_CONCURRENT_GLOBAL=12");
+  });
+
+  it("rejects requests when client ip is not in ADMIN_IP_ALLOWLIST", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminIpAllowlist: ["10.10.10.10"],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const blockedApi = await fetchJson(`${baseUrl}/api/admin/config/global`);
+    expect(blockedApi.status).toBe(403);
+
+    const blockedUi = await fetchJson(`${baseUrl}/`);
+    expect(blockedUi.status).toBe(403);
   });
 });

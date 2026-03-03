@@ -103,6 +103,7 @@ export class CodeHarborAdminApp {
       host: options?.host ?? config.adminBindHost,
       port: options?.port ?? config.adminPort,
       adminToken: config.adminToken,
+      adminIpAllowlist: config.adminIpAllowlist,
     });
   }
 
