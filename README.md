@@ -62,6 +62,28 @@ npm pack
 npm install -g ./codeharbor-<version>.tgz
 ```
 
+## GitHub CI/CD Publish
+
+CodeHarbor supports auto publish to npm from GitHub Actions.
+
+Setup once:
+
+1. Add repository secret `NPM_TOKEN` (npm token with publish permission).
+2. Push to `main` with commit message containing `[publish-npm]`.
+
+Trigger rules:
+
+- `push` to `main` + commit message includes `[publish-npm]` -> run publish workflow
+- `workflow_dispatch` -> manual publish from GitHub Actions UI
+
+The workflow runs `typecheck`, `test`, `build`, then publishes with:
+
+```bash
+npm publish --access public
+```
+
+If the same package version already exists on npm, publish is skipped automatically.
+
 ## Quick Start
 
 For local development from source:
