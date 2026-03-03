@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Instant-messaging bridge for Codex CLI sessions",
   "license": "MIT",
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "codeharbor": "dist/cli.js"
   },
@@ -11,6 +20,24 @@
     "README.md",
     "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biglone/CodeHarbor.git"
+  },
+  "homepage": "https://github.com/biglone/CodeHarbor#readme",
+  "bugs": {
+    "url": "https://github.com/biglone/CodeHarbor/issues"
+  },
+  "keywords": [
+    "codex",
+    "cli",
+    "matrix",
+    "bot",
+    "im"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -23,7 +50,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:legacy": ".venv/bin/python -m pytest -q tests"
+    "test:legacy": ".venv/bin/python -m pytest -q tests",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",

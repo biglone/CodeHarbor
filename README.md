@@ -41,7 +41,30 @@ Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume
 - `codex` CLI installed and authenticated (`codex login`)
 - A Matrix bot user + access token
 
+## Install
+
+Install globally from npm (after publish):
+
+```bash
+npm install -g codeharbor
+```
+
+Install directly from GitHub:
+
+```bash
+npm install -g github:biglone/CodeHarbor
+```
+
+Build a local package tarball and install it:
+
+```bash
+npm pack
+npm install -g ./codeharbor-<version>.tgz
+```
+
 ## Quick Start
+
+For local development from source:
 
 1. Install dependencies:
 

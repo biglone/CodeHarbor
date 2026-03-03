@@ -1,11 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import { SessionState, StateData } from "../types";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
+const SQLITE_MODULE_ID = `node:${"sqlite"}`;
+
+type DatabaseSyncCtor = typeof import("node:sqlite").DatabaseSync;
+type DatabaseSyncInstance = import("node:sqlite").DatabaseSync;
+
+function loadDatabaseSync(): DatabaseSyncCtor {
+  const sqliteModule = require(SQLITE_MODULE_ID) as { DatabaseSync?: DatabaseSyncCtor };
+  if (!sqliteModule.DatabaseSync) {
+    throw new Error(`Failed to load ${SQLITE_MODULE_ID} DatabaseSync`);
+  }
+  return sqliteModule.DatabaseSync;
+}
+
+const DatabaseSync = loadDatabaseSync();
 
 export class StateStore {
   private readonly dbPath: string;
@@ -13,7 +26,7 @@ export class StateStore {
   private readonly maxProcessedEventsPerSession: number;
   private readonly maxSessionAgeMs: number;
   private readonly maxSessions: number;
-  private readonly db: DatabaseSync;
+  private readonly db: DatabaseSyncInstance;
   private lastPruneAt = 0;
 
   constructor(
