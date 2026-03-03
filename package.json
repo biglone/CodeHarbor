@@ -39,7 +39,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsup src/cli.ts --format cjs --dts --clean",

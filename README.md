@@ -37,7 +37,7 @@ Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - `codex` CLI installed and authenticated (`codex login`)
 - A Matrix bot user + access token
 
