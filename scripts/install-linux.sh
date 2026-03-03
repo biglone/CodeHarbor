@@ -6,6 +6,7 @@ PACKAGE_SPEC="${PACKAGE_SPEC:-codeharbor@latest}"
 RUN_USER="${RUN_USER:-${SUDO_USER:-${USER:-}}}"
 RUN_INIT="false"
 DRY_RUN="false"
+RUNTIME_HOME_ENV_KEY="CODEHARBOR_HOME"
 
 usage() {
   cat <<'USAGE'
@@ -131,7 +132,7 @@ run_init_if_requested() {
   fi
 
   if [[ "${DRY_RUN}" == "true" ]]; then
-    log "[dry-run] cd ${APP_DIR} && codeharbor init"
+    log "[dry-run] ${RUNTIME_HOME_ENV_KEY}=${APP_DIR} codeharbor init"
     return
   fi
 
@@ -139,11 +140,8 @@ run_init_if_requested() {
     fail "`codeharbor` command not found after install. Check npm global PATH."
   fi
 
-  log "Running init wizard in ${APP_DIR}"
-  (
-    cd "${APP_DIR}"
-    codeharbor init
-  )
+  log "Running init wizard for runtime home ${APP_DIR}"
+  CODEHARBOR_HOME="${APP_DIR}" codeharbor init
 }
 
 print_summary() {
@@ -158,9 +156,20 @@ print_summary() {
     log "CLI binary not found in current PATH (you may need a new shell session)."
   fi
 
-  cat <<EOF
+  if [[ "${APP_DIR}" == "/opt/codeharbor" ]]; then
+    cat <<'EOF'
 Next steps:
-  cd ${APP_DIR}
+  codex login
+  codeharbor init
+  codeharbor doctor
+  codeharbor start
+EOF
+    return
+  fi
+
+  cat <<EOF
+Next steps (custom runtime home):
+  export ${RUNTIME_HOME_ENV_KEY}=${APP_DIR}
   codex login
   codeharbor init
   codeharbor doctor

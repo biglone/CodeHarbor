@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { Command } from "commander";
 
 import { CodeHarborAdminApp, CodeHarborApp, runDoctor } from "./app";
 import { isNonLoopbackHost } from "./utils/admin-host";
-import { loadConfig } from "./config";
+import { loadConfig, loadEnvFromFile } from "./config";
 import { runConfigExportCommand, runConfigImportCommand } from "./config-snapshot";
 import { runInitCommand } from "./init";
 import { formatPreflightReport, runStartupPreflight } from "./preflight";
+import { resolveRuntimeHome } from "./runtime-home";
+
+let runtimeHome: string | null = null;
 
 const program = new Command();
 
@@ -21,14 +27,16 @@ program
   .description("Create or update .env via guided prompts")
   .option("-f, --force", "overwrite existing .env without confirmation")
   .action(async (options: { force?: boolean }) => {
-    await runInitCommand({ force: options.force ?? false });
+    const home = ensureRuntimeHomeOrExit();
+    await runInitCommand({ force: options.force ?? false, cwd: home });
   });
 
 program
   .command("start")
   .description("Start CodeHarbor service")
   .action(async () => {
-    const config = await loadConfigWithPreflight("start");
+    const home = ensureRuntimeHomeOrExit();
+    const config = await loadConfigWithPreflight("start", home);
     if (!config) {
       process.exitCode = 1;
       return;
@@ -54,7 +62,8 @@ program
   .command("doctor")
   .description("Check codex and matrix connectivity")
   .action(async () => {
-    const config = await loadConfigWithPreflight("doctor");
+    const home = ensureRuntimeHomeOrExit();
+    const config = await loadConfigWithPreflight("doctor", home);
     if (!config) {
       process.exitCode = 1;
       return;
@@ -75,6 +84,7 @@ admin
     "allow serving admin API without ADMIN_TOKEN on non-loopback host (not recommended)",
   )
   .action(async (options: { host?: string; port?: string; allowInsecureNoToken?: boolean }) => {
+    ensureRuntimeHomeOrExit();
     const config = loadConfig();
     const host = options.host?.trim() || config.adminBindHost;
     const port = options.port ? parsePortOption(options.port, config.adminPort) : config.adminPort;
@@ -114,7 +124,8 @@ configCommand
   .option("-o, --output <path>", "write snapshot to file instead of stdout")
   .action(async (options: { output?: string }) => {
     try {
-      await runConfigExportCommand({ outputPath: options.output });
+      const home = ensureRuntimeHomeOrExit();
+      await runConfigExportCommand({ outputPath: options.output, cwd: home });
     } catch (error) {
       process.stderr.write(`Config export failed: ${formatError(error)}\n`);
       process.exitCode = 1;
@@ -128,9 +139,11 @@ configCommand
   .option("--dry-run", "validate snapshot without writing changes")
   .action(async (file: string, options: { dryRun?: boolean }) => {
     try {
+      const home = ensureRuntimeHomeOrExit();
       await runConfigImportCommand({
         filePath: file,
         dryRun: options.dryRun ?? false,
+        cwd: home,
       });
     } catch (error) {
       process.stderr.write(`Config import failed: ${formatError(error)}\n`);
@@ -144,8 +157,11 @@ if (process.argv.length <= 2) {
 
 void program.parseAsync(process.argv);
 
-async function loadConfigWithPreflight(commandName: string): Promise<ReturnType<typeof loadConfig> | null> {
-  const preflight = await runStartupPreflight();
+async function loadConfigWithPreflight(
+  commandName: string,
+  runtimeHomePath: string,
+): Promise<ReturnType<typeof loadConfig> | null> {
+  const preflight = await runStartupPreflight({ cwd: runtimeHomePath });
   if (preflight.issues.length > 0) {
     const report = formatPreflightReport(preflight, commandName);
     if (preflight.ok) {
@@ -164,6 +180,34 @@ async function loadConfigWithPreflight(commandName: string): Promise<ReturnType<
     process.stderr.write("Fix: run \"codeharbor init\" and then retry.\n");
     return null;
   }
+}
+
+function ensureRuntimeHomeOrExit(): string {
+  if (runtimeHome) {
+    return runtimeHome;
+  }
+
+  const home = resolveRuntimeHome();
+
+  try {
+    fs.mkdirSync(home, { recursive: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Runtime setup failed: cannot create ${home}. ${message}\n`);
+    process.exit(1);
+  }
+
+  try {
+    process.chdir(home);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Runtime setup failed: cannot switch to ${home}. ${message}\n`);
+    process.exit(1);
+  }
+
+  loadEnvFromFile(path.resolve(home, ".env"));
+  runtimeHome = home;
+  return runtimeHome;
 }
 
 function parsePortOption(raw: string, fallback: number): number {

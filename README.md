@@ -61,6 +61,12 @@ Run local script with custom options:
 ./scripts/install-linux.sh --app-dir /srv/codeharbor --package codeharbor@0.1.1 --init
 ```
 
+Runtime home behavior:
+
+- By default, all `codeharbor` commands use `/opt/codeharbor` for `.env` and relative data paths.
+- No manual `cd /opt/codeharbor` is required after installation.
+- To use a custom runtime directory, set `CODEHARBOR_HOME` (for example `export CODEHARBOR_HOME=/srv/codeharbor`).
+
 Install directly from GitHub:
 
 ```bash
@@ -145,6 +151,7 @@ npm install
 2. Configure environment:
 
 ```bash
+export CODEHARBOR_HOME="$(pwd)"
 codeharbor init
 ```
 
@@ -157,6 +164,7 @@ Required values:
 3. Run in dev mode:
 
 ```bash
+export CODEHARBOR_HOME="$(pwd)"
 npm run dev
 ```
 
@@ -164,6 +172,7 @@ npm run dev
 
 ```bash
 npm run build
+export CODEHARBOR_HOME="$(pwd)"
 node dist/cli.js start
 ```
 

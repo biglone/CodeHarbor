@@ -4,8 +4,6 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { z } from "zod";
 
-dotenv.config();
-
 export interface TriggerPolicy {
   allowMention: boolean;
   allowReply: boolean;
@@ -33,7 +31,7 @@ const configSchema = z
     MATRIX_COMMAND_PREFIX: z.string().default("!code"),
     CODEX_BIN: z.string().default("codex"),
     CODEX_MODEL: z.string().optional(),
-    CODEX_WORKDIR: z.string().default(process.cwd()),
+    CODEX_WORKDIR: z.string().default("."),
     CODEX_DANGEROUS_BYPASS: z
       .string()
       .default("false")
@@ -235,6 +233,14 @@ const configSchema = z
   }));
 
 export type AppConfig = z.infer<typeof configSchema>;
+
+export function loadEnvFromFile(filePath = path.resolve(process.cwd(), ".env"), env: NodeJS.ProcessEnv = process.env): void {
+  dotenv.config({
+    path: filePath,
+    processEnv: env,
+    quiet: true,
+  });
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = configSchema.safeParse(env);

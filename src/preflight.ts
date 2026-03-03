@@ -52,7 +52,7 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
       code: "missing_dotenv",
       check: ".env",
       message: `No .env file found at ${envPath}.`,
-      fix: "cp .env.example .env && codeharbor init",
+      fix: 'Run "codeharbor init" to create baseline config.',
     });
   }
 
