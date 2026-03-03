@@ -11,13 +11,48 @@ permissions:
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish-npm]')
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve publish intent
+        id: intent
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if printf '%s' "$COMMIT_MESSAGE" | grep -qi '\[publish-npm\]'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=marker" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if printf '%s' "$COMMIT_MESSAGE" | grep -Eqi '\brelease\b' \
+            && printf '%s' "$COMMIT_MESSAGE" | grep -Eqi 'v?[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=release_with_version" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "publish=false" >> "$GITHUB_OUTPUT"
+          echo "reason=no_trigger" >> "$GITHUB_OUTPUT"
+
+      - name: Skip publish (trigger not matched)
+        if: steps.intent.outputs.publish != 'true'
+        run: |
+          echo "Skip npm publish. Commit message does not match trigger rules."
+          echo "Allowed: [publish-npm] OR release + semver (for example: release v0.1.1)."
+
       - name: Checkout
+        if: steps.intent.outputs.publish == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.intent.outputs.publish == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -25,24 +60,30 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        if: steps.intent.outputs.publish == 'true'
         run: npm ci
 
       - name: Type check
+        if: steps.intent.outputs.publish == 'true'
         run: npm run typecheck
 
       - name: Unit tests
+        if: steps.intent.outputs.publish == 'true'
         run: npm test
 
       - name: Build
+        if: steps.intent.outputs.publish == 'true'
         run: npm run build
 
       - name: Resolve package metadata
+        if: steps.intent.outputs.publish == 'true'
         id: package
         run: |
           echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Check if version is already published
+        if: steps.intent.outputs.publish == 'true'
         id: version
         run: |
           if npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version >/dev/null 2>&1; then
@@ -52,13 +93,13 @@ jobs:
           fi
 
       - name: Publish to npm
-        if: steps.version.outputs.exists != 'true'
+        if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
       - name: Skip publish (version exists)
-        if: steps.version.outputs.exists == 'true'
+        if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists == 'true'
         run: |
           echo "Version already published:"
           echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"

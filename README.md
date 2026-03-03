@@ -69,11 +69,13 @@ CodeHarbor supports auto publish to npm from GitHub Actions.
 Setup once:
 
 1. Add repository secret `NPM_TOKEN` (npm token with publish permission).
-2. Push to `main` with commit message containing `[publish-npm]`.
+2. Push to `main` with a publish trigger commit message.
 
 Trigger rules:
 
 - `push` to `main` + commit message includes `[publish-npm]` -> run publish workflow
+- `push` to `main` + commit message includes both `release` and a semver version -> run publish workflow
+  - examples: `release v0.1.1`, `chore: release 0.1.2`
 - `workflow_dispatch` -> manual publish from GitHub Actions UI
 
 The workflow runs `typecheck`, `test`, `build`, then publishes with:
