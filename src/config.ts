@@ -15,6 +15,14 @@ export interface TriggerPolicy {
 
 export type RoomTriggerPolicyOverrides = Record<string, Partial<TriggerPolicy>>;
 
+export interface CliCompatConfig {
+  enabled: boolean;
+  passThroughEvents: boolean;
+  preserveWhitespace: boolean;
+  disableReplyChunkSplit: boolean;
+  progressThrottleMs: number;
+}
+
 const configSchema = z
   .object({
     MATRIX_HOMESERVER: z.string().url(),
@@ -33,6 +41,10 @@ const configSchema = z
       .default("600000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    CODEX_SANDBOX_MODE: z.string().optional(),
+    CODEX_APPROVAL_POLICY: z.string().optional(),
+    CODEX_EXTRA_ARGS: z.string().default(""),
+    CODEX_EXTRA_ENV_JSON: z.string().default(""),
     STATE_DB_PATH: z.string().default("data/state.db"),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
@@ -121,6 +133,27 @@ const configSchema = z
       .default("4")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().nonnegative()),
+    CLI_COMPAT_MODE: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_PASSTHROUGH_EVENTS: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_PRESERVE_WHITESPACE: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_PROGRESS_THROTTLE_MS: z
+      .string()
+      .default("300")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -138,6 +171,10 @@ const configSchema = z
     codexWorkdir: path.resolve(v.CODEX_WORKDIR),
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,
     codexExecTimeoutMs: v.CODEX_EXEC_TIMEOUT_MS,
+    codexSandboxMode: v.CODEX_SANDBOX_MODE?.trim() || null,
+    codexApprovalPolicy: v.CODEX_APPROVAL_POLICY?.trim() || null,
+    codexExtraArgs: parseExtraArgs(v.CODEX_EXTRA_ARGS),
+    codexExtraEnv: parseExtraEnv(v.CODEX_EXTRA_ENV_JSON),
     stateDbPath: path.resolve(v.STATE_DB_PATH),
     legacyStateJsonPath: v.STATE_PATH.trim() ? path.resolve(v.STATE_PATH) : null,
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
@@ -162,6 +199,13 @@ const configSchema = z
       maxConcurrentGlobal: v.RATE_LIMIT_MAX_CONCURRENT_GLOBAL,
       maxConcurrentPerUser: v.RATE_LIMIT_MAX_CONCURRENT_PER_USER,
       maxConcurrentPerRoom: v.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM,
+    },
+    cliCompat: {
+      enabled: v.CLI_COMPAT_MODE,
+      passThroughEvents: v.CLI_COMPAT_PASSTHROUGH_EVENTS,
+      preserveWhitespace: v.CLI_COMPAT_PRESERVE_WHITESPACE,
+      disableReplyChunkSplit: v.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT,
+      progressThrottleMs: v.CLI_COMPAT_PROGRESS_THROTTLE_MS,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,
@@ -225,5 +269,40 @@ function parseRoomTriggerPolicyOverrides(raw: string): RoomTriggerPolicyOverride
     output[roomId] = override;
   }
 
+  return output;
+}
+
+function parseExtraArgs(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+  return trimmed
+    .split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function parseExtraEnv(raw: string): Record<string, string> {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("CODEX_EXTRA_ENV_JSON must be valid JSON object.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("CODEX_EXTRA_ENV_JSON must be a key/value object.");
+  }
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== "string") {
+      throw new Error(`CODEX_EXTRA_ENV_JSON[${key}] must be string.`);
+    }
+    output[key] = value;
+  }
   return output;
 }

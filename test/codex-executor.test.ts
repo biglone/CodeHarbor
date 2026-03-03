@@ -42,6 +42,10 @@ describe("CodexExecutor", () => {
       workdir: process.cwd(),
       dangerousBypass: false,
       timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
     });
 
     const resultPromise = executor.execute("hello", null, (event) => {
@@ -59,9 +63,9 @@ describe("CodexExecutor", () => {
     });
     expect(progressEvents).toEqual(
       expect.arrayContaining([
-        { stage: "thread_started", message: "thread-1" },
-        { stage: "turn_started" },
-        { stage: "reasoning", message: "thinking" },
+        expect.objectContaining({ stage: "thread_started", message: "thread-1" }),
+        expect.objectContaining({ stage: "turn_started" }),
+        expect.objectContaining({ stage: "reasoning", message: "thinking" }),
       ]),
     );
   });
@@ -76,6 +80,10 @@ describe("CodexExecutor", () => {
       workdir: process.cwd(),
       dangerousBypass: false,
       timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
     });
 
     const resultPromise = executor.execute("hello", null);
@@ -102,6 +110,10 @@ describe("CodexExecutor", () => {
       workdir: process.cwd(),
       dangerousBypass: false,
       timeoutMs: 100,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
     });
 
     const resultPromise = executor.execute("long task", null);
@@ -128,6 +140,10 @@ describe("CodexExecutor", () => {
       workdir: process.cwd(),
       dangerousBypass: false,
       timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
     });
 
     const handle = executor.startExecution("cancel me", null);
@@ -135,5 +151,39 @@ describe("CodexExecutor", () => {
 
     await expect(handle.result).rejects.toBeInstanceOf(CodexExecutionCancelledError);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("emits raw event when passthrough is enabled", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+    const events: Array<{ stage: string; eventType?: string; message?: string }> = [];
+
+    const executor = new CodexExecutor({
+      bin: "codex",
+      model: null,
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute(
+      "hello",
+      null,
+      (event) => events.push({ stage: event.stage, eventType: event.eventType, message: event.message }),
+      { passThroughRawEvents: true },
+    );
+    child.stdout.write('{"type":"thread.started","thread_id":"thread-raw"}\n');
+    child.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"done"}}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "thread-raw",
+      reply: "done",
+    });
+    expect(events.some((event) => event.stage === "raw_event" && event.eventType === "thread.started")).toBe(true);
   });
 });

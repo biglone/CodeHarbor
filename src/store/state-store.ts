@@ -127,10 +127,47 @@ export class StateStore {
   markEventProcessed(sessionKey: string, eventId: string): void {
     this.maybePruneExpiredSessions();
     this.ensureSession(sessionKey);
+    this.insertProcessedEventAndTrim(sessionKey, eventId, Date.now());
+  }
 
+  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string): void {
+    this.maybePruneExpiredSessions();
+    const now = Date.now();
+    this.ensureSession(sessionKey);
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare("UPDATE sessions SET codex_session_id = ?2, updated_at = ?3 WHERE session_key = ?1")
+        .run(sessionKey, codexSessionId, now);
+      this.insertProcessedEventAndTrim(sessionKey, eventId, now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  commitExecutionHandled(sessionKey: string, eventId: string): void {
+    this.maybePruneExpiredSessions();
+    this.ensureSession(sessionKey);
+    this.db.exec("BEGIN");
+    try {
+      this.insertProcessedEventAndTrim(sessionKey, eventId, Date.now());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async flush(): Promise<void> {
+    this.touchDatabase();
+  }
+
+  private insertProcessedEventAndTrim(sessionKey: string, eventId: string, now: number): void {
     this.db
       .prepare("INSERT OR IGNORE INTO processed_events (session_key, event_id, created_at) VALUES (?1, ?2, ?3)")
-      .run(sessionKey, eventId, Date.now());
+      .run(sessionKey, eventId, now);
 
     if (this.maxProcessedEventsPerSession > 0) {
       this.db
@@ -147,11 +184,7 @@ export class StateStore {
         .run(sessionKey, this.maxProcessedEventsPerSession);
     }
 
-    this.db.prepare("UPDATE sessions SET updated_at = ?2 WHERE session_key = ?1").run(sessionKey, Date.now());
-  }
-
-  async flush(): Promise<void> {
-    this.touchDatabase();
+    this.db.prepare("UPDATE sessions SET updated_at = ?2 WHERE session_key = ?1").run(sessionKey, now);
   }
 
   private ensureSession(sessionKey: string): void {

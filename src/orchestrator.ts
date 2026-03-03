@@ -1,13 +1,14 @@
 import { Mutex } from "async-mutex";
 
 import { MatrixChannel } from "./channels/matrix-channel";
-import { TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
+import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
 import {
   CodexExecutionCancelledError,
   CodexExecutor,
   type CodexExecutionHandle,
   type CodexProgressEvent,
 } from "./executor/codex-executor";
+import { CodexSessionRuntime } from "./executor/codex-session-runtime";
 import { Logger } from "./logger";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import { StateStore } from "./store/state-store";
@@ -26,6 +27,7 @@ interface OrchestratorOptions {
   defaultGroupTriggerPolicy?: TriggerPolicy;
   roomTriggerPolicies?: RoomTriggerPolicyOverrides;
   rateLimiterOptions?: RateLimiterOptions;
+  cliCompat?: CliCompatConfig;
 }
 
 interface SessionLockEntry {
@@ -141,6 +143,7 @@ class RequestMetrics {
 export class Orchestrator {
   private readonly channel: MatrixChannel;
   private readonly executor: CodexExecutor;
+  private readonly sessionRuntime: CodexSessionRuntime;
   private readonly stateStore: StateStore;
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
@@ -156,6 +159,7 @@ export class Orchestrator {
   private readonly defaultGroupTriggerPolicy: TriggerPolicy;
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
   private readonly rateLimiter: RateLimiter;
+  private readonly cliCompat: CliCompatConfig;
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
@@ -173,7 +177,15 @@ export class Orchestrator {
     this.lockTtlMs = options?.lockTtlMs ?? 30 * 60 * 1000;
     this.lockPruneIntervalMs = options?.lockPruneIntervalMs ?? 5 * 60 * 1000;
     this.progressUpdatesEnabled = options?.progressUpdatesEnabled ?? false;
-    this.progressMinIntervalMs = options?.progressMinIntervalMs ?? 2_500;
+    this.cliCompat = options?.cliCompat ?? {
+      enabled: false,
+      passThroughEvents: false,
+      preserveWhitespace: false,
+      disableReplyChunkSplit: false,
+      progressThrottleMs: 300,
+    };
+    const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
+    this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;
     this.typingTimeoutMs = options?.typingTimeoutMs ?? 10_000;
     this.commandPrefix = (options?.commandPrefix ?? "").trim();
     this.matrixUserId = options?.matrixUserId ?? "";
@@ -196,6 +208,7 @@ export class Orchestrator {
         maxConcurrentPerRoom: 4,
       },
     );
+    this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
@@ -264,11 +277,13 @@ export class Orchestrator {
 
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
+      const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
       this.logger.info("Processing message", {
         requestId,
         sessionKey,
         hasCodexSession: Boolean(previousCodexSessionId),
         queueWaitMs,
+        attachmentCount: message.attachments.length,
         isDirectMessage: message.isDirectMessage,
         mentionsBot: message.mentionsBot,
         repliesToBot: message.repliesToBot,
@@ -286,7 +301,11 @@ export class Orchestrator {
 
       try {
         const executionStartedAt = Date.now();
-        executionHandle = this.executor.startExecution(route.prompt, previousCodexSessionId, (progress) => {
+        executionHandle = this.sessionRuntime.startExecution(
+          sessionKey,
+          executionPrompt,
+          previousCodexSessionId,
+          (progress) => {
           progressChain = progressChain
             .then(() =>
               this.handleProgress(
@@ -310,7 +329,11 @@ export class Orchestrator {
             .catch((progressError) => {
               this.logger.debug("Failed to process progress callback", { progressError });
             });
-        });
+          },
+          {
+            passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
+          },
+        );
 
         this.runningExecutions.set(sessionKey, {
           requestId,
@@ -321,10 +344,6 @@ export class Orchestrator {
         const result = await executionHandle.result;
         executionDurationMs = Date.now() - executionStartedAt;
         await progressChain;
-
-        if (!previousCodexSessionId || previousCodexSessionId !== result.sessionId) {
-          this.stateStore.setCodexSessionId(sessionKey, result.sessionId);
-        }
 
         const sendStartedAt = Date.now();
         await this.channel.sendMessage(message.conversationId, result.reply);
@@ -341,7 +360,7 @@ export class Orchestrator {
         );
         sendDurationMs = Date.now() - sendStartedAt;
 
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        this.stateStore.commitExecutionSuccess(sessionKey, message.eventId, result.sessionId);
         this.metrics.record("success", queueWaitMs, executionDurationMs, sendDurationMs);
         this.logger.info("Request completed", {
           requestId,
@@ -380,7 +399,7 @@ export class Orchestrator {
           }
         }
 
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
         this.metrics.record(status, queueWaitMs, executionDurationMs, sendDurationMs);
         this.logger.error("Request failed", {
           requestId,
@@ -403,15 +422,16 @@ export class Orchestrator {
   }
 
   private routeMessage(message: InboundMessage, sessionKey: string): RouteDecision {
-    const incoming = message.text.trim();
-    if (!incoming) {
+    const incomingRaw = message.text;
+    const incomingTrimmed = incomingRaw.trim();
+    if (!incomingTrimmed && message.attachments.length === 0) {
       return { kind: "ignore" };
     }
 
     const groupPolicy = message.isDirectMessage ? null : this.resolveGroupPolicy(message.conversationId);
     const prefixAllowed = message.isDirectMessage || Boolean(groupPolicy?.allowPrefix);
     const prefixTriggered = prefixAllowed && this.commandPrefix.length > 0;
-    const prefixedText = prefixTriggered ? extractCommandText(incoming, this.commandPrefix) : null;
+    const prefixedText = prefixTriggered ? extractCommandText(incomingTrimmed, this.commandPrefix) : null;
 
     const activeSession =
       message.isDirectMessage || groupPolicy?.allowActiveWindow
@@ -428,19 +448,24 @@ export class Orchestrator {
       return { kind: "ignore" };
     }
 
-    let normalized = prefixedText ?? incoming;
-    if (prefixedText === null && message.mentionsBot) {
+    let normalized = prefixedText ?? (this.cliCompat.preserveWhitespace ? incomingRaw : incomingTrimmed);
+    if (prefixedText === null && message.mentionsBot && !this.cliCompat.enabled) {
       normalized = stripLeadingBotMention(normalized, this.matrixUserId);
     }
-    normalized = normalized.trim();
-    if (!normalized) {
+    const normalizedTrimmed = normalized.trim();
+    if (!normalizedTrimmed && message.attachments.length === 0) {
       return { kind: "ignore" };
     }
 
-    const command = parseControlCommand(normalized);
+    const command = parseControlCommand(normalizedTrimmed);
     if (command) {
       return { kind: "command", command };
     }
+
+    if (!this.cliCompat.preserveWhitespace || prefixedText !== null) {
+      normalized = normalizedTrimmed;
+    }
+
     return { kind: "execute", prompt: normalized };
   }
 
@@ -458,6 +483,7 @@ export class Orchestrator {
     if (command === "reset") {
       this.stateStore.clearCodexSessionId(sessionKey);
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+      this.sessionRuntime.clearSession(sessionKey);
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
@@ -470,6 +496,7 @@ export class Orchestrator {
     const activeUntil = status.activeUntil ?? "未激活";
     const metrics = this.metrics.snapshot(this.runningExecutions.size);
     const limiter = this.rateLimiter.snapshot();
+    const runtime = this.sessionRuntime.getRuntimeStats();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -481,16 +508,21 @@ export class Orchestrator {
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
-- 限流并发: global=${limiter.activeGlobal}, users=${limiter.activeUsers}, rooms=${limiter.activeRooms}`,
+- 限流并发: global=${limiter.activeGlobal}, users=${limiter.activeUsers}, rooms=${limiter.activeRooms}
+- CLI runtime: workers=${runtime.workerCount}, running=${runtime.runningCount}, compat_mode=${
+        this.cliCompat.enabled ? "on" : "off"
+      }`,
     );
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
     this.stateStore.deactivateSession(sessionKey);
     this.stateStore.clearCodexSessionId(sessionKey);
+    this.sessionRuntime.clearSession(sessionKey);
 
     const running = this.runningExecutions.get(sessionKey);
     if (running) {
+      this.sessionRuntime.cancelRunningExecution(sessionKey);
       running.cancel();
       await this.channel.sendNotice(
         message.conversationId,
@@ -557,7 +589,7 @@ export class Orchestrator {
       return;
     }
 
-    const progressText = mapProgressText(progress);
+    const progressText = mapProgressText(progress, this.cliCompat.enabled);
     if (!progressText) {
       return;
     }
@@ -623,6 +655,24 @@ export class Orchestrator {
     };
   }
 
+  private buildExecutionPrompt(prompt: string, message: InboundMessage): string {
+    if (message.attachments.length === 0) {
+      return prompt;
+    }
+
+    const attachmentSummary = message.attachments
+      .map((attachment) => {
+        const size = attachment.sizeBytes === null ? "unknown" : `${attachment.sizeBytes}`;
+        const mime = attachment.mimeType ?? "unknown";
+        const source = attachment.mxcUrl ?? "none";
+        return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source}`;
+      })
+      .join("\n");
+
+    const promptBody = prompt.trim() ? prompt : "(no text body)";
+    return `${promptBody}\n\n[attachments]\n${attachmentSummary}\n[/attachments]`;
+  }
+
   private getLock(key: string): Mutex {
     const now = Date.now();
     if (now - this.lastLockPruneAt >= this.lockPruneIntervalMs) {
@@ -667,7 +717,7 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-function mapProgressText(progress: CodexProgressEvent): string | null {
+function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): string | null {
   if (progress.stage === "turn_started") {
     return "开始处理请求，正在思考...";
   }
@@ -681,6 +731,16 @@ function mapProgressText(progress: CodexProgressEvent): string | null {
   }
   if (progress.stage === "item_completed" && progress.message) {
     return `阶段完成: ${progress.message}`;
+  }
+  if (cliCompatMode && progress.stage === "stderr" && progress.message) {
+    const text = progress.message.length > 220 ? `${progress.message.slice(0, 220)}...` : progress.message;
+    return `stderr: ${text}`;
+  }
+  if (cliCompatMode && progress.stage === "raw_event") {
+    if (!progress.message) {
+      return null;
+    }
+    return `事件: ${progress.message}`;
   }
   return null;
 }

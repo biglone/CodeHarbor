@@ -9,11 +9,29 @@ export interface CodexExecutorOptions {
   workdir: string;
   dangerousBypass: boolean;
   timeoutMs: number;
+  sandboxMode: string | null;
+  approvalPolicy: string | null;
+  extraArgs: string[];
+  extraEnv: Record<string, string>;
+}
+
+export interface CodexExecutionStartOptions {
+  passThroughRawEvents?: boolean;
+  imagePaths?: string[];
 }
 
 export interface CodexProgressEvent {
-  stage: "thread_started" | "turn_started" | "reasoning" | "turn_completed" | "item_completed";
+  stage:
+    | "thread_started"
+    | "turn_started"
+    | "reasoning"
+    | "turn_completed"
+    | "item_completed"
+    | "stderr"
+    | "raw_event";
   message?: string;
+  eventType?: string;
+  raw?: Record<string, unknown>;
 }
 
 export type CodexProgressHandler = (event: CodexProgressEvent) => void;
@@ -30,6 +48,7 @@ interface CodexJsonEvent {
     type?: string;
     text?: string;
   };
+  [key: string]: unknown;
 }
 
 export class CodexExecutionCancelledError extends Error {
@@ -50,19 +69,24 @@ export class CodexExecutor {
     prompt: string,
     sessionId: string | null,
     onProgress?: CodexProgressHandler,
+    startOptions?: CodexExecutionStartOptions,
   ): Promise<CodexExecutionResult> {
-    return this.startExecution(prompt, sessionId, onProgress).result;
+    return this.startExecution(prompt, sessionId, onProgress, startOptions).result;
   }
 
   startExecution(
     prompt: string,
     sessionId: string | null,
     onProgress?: CodexProgressHandler,
+    startOptions?: CodexExecutionStartOptions,
   ): CodexExecutionHandle {
-    const args = buildCodexArgs(prompt, sessionId, this.options);
+    const args = buildCodexArgs(prompt, sessionId, this.options, startOptions);
     const child = spawn(this.options.bin, args, {
       cwd: this.options.workdir,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...this.options.extraEnv,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -73,6 +97,7 @@ export class CodexExecutor {
     let cancelled = false;
     let killTimer: NodeJS.Timeout | null = null;
     let completed = false;
+    const passThroughRawEvents = startOptions?.passThroughRawEvents ?? false;
 
     const lineReader = readline.createInterface({ input: child.stdout });
     lineReader.on("line", (line) => {
@@ -80,18 +105,33 @@ export class CodexExecutor {
       if (!event) {
         return;
       }
+
+      if (passThroughRawEvents) {
+        onProgress?.({
+          stage: "raw_event",
+          eventType: typeof event.type === "string" ? event.type : "unknown",
+          raw: event,
+          message: summarizeRawEvent(event),
+        });
+      }
+
       if (event.type === "thread.started" && event.thread_id) {
         resolvedThreadId = event.thread_id;
-        onProgress?.({ stage: "thread_started", message: event.thread_id });
+        onProgress?.({ stage: "thread_started", message: event.thread_id, eventType: event.type, raw: event });
       }
       if (event.type === "turn.started") {
-        onProgress?.({ stage: "turn_started" });
+        onProgress?.({ stage: "turn_started", eventType: event.type, raw: event });
       }
       if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
         latestMessage = event.item.text.trim();
       }
       if (event.type === "item.completed" && event.item?.type === "reasoning" && event.item.text) {
-        onProgress?.({ stage: "reasoning", message: event.item.text.trim() });
+        onProgress?.({
+          stage: "reasoning",
+          message: event.item.text.trim(),
+          eventType: event.type,
+          raw: event,
+        });
       }
       if (
         event.type === "item.completed" &&
@@ -99,15 +139,28 @@ export class CodexExecutor {
         event.item?.type !== "agent_message" &&
         event.item?.type !== "reasoning"
       ) {
-        onProgress?.({ stage: "item_completed", message: event.item.type });
+        onProgress?.({
+          stage: "item_completed",
+          message: event.item.type,
+          eventType: event.type,
+          raw: event,
+        });
       }
       if (event.type === "turn.completed") {
-        onProgress?.({ stage: "turn_completed" });
+        onProgress?.({ stage: "turn_completed", eventType: event.type, raw: event });
       }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      const chunkText = chunk.toString("utf8");
+      stderr += chunkText;
+      const normalized = chunkText.replace(/\s+/g, " ").trim();
+      if (normalized) {
+        onProgress?.({
+          stage: "stderr",
+          message: normalized,
+        });
+      }
     });
 
     const terminateProcess = (mode: "cancel" | "timeout"): void => {
@@ -194,7 +247,12 @@ export function parseCodexJsonLine(line: string): CodexJsonEvent | null {
   }
 }
 
-function buildCodexArgs(prompt: string, sessionId: string | null, options: CodexExecutorOptions): string[] {
+function buildCodexArgs(
+  prompt: string,
+  sessionId: string | null,
+  options: CodexExecutorOptions,
+  startOptions?: CodexExecutionStartOptions,
+): string[] {
   const args: string[] = [];
   if (sessionId) {
     args.push("exec", "resume", "--json", "--skip-git-repo-check", sessionId, prompt);
@@ -205,8 +263,31 @@ function buildCodexArgs(prompt: string, sessionId: string | null, options: Codex
   if (options.model) {
     args.push("--model", options.model);
   }
+  if (options.sandboxMode) {
+    args.push("--sandbox", options.sandboxMode);
+  }
+  if (options.approvalPolicy) {
+    args.push("--ask-for-approval", options.approvalPolicy);
+  }
+
+  for (const imagePath of startOptions?.imagePaths ?? []) {
+    if (imagePath.trim()) {
+      args.push("--image", imagePath);
+    }
+  }
+
+  if (options.extraArgs.length > 0) {
+    args.push(...options.extraArgs);
+  }
+
   if (options.dangerousBypass) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   }
   return args;
+}
+
+function summarizeRawEvent(event: CodexJsonEvent): string {
+  const type = typeof event.type === "string" ? event.type : "unknown";
+  const itemType = event.item?.type ? ` item=${event.item.type}` : "";
+  return `event=${type}${itemType}`;
 }

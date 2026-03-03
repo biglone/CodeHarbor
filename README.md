@@ -12,8 +12,11 @@ Users send messages in Matrix, CodeHarbor routes each message to a Codex session
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
 - Room-level trigger policy overrides
 - Real `/stop` cancellation (kills in-flight Codex process)
+- Session runtime workers (logical worker per `channel:room:user`, with worker stats in `/status`)
 - Rate limiting + concurrency guardrails (user/room/global)
 - Progress + typing updates with group notice coalescing (`m.replace` edit)
+- CLI-compat mode (`cli_compat_mode`) for minimal prompt rewriting + raw event passthrough
+- Attachment metadata passthrough from Matrix events into prompt context
 - Request observability (request_id, queue/exec/send durations, status counters)
 - NPM-distributed CLI (`codeharbor`)
 
@@ -93,9 +96,28 @@ node dist/cli.js start
   - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
-  - `/status` show session + limiter + metrics status
+  - `/status` show session + limiter + metrics + runtime worker status
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
+
+## CLI Compatibility Mode
+
+To make IM behavior closer to local `codex` CLI interaction, enable:
+
+- `CLI_COMPAT_MODE=true`
+  - preserve user prompt whitespace
+  - avoid stripping `@bot` mention text in prompt body
+  - enable richer raw event passthrough summaries
+- `CLI_COMPAT_PASSTHROUGH_EVENTS=true`
+  - emit raw event summaries from codex JSON stream
+- `CLI_COMPAT_PRESERVE_WHITESPACE=true`
+  - keep incoming Matrix message body untrimmed for execution
+- `CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT=true|false`
+  - optionally send one full message chunk to Matrix without auto split
+- `CLI_COMPAT_PROGRESS_THROTTLE_MS`
+  - lower update throttle for near-real-time progress
+
+Note: execution still uses `codex exec/resume` per request; compatibility mode focuses on behavior parity and reduced middleware interference.
 
 ## Persistence
 
@@ -118,6 +140,15 @@ node dist/cli.js start
 - `RATE_LIMIT_MAX_CONCURRENT_PER_ROOM`
 
 Set a value to `0` to disable a specific limiter.
+
+## Codex CLI Alignment
+
+Use these to align runtime with your terminal CLI profile:
+
+- `CODEX_SANDBOX_MODE`
+- `CODEX_APPROVAL_POLICY`
+- `CODEX_EXTRA_ARGS`
+- `CODEX_EXTRA_ENV_JSON`
 
 ## Progress + Output
 

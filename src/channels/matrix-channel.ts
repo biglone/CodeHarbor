@@ -13,7 +13,7 @@ import {
 
 import { AppConfig } from "../config";
 import { Logger } from "../logger";
-import { InboundMessage } from "../types";
+import { InboundAttachment, InboundMessage } from "../types";
 import { splitText } from "../utils/message";
 
 export type InboundHandler = (message: InboundMessage) => Promise<void>;
@@ -22,6 +22,8 @@ export class MatrixChannel {
   private readonly config: AppConfig;
   private readonly logger: Logger;
   private readonly chunkSize: number;
+  private readonly splitReplies: boolean;
+  private readonly preserveWhitespace: boolean;
   private readonly client: MatrixClient;
   private handler: InboundHandler | null = null;
   private started = false;
@@ -30,6 +32,8 @@ export class MatrixChannel {
     this.config = config;
     this.logger = logger;
     this.chunkSize = config.replyChunkSize;
+    this.splitReplies = !config.cliCompat.disableReplyChunkSplit;
+    this.preserveWhitespace = config.cliCompat.preserveWhitespace;
     this.client = createClient({
       baseUrl: config.matrixHomeserver,
       accessToken: config.matrixAccessToken,
@@ -54,7 +58,8 @@ export class MatrixChannel {
       throw new Error("Matrix channel not started.");
     }
 
-    for (const chunk of splitText(text, this.chunkSize)) {
+    const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
+    for (const chunk of chunks) {
       await this.client.sendTextMessage(conversationId, chunk);
     }
   }
@@ -64,7 +69,8 @@ export class MatrixChannel {
       throw new Error("Matrix channel not started.");
     }
 
-    for (const chunk of splitText(text, this.chunkSize)) {
+    const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
+    for (const chunk of chunks) {
       await this.client.sendNotice(conversationId, chunk);
     }
   }
@@ -74,7 +80,7 @@ export class MatrixChannel {
       throw new Error("Matrix channel not started.");
     }
 
-    const normalized = splitText(text, this.chunkSize)[0] ?? "";
+    const normalized = (this.splitReplies ? splitText(text, this.chunkSize)[0] : text) ?? "";
     if (!normalized.trim()) {
       throw new Error("Progress notice cannot be empty.");
     }
@@ -152,7 +158,13 @@ export class MatrixChannel {
     }
 
     const content = event.getContent();
-    if (!content || content.msgtype !== "m.text" || typeof content.body !== "string") {
+    if (!content || typeof content !== "object") {
+      return;
+    }
+
+    const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
+    const acceptedMsgtypes = new Set(["m.text", "m.image", "m.file", "m.audio", "m.video"]);
+    if (!acceptedMsgtypes.has(msgtype)) {
       return;
     }
 
@@ -161,8 +173,10 @@ export class MatrixChannel {
       return;
     }
 
-    const text = content.body.trim();
-    if (!text) {
+    const body = typeof content.body === "string" ? content.body : "";
+    const text = this.preserveWhitespace ? body : body.trim();
+    const attachments = extractAttachments(content);
+    if (!text.trim() && attachments.length === 0) {
       return;
     }
 
@@ -177,6 +191,7 @@ export class MatrixChannel {
       senderId,
       eventId,
       text,
+      attachments,
       isDirectMessage,
       mentionsBot,
       repliesToBot,
@@ -278,4 +293,37 @@ function checkRepliesToBot(content: Record<string, unknown>, room: Room, botUser
 
   const repliedEvent = room.findEventById(eventId);
   return repliedEvent?.getSender() === botUserId;
+}
+
+function extractAttachments(content: Record<string, unknown>): InboundAttachment[] {
+  const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
+  const mapping: Record<string, InboundAttachment["kind"]> = {
+    "m.image": "image",
+    "m.file": "file",
+    "m.audio": "audio",
+    "m.video": "video",
+  };
+  const kind = mapping[msgtype];
+  if (!kind) {
+    return [];
+  }
+
+  const body = typeof content.body === "string" && content.body.trim() ? content.body.trim() : "attachment";
+  const info = content.info && typeof content.info === "object" ? (content.info as Record<string, unknown>) : {};
+  const mimeType = typeof info.mimetype === "string" ? info.mimetype : null;
+  const sizeBytes = typeof info.size === "number" ? info.size : null;
+
+  const directUrl = typeof content.url === "string" ? content.url : null;
+  const encryptedFile = content.file && typeof content.file === "object" ? (content.file as Record<string, unknown>) : {};
+  const encryptedUrl = typeof encryptedFile.url === "string" ? encryptedFile.url : null;
+
+  return [
+    {
+      kind,
+      name: body,
+      mxcUrl: directUrl ?? encryptedUrl,
+      mimeType,
+      sizeBytes,
+    },
+  ];
 }

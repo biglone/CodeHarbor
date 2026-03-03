@@ -1,3 +1,11 @@
+export interface InboundAttachment {
+  kind: "image" | "file" | "audio" | "video";
+  name: string;
+  mxcUrl: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+}
+
 export interface InboundMessage {
   requestId: string;
   channel: "matrix";
@@ -5,6 +13,7 @@ export interface InboundMessage {
   senderId: string;
   eventId: string;
   text: string;
+  attachments: InboundAttachment[];
   isDirectMessage: boolean;
   mentionsBot: boolean;
   repliesToBot: boolean;

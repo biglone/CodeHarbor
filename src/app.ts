@@ -34,6 +34,10 @@ export class CodeHarborApp {
       workdir: config.codexWorkdir,
       dangerousBypass: config.codexDangerousBypass,
       timeoutMs: config.codexExecTimeoutMs,
+      sandboxMode: config.codexSandboxMode,
+      approvalPolicy: config.codexApprovalPolicy,
+      extraArgs: config.codexExtraArgs,
+      extraEnv: config.codexExtraEnv,
     });
 
     this.channel = new MatrixChannel(config, this.logger);
@@ -47,6 +51,7 @@ export class CodeHarborApp {
       defaultGroupTriggerPolicy: config.defaultGroupTriggerPolicy,
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,
+      cliCompat: config.cliCompat,
     });
   }
 

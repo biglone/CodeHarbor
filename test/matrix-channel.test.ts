@@ -44,7 +44,12 @@ const config = {
   codexWorkdir: process.cwd(),
   codexDangerousBypass: false,
   codexExecTimeoutMs: 1_000,
-  statePath: "data/state.json",
+  codexSandboxMode: null,
+  codexApprovalPolicy: null,
+  codexExtraArgs: [],
+  codexExtraEnv: {},
+  stateDbPath: "data/state.db",
+  legacyStateJsonPath: "data/state.json",
   maxProcessedEventsPerSession: 200,
   maxSessionAgeDays: 30,
   maxSessions: 5000,
@@ -52,6 +57,29 @@ const config = {
   matrixProgressUpdates: true,
   matrixProgressMinIntervalMs: 2500,
   matrixTypingTimeoutMs: 10_000,
+  sessionActiveWindowMinutes: 20,
+  defaultGroupTriggerPolicy: {
+    allowMention: true,
+    allowReply: true,
+    allowActiveWindow: true,
+    allowPrefix: true,
+  },
+  roomTriggerPolicies: {},
+  rateLimiter: {
+    windowMs: 60_000,
+    maxRequestsPerUser: 20,
+    maxRequestsPerRoom: 120,
+    maxConcurrentGlobal: 8,
+    maxConcurrentPerUser: 1,
+    maxConcurrentPerRoom: 4,
+  },
+  cliCompat: {
+    enabled: false,
+    passThroughEvents: false,
+    preserveWhitespace: false,
+    disableReplyChunkSplit: false,
+    progressThrottleMs: 300,
+  },
   doctorHttpTimeoutMs: 10_000,
   logLevel: "info",
 };
@@ -134,9 +162,61 @@ describe("MatrixChannel", () => {
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0]).toMatchObject({
       text: "@bot:example.com 帮我看看",
+      attachments: [],
       isDirectMessage: true,
       mentionsBot: true,
       repliesToBot: false,
+    });
+
+    await channel.stop();
+  });
+
+  it("forwards attachment metadata for media messages", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    const handler = vi.fn(async (_message: unknown) => {});
+    await channel.start(handler);
+
+    const event = {
+      getType: () => "m.room.message",
+      getSender: () => "@alice:example.com",
+      getContent: () => ({
+        msgtype: "m.image",
+        body: "diagram.png",
+        url: "mxc://example.com/abc123",
+        info: {
+          mimetype: "image/png",
+          size: 4096,
+        },
+      }),
+      getId: () => "$event-image",
+    };
+
+    const room = {
+      roomId: "!room:example.com",
+      getJoinedMemberCount: () => 3,
+      findEventById: (_eventId: string) => undefined,
+    };
+
+    client.emit("Room.timeline", event, room, false);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toMatchObject({
+      text: "diagram.png",
+      attachments: [
+        {
+          kind: "image",
+          name: "diagram.png",
+          mxcUrl: "mxc://example.com/abc123",
+          mimeType: "image/png",
+          sizeBytes: 4096,
+        },
+      ],
     });
 
     await channel.stop();

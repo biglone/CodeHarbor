@@ -57,6 +57,16 @@ class FakeStateStore {
     this.ensureSession(sessionKey).processedEventIds.add(eventId);
   }
 
+  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string): void {
+    const session = this.ensureSession(sessionKey);
+    session.codexSessionId = codexSessionId;
+    session.processedEventIds.add(eventId);
+  }
+
+  commitExecutionHandled(sessionKey: string, eventId: string): void {
+    this.ensureSession(sessionKey).processedEventIds.add(eventId);
+  }
+
   isSessionActive(sessionKey: string): boolean {
     const session = this.sessions.get(sessionKey);
     if (!session || !session.activeUntil) {
@@ -150,6 +160,7 @@ function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
     senderId: "@alice:example.com",
     eventId: "$event",
     text: "ping",
+    attachments: [],
     isDirectMessage: false,
     mentionsBot: false,
     repliesToBot: false,
