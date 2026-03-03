@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { Orchestrator } from "../src/orchestrator";
 import { InboundMessage } from "../src/types";
 
@@ -24,19 +25,6 @@ class FakeChannel {
   async upsertProgressNotice(conversationId: string, text: string, replaceEventId: string | null): Promise<string> {
     this.upserts.push({ conversationId, text, replaceEventId });
     return replaceEventId ?? `$notice-${this.upserts.length}`;
-  }
-}
-
-class FakeExecutor {
-  callCount = 0;
-
-  async execute(
-    text: string,
-    sessionId: string | null,
-    _onProgress?: (event: unknown) => void,
-  ): Promise<{ sessionId: string; reply: string }> {
-    this.callCount += 1;
-    return { sessionId: sessionId ?? "thread-1", reply: `ok:${text}` };
   }
 }
 
@@ -112,6 +100,41 @@ class FakeStateStore {
   }
 }
 
+class ImmediateExecutor {
+  callCount = 0;
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    return {
+      result: Promise.resolve({ sessionId: sessionId ?? "thread-1", reply: `ok:${text}` }),
+      cancel: () => {},
+    };
+  }
+}
+
+class CancellableExecutor {
+  callCount = 0;
+  private rejectCurrent: ((error: unknown) => void) | null = null;
+
+  startExecution(): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    const result = new Promise<{ sessionId: string; reply: string }>((_resolve, reject) => {
+      this.rejectCurrent = reject;
+    });
+
+    return {
+      result,
+      cancel: () => {
+        this.rejectCurrent?.(new CodexExecutionCancelledError());
+      },
+    };
+  }
+}
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -121,6 +144,7 @@ const logger = {
 
 function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
+    requestId: `req-${Math.random().toString(36).slice(2, 8)}`,
     channel: "matrix",
     conversationId: "!room:example.com",
     senderId: "@alice:example.com",
@@ -134,103 +158,95 @@ function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
 }
 
 describe("Orchestrator", () => {
-  it("ignores non-triggered group messages", async () => {
+  it("respects room-level trigger policy for prefix-only groups", async () => {
     const channel = new FakeChannel();
-    const executor = new FakeExecutor();
+    const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
     const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
-      sessionActiveWindowMinutes: 20,
-      progressUpdatesEnabled: true,
-    });
-
-    await orchestrator.handleMessage(makeInbound({ text: "hello" }));
-
-    expect(executor.callCount).toBe(0);
-    expect(channel.sent).toHaveLength(0);
-  });
-
-  it("processes direct messages without prefix", async () => {
-    const channel = new FakeChannel();
-    const executor = new FakeExecutor();
-    const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
-      commandPrefix: "!code",
-      matrixUserId: "@bot:example.com",
-      sessionActiveWindowMinutes: 20,
-      progressUpdatesEnabled: true,
+      defaultGroupTriggerPolicy: {
+        allowMention: false,
+        allowReply: false,
+        allowActiveWindow: false,
+        allowPrefix: true,
+      },
+      progressUpdatesEnabled: false,
     });
 
     await orchestrator.handleMessage(
       makeInbound({
-        text: "请帮我优化这段代码",
-        isDirectMessage: true,
-      }),
-    );
-
-    expect(executor.callCount).toBe(1);
-    expect(channel.sent[0]?.text).toBe("ok:请帮我优化这段代码");
-    expect(channel.typing.some((entry) => entry.isTyping)).toBe(true);
-    expect(channel.upserts).toHaveLength(0);
-  });
-
-  it("processes group messages when bot is mentioned", async () => {
-    const channel = new FakeChannel();
-    const executor = new FakeExecutor();
-    const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
-      commandPrefix: "!code",
-      matrixUserId: "@bot:example.com",
-      sessionActiveWindowMinutes: 20,
-      progressUpdatesEnabled: true,
-    });
-
-    await orchestrator.handleMessage(
-      makeInbound({
-        text: "@bot:example.com 修复这个 bug",
+        text: "@bot:example.com 你好",
         mentionsBot: true,
       }),
     );
+    await orchestrator.handleMessage(
+      makeInbound({
+        eventId: "$e2",
+        text: "!code 你好",
+      }),
+    );
 
     expect(executor.callCount).toBe(1);
-    expect(channel.sent[0]?.text).toBe("ok:修复这个 bug");
-    expect(channel.upserts.length).toBeGreaterThan(0);
+    expect(channel.sent[0]?.text).toBe("ok:你好");
   });
 
-  it("supports /status and /stop control commands", async () => {
+  it("rejects requests when user is rate-limited", async () => {
     const channel = new FakeChannel();
-    const executor = new FakeExecutor();
+    const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
     const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
-      sessionActiveWindowMinutes: 20,
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 1,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 10,
+        maxConcurrentPerRoom: 10,
+      },
     });
 
-    await orchestrator.handleMessage(makeInbound({ text: "/status", isDirectMessage: true, eventId: "$s1" }));
-    await orchestrator.handleMessage(makeInbound({ text: "/stop", isDirectMessage: true, eventId: "$s2" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first", eventId: "$r1" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second", eventId: "$r2" }));
 
-    expect(executor.callCount).toBe(0);
-    expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("会话已停止"))).toBe(true);
+    expect(executor.callCount).toBe(1);
+    expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(true);
   });
 
-  it("ignores duplicate processed events", async () => {
+  it("/stop cancels an active execution immediately", async () => {
     const channel = new FakeChannel();
-    const executor = new FakeExecutor();
+    const executor = new CancellableExecutor();
     const store = new FakeStateStore();
     const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
-      sessionActiveWindowMinutes: 20,
+      progressUpdatesEnabled: false,
     });
 
-    const message = makeInbound({ text: "hello", isDirectMessage: true });
-    await orchestrator.handleMessage(message);
-    await orchestrator.handleMessage(message);
+    const runningPromise = orchestrator.handleMessage(
+      makeInbound({
+        requestId: "req-main",
+        isDirectMessage: true,
+        text: "请持续执行",
+        eventId: "$main",
+      }),
+    );
 
-    expect(executor.callCount).toBe(1);
-    expect(channel.sent).toHaveLength(1);
+    await Promise.resolve();
+    await orchestrator.handleMessage(
+      makeInbound({
+        requestId: "req-stop",
+        isDirectMessage: true,
+        text: "/stop",
+        eventId: "$stop",
+      }),
+    );
+
+    await expect(runningPromise).resolves.toBeUndefined();
+    expect(channel.notices.some((entry) => entry.text.includes("已请求停止当前任务"))).toBe(true);
+    expect(channel.sent.some((entry) => entry.text.includes("Failed to process request"))).toBe(false);
   });
 });

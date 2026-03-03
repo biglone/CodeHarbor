@@ -1,188 +1,242 @@
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { SessionState, StateData } from "../types";
 
-const EMPTY_STATE: StateData = { sessions: {} };
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 
 export class StateStore {
-  private readonly filePath: string;
+  private readonly dbPath: string;
+  private readonly legacyJsonPath: string | null;
   private readonly maxProcessedEventsPerSession: number;
   private readonly maxSessionAgeMs: number;
   private readonly maxSessions: number;
-  private readonly persistDebounceMs: number;
-  private data: StateData;
+  private readonly db: DatabaseSync;
   private lastPruneAt = 0;
-  private pendingPersist = false;
-  private persistTimer: NodeJS.Timeout | null = null;
-  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
-    filePath: string,
+    dbPath: string,
+    legacyJsonPath: string | null,
     maxProcessedEventsPerSession: number,
     maxSessionAgeDays: number,
     maxSessions: number,
-    persistDebounceMs = 30,
   ) {
-    this.filePath = filePath;
+    this.dbPath = dbPath;
+    this.legacyJsonPath = legacyJsonPath;
     this.maxProcessedEventsPerSession = maxProcessedEventsPerSession;
     this.maxSessionAgeMs = maxSessionAgeDays * ONE_DAY_MS;
     this.maxSessions = maxSessions;
-    this.persistDebounceMs = persistDebounceMs;
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    this.data = this.load();
+
+    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    this.db = new DatabaseSync(this.dbPath);
+    this.initializeSchema();
+    this.importLegacyStateIfNeeded();
+
     if (this.pruneSessions()) {
-      this.schedulePersist();
+      this.touchDatabase();
     }
   }
 
   getCodexSessionId(sessionKey: string): string | null {
-    const session = this.data.sessions[sessionKey];
-    return session?.codexSessionId ?? null;
+    this.maybePruneExpiredSessions();
+    const row = this.db
+      .prepare("SELECT codex_session_id FROM sessions WHERE session_key = ?1")
+      .get(sessionKey) as { codex_session_id: string | null } | undefined;
+    return row?.codex_session_id ?? null;
   }
 
   setCodexSessionId(sessionKey: string, codexSessionId: string): void {
     this.maybePruneExpiredSessions();
-    const session = this.ensureSession(sessionKey);
-    session.codexSessionId = codexSessionId;
-    session.updatedAt = new Date().toISOString();
-    this.schedulePersist();
+    this.ensureSession(sessionKey);
+    this.db
+      .prepare(
+        "UPDATE sessions SET codex_session_id = ?2, updated_at = ?3 WHERE session_key = ?1",
+      )
+      .run(sessionKey, codexSessionId, Date.now());
   }
 
   clearCodexSessionId(sessionKey: string): void {
     this.maybePruneExpiredSessions();
-    const session = this.ensureSession(sessionKey);
-    session.codexSessionId = null;
-    session.updatedAt = new Date().toISOString();
-    this.schedulePersist();
+    this.ensureSession(sessionKey);
+    this.db
+      .prepare("UPDATE sessions SET codex_session_id = NULL, updated_at = ?2 WHERE session_key = ?1")
+      .run(sessionKey, Date.now());
   }
 
   isSessionActive(sessionKey: string, now = Date.now()): boolean {
     this.maybePruneExpiredSessions();
-    const session = this.data.sessions[sessionKey];
-    if (!session || !session.activeUntil) {
+    const row = this.db
+      .prepare("SELECT active_until FROM sessions WHERE session_key = ?1")
+      .get(sessionKey) as { active_until: number | null } | undefined;
+    if (!row || row.active_until === null) {
       return false;
     }
-    const activeUntilTs = Date.parse(session.activeUntil);
-    if (!Number.isFinite(activeUntilTs)) {
-      return false;
-    }
-    return now <= activeUntilTs;
+    return now <= row.active_until;
   }
 
   activateSession(sessionKey: string, activeWindowMs: number): void {
     this.maybePruneExpiredSessions();
-    const session = this.ensureSession(sessionKey);
-    const activeUntil = new Date(Date.now() + Math.max(0, activeWindowMs)).toISOString();
-    session.activeUntil = activeUntil;
-    session.updatedAt = new Date().toISOString();
-    this.schedulePersist();
+    this.ensureSession(sessionKey);
+    const now = Date.now();
+    this.db
+      .prepare(
+        "UPDATE sessions SET active_until = ?2, updated_at = ?3 WHERE session_key = ?1",
+      )
+      .run(sessionKey, now + Math.max(0, activeWindowMs), now);
   }
 
   deactivateSession(sessionKey: string): void {
     this.maybePruneExpiredSessions();
-    const session = this.data.sessions[sessionKey];
-    if (!session) {
-      return;
-    }
-    session.activeUntil = null;
-    session.updatedAt = new Date().toISOString();
-    this.schedulePersist();
+    this.ensureSession(sessionKey);
+    this.db
+      .prepare("UPDATE sessions SET active_until = NULL, updated_at = ?2 WHERE session_key = ?1")
+      .run(sessionKey, Date.now());
   }
 
   getSessionStatus(sessionKey: string): { hasCodexSession: boolean; activeUntil: string | null; isActive: boolean } {
     this.maybePruneExpiredSessions();
-    const session = this.data.sessions[sessionKey];
-    if (!session) {
+    const row = this.db
+      .prepare("SELECT codex_session_id, active_until FROM sessions WHERE session_key = ?1")
+      .get(sessionKey) as { codex_session_id: string | null; active_until: number | null } | undefined;
+    if (!row) {
       return {
         hasCodexSession: false,
         activeUntil: null,
         isActive: false,
       };
     }
-    const isActive = session.activeUntil ? this.isSessionActive(sessionKey) : false;
+
+    const activeUntilIso = row.active_until === null ? null : new Date(row.active_until).toISOString();
     return {
-      hasCodexSession: Boolean(session.codexSessionId),
-      activeUntil: session.activeUntil,
-      isActive,
+      hasCodexSession: Boolean(row.codex_session_id),
+      activeUntil: activeUntilIso,
+      isActive: row.active_until !== null ? Date.now() <= row.active_until : false,
     };
   }
 
   hasProcessedEvent(sessionKey: string, eventId: string): boolean {
     this.maybePruneExpiredSessions();
-    const session = this.data.sessions[sessionKey];
-    if (!session) {
-      return false;
-    }
-    return session.processedEventIds.includes(eventId);
+    const row = this.db
+      .prepare("SELECT 1 FROM processed_events WHERE session_key = ?1 AND event_id = ?2")
+      .get(sessionKey, eventId) as { 1: 1 } | undefined;
+    return Boolean(row);
   }
 
   markEventProcessed(sessionKey: string, eventId: string): void {
     this.maybePruneExpiredSessions();
-    const session = this.ensureSession(sessionKey);
-    if (session.processedEventIds.includes(eventId)) {
-      return;
+    this.ensureSession(sessionKey);
+
+    this.db
+      .prepare("INSERT OR IGNORE INTO processed_events (session_key, event_id, created_at) VALUES (?1, ?2, ?3)")
+      .run(sessionKey, eventId, Date.now());
+
+    if (this.maxProcessedEventsPerSession > 0) {
+      this.db
+        .prepare(
+          `DELETE FROM processed_events
+           WHERE rowid IN (
+             SELECT rowid
+             FROM processed_events
+             WHERE session_key = ?1
+             ORDER BY rowid DESC
+             LIMIT -1 OFFSET ?2
+           )`,
+        )
+        .run(sessionKey, this.maxProcessedEventsPerSession);
     }
-    session.processedEventIds.push(eventId);
-    if (session.processedEventIds.length > this.maxProcessedEventsPerSession) {
-      const offset = session.processedEventIds.length - this.maxProcessedEventsPerSession;
-      session.processedEventIds = session.processedEventIds.slice(offset);
-    }
-    session.updatedAt = new Date().toISOString();
-    this.schedulePersist();
+
+    this.db.prepare("UPDATE sessions SET updated_at = ?2 WHERE session_key = ?1").run(sessionKey, Date.now());
   }
 
   async flush(): Promise<void> {
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = null;
-    }
-    this.triggerFlush();
-    await this.writeChain;
+    this.touchDatabase();
   }
 
-  private ensureSession(sessionKey: string): SessionState {
-    if (!this.data.sessions[sessionKey]) {
-      this.data.sessions[sessionKey] = {
-        codexSessionId: null,
-        processedEventIds: [],
-        activeUntil: null,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    return this.data.sessions[sessionKey];
+  private ensureSession(sessionKey: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO sessions (session_key, codex_session_id, active_until, updated_at) VALUES (?1, NULL, NULL, ?2) ON CONFLICT(session_key) DO NOTHING",
+      )
+      .run(sessionKey, Date.now());
   }
 
-  private load(): StateData {
-    if (!fs.existsSync(this.filePath)) {
-      this.writeFile(EMPTY_STATE);
-      return structuredClone(EMPTY_STATE);
+  private initializeSchema(): void {
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_key TEXT PRIMARY KEY,
+        codex_session_id TEXT,
+        active_until INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS processed_events (
+        session_key TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (session_key, event_id),
+        FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_events_created_at ON processed_events(created_at);
+    `);
+  }
+
+  private importLegacyStateIfNeeded(): void {
+    if (!this.legacyJsonPath || !fs.existsSync(this.legacyJsonPath)) {
+      return;
     }
 
+    const countRow = this.db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number };
+    if ((countRow?.count ?? 0) > 0) {
+      return;
+    }
+
+    const legacy = loadLegacyState(this.legacyJsonPath);
+    if (!legacy) {
+      return;
+    }
+
+    const insertSession = this.db.prepare(
+      "INSERT OR REPLACE INTO sessions (session_key, codex_session_id, active_until, updated_at) VALUES (?1, ?2, ?3, ?4)",
+    );
+    const insertEvent = this.db.prepare(
+      "INSERT OR IGNORE INTO processed_events (session_key, event_id, created_at) VALUES (?1, ?2, ?3)",
+    );
+
+    this.db.exec("BEGIN");
     try {
-      const raw = fs.readFileSync(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as StateData;
-      if (!parsed.sessions || typeof parsed.sessions !== "object") {
-        throw new Error("Malformed state data.");
+      for (const [sessionKey, session] of Object.entries(legacy.sessions)) {
+        const updatedAt = parseUpdatedAt(session.updatedAt);
+        const activeUntil = parseOptionalTimestamp(session.activeUntil);
+        insertSession.run(sessionKey, session.codexSessionId, activeUntil, updatedAt);
+
+        let eventTs = updatedAt;
+        for (const eventId of session.processedEventIds) {
+          eventTs += 1;
+          insertEvent.run(sessionKey, eventId, eventTs);
+        }
       }
-      normalizeState(parsed);
-      return parsed;
-    } catch {
-      this.writeFile(EMPTY_STATE);
-      return structuredClone(EMPTY_STATE);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
   }
 
   private maybePruneExpiredSessions(): void {
     const now = Date.now();
-    const pruneIntervalMs = 5 * 60 * 1000;
-    if (now - this.lastPruneAt < pruneIntervalMs) {
+    if (now - this.lastPruneAt < PRUNE_INTERVAL_MS) {
       return;
     }
     this.lastPruneAt = now;
+
     if (this.pruneSessions(now)) {
-      this.schedulePersist();
+      this.touchDatabase();
     }
   }
 
@@ -197,98 +251,68 @@ export class StateStore {
     return changed;
   }
 
-  private pruneExpiredSessions(now = Date.now()): boolean {
+  private pruneExpiredSessions(now: number): boolean {
     if (this.maxSessionAgeMs <= 0) {
       return false;
     }
-
-    let changed = false;
-    for (const [sessionKey, session] of Object.entries(this.data.sessions)) {
-      const updatedAt = Date.parse(session.updatedAt);
-      if (!Number.isFinite(updatedAt)) {
-        continue;
-      }
-      if (now - updatedAt > this.maxSessionAgeMs) {
-        delete this.data.sessions[sessionKey];
-        changed = true;
-      }
-    }
-    return changed;
+    const result = this.db
+      .prepare("DELETE FROM sessions WHERE updated_at < ?1")
+      .run(now - this.maxSessionAgeMs) as { changes?: number };
+    return (result.changes ?? 0) > 0;
   }
 
   private pruneExcessSessions(): boolean {
     if (this.maxSessions <= 0) {
       return false;
     }
-
-    const sessionEntries = Object.entries(this.data.sessions);
-    if (sessionEntries.length <= this.maxSessions) {
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number };
+    const count = row?.count ?? 0;
+    if (count <= this.maxSessions) {
       return false;
     }
 
-    sessionEntries.sort((left, right) => {
-      const leftUpdatedAt = parseUpdatedAt(left[1].updatedAt);
-      const rightUpdatedAt = parseUpdatedAt(right[1].updatedAt);
-      return leftUpdatedAt - rightUpdatedAt;
-    });
+    const removeCount = count - this.maxSessions;
+    const result = this.db
+      .prepare(
+        "DELETE FROM sessions WHERE session_key IN (SELECT session_key FROM sessions ORDER BY updated_at ASC LIMIT ?1)",
+      )
+      .run(removeCount) as { changes?: number };
+    return (result.changes ?? 0) > 0;
+  }
 
-    const removeCount = sessionEntries.length - this.maxSessions;
-    for (let i = 0; i < removeCount; i += 1) {
-      delete this.data.sessions[sessionEntries[i][0]];
+  private touchDatabase(): void {
+    this.db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+  }
+}
+
+function loadLegacyState(filePath: string): StateData | null {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw) as StateData;
+    if (!parsed.sessions || typeof parsed.sessions !== "object") {
+      return null;
     }
-    return true;
-  }
-
-  private schedulePersist(): void {
-    this.pendingPersist = true;
-    if (this.persistTimer) {
-      return;
-    }
-
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
-      this.triggerFlush();
-    }, this.persistDebounceMs);
-    this.persistTimer.unref?.();
-  }
-
-  private triggerFlush(): void {
-    this.writeChain = this.writeChain.then(() => this.flushPending());
-  }
-
-  private async flushPending(): Promise<void> {
-    if (!this.pendingPersist) {
-      return;
-    }
-    this.pendingPersist = false;
-    const serialized = JSON.stringify(this.data, null, 2);
-    await this.writeSerialized(serialized);
-
-    if (this.pendingPersist) {
-      await this.flushPending();
-    }
-  }
-
-  private writeFile(data: StateData): void {
-    const serialized = JSON.stringify(data, null, 2);
-    const tmpPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmpPath, serialized);
-    fs.renameSync(tmpPath, this.filePath);
-  }
-
-  private async writeSerialized(serialized: string): Promise<void> {
-    const tmpPath = `${this.filePath}.tmp`;
-    await fs.promises.writeFile(tmpPath, serialized);
-    await fs.promises.rename(tmpPath, this.filePath);
+    normalizeLegacyState(parsed);
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
 function parseUpdatedAt(updatedAt: string): number {
   const timestamp = Date.parse(updatedAt);
-  return Number.isFinite(timestamp) ? timestamp : 0;
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
 }
 
-function normalizeState(state: StateData): void {
+function parseOptionalTimestamp(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function normalizeLegacyState(state: StateData): void {
   for (const session of Object.values(state.sessions)) {
     if (!Array.isArray(session.processedEventIds)) {
       session.processedEventIds = [];

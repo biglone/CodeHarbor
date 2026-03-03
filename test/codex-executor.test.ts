@@ -9,7 +9,7 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-import { CodexExecutor } from "../src/executor/codex-executor";
+import { CodexExecutionCancelledError, CodexExecutor } from "../src/executor/codex-executor";
 
 interface FakeChildProcess extends EventEmitter {
   stdout: PassThrough;
@@ -109,6 +109,31 @@ describe("CodexExecutor", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     await assertion;
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("supports explicit cancellation through execution handle", async () => {
+    const child = createFakeChildProcess();
+    child.kill = vi.fn((signal?: NodeJS.Signals) => {
+      if (signal === "SIGTERM") {
+        child.emit("close", 143);
+      }
+      return true;
+    }) as unknown as (signal?: NodeJS.Signals) => boolean;
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      bin: "codex",
+      model: null,
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+    });
+
+    const handle = executor.startExecution("cancel me", null);
+    handle.cancel();
+
+    await expect(handle.result).rejects.toBeInstanceOf(CodexExecutionCancelledError);
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
 });

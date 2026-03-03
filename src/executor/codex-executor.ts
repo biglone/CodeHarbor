@@ -18,6 +18,11 @@ export interface CodexProgressEvent {
 
 export type CodexProgressHandler = (event: CodexProgressEvent) => void;
 
+export interface CodexExecutionHandle {
+  result: Promise<CodexExecutionResult>;
+  cancel: () => void;
+}
+
 interface CodexJsonEvent {
   type?: string;
   thread_id?: string;
@@ -25,6 +30,13 @@ interface CodexJsonEvent {
     type?: string;
     text?: string;
   };
+}
+
+export class CodexExecutionCancelledError extends Error {
+  constructor(message = "codex execution cancelled") {
+    super(message);
+    this.name = "CodexExecutionCancelledError";
+  }
 }
 
 export class CodexExecutor {
@@ -39,6 +51,14 @@ export class CodexExecutor {
     sessionId: string | null,
     onProgress?: CodexProgressHandler,
   ): Promise<CodexExecutionResult> {
+    return this.startExecution(prompt, sessionId, onProgress).result;
+  }
+
+  startExecution(
+    prompt: string,
+    sessionId: string | null,
+    onProgress?: CodexProgressHandler,
+  ): CodexExecutionHandle {
     const args = buildCodexArgs(prompt, sessionId, this.options);
     const child = spawn(this.options.bin, args, {
       cwd: this.options.workdir,
@@ -50,7 +70,9 @@ export class CodexExecutor {
     let resolvedThreadId: string | null = sessionId;
     let latestMessage = "";
     let timedOut = false;
+    let cancelled = false;
     let killTimer: NodeJS.Timeout | null = null;
+    let completed = false;
 
     const lineReader = readline.createInterface({ input: child.stdout });
     lineReader.on("line", (line) => {
@@ -88,48 +110,74 @@ export class CodexExecutor {
       stderr += chunk.toString("utf8");
     });
 
+    const terminateProcess = (mode: "cancel" | "timeout"): void => {
+      if (completed) {
+        return;
+      }
+      if (mode === "timeout") {
+        timedOut = true;
+      } else {
+        cancelled = true;
+      }
+      child.kill("SIGTERM");
+      if (!killTimer) {
+        killTimer = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, 5_000);
+        killTimer.unref?.();
+      }
+    };
+
     const timeoutTimer =
       this.options.timeoutMs > 0
         ? setTimeout(() => {
-            timedOut = true;
-            child.kill("SIGTERM");
-            killTimer = setTimeout(() => {
-              child.kill("SIGKILL");
-            }, 5_000);
-            killTimer.unref?.();
+            terminateProcess("timeout");
           }, this.options.timeoutMs)
         : null;
     timeoutTimer?.unref?.();
 
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", (code) => resolve(code ?? 1));
+    const result = (async (): Promise<CodexExecutionResult> => {
+      const exitCode = await new Promise<number>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (code) => resolve(code ?? 1));
+      });
+
+      if (timedOut) {
+        throw new Error(`codex execution timed out after ${this.options.timeoutMs}ms`);
+      }
+      if (cancelled) {
+        throw new CodexExecutionCancelledError();
+      }
+      if (exitCode !== 0) {
+        throw new Error(`codex exited with code ${exitCode}: ${stderr.trim() || "<no stderr output>"}`);
+      }
+      if (!resolvedThreadId) {
+        throw new Error("codex did not return thread_id.");
+      }
+      if (!latestMessage) {
+        throw new Error("codex did not return a final assistant message.");
+      }
+
+      return {
+        sessionId: resolvedThreadId,
+        reply: latestMessage,
+      };
+    })().finally(() => {
+      completed = true;
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+      lineReader.close();
     });
 
-    if (timeoutTimer) {
-      clearTimeout(timeoutTimer);
-    }
-    if (killTimer) {
-      clearTimeout(killTimer);
-    }
-    lineReader.close();
-
-    if (timedOut) {
-      throw new Error(`codex execution timed out after ${this.options.timeoutMs}ms`);
-    }
-    if (exitCode !== 0) {
-      throw new Error(`codex exited with code ${exitCode}: ${stderr.trim() || "<no stderr output>"}`);
-    }
-    if (!resolvedThreadId) {
-      throw new Error("codex did not return thread_id.");
-    }
-    if (!latestMessage) {
-      throw new Error("codex did not return a final assistant message.");
-    }
-
     return {
-      sessionId: resolvedThreadId,
-      reply: latestMessage,
+      result,
+      cancel: () => {
+        terminateProcess("cancel");
+      },
     };
   }
 }

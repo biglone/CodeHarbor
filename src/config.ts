@@ -6,6 +6,15 @@ import { z } from "zod";
 
 dotenv.config();
 
+export interface TriggerPolicy {
+  allowMention: boolean;
+  allowReply: boolean;
+  allowActiveWindow: boolean;
+  allowPrefix: boolean;
+}
+
+export type RoomTriggerPolicyOverrides = Record<string, Partial<TriggerPolicy>>;
+
 const configSchema = z
   .object({
     MATRIX_HOMESERVER: z.string().url(),
@@ -24,6 +33,7 @@ const configSchema = z
       .default("600000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    STATE_DB_PATH: z.string().default("data/state.db"),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
       .string()
@@ -64,6 +74,53 @@ const configSchema = z
       .default("20")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    GROUP_TRIGGER_ALLOW_MENTION: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    GROUP_TRIGGER_ALLOW_REPLY: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    GROUP_TRIGGER_ALLOW_PREFIX: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    ROOM_TRIGGER_POLICY_JSON: z.string().default(""),
+    RATE_LIMIT_WINDOW_SECONDS: z
+      .string()
+      .default("60")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    RATE_LIMIT_MAX_REQUESTS_PER_USER: z
+      .string()
+      .default("20")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    RATE_LIMIT_MAX_REQUESTS_PER_ROOM: z
+      .string()
+      .default("120")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    RATE_LIMIT_MAX_CONCURRENT_GLOBAL: z
+      .string()
+      .default("8")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    RATE_LIMIT_MAX_CONCURRENT_PER_USER: z
+      .string()
+      .default("1")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    RATE_LIMIT_MAX_CONCURRENT_PER_ROOM: z
+      .string()
+      .default("4")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -81,7 +138,8 @@ const configSchema = z
     codexWorkdir: path.resolve(v.CODEX_WORKDIR),
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,
     codexExecTimeoutMs: v.CODEX_EXEC_TIMEOUT_MS,
-    statePath: path.resolve(v.STATE_PATH),
+    stateDbPath: path.resolve(v.STATE_DB_PATH),
+    legacyStateJsonPath: v.STATE_PATH.trim() ? path.resolve(v.STATE_PATH) : null,
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,
     maxSessionAgeDays: v.MAX_SESSION_AGE_DAYS,
     maxSessions: v.MAX_SESSIONS,
@@ -90,6 +148,21 @@ const configSchema = z
     matrixProgressMinIntervalMs: v.MATRIX_PROGRESS_MIN_INTERVAL_MS,
     matrixTypingTimeoutMs: v.MATRIX_TYPING_TIMEOUT_MS,
     sessionActiveWindowMinutes: v.SESSION_ACTIVE_WINDOW_MINUTES,
+    defaultGroupTriggerPolicy: {
+      allowMention: v.GROUP_TRIGGER_ALLOW_MENTION,
+      allowReply: v.GROUP_TRIGGER_ALLOW_REPLY,
+      allowActiveWindow: v.GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW,
+      allowPrefix: v.GROUP_TRIGGER_ALLOW_PREFIX,
+    },
+    roomTriggerPolicies: parseRoomTriggerPolicyOverrides(v.ROOM_TRIGGER_POLICY_JSON),
+    rateLimiter: {
+      windowMs: v.RATE_LIMIT_WINDOW_SECONDS * 1000,
+      maxRequestsPerUser: v.RATE_LIMIT_MAX_REQUESTS_PER_USER,
+      maxRequestsPerRoom: v.RATE_LIMIT_MAX_REQUESTS_PER_ROOM,
+      maxConcurrentGlobal: v.RATE_LIMIT_MAX_CONCURRENT_GLOBAL,
+      maxConcurrentPerUser: v.RATE_LIMIT_MAX_CONCURRENT_PER_USER,
+      maxConcurrentPerRoom: v.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM,
+    },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,
   }));
@@ -105,6 +178,52 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid configuration: ${message}`);
   }
 
-  fs.mkdirSync(path.dirname(parsed.data.statePath), { recursive: true });
+  fs.mkdirSync(path.dirname(parsed.data.stateDbPath), { recursive: true });
+  if (parsed.data.legacyStateJsonPath) {
+    fs.mkdirSync(path.dirname(parsed.data.legacyStateJsonPath), { recursive: true });
+  }
+
   return parsed.data;
+}
+
+function parseRoomTriggerPolicyOverrides(raw: string): RoomTriggerPolicyOverrides {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("ROOM_TRIGGER_POLICY_JSON must be valid JSON.");
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("ROOM_TRIGGER_POLICY_JSON must be an object keyed by room id.");
+  }
+
+  const output: RoomTriggerPolicyOverrides = {};
+  for (const [roomId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`ROOM_TRIGGER_POLICY_JSON[${roomId}] must be an object.`);
+    }
+
+    const item = value as Record<string, unknown>;
+    const override: Partial<TriggerPolicy> = {};
+
+    for (const key of ["allowMention", "allowReply", "allowActiveWindow", "allowPrefix"] as const) {
+      if (item[key] === undefined) {
+        continue;
+      }
+      if (typeof item[key] !== "boolean") {
+        throw new Error(`ROOM_TRIGGER_POLICY_JSON[${roomId}].${key} must be boolean.`);
+      }
+      override[key] = item[key] as boolean;
+    }
+
+    output[roomId] = override;
+  }
+
+  return output;
 }

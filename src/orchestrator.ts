@@ -1,8 +1,15 @@
 import { Mutex } from "async-mutex";
 
 import { MatrixChannel } from "./channels/matrix-channel";
-import { CodexExecutor, type CodexProgressEvent } from "./executor/codex-executor";
+import { TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
+import {
+  CodexExecutionCancelledError,
+  CodexExecutor,
+  type CodexExecutionHandle,
+  type CodexProgressEvent,
+} from "./executor/codex-executor";
 import { Logger } from "./logger";
+import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import { StateStore } from "./store/state-store";
 import { InboundMessage } from "./types";
 import { extractCommandText } from "./utils/message";
@@ -16,6 +23,9 @@ interface OrchestratorOptions {
   commandPrefix?: string;
   matrixUserId?: string;
   sessionActiveWindowMinutes?: number;
+  defaultGroupTriggerPolicy?: TriggerPolicy;
+  roomTriggerPolicies?: RoomTriggerPolicyOverrides;
+  rateLimiterOptions?: RateLimiterOptions;
 }
 
 interface SessionLockEntry {
@@ -28,12 +38,113 @@ type RouteDecision =
   | { kind: "execute"; prompt: string }
   | { kind: "command"; command: "status" | "stop" | "reset" };
 
+type RequestOutcome =
+  | "success"
+  | "failed"
+  | "timeout"
+  | "cancelled"
+  | "rate_limited"
+  | "ignored"
+  | "duplicate";
+
+interface RunningExecution {
+  requestId: string;
+  startedAt: number;
+  cancel: () => void;
+}
+
+interface SendProgressContext {
+  conversationId: string;
+  isDirectMessage: boolean;
+  getProgressNoticeEventId: () => string | null;
+  setProgressNoticeEventId: (next: string) => void;
+}
+
+class RequestMetrics {
+  private total = 0;
+  private success = 0;
+  private failed = 0;
+  private timeout = 0;
+  private cancelled = 0;
+  private rateLimited = 0;
+  private ignored = 0;
+  private duplicate = 0;
+  private totalQueueMs = 0;
+  private totalExecMs = 0;
+  private totalSendMs = 0;
+
+  record(outcome: RequestOutcome, queueMs: number, execMs: number, sendMs: number): void {
+    this.total += 1;
+    this.totalQueueMs += Math.max(0, queueMs);
+    this.totalExecMs += Math.max(0, execMs);
+    this.totalSendMs += Math.max(0, sendMs);
+
+    if (outcome === "success") {
+      this.success += 1;
+      return;
+    }
+    if (outcome === "failed") {
+      this.failed += 1;
+      return;
+    }
+    if (outcome === "timeout") {
+      this.timeout += 1;
+      return;
+    }
+    if (outcome === "cancelled") {
+      this.cancelled += 1;
+      return;
+    }
+    if (outcome === "rate_limited") {
+      this.rateLimited += 1;
+      return;
+    }
+    if (outcome === "ignored") {
+      this.ignored += 1;
+      return;
+    }
+    this.duplicate += 1;
+  }
+
+  snapshot(activeExecutions: number): {
+    total: number;
+    success: number;
+    failed: number;
+    timeout: number;
+    cancelled: number;
+    rateLimited: number;
+    ignored: number;
+    duplicate: number;
+    activeExecutions: number;
+    avgQueueMs: number;
+    avgExecMs: number;
+    avgSendMs: number;
+  } {
+    const divisor = this.total > 0 ? this.total : 1;
+    return {
+      total: this.total,
+      success: this.success,
+      failed: this.failed,
+      timeout: this.timeout,
+      cancelled: this.cancelled,
+      rateLimited: this.rateLimited,
+      ignored: this.ignored,
+      duplicate: this.duplicate,
+      activeExecutions,
+      avgQueueMs: Math.round(this.totalQueueMs / divisor),
+      avgExecMs: Math.round(this.totalExecMs / divisor),
+      avgSendMs: Math.round(this.totalSendMs / divisor),
+    };
+  }
+}
+
 export class Orchestrator {
   private readonly channel: MatrixChannel;
   private readonly executor: CodexExecutor;
   private readonly stateStore: StateStore;
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
+  private readonly runningExecutions = new Map<string, RunningExecution>();
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
   private readonly progressUpdatesEnabled: boolean;
@@ -42,6 +153,10 @@ export class Orchestrator {
   private readonly commandPrefix: string;
   private readonly matrixUserId: string;
   private readonly sessionActiveWindowMs: number;
+  private readonly defaultGroupTriggerPolicy: TriggerPolicy;
+  private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
+  private readonly rateLimiter: RateLimiter;
+  private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
   constructor(
@@ -64,34 +179,96 @@ export class Orchestrator {
     this.matrixUserId = options?.matrixUserId ?? "";
     const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
     this.sessionActiveWindowMs = Math.max(1, sessionActiveWindowMinutes) * 60_000;
+    this.defaultGroupTriggerPolicy = options?.defaultGroupTriggerPolicy ?? {
+      allowMention: true,
+      allowReply: true,
+      allowActiveWindow: true,
+      allowPrefix: true,
+    };
+    this.roomTriggerPolicies = options?.roomTriggerPolicies ?? {};
+    this.rateLimiter = new RateLimiter(
+      options?.rateLimiterOptions ?? {
+        windowMs: 60_000,
+        maxRequestsPerUser: 20,
+        maxRequestsPerRoom: 120,
+        maxConcurrentGlobal: 8,
+        maxConcurrentPerUser: 1,
+        maxConcurrentPerRoom: 4,
+      },
+    );
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
+    const receivedAt = Date.now();
+    const requestId = message.requestId || message.eventId;
     const sessionKey = buildSessionKey(message);
-    const lock = this.getLock(sessionKey);
 
-    await lock.runExclusive(async () => {
+    const directCommand = parseControlCommand(message.text.trim());
+    if (directCommand === "stop" && this.runningExecutions.has(sessionKey)) {
       if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-        this.logger.debug("Duplicate event ignored", { eventId: message.eventId });
+        this.metrics.record("duplicate", 0, 0, 0);
+        this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
+        return;
+      }
+      await this.handleStopCommand(sessionKey, message, requestId);
+      this.stateStore.markEventProcessed(sessionKey, message.eventId);
+      return;
+    }
+
+    const lock = this.getLock(sessionKey);
+    await lock.runExclusive(async () => {
+      const queueWaitMs = Date.now() - receivedAt;
+
+      if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
+        this.metrics.record("duplicate", queueWaitMs, 0, 0);
+        this.logger.debug("Duplicate event ignored", { requestId, eventId: message.eventId, sessionKey, queueWaitMs });
         return;
       }
 
       const route = this.routeMessage(message, sessionKey);
       if (route.kind === "ignore") {
+        this.metrics.record("ignored", queueWaitMs, 0, 0);
+        this.logger.debug("Message ignored by routing policy", {
+          requestId,
+          sessionKey,
+          isDirectMessage: message.isDirectMessage,
+          mentionsBot: message.mentionsBot,
+          repliesToBot: message.repliesToBot,
+        });
         return;
       }
 
       if (route.kind === "command") {
-        await this.handleControlCommand(route.command, sessionKey, message);
+        await this.handleControlCommand(route.command, sessionKey, message, requestId);
         this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        return;
+      }
+
+      const rateDecision = this.rateLimiter.tryAcquire({
+        userId: message.senderId,
+        roomId: message.conversationId,
+      });
+      if (!rateDecision.allowed) {
+        this.metrics.record("rate_limited", queueWaitMs, 0, 0);
+        await this.channel.sendNotice(message.conversationId, buildRateLimitNotice(rateDecision));
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        this.logger.warn("Request rejected by rate limiter", {
+          requestId,
+          sessionKey,
+          reason: rateDecision.reason,
+          retryAfterMs: rateDecision.retryAfterMs ?? null,
+          queueWaitMs,
+        });
         return;
       }
 
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
       this.logger.info("Processing message", {
+        requestId,
         sessionKey,
         hasCodexSession: Boolean(previousCodexSessionId),
+        queueWaitMs,
         isDirectMessage: message.isDirectMessage,
         mentionsBot: message.mentionsBot,
         repliesToBot: message.repliesToBot,
@@ -101,51 +278,125 @@ export class Orchestrator {
       let lastProgressAt = 0;
       let lastProgressText = "";
       let progressNoticeEventId: string | null = null;
+      let progressChain: Promise<void> = Promise.resolve();
+      let executionHandle: CodexExecutionHandle | null = null;
+      let executionDurationMs = 0;
+      let sendDurationMs = 0;
+      const requestStartedAt = Date.now();
 
       try {
-        const result = await this.executor.execute(route.prompt, previousCodexSessionId, (progress) => {
-          void this.handleProgress(
-            message.conversationId,
-            message.isDirectMessage,
-            progress,
-            () => lastProgressAt,
-            (next) => {
-              lastProgressAt = next;
-            },
-            () => lastProgressText,
-            (next) => {
-              lastProgressText = next;
-            },
-            () => progressNoticeEventId,
-            (next) => {
-              progressNoticeEventId = next;
-            },
-          );
+        const executionStartedAt = Date.now();
+        executionHandle = this.executor.startExecution(route.prompt, previousCodexSessionId, (progress) => {
+          progressChain = progressChain
+            .then(() =>
+              this.handleProgress(
+                message.conversationId,
+                message.isDirectMessage,
+                progress,
+                () => lastProgressAt,
+                (next) => {
+                  lastProgressAt = next;
+                },
+                () => lastProgressText,
+                (next) => {
+                  lastProgressText = next;
+                },
+                () => progressNoticeEventId,
+                (next) => {
+                  progressNoticeEventId = next;
+                },
+              ),
+            )
+            .catch((progressError) => {
+              this.logger.debug("Failed to process progress callback", { progressError });
+            });
         });
+
+        this.runningExecutions.set(sessionKey, {
+          requestId,
+          startedAt: executionStartedAt,
+          cancel: executionHandle.cancel,
+        });
+
+        const result = await executionHandle.result;
+        executionDurationMs = Date.now() - executionStartedAt;
+        await progressChain;
 
         if (!previousCodexSessionId || previousCodexSessionId !== result.sessionId) {
           this.stateStore.setCodexSessionId(sessionKey, result.sessionId);
         }
+
+        const sendStartedAt = Date.now();
         await this.channel.sendMessage(message.conversationId, result.reply);
-        await this.finishProgress(message.conversationId, message.isDirectMessage, "处理完成", progressNoticeEventId);
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
-      } catch (error) {
-        this.logger.error("Failed to execute codex request", error);
         await this.finishProgress(
-          message.conversationId,
-          message.isDirectMessage,
-          `处理失败: ${formatError(error)}`,
-          progressNoticeEventId,
+          {
+            conversationId: message.conversationId,
+            isDirectMessage: message.isDirectMessage,
+            getProgressNoticeEventId: () => progressNoticeEventId,
+            setProgressNoticeEventId: (next) => {
+              progressNoticeEventId = next;
+            },
+          },
+          `处理完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
         );
-        try {
-          await this.channel.sendMessage(
-            message.conversationId,
-            `[CodeHarbor] Failed to process request: ${formatError(error)}`,
-          );
-        } catch (sendError) {
-          this.logger.error("Failed to send error reply to Matrix", sendError);
+        sendDurationMs = Date.now() - sendStartedAt;
+
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        this.metrics.record("success", queueWaitMs, executionDurationMs, sendDurationMs);
+        this.logger.info("Request completed", {
+          requestId,
+          sessionKey,
+          status: "success",
+          queueWaitMs,
+          executionDurationMs,
+          sendDurationMs,
+          totalDurationMs: Date.now() - receivedAt,
+        });
+      } catch (error) {
+        const status = classifyExecutionOutcome(error);
+        executionDurationMs = Date.now() - requestStartedAt;
+        await progressChain;
+
+        await this.finishProgress(
+          {
+            conversationId: message.conversationId,
+            isDirectMessage: message.isDirectMessage,
+            getProgressNoticeEventId: () => progressNoticeEventId,
+            setProgressNoticeEventId: (next) => {
+              progressNoticeEventId = next;
+            },
+          },
+          buildFailureProgressSummary(status, requestStartedAt, error),
+        );
+
+        if (status !== "cancelled") {
+          try {
+            await this.channel.sendMessage(
+              message.conversationId,
+              `[CodeHarbor] Failed to process request: ${formatError(error)}`,
+            );
+          } catch (sendError) {
+            this.logger.error("Failed to send error reply to Matrix", sendError);
+          }
         }
+
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        this.metrics.record(status, queueWaitMs, executionDurationMs, sendDurationMs);
+        this.logger.error("Request failed", {
+          requestId,
+          sessionKey,
+          status,
+          queueWaitMs,
+          executionDurationMs,
+          totalDurationMs: Date.now() - receivedAt,
+          error: formatError(error),
+        });
       } finally {
+        const running = this.runningExecutions.get(sessionKey);
+        if (running?.requestId === requestId) {
+          this.runningExecutions.delete(sessionKey);
+        }
+        rateDecision.release?.();
         await stopTyping();
       }
     });
@@ -157,11 +408,21 @@ export class Orchestrator {
       return { kind: "ignore" };
     }
 
-    const prefixTriggered = this.commandPrefix.length > 0;
+    const groupPolicy = message.isDirectMessage ? null : this.resolveGroupPolicy(message.conversationId);
+    const prefixAllowed = message.isDirectMessage || Boolean(groupPolicy?.allowPrefix);
+    const prefixTriggered = prefixAllowed && this.commandPrefix.length > 0;
     const prefixedText = prefixTriggered ? extractCommandText(incoming, this.commandPrefix) : null;
-    const activeSession = this.stateStore.isSessionActive(sessionKey);
+
+    const activeSession =
+      message.isDirectMessage || groupPolicy?.allowActiveWindow
+        ? this.stateStore.isSessionActive(sessionKey)
+        : false;
+
     const conversationalTrigger =
-      message.isDirectMessage || message.mentionsBot || message.repliesToBot || activeSession;
+      message.isDirectMessage ||
+      (Boolean(groupPolicy?.allowMention) && message.mentionsBot) ||
+      (Boolean(groupPolicy?.allowReply) && message.repliesToBot) ||
+      activeSession;
 
     if (!conversationalTrigger && prefixedText === null) {
       return { kind: "ignore" };
@@ -183,14 +444,14 @@ export class Orchestrator {
     return { kind: "execute", prompt: normalized };
   }
 
-  private async handleControlCommand(command: "status" | "stop" | "reset", sessionKey: string, message: InboundMessage): Promise<void> {
+  private async handleControlCommand(
+    command: "status" | "stop" | "reset",
+    sessionKey: string,
+    message: InboundMessage,
+    requestId: string,
+  ): Promise<void> {
     if (command === "stop") {
-      this.stateStore.deactivateSession(sessionKey);
-      this.stateStore.clearCodexSessionId(sessionKey);
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
-      );
+      await this.handleStopCommand(sessionKey, message, requestId);
       return;
     }
 
@@ -205,13 +466,48 @@ export class Orchestrator {
     }
 
     const status = this.stateStore.getSessionStatus(sessionKey);
-    const scope = message.isDirectMessage ? "私聊（免前缀）" : "群聊（提及/回复/激活窗口触发）";
+    const scope = message.isDirectMessage ? "私聊（免前缀）" : "群聊（按房间触发策略）";
     const activeUntil = status.activeUntil ?? "未激活";
+    const metrics = this.metrics.snapshot(this.runningExecutions.size);
+    const limiter = this.rateLimiter.snapshot();
+
     await this.channel.sendNotice(
       message.conversationId,
-      `[CodeHarbor] 当前状态\n- 会话类型: ${scope}\n- 激活中: ${
-        status.isActive ? "是" : "否"
-      }\n- activeUntil: ${activeUntil}\n- 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}`,
+      `[CodeHarbor] 当前状态
+- 会话类型: ${scope}
+- 激活中: ${status.isActive ? "是" : "否"}
+- activeUntil: ${activeUntil}
+- 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}
+- 运行中任务: ${metrics.activeExecutions}
+- 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
+- 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
+- 限流并发: global=${limiter.activeGlobal}, users=${limiter.activeUsers}, rooms=${limiter.activeRooms}`,
+    );
+  }
+
+  private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
+    this.stateStore.deactivateSession(sessionKey);
+    this.stateStore.clearCodexSessionId(sessionKey);
+
+    const running = this.runningExecutions.get(sessionKey);
+    if (running) {
+      running.cancel();
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 已请求停止当前任务，并已清理会话上下文。",
+      );
+      this.logger.info("Stop command cancelled running execution", {
+        requestId,
+        sessionKey,
+        targetRequestId: running.requestId,
+        runningForMs: Date.now() - running.startedAt,
+      });
+      return;
+    }
+
+    await this.channel.sendNotice(
+      message.conversationId,
+      "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
     );
   }
 
@@ -276,54 +572,55 @@ export class Orchestrator {
 
     setLastProgressAt(now);
     setLastProgressText(progressText);
+
     await this.sendProgressUpdate(
-      conversationId,
-      isDirectMessage,
+      {
+        conversationId,
+        isDirectMessage,
+        getProgressNoticeEventId,
+        setProgressNoticeEventId,
+      },
       `[CodeHarbor] ${progressText}`,
-      getProgressNoticeEventId,
-      setProgressNoticeEventId,
     );
   }
 
-  private async finishProgress(
-    conversationId: string,
-    isDirectMessage: boolean,
-    summary: string,
-    progressNoticeEventId: string | null,
-  ): Promise<void> {
+  private async finishProgress(ctx: SendProgressContext, summary: string): Promise<void> {
     if (!this.progressUpdatesEnabled) {
       return;
     }
-    await this.sendProgressUpdate(
-      conversationId,
-      isDirectMessage,
-      `[CodeHarbor] ${summary}`,
-      () => progressNoticeEventId,
-      () => undefined,
-    );
+    await this.sendProgressUpdate(ctx, `[CodeHarbor] ${summary}`);
   }
 
-  private async sendProgressUpdate(
-    conversationId: string,
-    isDirectMessage: boolean,
-    text: string,
-    getProgressNoticeEventId: () => string | null,
-    setProgressNoticeEventId: (next: string) => void,
-  ): Promise<void> {
+  private async sendProgressUpdate(ctx: SendProgressContext, text: string): Promise<void> {
     try {
-      if (isDirectMessage) {
-        await this.channel.sendNotice(conversationId, text);
+      if (ctx.isDirectMessage) {
+        await this.channel.sendNotice(ctx.conversationId, text);
         return;
       }
+
       const eventId = await this.channel.upsertProgressNotice(
-        conversationId,
+        ctx.conversationId,
         text,
-        getProgressNoticeEventId(),
+        ctx.getProgressNoticeEventId(),
       );
-      setProgressNoticeEventId(eventId);
+      ctx.setProgressNoticeEventId(eventId);
     } catch (error) {
-      this.logger.debug("Failed to send progress update", { conversationId, text, error });
+      this.logger.debug("Failed to send progress update", {
+        conversationId: ctx.conversationId,
+        text,
+        error,
+      });
     }
+  }
+
+  private resolveGroupPolicy(conversationId: string): TriggerPolicy {
+    const override = this.roomTriggerPolicies[conversationId] ?? {};
+    return {
+      allowMention: override.allowMention ?? this.defaultGroupTriggerPolicy.allowMention,
+      allowReply: override.allowReply ?? this.defaultGroupTriggerPolicy.allowReply,
+      allowActiveWindow: override.allowActiveWindow ?? this.defaultGroupTriggerPolicy.allowActiveWindow,
+      allowPrefix: override.allowPrefix ?? this.defaultGroupTriggerPolicy.allowPrefix,
+    };
   }
 
   private getLock(key: string): Mutex {
@@ -413,4 +710,50 @@ function stripLeadingBotMention(text: string, matrixUserId: string): string {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatDurationMs(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${durationMs}ms`;
+  }
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(1)}s`;
+  }
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = ((durationMs % 60_000) / 1_000).toFixed(1);
+  return `${minutes}m${seconds}s`;
+}
+
+function buildRateLimitNotice(decision: RateLimitDecision): string {
+  if (decision.reason === "user_requests_per_window" || decision.reason === "room_requests_per_window") {
+    const retrySec = Math.max(1, Math.ceil((decision.retryAfterMs ?? 1_000) / 1_000));
+    return `[CodeHarbor] 请求过于频繁，请在 ${retrySec} 秒后重试。`;
+  }
+  return "[CodeHarbor] 当前任务并发较高，请稍后再试。";
+}
+
+function classifyExecutionOutcome(error: unknown): Extract<RequestOutcome, "failed" | "timeout" | "cancelled"> {
+  if (error instanceof CodexExecutionCancelledError) {
+    return "cancelled";
+  }
+  const message = formatError(error).toLowerCase();
+  if (message.includes("timed out")) {
+    return "timeout";
+  }
+  return "failed";
+}
+
+function buildFailureProgressSummary(
+  status: Extract<RequestOutcome, "failed" | "timeout" | "cancelled">,
+  startedAt: number,
+  error: unknown,
+): string {
+  const elapsed = formatDurationMs(Date.now() - startedAt);
+  if (status === "cancelled") {
+    return `处理已取消（耗时 ${elapsed}）`;
+  }
+  if (status === "timeout") {
+    return `处理超时（耗时 ${elapsed}）: ${formatError(error)}`;
+  }
+  return `处理失败（耗时 ${elapsed}）: ${formatError(error)}`;
 }

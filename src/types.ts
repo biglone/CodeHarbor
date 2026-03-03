@@ -1,4 +1,5 @@
 export interface InboundMessage {
+  requestId: string;
   channel: "matrix";
   conversationId: string;
   senderId: string;

@@ -6,10 +6,15 @@ Users send messages in Matrix, CodeHarbor routes each message to a Codex session
 ## What It Does
 
 - Matrix channel adapter (receive + reply)
-- Session-to-Codex mapping via persistent local state
+- Session-to-Codex mapping via persistent SQLite state
+- One-time migration import from legacy `state.json`
 - Duplicate Matrix event protection
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
-- Control commands (`/status`, `/reset`, `/stop`)
+- Room-level trigger policy overrides
+- Real `/stop` cancellation (kills in-flight Codex process)
+- Rate limiting + concurrency guardrails (user/room/global)
+- Progress + typing updates with group notice coalescing (`m.replace` edit)
+- Request observability (request_id, queue/exec/send durations, status counters)
 - NPM-distributed CLI (`codeharbor`)
 
 ## Architecture
@@ -17,7 +22,7 @@ Users send messages in Matrix, CodeHarbor routes each message to a Codex session
 ```text
 Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume)
                                           |
-                                          -> StateStore (state.json)
+                                          -> StateStore (SQLite)
 ```
 
 ## Implementation Status
@@ -76,45 +81,62 @@ node dist/cli.js start
 - Direct Message (DM)
   - all text messages are processed by default (no prefix required)
 - Group Room
-  - processed when **any** condition matches:
+  - processed when **any allowed trigger** matches:
     - message mentions bot user id
     - message replies to a bot message
     - sender has an active conversation window
     - optional explicit prefix match (`MATRIX_COMMAND_PREFIX`)
+- Trigger Policy
+  - global defaults via `GROUP_TRIGGER_ALLOW_*`
+  - per-room overrides via `ROOM_TRIGGER_POLICY_JSON`
 - Active Conversation Window
-  - each successful request activates the sender's conversation in that room
+  - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
-  - `/status` show current trigger/session status
+  - `/status` show session + limiter + metrics status
   - `/reset` clear bound Codex session and keep conversation active
-  - `/stop` deactivate conversation and clear bound Codex session
+  - `/stop` cancel in-flight execution (if running) and reset session context
+
+## Persistence
+
+- `STATE_DB_PATH=data/state.db`
+  - SQLite store for sessions + processed event ids
+- `STATE_PATH=data/state.json`
+  - legacy JSON source for one-time migration import when SQLite is empty
 - `MAX_SESSION_AGE_DAYS=30`
-  - session metadata older than this TTL is pruned from `state.json`
+  - prune stale sessions by age
 - `MAX_SESSIONS=5000`
-  - when session count exceeds the limit, least-recently-updated sessions are pruned
-- `MATRIX_COMMAND_PREFIX=!code`
-  - optional explicit trigger in group rooms (can be empty to disable prefix trigger)
+  - prune least-recently-updated sessions when over limit
+
+## Rate Limiting
+
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_MAX_REQUESTS_PER_USER`
+- `RATE_LIMIT_MAX_REQUESTS_PER_ROOM`
+- `RATE_LIMIT_MAX_CONCURRENT_GLOBAL`
+- `RATE_LIMIT_MAX_CONCURRENT_PER_USER`
+- `RATE_LIMIT_MAX_CONCURRENT_PER_ROOM`
+
+Set a value to `0` to disable a specific limiter.
+
+## Progress + Output
+
 - `MATRIX_PROGRESS_UPDATES=true`
   - emit stage progress updates (for example reasoning/thinking snippets)
-  - in group rooms, progress is coalesced into a single editable status message to reduce notice spam
 - `MATRIX_PROGRESS_MIN_INTERVAL_MS=2500`
-  - minimum interval between progress updates to avoid room spam
+  - minimum interval between progress updates
 - `MATRIX_TYPING_TIMEOUT_MS=10000`
   - typing indicator timeout; CodeHarbor refreshes typing state while handling a request
+- Group rooms use notice edit (`m.replace`) to coalesce progress and reduce spam.
+- Reply chunking is paragraph/code-block aware to avoid cutting fenced blocks when possible.
 
 ## Tests
 
 ```bash
 npm run typecheck
 npm test
-```
-
-Python legacy tests (optional, requires Python env + pytest):
-
-```bash
-./.venv/bin/python -m pytest -q tests
-# or
-python3 -m pytest -q tests
+npm run build
+npm run test:legacy
 ```
 
 ## Legacy Runtime

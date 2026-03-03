@@ -171,6 +171,7 @@ export class MatrixChannel {
     const repliesToBot = checkRepliesToBot(content, room, this.config.matrixUserId);
 
     const inbound: InboundMessage = {
+      requestId: buildRequestId(eventId),
       channel: "matrix",
       conversationId: room.roomId,
       senderId,
@@ -237,6 +238,11 @@ export class MatrixChannel {
       await this.joinInvitedRoom(room.roomId);
     }
   }
+}
+
+function buildRequestId(eventId: string): string {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${eventId}:${suffix}`;
 }
 
 function isDirectRoom(room: Room): boolean {

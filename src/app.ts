@@ -22,7 +22,8 @@ export class CodeHarborApp {
     this.logger = new Logger(config.logLevel);
 
     this.stateStore = new StateStore(
-      config.statePath,
+      config.stateDbPath,
+      config.legacyStateJsonPath,
       config.maxProcessedEventsPerSession,
       config.maxSessionAgeDays,
       config.maxSessions,
@@ -43,6 +44,9 @@ export class CodeHarborApp {
       commandPrefix: config.matrixCommandPrefix,
       matrixUserId: config.matrixUserId,
       sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
+      defaultGroupTriggerPolicy: config.defaultGroupTriggerPolicy,
+      roomTriggerPolicies: config.roomTriggerPolicies,
+      rateLimiterOptions: config.rateLimiter,
     });
   }
 
