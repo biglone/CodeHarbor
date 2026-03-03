@@ -22,6 +22,7 @@ export interface CliCompatConfig {
   disableReplyChunkSplit: boolean;
   progressThrottleMs: number;
   fetchMedia: boolean;
+  recordPath: string | null;
 }
 
 const configSchema = z
@@ -159,6 +160,7 @@ const configSchema = z
       .string()
       .default("true")
       .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_RECORD_PATH: z.string().default(""),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -212,6 +214,7 @@ const configSchema = z
       disableReplyChunkSplit: v.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT,
       progressThrottleMs: v.CLI_COMPAT_PROGRESS_THROTTLE_MS,
       fetchMedia: v.CLI_COMPAT_FETCH_MEDIA,
+      recordPath: v.CLI_COMPAT_RECORD_PATH.trim() ? path.resolve(v.CLI_COMPAT_RECORD_PATH) : null,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     logLevel: v.LOG_LEVEL,

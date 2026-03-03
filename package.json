@@ -19,6 +19,7 @@
     "dev": "tsx src/cli.ts start",
     "start": "node dist/cli.js start",
     "doctor": "node dist/cli.js doctor",
+    "replay:cli-compat": "tsx scripts/replay-cli-compat.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

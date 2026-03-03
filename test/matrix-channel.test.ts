@@ -80,6 +80,7 @@ const config = {
     disableReplyChunkSplit: false,
     progressThrottleMs: 300,
     fetchMedia: false,
+    recordPath: null,
   },
   doctorHttpTimeoutMs: 10_000,
   logLevel: "info",

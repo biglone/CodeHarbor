@@ -118,6 +118,8 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - lower update throttle for near-real-time progress
 - `CLI_COMPAT_FETCH_MEDIA=true|false`
   - download Matrix `mxc://` media (image) to temp file and pass it to codex via `--image`
+- `CLI_COMPAT_RECORD_PATH=/abs/path/records.jsonl`
+  - append executed prompts as JSONL for replay benchmarking
 
 Note: execution still uses `codex exec/resume` per request; compatibility mode focuses on behavior parity and reduced middleware interference.
 
@@ -157,6 +159,24 @@ When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor
 1. download `mxc://` media to a temp file
 2. pass local file paths as `--image` to codex exec
 3. best-effort cleanup temp files after the request
+4. optional prompt record append (`CLI_COMPAT_RECORD_PATH`) for deterministic replay input
+
+## Replay Benchmark
+
+Replay recorded prompts directly against codex CLI to quantify drift and latency:
+
+```bash
+npm run replay:cli-compat -- --input data/cli-compat-record.jsonl --out data/replay-report.json --max 50
+```
+
+Useful flags:
+
+- `--model <name>`
+- `--workdir <path>`
+- `--timeout-ms <n>`
+- `--sandbox <mode>`
+- `--approval <policy>`
+- `--dangerous`
 
 ## Progress + Output
 

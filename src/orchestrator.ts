@@ -2,6 +2,7 @@ import { Mutex } from "async-mutex";
 import fs from "node:fs/promises";
 
 import { MatrixChannel } from "./channels/matrix-channel";
+import { CliCompatRecorder } from "./compat/cli-compat-recorder";
 import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
 import {
   CodexExecutionCancelledError,
@@ -161,6 +162,7 @@ export class Orchestrator {
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
   private readonly rateLimiter: RateLimiter;
   private readonly cliCompat: CliCompatConfig;
+  private readonly cliCompatRecorder: CliCompatRecorder | null;
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
@@ -185,7 +187,9 @@ export class Orchestrator {
       disableReplyChunkSplit: false,
       progressThrottleMs: 300,
       fetchMedia: false,
+      recordPath: null,
     };
+    this.cliCompatRecorder = this.cliCompat.recordPath ? new CliCompatRecorder(this.cliCompat.recordPath) : null;
     const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
     this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;
     this.typingTimeoutMs = options?.typingTimeoutMs ?? 10_000;
@@ -219,7 +223,7 @@ export class Orchestrator {
     const sessionKey = buildSessionKey(message);
 
     const directCommand = parseControlCommand(message.text.trim());
-    if (directCommand === "stop" && this.runningExecutions.has(sessionKey)) {
+    if (directCommand === "stop") {
       if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
         this.metrics.record("duplicate", 0, 0, 0);
         this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
@@ -281,6 +285,33 @@ export class Orchestrator {
       const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
       const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
       const imagePaths = collectImagePaths(message);
+      let lastProgressAt = 0;
+      let lastProgressText = "";
+      let progressNoticeEventId: string | null = null;
+      let progressChain: Promise<void> = Promise.resolve();
+      let executionHandle: CodexExecutionHandle | null = null;
+      let executionDurationMs = 0;
+      let sendDurationMs = 0;
+      const requestStartedAt = Date.now();
+      let cancelRequested = false;
+
+      this.runningExecutions.set(sessionKey, {
+        requestId,
+        startedAt: requestStartedAt,
+        cancel: () => {
+          cancelRequested = true;
+          executionHandle?.cancel();
+        },
+      });
+
+      await this.recordCliCompatPrompt({
+        requestId,
+        sessionKey,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        prompt: executionPrompt,
+        imageCount: imagePaths.length,
+      });
       this.logger.info("Processing message", {
         requestId,
         sessionKey,
@@ -293,14 +324,6 @@ export class Orchestrator {
       });
 
       const stopTyping = this.startTypingHeartbeat(message.conversationId);
-      let lastProgressAt = 0;
-      let lastProgressText = "";
-      let progressNoticeEventId: string | null = null;
-      let progressChain: Promise<void> = Promise.resolve();
-      let executionHandle: CodexExecutionHandle | null = null;
-      let executionDurationMs = 0;
-      let sendDurationMs = 0;
-      const requestStartedAt = Date.now();
 
       try {
         const executionStartedAt = Date.now();
@@ -338,12 +361,17 @@ export class Orchestrator {
             imagePaths,
           },
         );
-
-        this.runningExecutions.set(sessionKey, {
-          requestId,
-          startedAt: executionStartedAt,
-          cancel: executionHandle.cancel,
-        });
+        const running = this.runningExecutions.get(sessionKey);
+        if (running?.requestId === requestId) {
+          running.startedAt = executionStartedAt;
+          running.cancel = () => {
+            cancelRequested = true;
+            executionHandle?.cancel();
+          };
+        }
+        if (cancelRequested) {
+          executionHandle.cancel();
+        }
 
         const result = await executionHandle.result;
         executionDurationMs = Date.now() - executionStartedAt;
@@ -677,6 +705,35 @@ export class Orchestrator {
 
     const promptBody = prompt.trim() ? prompt : "(no text body)";
     return `${promptBody}\n\n[attachments]\n${attachmentSummary}\n[/attachments]`;
+  }
+
+  private async recordCliCompatPrompt(entry: {
+    requestId: string;
+    sessionKey: string;
+    conversationId: string;
+    senderId: string;
+    prompt: string;
+    imageCount: number;
+  }): Promise<void> {
+    if (!this.cliCompatRecorder) {
+      return;
+    }
+    try {
+      await this.cliCompatRecorder.append({
+        timestamp: new Date().toISOString(),
+        requestId: entry.requestId,
+        sessionKey: entry.sessionKey,
+        conversationId: entry.conversationId,
+        senderId: entry.senderId,
+        prompt: entry.prompt,
+        imageCount: entry.imageCount,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to record cli compat prompt", {
+        requestId: entry.requestId,
+        error,
+      });
+    }
   }
 
   private getLock(key: string): Mutex {
