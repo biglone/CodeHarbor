@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { applyEnvOverrides } from "../src/init";
+import { applyEnvOverrides, resolveInitTemplatePath } from "../src/init";
 
 describe("applyEnvOverrides", () => {
   it("replaces existing key values while preserving comments", () => {
@@ -33,5 +37,18 @@ describe("applyEnvOverrides", () => {
 
     expect(result).toContain("CODEX_BIN=codex");
     expect(result).toContain('MATRIX_ACCESS_TOKEN="token #with-space"');
+  });
+
+  it("uses packaged .env.example when cwd does not contain template", () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-init-"));
+
+    try {
+      const templatePath = resolveInitTemplatePath(cwd);
+      expect(templatePath).not.toBe(path.join(cwd, ".env.example"));
+      expect(fs.existsSync(templatePath)).toBe(true);
+      expect(path.basename(templatePath)).toBe(".env.example");
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

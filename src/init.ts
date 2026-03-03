@@ -23,13 +23,9 @@ export interface InitCommandOptions {
 export async function runInitCommand(options: InitCommandOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const envPath = path.resolve(cwd, ".env");
-  const templatePath = path.resolve(cwd, ".env.example");
+  const templatePath = resolveInitTemplatePath(cwd);
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
-
-  if (!fs.existsSync(templatePath)) {
-    throw new Error(`Cannot find template file: ${templatePath}`);
-  }
 
   const templateContent = fs.readFileSync(templatePath, "utf8");
   const existingContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
@@ -125,6 +121,21 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
   } finally {
     rl.close();
   }
+}
+
+export function resolveInitTemplatePath(cwd: string): string {
+  const candidates = [
+    path.resolve(cwd, ".env.example"),
+    path.resolve(__dirname, "..", ".env.example"),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Cannot find template file. Tried: ${candidates.join(", ")}`);
 }
 
 export function applyEnvOverrides(template: string, overrides: Record<string, string>): string {

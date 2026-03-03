@@ -49,6 +49,18 @@ Install globally from npm (after publish):
 npm install -g codeharbor
 ```
 
+Linux one-command install (creates `/opt/codeharbor`, sets ownership, installs latest package):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/install-linux.sh | bash
+```
+
+Run local script with custom options:
+
+```bash
+./scripts/install-linux.sh --app-dir /srv/codeharbor --package codeharbor@0.1.1 --init
+```
+
 Install directly from GitHub:
 
 ```bash
@@ -176,6 +188,7 @@ It documents:
 - `codeharbor admin serve`: start admin UI + config API server
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
+- `scripts/install-linux.sh`: Linux bootstrap installer (creates runtime dir + installs npm package)
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
 - `scripts/install-backup-timer.sh`: install/update user-level systemd timer for automatic backups
 - `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
