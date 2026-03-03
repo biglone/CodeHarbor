@@ -186,4 +186,38 @@ describe("CodexExecutor", () => {
     });
     expect(events.some((event) => event.stage === "raw_event" && event.eventType === "thread.started")).toBe(true);
   });
+
+  it("uses per-request workdir override when provided", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      bin: "codex",
+      model: null,
+      workdir: "/tmp/default-workdir",
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("hello", null, undefined, { workdir: "/tmp/room-workdir" });
+    child.stdout.write('{"type":"thread.started","thread_id":"thread-workdir"}\n');
+    child.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"done"}}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "thread-workdir",
+      reply: "done",
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      "codex",
+      expect.any(Array),
+      expect.objectContaining({
+        cwd: "/tmp/room-workdir",
+      }),
+    );
+  });
 });

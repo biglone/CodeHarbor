@@ -112,13 +112,20 @@ class FakeStateStore {
 
 class ImmediateExecutor {
   callCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null }> = [];
 
   startExecution(
     text: string,
     sessionId: string | null,
     _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
   ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
     this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
     return {
       result: Promise.resolve({ sessionId: sessionId ?? "thread-1", reply: `ok:${text}` }),
       cancel: () => {},
@@ -259,5 +266,42 @@ describe("Orchestrator", () => {
     await expect(runningPromise).resolves.toBeUndefined();
     expect(channel.notices.some((entry) => entry.text.includes("已请求停止当前任务"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text.includes("Failed to process request"))).toBe(false);
+  });
+
+  it("uses room-configured workdir for execution", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const configService = {
+      resolveRoomConfig: vi.fn().mockReturnValue({
+        source: "room",
+        enabled: true,
+        triggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+        workdir: "/tmp/project-b",
+      }),
+    };
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      configService: configService as never,
+      defaultCodexWorkdir: "/tmp/default-project",
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "执行任务",
+        eventId: "$workdir",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.workdir).toBe("/tmp/project-b");
   });
 });

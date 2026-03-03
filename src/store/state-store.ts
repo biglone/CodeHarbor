@@ -20,6 +20,35 @@ function loadDatabaseSync(): DatabaseSyncCtor {
 
 const DatabaseSync = loadDatabaseSync();
 
+export interface RoomSettingsRecord {
+  roomId: string;
+  enabled: boolean;
+  allowMention: boolean;
+  allowReply: boolean;
+  allowActiveWindow: boolean;
+  allowPrefix: boolean;
+  workdir: string;
+  updatedAt: number;
+}
+
+export interface RoomSettingsUpsertInput {
+  roomId: string;
+  enabled: boolean;
+  allowMention: boolean;
+  allowReply: boolean;
+  allowActiveWindow: boolean;
+  allowPrefix: boolean;
+  workdir: string;
+}
+
+export interface ConfigRevisionRecord {
+  id: number;
+  actor: string | null;
+  summary: string;
+  payloadJson: string;
+  createdAt: number;
+}
+
 export class StateStore {
   private readonly dbPath: string;
   private readonly legacyJsonPath: string | null;
@@ -173,6 +202,128 @@ export class StateStore {
     }
   }
 
+  getRoomSettings(roomId: string): RoomSettingsRecord | null {
+    const row = this.db
+      .prepare(
+        "SELECT room_id, enabled, allow_mention, allow_reply, allow_active_window, allow_prefix, workdir, updated_at FROM room_settings WHERE room_id = ?1",
+      )
+      .get(roomId) as
+      | {
+          room_id: string;
+          enabled: number;
+          allow_mention: number;
+          allow_reply: number;
+          allow_active_window: number;
+          allow_prefix: number;
+          workdir: string;
+          updated_at: number;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+
+    return {
+      roomId: row.room_id,
+      enabled: row.enabled === 1,
+      allowMention: row.allow_mention === 1,
+      allowReply: row.allow_reply === 1,
+      allowActiveWindow: row.allow_active_window === 1,
+      allowPrefix: row.allow_prefix === 1,
+      workdir: row.workdir,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  listRoomSettings(): RoomSettingsRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT room_id, enabled, allow_mention, allow_reply, allow_active_window, allow_prefix, workdir, updated_at FROM room_settings ORDER BY room_id ASC",
+      )
+      .all() as Array<{
+      room_id: string;
+      enabled: number;
+      allow_mention: number;
+      allow_reply: number;
+      allow_active_window: number;
+      allow_prefix: number;
+      workdir: string;
+      updated_at: number;
+    }>;
+
+    return rows.map((row) => ({
+      roomId: row.room_id,
+      enabled: row.enabled === 1,
+      allowMention: row.allow_mention === 1,
+      allowReply: row.allow_reply === 1,
+      allowActiveWindow: row.allow_active_window === 1,
+      allowPrefix: row.allow_prefix === 1,
+      workdir: row.workdir,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  upsertRoomSettings(input: RoomSettingsUpsertInput): void {
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO room_settings
+          (room_id, enabled, allow_mention, allow_reply, allow_active_window, allow_prefix, workdir, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(room_id) DO UPDATE SET
+          enabled = excluded.enabled,
+          allow_mention = excluded.allow_mention,
+          allow_reply = excluded.allow_reply,
+          allow_active_window = excluded.allow_active_window,
+          allow_prefix = excluded.allow_prefix,
+          workdir = excluded.workdir,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        input.roomId,
+        boolToInt(input.enabled),
+        boolToInt(input.allowMention),
+        boolToInt(input.allowReply),
+        boolToInt(input.allowActiveWindow),
+        boolToInt(input.allowPrefix),
+        input.workdir,
+        now,
+      );
+  }
+
+  deleteRoomSettings(roomId: string): void {
+    this.db.prepare("DELETE FROM room_settings WHERE room_id = ?1").run(roomId);
+  }
+
+  appendConfigRevision(actor: string | null, summary: string, payloadJson: string): void {
+    this.db
+      .prepare("INSERT INTO config_revisions (actor, summary, payload_json, created_at) VALUES (?1, ?2, ?3, ?4)")
+      .run(actor, summary, payloadJson, Date.now());
+  }
+
+  listConfigRevisions(limit = 20): ConfigRevisionRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db
+      .prepare(
+        "SELECT id, actor, summary, payload_json, created_at FROM config_revisions ORDER BY id DESC LIMIT ?1",
+      )
+      .all(safeLimit) as Array<{
+      id: number;
+      actor: string | null;
+      summary: string;
+      payload_json: string;
+      created_at: number;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      actor: row.actor,
+      summary: row.summary,
+      payloadJson: row.payload_json,
+      createdAt: row.created_at,
+    }));
+  }
+
   async flush(): Promise<void> {
     this.touchDatabase();
   }
@@ -229,6 +380,27 @@ export class StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON processed_events(created_at);
+
+      CREATE TABLE IF NOT EXISTS room_settings (
+        room_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        allow_mention INTEGER NOT NULL DEFAULT 1,
+        allow_reply INTEGER NOT NULL DEFAULT 1,
+        allow_active_window INTEGER NOT NULL DEFAULT 1,
+        allow_prefix INTEGER NOT NULL DEFAULT 1,
+        workdir TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS config_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT,
+        summary TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_config_revisions_created_at ON config_revisions(created_at);
     `);
   }
 
@@ -373,4 +545,8 @@ function normalizeLegacyState(state: StateData): void {
       session.activeUntil = null;
     }
   }
+}
+
+function boolToInt(value: boolean): number {
+  return value ? 1 : 0;
 }

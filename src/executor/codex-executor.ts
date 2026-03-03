@@ -18,6 +18,7 @@ export interface CodexExecutorOptions {
 export interface CodexExecutionStartOptions {
   passThroughRawEvents?: boolean;
   imagePaths?: string[];
+  workdir?: string;
 }
 
 export interface CodexProgressEvent {
@@ -82,7 +83,7 @@ export class CodexExecutor {
   ): CodexExecutionHandle {
     const args = buildCodexArgs(prompt, sessionId, this.options, startOptions);
     const child = spawn(this.options.bin, args, {
-      cwd: this.options.workdir,
+      cwd: startOptions?.workdir ?? this.options.workdir,
       env: {
         ...process.env,
         ...this.options.extraEnv,

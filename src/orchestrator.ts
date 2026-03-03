@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 
 import { MatrixChannel } from "./channels/matrix-channel";
 import { CliCompatRecorder } from "./compat/cli-compat-recorder";
+import { ConfigService } from "./config-service";
 import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
 import {
   CodexExecutionCancelledError,
@@ -30,6 +31,8 @@ interface OrchestratorOptions {
   roomTriggerPolicies?: RoomTriggerPolicyOverrides;
   rateLimiterOptions?: RateLimiterOptions;
   cliCompat?: CliCompatConfig;
+  configService?: ConfigService;
+  defaultCodexWorkdir?: string;
 }
 
 interface SessionLockEntry {
@@ -62,6 +65,13 @@ interface SendProgressContext {
   isDirectMessage: boolean;
   getProgressNoticeEventId: () => string | null;
   setProgressNoticeEventId: (next: string) => void;
+}
+
+interface RoomRuntimeConfig {
+  source: "default" | "room";
+  enabled: boolean;
+  triggerPolicy: TriggerPolicy;
+  workdir: string;
 }
 
 class RequestMetrics {
@@ -160,6 +170,8 @@ export class Orchestrator {
   private readonly sessionActiveWindowMs: number;
   private readonly defaultGroupTriggerPolicy: TriggerPolicy;
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
+  private readonly configService: ConfigService | null;
+  private readonly defaultCodexWorkdir: string;
   private readonly rateLimiter: RateLimiter;
   private readonly cliCompat: CliCompatConfig;
   private readonly cliCompatRecorder: CliCompatRecorder | null;
@@ -204,6 +216,8 @@ export class Orchestrator {
       allowPrefix: true,
     };
     this.roomTriggerPolicies = options?.roomTriggerPolicies ?? {};
+    this.configService = options?.configService ?? null;
+    this.defaultCodexWorkdir = options?.defaultCodexWorkdir ?? process.cwd();
     this.rateLimiter = new RateLimiter(
       options?.rateLimiterOptions ?? {
         windowMs: 60_000,
@@ -244,7 +258,8 @@ export class Orchestrator {
         return;
       }
 
-      const route = this.routeMessage(message, sessionKey);
+      const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
+      const route = this.routeMessage(message, sessionKey, roomConfig);
       if (route.kind === "ignore") {
         this.metrics.record("ignored", queueWaitMs, 0, 0);
         this.logger.debug("Message ignored by routing policy", {
@@ -318,6 +333,8 @@ export class Orchestrator {
         hasCodexSession: Boolean(previousCodexSessionId),
         queueWaitMs,
         attachmentCount: message.attachments.length,
+        workdir: roomConfig.workdir,
+        roomConfigSource: roomConfig.source,
         isDirectMessage: message.isDirectMessage,
         mentionsBot: message.mentionsBot,
         repliesToBot: message.repliesToBot,
@@ -332,33 +349,34 @@ export class Orchestrator {
           executionPrompt,
           previousCodexSessionId,
           (progress) => {
-          progressChain = progressChain
-            .then(() =>
-              this.handleProgress(
-                message.conversationId,
-                message.isDirectMessage,
-                progress,
-                () => lastProgressAt,
-                (next) => {
-                  lastProgressAt = next;
-                },
-                () => lastProgressText,
-                (next) => {
-                  lastProgressText = next;
-                },
-                () => progressNoticeEventId,
-                (next) => {
-                  progressNoticeEventId = next;
-                },
-              ),
-            )
-            .catch((progressError) => {
-              this.logger.debug("Failed to process progress callback", { progressError });
-            });
+            progressChain = progressChain
+              .then(() =>
+                this.handleProgress(
+                  message.conversationId,
+                  message.isDirectMessage,
+                  progress,
+                  () => lastProgressAt,
+                  (next) => {
+                    lastProgressAt = next;
+                  },
+                  () => lastProgressText,
+                  (next) => {
+                    lastProgressText = next;
+                  },
+                  () => progressNoticeEventId,
+                  (next) => {
+                    progressNoticeEventId = next;
+                  },
+                ),
+              )
+              .catch((progressError) => {
+                this.logger.debug("Failed to process progress callback", { progressError });
+              });
           },
           {
             passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
             imagePaths,
+            workdir: roomConfig.workdir,
           },
         );
         const running = this.runningExecutions.get(sessionKey);
@@ -454,14 +472,18 @@ export class Orchestrator {
     });
   }
 
-  private routeMessage(message: InboundMessage, sessionKey: string): RouteDecision {
+  private routeMessage(message: InboundMessage, sessionKey: string, roomConfig: RoomRuntimeConfig): RouteDecision {
     const incomingRaw = message.text;
     const incomingTrimmed = incomingRaw.trim();
     if (!incomingTrimmed && message.attachments.length === 0) {
       return { kind: "ignore" };
     }
 
-    const groupPolicy = message.isDirectMessage ? null : this.resolveGroupPolicy(message.conversationId);
+    if (!message.isDirectMessage && !roomConfig.enabled) {
+      return { kind: "ignore" };
+    }
+
+    const groupPolicy = message.isDirectMessage ? null : roomConfig.triggerPolicy;
     const prefixAllowed = message.isDirectMessage || Boolean(groupPolicy?.allowPrefix);
     const prefixTriggered = prefixAllowed && this.commandPrefix.length > 0;
     const prefixedText = prefixTriggered ? extractCommandText(incomingTrimmed, this.commandPrefix) : null;
@@ -525,6 +547,7 @@ export class Orchestrator {
     }
 
     const status = this.stateStore.getSessionStatus(sessionKey);
+    const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
     const scope = message.isDirectMessage ? "私聊（免前缀）" : "群聊（按房间触发策略）";
     const activeUntil = status.activeUntil ?? "未激活";
     const metrics = this.metrics.snapshot(this.runningExecutions.size);
@@ -538,6 +561,7 @@ export class Orchestrator {
 - 激活中: ${status.isActive ? "是" : "否"}
 - activeUntil: ${activeUntil}
 - 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}
+- 当前工作目录: ${roomConfig.workdir}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
@@ -686,6 +710,20 @@ export class Orchestrator {
       allowActiveWindow: override.allowActiveWindow ?? this.defaultGroupTriggerPolicy.allowActiveWindow,
       allowPrefix: override.allowPrefix ?? this.defaultGroupTriggerPolicy.allowPrefix,
     };
+  }
+
+  private resolveRoomRuntimeConfig(conversationId: string): RoomRuntimeConfig {
+    const fallbackPolicy = this.resolveGroupPolicy(conversationId);
+    if (!this.configService) {
+      return {
+        source: "default",
+        enabled: true,
+        triggerPolicy: fallbackPolicy,
+        workdir: this.defaultCodexWorkdir,
+      };
+    }
+
+    return this.configService.resolveRoomConfig(conversationId, fallbackPolicy);
   }
 
   private buildExecutionPrompt(prompt: string, message: InboundMessage): string {

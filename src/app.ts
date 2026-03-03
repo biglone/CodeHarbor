@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { MatrixChannel } from "./channels/matrix-channel";
+import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
 import { CodexExecutor } from "./executor/codex-executor";
 import { Logger } from "./logger";
@@ -16,6 +17,7 @@ export class CodeHarborApp {
   private readonly stateStore: StateStore;
   private readonly channel: MatrixChannel;
   private readonly orchestrator: Orchestrator;
+  private readonly configService: ConfigService;
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -28,6 +30,7 @@ export class CodeHarborApp {
       config.maxSessionAgeDays,
       config.maxSessions,
     );
+    this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
     const executor = new CodexExecutor({
       bin: config.codexBin,
       model: config.codexModel,
@@ -52,6 +55,8 @@ export class CodeHarborApp {
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,
       cliCompat: config.cliCompat,
+      configService: this.configService,
+      defaultCodexWorkdir: config.codexWorkdir,
     });
   }
 

@@ -144,4 +144,39 @@ describe("StateStore", () => {
     store.deactivateSession("s1");
     expect(store.isSessionActive("s1")).toBe(false);
   });
+
+  it("stores room settings and config revisions", () => {
+    const { db, legacy, dir } = createPaths();
+    const projectDir = path.join(dir, "project-a");
+    fs.mkdirSync(projectDir, { recursive: true });
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    store.upsertRoomSettings({
+      roomId: "!room:example.com",
+      enabled: true,
+      allowMention: true,
+      allowReply: false,
+      allowActiveWindow: true,
+      allowPrefix: false,
+      workdir: projectDir,
+    });
+    const room = store.getRoomSettings("!room:example.com");
+    expect(room).toEqual(
+      expect.objectContaining({
+        roomId: "!room:example.com",
+        workdir: projectDir,
+        allowReply: false,
+      }),
+    );
+
+    store.appendConfigRevision("tester", "update room config", '{"roomId":"!room:example.com"}');
+    const revisions = store.listConfigRevisions(5);
+    expect(revisions).toHaveLength(1);
+    expect(revisions[0]).toEqual(
+      expect.objectContaining({
+        actor: "tester",
+        summary: "update room config",
+      }),
+    );
+  });
 });
