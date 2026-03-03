@@ -78,7 +78,7 @@ Trigger rules:
   - examples: `release v0.1.1`, `chore: release 0.1.2`
 - `workflow_dispatch` -> manual publish from GitHub Actions UI
 
-The workflow runs `typecheck`, `test`, `build`, `node dist/cli.js --help`, `npm pack --dry-run`, then publishes with:
+The workflow runs `typecheck`, `test`, `test:e2e` (Admin UI Playwright), `build`, `node dist/cli.js --help`, `npm pack --dry-run`, then publishes with:
 
 ```bash
 npm publish --access public
@@ -95,6 +95,19 @@ Release checklist (recommended):
 
 ```bash
 npm view codeharbor version
+```
+
+Run e2e locally:
+
+```bash
+npm run test:e2e
+```
+
+If your machine has no system Chrome, run:
+
+```bash
+PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run e2e:install
+PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 ```
 
 ## Planning Docs
@@ -145,6 +158,7 @@ node dist/cli.js start
 - `codeharbor start`: start service
 - `codeharbor doctor`: check `codex` and Matrix connectivity
 - `codeharbor admin serve`: start admin UI + config API server
+- `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
 
 ## Admin UI And API
 

@@ -71,6 +71,10 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm test
 
+      - name: Admin UI e2e tests
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run test:e2e
+
       - name: Build
         if: steps.intent.outputs.publish == 'true'
         run: npm run build

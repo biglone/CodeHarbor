@@ -11,9 +11,10 @@ On `push` to `main` and pull requests, CI runs:
 1. `npm ci`
 2. `npm run typecheck`
 3. `npm test`
-4. `npm run build`
-5. `node dist/cli.js --help` (CLI smoke check)
-6. `npm pack --dry-run` (package integrity check)
+4. `npm run test:e2e`
+5. `npm run build`
+6. `node dist/cli.js --help` (CLI smoke check)
+7. `npm pack --dry-run` (package integrity check)
 
 ## npm Publish Triggers
 
