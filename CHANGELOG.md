@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.8] - 2026-03-04
+
+- Fixed systemd service hardening conflict for user-home runtime directories (`~/.codeharbor`).
+- Changed generated unit files from `ProtectHome=true` to `ProtectHome=read-only` so service can `chdir` into runtime home.
+- Updated Linux easy installer unit template with the same `ProtectHome=read-only` compatibility fix.
+
 ## [0.1.7] - 2026-03-04
 
 - Added `codeharbor service restart` command for one-command restart of systemd-managed service.
