@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.5] - 2026-03-04
+
+- Changed default runtime home from `/opt/codeharbor` to user directory `~/.codeharbor` for global npm installs.
+- Added backward compatibility: if `/opt/codeharbor/.env` already exists, CodeHarbor keeps using legacy `/opt/codeharbor`.
+- Fixed CLI version output to read from `package.json` instead of hardcoded `0.1.0`.
+- Hardened npm release workflow auth mode: supports Trusted Publishing (OIDC) and `NPM_TOKEN` fallback.
+
 ## [0.1.4] - 2026-03-04
 
 - Migrated GitHub npm publish workflow to Trusted Publishing (OIDC) with `id-token: write`.
