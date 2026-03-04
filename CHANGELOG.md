@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.6] - 2026-03-04
+
+- Added built-in `codeharbor service install` command to install and enable systemd service after npm installation.
+- Added `codeharbor service uninstall` command for one-command service removal.
+- Added optional service flags for admin unit install, custom run user/runtime home, and deferred startup.
+- Updated README with post-install service lifecycle commands.
+
 ## [0.1.5] - 2026-03-04
 
 - Changed default runtime home from `/opt/codeharbor` to user directory `~/.codeharbor` for global npm installs.
