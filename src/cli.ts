@@ -180,7 +180,14 @@ serviceCommand
       });
     } catch (error) {
       process.stderr.write(`Service install failed: ${formatError(error)}\n`);
-      process.stderr.write("Hint: run with sudo, for example: sudo codeharbor service install\n");
+      process.stderr.write(
+        [
+          'Hint: run with sudo and absolute CLI path, for example:',
+          '  sudo "$(command -v codeharbor)" service install --with-admin',
+          "  (remove --with-admin if you only want the main service)",
+          "",
+        ].join("\n"),
+      );
       process.exitCode = 1;
     }
   });
@@ -196,7 +203,13 @@ serviceCommand
       });
     } catch (error) {
       process.stderr.write(`Service uninstall failed: ${formatError(error)}\n`);
-      process.stderr.write("Hint: run with sudo, for example: sudo codeharbor service uninstall\n");
+      process.stderr.write(
+        [
+          'Hint: run with sudo and absolute CLI path, for example:',
+          '  sudo "$(command -v codeharbor)" service uninstall --with-admin',
+          "",
+        ].join("\n"),
+      );
       process.exitCode = 1;
     }
   });
