@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.9] - 2026-03-04
+
+- Fixed systemd unit defaults to avoid Codex session write failures under user-home runtime.
+- Changed generated service hardening from `ProtectHome=read-only` to `ProtectHome=false` for both main and admin units.
+- Updated Linux easy installer unit templates with the same fix.
+
 ## [0.1.8] - 2026-03-04
 
 - Fixed systemd service hardening conflict for user-home runtime directories (`~/.codeharbor`).

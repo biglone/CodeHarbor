@@ -310,7 +310,7 @@ RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=read-only
+ProtectHome=false
 ReadWritePaths=${APP_DIR}
 
 [Install]
@@ -336,7 +336,7 @@ RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=read-only
+ProtectHome=false
 ReadWritePaths=${APP_DIR}
 
 [Install]
