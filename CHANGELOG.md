@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.7] - 2026-03-04
+
+- Added `codeharbor service restart` command for one-command restart of systemd-managed service.
+- Added `--with-admin` support for restart to restart main + admin services together.
+- Improved service command error hints to use `sudo "$(command -v codeharbor)" ...` to avoid sudo PATH issues.
+
 ## [0.1.6] - 2026-03-04
 
 - Added built-in `codeharbor service install` command to install and enable systemd service after npm installation.
