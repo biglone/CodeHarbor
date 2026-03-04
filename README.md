@@ -83,8 +83,9 @@ Run local script with custom options:
 
 Runtime home behavior:
 
-- By default, all `codeharbor` commands use `/opt/codeharbor` for `.env` and relative data paths.
-- No manual `cd /opt/codeharbor` is required after installation.
+- By default, all `codeharbor` commands use `~/.codeharbor` for `.env` and relative data paths.
+- Backward compatibility: if `/opt/codeharbor/.env` already exists, it continues to be used automatically.
+- No manual `cd` is required after installation.
 - To use a custom runtime directory, set `CODEHARBOR_HOME` (for example `export CODEHARBOR_HOME=/srv/codeharbor`).
 
 Install directly from GitHub:

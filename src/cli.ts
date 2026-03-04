@@ -14,13 +14,14 @@ import { formatPreflightReport, runStartupPreflight } from "./preflight";
 import { resolveRuntimeHome } from "./runtime-home";
 
 let runtimeHome: string | null = null;
+const cliVersion = resolveCliVersion();
 
 const program = new Command();
 
 program
   .name("codeharbor")
   .description("Instant-messaging bridge for Codex CLI sessions")
-  .version("0.1.0");
+  .version(cliVersion);
 
 program
   .command("init")
@@ -217,6 +218,17 @@ function parsePortOption(raw: string, fallback: number): number {
     return fallback;
   }
   return parsed;
+}
+
+function resolveCliVersion(): string {
+  try {
+    const packagePath = path.resolve(__dirname, "..", "package.json");
+    const content = fs.readFileSync(packagePath, "utf8");
+    const parsed = JSON.parse(content) as { version?: string };
+    return typeof parsed.version === "string" && parsed.version.trim() ? parsed.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
 }
 
 function formatError(error: unknown): string {
