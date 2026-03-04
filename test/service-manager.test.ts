@@ -45,6 +45,7 @@ describe("service-manager unit templates", () => {
     expect(unit).toContain("User=appuser");
     expect(unit).toContain("Environment=CODEHARBOR_HOME=/home/appuser/.codeharbor");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js start");
+    expect(unit).toContain("ProtectHome=read-only");
   });
 
   it("builds admin service unit with expected command", () => {
@@ -57,5 +58,6 @@ describe("service-manager unit templates", () => {
 
     expect(unit).toContain("Description=CodeHarbor admin service");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js admin serve");
+    expect(unit).toContain("ProtectHome=read-only");
   });
 });
