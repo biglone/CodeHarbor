@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -55,7 +56,7 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.14.0
           registry-url: https://registry.npmjs.org
           cache: npm
 
@@ -118,9 +119,7 @@ jobs:
 
       - name: Publish to npm
         if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --provenance --access public
 
       - name: Skip publish (version exists)
         if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists == 'true'
