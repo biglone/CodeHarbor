@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.3] - 2026-03-04
+
+- Added strict changelog enforcement for release flow via `npm run changelog:check`.
+- Added release workflow gate to block publish when the current package version has no changelog section.
+- Added release process documentation updates and packaged tarball ignore rule.
+
 ## [0.1.2] - 2026-03-04
 
 - Added fixed runtime home behavior (`/opt/codeharbor` by default) so users no longer need manual `cd` before `init/start`.
