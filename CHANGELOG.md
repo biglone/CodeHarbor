@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [0.1.4] - 2026-03-04
+
+- Migrated GitHub npm publish workflow to Trusted Publishing (OIDC) with `id-token: write`.
+- Updated publish command to include provenance: `npm publish --provenance --access public`.
+- Updated release documentation to use Trusted Publishing setup and removed `NPM_TOKEN` requirement.
+
 ## [0.1.3] - 2026-03-04
 
 - Added strict changelog enforcement for release flow via `npm run changelog:check`.
