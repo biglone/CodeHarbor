@@ -56,7 +56,7 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 22.14.0
+          node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
 
