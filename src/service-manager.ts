@@ -31,6 +31,11 @@ export interface UninstallSystemdServicesOptions {
   output?: NodeJS.WritableStream;
 }
 
+export interface RestartSystemdServicesOptions {
+  restartAdmin: boolean;
+  output?: NodeJS.WritableStream;
+}
+
 export function resolveDefaultRunUser(env: NodeJS.ProcessEnv = process.env): string {
   const sudoUser = env.SUDO_USER?.trim();
   if (sudoUser) {
@@ -210,6 +215,22 @@ export function uninstallSystemdServices(options: UninstallSystemdServicesOption
   if (options.removeAdmin) {
     output.write(`Removed systemd unit: ${adminPath}\n`);
   }
+  output.write("Done.\n");
+}
+
+export function restartSystemdServices(options: RestartSystemdServicesOptions): void {
+  assertLinuxWithSystemd();
+  assertRootPrivileges();
+
+  const output = options.output ?? process.stdout;
+  runSystemctl(["restart", MAIN_SERVICE_NAME]);
+  output.write(`Restarted service: ${MAIN_SERVICE_NAME}\n`);
+
+  if (options.restartAdmin) {
+    runSystemctl(["restart", ADMIN_SERVICE_NAME]);
+    output.write(`Restarted service: ${ADMIN_SERVICE_NAME}\n`);
+  }
+
   output.write("Done.\n");
 }
 

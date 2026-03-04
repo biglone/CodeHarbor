@@ -14,6 +14,7 @@ import { formatPreflightReport, runStartupPreflight } from "./preflight";
 import { resolveRuntimeHome } from "./runtime-home";
 import {
   installSystemdServices,
+  restartSystemdServices,
   resolveDefaultRunUser,
   resolveRuntimeHomeForUser,
   uninstallSystemdServices,
@@ -207,6 +208,29 @@ serviceCommand
         [
           'Hint: run with sudo and absolute CLI path, for example:',
           '  sudo "$(command -v codeharbor)" service uninstall --with-admin',
+          "",
+        ].join("\n"),
+      );
+      process.exitCode = 1;
+    }
+  });
+
+serviceCommand
+  .command("restart")
+  .description("Restart installed codeharbor systemd service (requires root)")
+  .option("--with-admin", "also restart codeharbor-admin.service")
+  .action((options: { withAdmin?: boolean }) => {
+    try {
+      restartSystemdServices({
+        restartAdmin: options.withAdmin ?? false,
+      });
+    } catch (error) {
+      process.stderr.write(`Service restart failed: ${formatError(error)}\n`);
+      process.stderr.write(
+        [
+          'Hint: run with sudo and absolute CLI path, for example:',
+          '  sudo "$(command -v codeharbor)" service restart --with-admin',
+          "  (remove --with-admin if you only want the main service)",
           "",
         ].join("\n"),
       );

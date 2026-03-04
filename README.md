@@ -67,19 +67,25 @@ curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/ins
 Install first, then enable systemd service with one command:
 
 ```bash
-sudo codeharbor service install
+sudo "$(command -v codeharbor)" service install
 ```
 
 Install + enable main and admin services:
 
 ```bash
-sudo codeharbor service install --with-admin
+sudo "$(command -v codeharbor)" service install --with-admin
+```
+
+Restart installed service(s):
+
+```bash
+sudo "$(command -v codeharbor)" service restart --with-admin
 ```
 
 Remove installed services:
 
 ```bash
-sudo codeharbor service uninstall --with-admin
+sudo "$(command -v codeharbor)" service uninstall --with-admin
 ```
 
 Enable Admin service at install time:
@@ -248,6 +254,7 @@ It documents:
 - `codeharbor doctor`: check `codex` and Matrix connectivity
 - `codeharbor admin serve`: start admin UI + config API server
 - `codeharbor service install`: install/enable systemd unit(s) after npm install (supports `--with-admin`)
+- `codeharbor service restart`: restart installed systemd unit(s) (supports `--with-admin`)
 - `codeharbor service uninstall`: remove installed systemd unit(s) (supports `--with-admin`)
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
