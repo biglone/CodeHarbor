@@ -12,6 +12,12 @@ import { runConfigExportCommand, runConfigImportCommand } from "./config-snapsho
 import { runInitCommand } from "./init";
 import { formatPreflightReport, runStartupPreflight } from "./preflight";
 import { resolveRuntimeHome } from "./runtime-home";
+import {
+  installSystemdServices,
+  resolveDefaultRunUser,
+  resolveRuntimeHomeForUser,
+  uninstallSystemdServices,
+} from "./service-manager";
 
 let runtimeHome: string | null = null;
 const cliVersion = resolveCliVersion();
@@ -74,6 +80,7 @@ program
 
 const admin = program.command("admin").description("Admin utilities");
 const configCommand = program.command("config").description("Config snapshot utilities");
+const serviceCommand = program.command("service").description("Systemd service management");
 
 admin
   .command("serve")
@@ -148,6 +155,48 @@ configCommand
       });
     } catch (error) {
       process.stderr.write(`Config import failed: ${formatError(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
+
+serviceCommand
+  .command("install")
+  .description("Install and enable codeharbor systemd service (requires root)")
+  .option("--run-user <user>", "service user (default: sudo user or current user)")
+  .option("--runtime-home <path>", "runtime home used as CODEHARBOR_HOME")
+  .option("--with-admin", "also install codeharbor-admin.service")
+  .option("--no-start", "enable service without starting immediately")
+  .action((options: { runUser?: string; runtimeHome?: string; withAdmin?: boolean; start?: boolean }) => {
+    try {
+      const runUser = options.runUser?.trim() || resolveDefaultRunUser();
+      const runtimeHomePath = resolveRuntimeHomeForUser(runUser, process.env, options.runtimeHome);
+      installSystemdServices({
+        runUser,
+        runtimeHome: runtimeHomePath,
+        nodeBinPath: process.execPath,
+        cliScriptPath: resolveCliScriptPath(),
+        installAdmin: options.withAdmin ?? false,
+        startNow: options.start ?? true,
+      });
+    } catch (error) {
+      process.stderr.write(`Service install failed: ${formatError(error)}\n`);
+      process.stderr.write("Hint: run with sudo, for example: sudo codeharbor service install\n");
+      process.exitCode = 1;
+    }
+  });
+
+serviceCommand
+  .command("uninstall")
+  .description("Remove codeharbor systemd service (requires root)")
+  .option("--with-admin", "also remove codeharbor-admin.service")
+  .action((options: { withAdmin?: boolean }) => {
+    try {
+      uninstallSystemdServices({
+        removeAdmin: options.withAdmin ?? false,
+      });
+    } catch (error) {
+      process.stderr.write(`Service uninstall failed: ${formatError(error)}\n`);
+      process.stderr.write("Hint: run with sudo, for example: sudo codeharbor service uninstall\n");
       process.exitCode = 1;
     }
   });
@@ -229,6 +278,14 @@ function resolveCliVersion(): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function resolveCliScriptPath(): string {
+  const argvPath = process.argv[1];
+  if (argvPath && argvPath.trim()) {
+    return path.resolve(argvPath);
+  }
+  return path.resolve(__dirname, "cli.js");
 }
 
 function formatError(error: unknown): string {

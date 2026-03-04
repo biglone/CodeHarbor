@@ -64,6 +64,24 @@ curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/ins
   --matrix-access-token 'your-token'
 ```
 
+Install first, then enable systemd service with one command:
+
+```bash
+sudo codeharbor service install
+```
+
+Install + enable main and admin services:
+
+```bash
+sudo codeharbor service install --with-admin
+```
+
+Remove installed services:
+
+```bash
+sudo codeharbor service uninstall --with-admin
+```
+
 Enable Admin service at install time:
 
 ```bash
