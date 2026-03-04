@@ -116,8 +116,28 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to npm
+      - name: Resolve npm auth mode
         if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists != 'true'
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "mode=token" >> "$GITHUB_OUTPUT"
+            echo "Using NPM_TOKEN secret for npm publish."
+          else
+            echo "mode=trusted" >> "$GITHUB_OUTPUT"
+            echo "No NPM_TOKEN secret found. Using npm Trusted Publishing (OIDC)."
+          fi
+
+      - name: Publish to npm (trusted publishing)
+        if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists != 'true' && steps.auth.outputs.mode == 'trusted'
+        run: npm publish --provenance --access public
+
+      - name: Publish to npm (token fallback)
+        if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists != 'true' && steps.auth.outputs.mode == 'token'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
 
       - name: Skip publish (version exists)

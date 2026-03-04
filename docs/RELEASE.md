@@ -36,9 +36,14 @@ Publish runs when one of these is true:
 
 If the version already exists on npm, publish is skipped.
 
-## Trusted Publishing Setup (Required)
+## npm Publish Auth Modes
 
-CodeHarbor release workflow publishes via npm Trusted Publishing (OIDC), not long-lived `NPM_TOKEN`.
+CodeHarbor release workflow supports two auth modes:
+
+1. Preferred: npm Trusted Publishing (OIDC)
+2. Fallback: repository secret `NPM_TOKEN`
+
+### Preferred: Trusted Publishing (OIDC)
 
 Configure once in npm package settings:
 
@@ -48,6 +53,11 @@ Configure once in npm package settings:
    - Repository: `biglone/CodeHarbor`
    - Workflow file: `.github/workflows/release-npm.yml`
 3. Save and verify the publisher status is active.
+
+### Fallback: `NPM_TOKEN` secret
+
+If Trusted Publishing is not available yet, add repository secret `NPM_TOKEN` (npm automation token).
+The workflow will automatically prefer token mode when this secret exists.
 
 ## Release Steps
 
@@ -89,6 +99,6 @@ For periodic snapshot backups:
 - Automated timer: `./scripts/install-backup-timer.sh`
 - Full guide: `docs/BACKUP_AUTOMATION.md`
 
-## Required Secret
+## Secret Requirement
 
-No npm publish secret is required when Trusted Publishing is configured correctly.
+`NPM_TOKEN` is optional and only needed as fallback when Trusted Publishing is not configured.

@@ -106,12 +106,13 @@ CodeHarbor supports auto publish to npm from GitHub Actions.
 
 Setup once:
 
-1. Configure npm Trusted Publishing for this repository/workflow:
+1. Configure npm Trusted Publishing for this repository/workflow (preferred):
    - npm package settings -> Trusted publishing -> Add publisher
    - Provider: GitHub Actions
    - Repository: `biglone/CodeHarbor`
    - Workflow file: `.github/workflows/release-npm.yml`
-2. Push to `main` with a publish trigger commit message.
+2. Optional fallback: set repository secret `NPM_TOKEN` (npm automation token).
+3. Push to `main` with a publish trigger commit message.
 
 Trigger rules:
 
@@ -125,6 +126,11 @@ The workflow runs `typecheck`, `test`, `test:e2e` (Admin UI Playwright), `build`
 ```bash
 npm publish --provenance --access public
 ```
+
+Auth mode selection:
+
+- If `NPM_TOKEN` secret exists: publish with token.
+- If `NPM_TOKEN` is absent: publish via npm Trusted Publishing (OIDC).
 
 If the same package version already exists on npm, publish is skipped automatically.
 
