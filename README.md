@@ -126,10 +126,13 @@ If the same package version already exists on npm, publish is skipped automatica
 
 Release checklist (recommended):
 
-1. Update version in `package.json` (`npm version patch|minor|major`).
-2. Push to `main` with `[publish-npm]` or `release vX.Y.Z` in commit message.
-3. Verify workflow status in GitHub Actions.
-4. Verify package on npm:
+1. Update `CHANGELOG.md` with a new version section and bullet-point release notes.
+2. Update version in `package.json` (`npm version patch|minor|major`).
+3. Validate changelog entry:
+   - `npm run changelog:check`
+4. Push to `main` with `[publish-npm]` or `release vX.Y.Z` in commit message.
+5. Verify workflow status in GitHub Actions.
+6. Verify package on npm:
 
 ```bash
 npm view codeharbor version
@@ -217,6 +220,7 @@ It documents:
 - `codeharbor admin serve`: start admin UI + config API server
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
+- `npm run changelog:check`: validate `CHANGELOG.md` has notes for current package version
 - `scripts/install-linux.sh`: Linux bootstrap installer (creates runtime dir + installs npm package)
 - `scripts/install-linux-easy.sh`: one-shot Linux install + config + systemd auto-start
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups

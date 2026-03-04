@@ -18,6 +18,10 @@ On `push` to `main` and pull requests, CI runs:
 8. `node dist/cli.js --help` (CLI smoke check)
 9. `npm pack --dry-run` (package integrity check)
 
+On publish-intent runs, release workflow additionally enforces:
+
+10. `npm run changelog:check` (must contain changelog notes for current package version)
+
 ## npm Publish Triggers
 
 Workflow: `.github/workflows/release-npm.yml`
@@ -39,11 +43,14 @@ If the version already exists on npm, publish is skipped.
    - `./scripts/backup-config.sh`
 3. Optionally validate latest snapshot:
    - `codeharbor config import <snapshot-file> --dry-run`
-4. Bump version:
+4. Update `CHANGELOG.md` with a new section for target version and notable bullet points.
+5. Bump version:
    - `npm version patch` or `npm version minor` or `npm version major`
-5. Push commit to `main` with a publish-trigger message.
-6. Wait for `Release NPM` workflow to finish.
-7. Verify:
+6. Validate changelog entry:
+   - `npm run changelog:check`
+7. Push commit to `main` with a publish-trigger message.
+8. Wait for `Release NPM` workflow to finish.
+9. Verify:
    - `npm view codeharbor version`
    - `npm install -g codeharbor@<version>`
 

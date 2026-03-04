@@ -63,6 +63,10 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm ci
 
+      - name: Changelog check
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run changelog:check
+
       - name: Type check
         if: steps.intent.outputs.publish == 'true'
         run: npm run typecheck
