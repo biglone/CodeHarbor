@@ -247,6 +247,8 @@ It documents:
 - `codeharbor start`: start service
 - `codeharbor doctor`: check `codex` and Matrix connectivity
 - `codeharbor admin serve`: start admin UI + config API server
+- `codeharbor service install`: install/enable systemd unit(s) after npm install (supports `--with-admin`)
+- `codeharbor service uninstall`: remove installed systemd unit(s) (supports `--with-admin`)
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
 - `npm run changelog:check`: validate `CHANGELOG.md` has notes for current package version
