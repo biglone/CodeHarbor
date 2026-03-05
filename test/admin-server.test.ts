@@ -206,6 +206,8 @@ describe("AdminServer", () => {
         "MATRIX_COMMAND_PREFIX=!code",
         "RATE_LIMIT_MAX_CONCURRENT_GLOBAL=8",
         "CODEX_WORKDIR=/tmp/old",
+        "AGENT_WORKFLOW_ENABLED=false",
+        "AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=1",
       ].join("\n"),
       "utf8",
     );
@@ -238,6 +240,10 @@ describe("AdminServer", () => {
         rateLimiter: {
           maxConcurrentGlobal: 12,
         },
+        agentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 2,
+        },
       }),
     });
     expect(updated.status).toBe(200);
@@ -247,6 +253,8 @@ describe("AdminServer", () => {
     expect(envRaw).toContain('MATRIX_COMMAND_PREFIX="!ai"');
     expect(envRaw).toContain(`CODEX_WORKDIR=${dir}`);
     expect(envRaw).toContain("RATE_LIMIT_MAX_CONCURRENT_GLOBAL=12");
+    expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");
+    expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=2");
   });
 
   it("rejects requests when client ip is not in ADMIN_IP_ALLOWLIST", async () => {

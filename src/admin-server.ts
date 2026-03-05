@@ -466,6 +466,27 @@ export class AdminServer {
       }
     }
 
+    if ("agentWorkflow" in body) {
+      const workflow = asObject(body.agentWorkflow, "agentWorkflow");
+      if ("enabled" in workflow) {
+        const value = normalizeBoolean(workflow.enabled, this.config.agentWorkflow.enabled);
+        this.config.agentWorkflow.enabled = value;
+        envUpdates.AGENT_WORKFLOW_ENABLED = String(value);
+        updatedKeys.push("agentWorkflow.enabled");
+      }
+      if ("autoRepairMaxRounds" in workflow) {
+        const value = normalizePositiveInt(
+          workflow.autoRepairMaxRounds,
+          this.config.agentWorkflow.autoRepairMaxRounds,
+          0,
+          10,
+        );
+        this.config.agentWorkflow.autoRepairMaxRounds = value;
+        envUpdates.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS = String(value);
+        updatedKeys.push("agentWorkflow.autoRepairMaxRounds");
+      }
+    }
+
     if (updatedKeys.length === 0) {
       throw new HttpError(400, "No supported global config fields provided.");
     }
@@ -606,6 +627,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   matrixTypingTimeoutMs: number;
   sessionActiveWindowMinutes: number;
   cliCompat: AppConfig["cliCompat"];
+  agentWorkflow: AppConfig["agentWorkflow"];
 } {
   return {
     matrixCommandPrefix: config.matrixCommandPrefix,
@@ -617,6 +639,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     matrixTypingTimeoutMs: config.matrixTypingTimeoutMs,
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     cliCompat: { ...config.cliCompat },
+    agentWorkflow: { ...config.agentWorkflow },
   };
 }
 
@@ -1157,6 +1180,11 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-cli-throttle" type="number" min="0" />
           </label>
           <label class="checkbox"><input id="global-cli-fetch-media" type="checkbox" /><span>Fetch media attachments</span></label>
+          <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span>Enable multi-agent workflow</span></label>
+          <label class="field">
+            <span class="field-label">Workflow auto-repair rounds</span>
+            <input id="global-agent-repair-rounds" type="number" min="0" max="10" />
+          </label>
         </div>
         <div class="actions">
           <button id="global-save-btn" type="button">Save Global Config</button>
@@ -1424,6 +1452,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             var rateLimiter = data.rateLimiter || {};
             var trigger = data.defaultGroupTriggerPolicy || {};
             var cliCompat = data.cliCompat || {};
+            var agentWorkflow = data.agentWorkflow || {};
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
             document.getElementById("global-workdir").value = data.codexWorkdir || "";
@@ -1449,6 +1478,10 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-disable-split").checked = Boolean(cliCompat.disableReplyChunkSplit);
             document.getElementById("global-cli-throttle").value = String(cliCompat.progressThrottleMs || 0);
             document.getElementById("global-cli-fetch-media").checked = Boolean(cliCompat.fetchMedia);
+            document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
+            document.getElementById("global-agent-repair-rounds").value = String(
+              typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
+            );
 
             showNotice("ok", "Global config loaded.");
           } catch (error) {
@@ -1486,6 +1519,10 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
                 disableReplyChunkSplit: asBool("global-cli-disable-split"),
                 progressThrottleMs: asNumber("global-cli-throttle", 300),
                 fetchMedia: asBool("global-cli-fetch-media")
+              },
+              agentWorkflow: {
+                enabled: asBool("global-agent-enabled"),
+                autoRepairMaxRounds: asNumber("global-agent-repair-rounds", 1)
               }
             };
             var response = await apiRequest("/api/admin/config/global", "PUT", body);

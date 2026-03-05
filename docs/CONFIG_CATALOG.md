@@ -21,8 +21,8 @@ These must be valid before `codeharbor start`.
 | `CODEX_APPROVAL_POLICY` | No | empty | No | Restart | Codex approval policy |
 | `CODEX_EXTRA_ARGS` | No | empty | No | Restart | Extra codex args |
 | `CODEX_EXTRA_ENV_JSON` | No | empty | No | Restart | Extra child env map |
-| `AGENT_WORKFLOW_ENABLED` | No | `false` | No | Restart | Enable Phase B multi-agent workflow commands |
-| `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS` | No | `1` | No | Restart | Max executor repair rounds after reviewer rejection |
+| `AGENT_WORKFLOW_ENABLED` | No | `false` | Yes | Restart | Enable Phase B multi-agent workflow commands |
+| `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS` | No | `1` | Yes | Restart | Max executor repair rounds after reviewer rejection |
 
 ## 2) State / Persistence
 
