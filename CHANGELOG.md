@@ -11,6 +11,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - `Restart Main + Admin`
 - Added Admin API endpoint `POST /api/admin/service/restart` (token/cors protected) to trigger managed service restart.
 
+## [0.1.13] - 2026-03-05
+
+- Re-released packaging/runtime restart-permission improvements from `0.1.12` on a new version due npm version lock conflict.
+- `codeharbor service install --with-admin` and Linux easy install now auto-configure
+  `/etc/sudoers.d/codeharbor-restart` for non-root service users.
+- Admin API service restart supports non-interactive sudo fallback, reducing target-machine post-install fixes.
+
 ## [0.1.12] - 2026-03-05
 
 - Made packaged service installs restart-ready without target-machine manual fixes:
