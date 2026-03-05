@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-03-05
+
 - Added Phase B opt-in multi-agent workflow engine (`Planner -> Executor -> Reviewer`) with automatic repair rounds.
 - Added workflow chat commands:
   - `/agents run <objective>` to execute multi-agent pipeline
