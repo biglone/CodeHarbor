@@ -67,26 +67,32 @@ curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/ins
 Install first, then enable systemd service with one command:
 
 ```bash
-sudo "$(command -v codeharbor)" service install
+codeharbor service install
 ```
 
 Install + enable main and admin services:
 
 ```bash
-sudo "$(command -v codeharbor)" service install --with-admin
+codeharbor service install --with-admin
 ```
 
 Restart installed service(s):
 
 ```bash
-sudo "$(command -v codeharbor)" service restart --with-admin
+codeharbor service restart --with-admin
 ```
 
 Remove installed services:
 
 ```bash
-sudo "$(command -v codeharbor)" service uninstall --with-admin
+codeharbor service uninstall --with-admin
 ```
+
+Notes:
+
+- Service commands auto-elevate with `sudo` when root privileges are required.
+- If your environment blocks interactive `sudo`, use explicit fallback:
+  - `sudo <node-bin> <codeharbor-cli-script> service ...`
 
 Enable Admin service at install time:
 

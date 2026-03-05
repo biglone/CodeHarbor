@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -169,6 +170,7 @@ serviceCommand
   .option("--no-start", "enable service without starting immediately")
   .action((options: { runUser?: string; runtimeHome?: string; withAdmin?: boolean; start?: boolean }) => {
     try {
+      maybeReexecServiceCommandWithSudo();
       const runUser = options.runUser?.trim() || resolveDefaultRunUser();
       const runtimeHomePath = resolveRuntimeHomeForUser(runUser, process.env, options.runtimeHome);
       installSystemdServices({
@@ -183,9 +185,10 @@ serviceCommand
       process.stderr.write(`Service install failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
-          'Hint: run with sudo and absolute CLI path, for example:',
-          '  sudo "$(command -v codeharbor)" service install --with-admin',
-          "  (remove --with-admin if you only want the main service)",
+          "Hint:",
+          "  - Run directly: codeharbor service install --with-admin",
+          "  - The command auto-elevates with sudo when needed.",
+          `  - Fallback explicit form: ${buildExplicitSudoCommand("service install --with-admin")}`,
           "",
         ].join("\n"),
       );
@@ -199,6 +202,7 @@ serviceCommand
   .option("--with-admin", "also remove codeharbor-admin.service")
   .action((options: { withAdmin?: boolean }) => {
     try {
+      maybeReexecServiceCommandWithSudo();
       uninstallSystemdServices({
         removeAdmin: options.withAdmin ?? false,
       });
@@ -206,8 +210,10 @@ serviceCommand
       process.stderr.write(`Service uninstall failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
-          'Hint: run with sudo and absolute CLI path, for example:',
-          '  sudo "$(command -v codeharbor)" service uninstall --with-admin',
+          "Hint:",
+          "  - Run directly: codeharbor service uninstall --with-admin",
+          "  - The command auto-elevates with sudo when needed.",
+          `  - Fallback explicit form: ${buildExplicitSudoCommand("service uninstall --with-admin")}`,
           "",
         ].join("\n"),
       );
@@ -221,6 +227,7 @@ serviceCommand
   .option("--with-admin", "also restart codeharbor-admin.service")
   .action((options: { withAdmin?: boolean }) => {
     try {
+      maybeReexecServiceCommandWithSudo();
       restartSystemdServices({
         restartAdmin: options.withAdmin ?? false,
       });
@@ -228,9 +235,10 @@ serviceCommand
       process.stderr.write(`Service restart failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
-          'Hint: run with sudo and absolute CLI path, for example:',
-          '  sudo "$(command -v codeharbor)" service restart --with-admin',
-          "  (remove --with-admin if you only want the main service)",
+          "Hint:",
+          "  - Run directly: codeharbor service restart --with-admin",
+          "  - The command auto-elevates with sudo when needed.",
+          `  - Fallback explicit form: ${buildExplicitSudoCommand("service restart --with-admin")}`,
           "",
         ].join("\n"),
       );
@@ -323,6 +331,38 @@ function resolveCliScriptPath(): string {
     return path.resolve(argvPath);
   }
   return path.resolve(__dirname, "cli.js");
+}
+
+function maybeReexecServiceCommandWithSudo(): void {
+  if (typeof process.getuid !== "function" || process.getuid() === 0) {
+    return;
+  }
+
+  const serviceArgs = process.argv.slice(2);
+  if (serviceArgs.length === 0 || serviceArgs[0] !== "service") {
+    return;
+  }
+
+  const cliScriptPath = resolveCliScriptPath();
+  const child = spawnSync("sudo", [process.execPath, cliScriptPath, ...serviceArgs], {
+    stdio: "inherit",
+  });
+  if (child.error) {
+    throw new Error(`failed to auto-elevate with sudo: ${child.error.message}`);
+  }
+
+  process.exit(child.status ?? 1);
+}
+
+function shellQuote(value: string): string {
+  if (!value) {
+    return "''";
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildExplicitSudoCommand(subcommand: string): string {
+  return `sudo ${shellQuote(process.execPath)} ${shellQuote(resolveCliScriptPath())} ${subcommand}`;
 }
 
 function formatError(error: unknown): string {
