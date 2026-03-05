@@ -257,6 +257,48 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=2");
   });
 
+  it("restarts managed services via admin API", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    let restartAdmin = false;
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      restartServices: async (withAdmin) => {
+        restartAdmin = withAdmin;
+        return {
+          restarted: withAdmin ? ["codeharbor", "codeharbor-admin"] : ["codeharbor"],
+        };
+      },
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const restartResponse = await fetchJson(`${baseUrl}/api/admin/service/restart`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "tester",
+      },
+      body: JSON.stringify({
+        withAdmin: true,
+      }),
+    });
+
+    expect(restartResponse.status).toBe(200);
+    expect(restartAdmin).toBe(true);
+    expect(JSON.stringify(restartResponse.body)).toContain("codeharbor-admin");
+  });
+
   it("rejects requests when client ip is not in ADMIN_IP_ALLOWLIST", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);

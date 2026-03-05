@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- Added Admin Console service control actions on Global settings page:
+  - `Restart Main Service`
+  - `Restart Main + Admin`
+- Added Admin API endpoint `POST /api/admin/service/restart` (token/cors protected) to trigger managed service restart.
+
 ## [0.1.10] - 2026-03-05
 
 - Added Phase B opt-in multi-agent workflow engine (`Planner -> Executor -> Reviewer`) with automatic repair rounds.

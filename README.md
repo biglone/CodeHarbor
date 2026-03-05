@@ -353,9 +353,10 @@ Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as resta
 1. Start server: `codeharbor admin serve`.
 2. Open `/settings/global`, set `Admin Token` (if enabled), then click `Save Auth`.
 3. Adjust global fields and click `Save Global Config` (UI shows restart-required warning).
-4. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
-5. Open `/health` to run connectivity checks (`codex` + Matrix).
-6. Open `/audit` to verify config revisions (actor/summary/payload).
+4. Use `Restart Main Service` or `Restart Main + Admin` buttons for one-click restart from Admin UI (requires root-capable service context).
+5. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
+6. Open `/health` to run connectivity checks (`codex` + Matrix).
+7. Open `/audit` to verify config revisions (actor/summary/payload).
 
 ## Standalone Admin Deployment
 

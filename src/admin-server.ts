@@ -8,6 +8,7 @@ import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
+import { restartSystemdServices } from "./service-manager";
 import { ConfigRevisionRecord, StateStore } from "./store/state-store";
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +26,10 @@ interface MatrixHealthResult {
   error: string | null;
 }
 
+interface RestartServicesResult {
+  restarted: string[];
+}
+
 interface AdminServerOptions {
   host: string;
   port: number;
@@ -34,6 +39,7 @@ interface AdminServerOptions {
   cwd?: string;
   checkCodex?: (bin: string) => Promise<CodexHealthResult>;
   checkMatrix?: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
+  restartServices?: (restartAdmin: boolean) => Promise<RestartServicesResult>;
 }
 
 interface AddressInfo {
@@ -63,6 +69,7 @@ export class AdminServer {
   private readonly cwd: string;
   private readonly checkCodex: (bin: string) => Promise<CodexHealthResult>;
   private readonly checkMatrix: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
+  private readonly restartServices: (restartAdmin: boolean) => Promise<RestartServicesResult>;
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
 
@@ -85,6 +92,7 @@ export class AdminServer {
     this.cwd = options.cwd ?? process.cwd();
     this.checkCodex = options.checkCodex ?? defaultCheckCodex;
     this.checkMatrix = options.checkMatrix ?? defaultCheckMatrix;
+    this.restartServices = options.restartServices ?? defaultRestartServices;
   }
 
   getAddress(): AddressInfo | null {
@@ -268,6 +276,34 @@ export class AdminServer {
           timestamp: new Date().toISOString(),
         });
         return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/admin/service/restart") {
+        const body = asObject(await readJsonBody(req), "service restart payload");
+        const restartAdmin = normalizeBoolean(body.withAdmin, false);
+        const actor = readActor(req);
+        try {
+          const result = await this.restartServices(restartAdmin);
+          this.stateStore.appendConfigRevision(
+            actor,
+            restartAdmin ? "restart services (main + admin)" : "restart service (main)",
+            JSON.stringify({
+              type: "service_restart",
+              restartAdmin,
+              restarted: result.restarted,
+            }),
+          );
+          this.sendJson(res, 200, {
+            ok: true,
+            restarted: result.restarted,
+          });
+          return;
+        } catch (error) {
+          throw new HttpError(
+            500,
+            `Service restart failed: ${formatError(error)}. Ensure service has root privileges or run CLI command manually.`,
+          );
+        }
       }
 
       this.sendJson(res, 404, {
@@ -588,7 +624,7 @@ export class AdminServer {
     }
     res.setHeader("Access-Control-Allow-Origin", corsDecision.origin);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token, X-Admin-Actor");
-    res.setHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
     appendVaryHeader(res, "Origin");
   }
 
@@ -685,6 +721,25 @@ function parseJsonLoose(raw: string): unknown {
   } catch {
     return raw;
   }
+}
+
+async function defaultRestartServices(restartAdmin: boolean): Promise<RestartServicesResult> {
+  const outputChunks: string[] = [];
+  const output = {
+    write: (chunk: string | Uint8Array): boolean => {
+      outputChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    },
+  } as unknown as NodeJS.WritableStream;
+
+  restartSystemdServices({
+    restartAdmin,
+    output,
+  });
+
+  return {
+    restarted: restartAdmin ? ["codeharbor", "codeharbor-admin"] : ["codeharbor"],
+  };
 }
 
 function isUiPath(pathname: string): boolean {
@@ -1205,6 +1260,8 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
         <div class="actions">
           <button id="global-save-btn" type="button">Save Global Config</button>
           <button id="global-reload-btn" type="button" class="secondary">Reload</button>
+          <button id="global-restart-main-btn" type="button" class="secondary">Restart Main Service</button>
+          <button id="global-restart-all-btn" type="button" class="secondary">Restart Main + Admin</button>
         </div>
         <p class="muted">Saving global config updates .env and requires restart to fully take effect.</p>
       </section>
@@ -1347,6 +1404,12 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         document.getElementById("global-save-btn").addEventListener("click", saveGlobal);
         document.getElementById("global-reload-btn").addEventListener("click", loadGlobal);
+        document.getElementById("global-restart-main-btn").addEventListener("click", function () {
+          restartManagedServices(false);
+        });
+        document.getElementById("global-restart-all-btn").addEventListener("click", function () {
+          restartManagedServices(true);
+        });
         document.getElementById("room-load-btn").addEventListener("click", loadRoom);
         document.getElementById("room-save-btn").addEventListener("click", saveRoom);
         document.getElementById("room-delete-btn").addEventListener("click", deleteRoom);
@@ -1547,6 +1610,19 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             await loadAudit();
           } catch (error) {
             showNotice("error", "Failed to save global config: " + error.message);
+          }
+        }
+
+        async function restartManagedServices(withAdmin) {
+          try {
+            var response = await apiRequest("/api/admin/service/restart", "POST", {
+              withAdmin: Boolean(withAdmin)
+            });
+            var restarted = Array.isArray(response.restarted) ? response.restarted.join(", ") : "codeharbor";
+            var suffix = withAdmin ? " Admin page may reconnect during restart." : "";
+            showNotice("warn", "Restart requested: " + restarted + "." + suffix);
+          } catch (error) {
+            showNotice("error", "Failed to restart service(s): " + error.message);
           }
         }
 
