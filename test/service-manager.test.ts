@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdminServiceUnit,
   buildMainServiceUnit,
+  buildRestartSudoersPolicy,
   resolveDefaultRunUser,
   resolveRuntimeHomeForUser,
 } from "../src/service-manager";
@@ -59,5 +60,17 @@ describe("service-manager unit templates", () => {
     expect(unit).toContain("Description=CodeHarbor admin service");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js admin serve");
     expect(unit).toContain("ProtectHome=false");
+  });
+
+  it("builds restart sudoers policy with non-interactive systemctl rules", () => {
+    const policy = buildRestartSudoersPolicy({
+      runUser: "appuser",
+      systemctlPath: "/usr/bin/systemctl",
+    });
+
+    expect(policy).toContain("Defaults:appuser !requiretty");
+    expect(policy).toContain(
+      "appuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart codeharbor.service, /usr/bin/systemctl restart codeharbor-admin.service",
+    );
   });
 });

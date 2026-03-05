@@ -301,7 +301,7 @@ export class AdminServer {
         } catch (error) {
           throw new HttpError(
             500,
-            `Service restart failed: ${formatError(error)}. Ensure service has root privileges or run CLI command manually.`,
+            `Service restart failed: ${formatError(error)}. Install services via "codeharbor service install --with-admin" to auto-configure restart permissions, or run CLI command manually with sudo.`,
           );
         }
       }

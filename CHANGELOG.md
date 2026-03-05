@@ -11,6 +11,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - `Restart Main + Admin`
 - Added Admin API endpoint `POST /api/admin/service/restart` (token/cors protected) to trigger managed service restart.
 
+## [0.1.12] - 2026-03-05
+
+- Made packaged service installs restart-ready without target-machine manual fixes:
+  - `codeharbor service install --with-admin` now writes `/etc/sudoers.d/codeharbor-restart` for non-root service users.
+  - Admin API service restart now supports non-interactive sudo fallback (`sudo -n systemctl ...`) when service user is not root.
+  - `codeharbor service uninstall --with-admin` now removes the managed sudoers policy file.
+- Updated `install-linux-easy.sh` to install matching sudoers policy when `--enable-admin-service` is used.
+- Updated docs and tests for the new restart-permission behavior.
+
 ## [0.1.11] - 2026-03-05
 
 - Added dedicated workflow unit tests for Phase B multi-agent runner:

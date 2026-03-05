@@ -344,6 +344,10 @@ WantedBy=multi-user.target
 EOF
   fi
 
+  if [[ "${ENABLE_ADMIN_SERVICE}" == "true" && "${RUN_USER}" != "root" ]]; then
+    install_restart_sudoers_policy
+  fi
+
   if [[ "${DRY_RUN}" == "true" ]]; then
     log "[dry-run] install ${service_main}"
     cat "${main_tmp}"
@@ -378,6 +382,31 @@ EOF
   fi
 }
 
+install_restart_sudoers_policy() {
+  local sudoers_file="/etc/sudoers.d/codeharbor-restart"
+  local systemctl_bin
+  systemctl_bin="$(command -v systemctl || true)"
+  [[ -n "${systemctl_bin}" ]] || fail "Cannot resolve systemctl path for sudoers policy."
+
+  local policy_tmp
+  policy_tmp="$(mktemp)"
+  cat >"${policy_tmp}" <<EOF
+# Managed by CodeHarbor installer; do not edit manually.
+Defaults:${RUN_USER} !requiretty
+${RUN_USER} ALL=(root) NOPASSWD: ${systemctl_bin} restart codeharbor.service, ${systemctl_bin} restart codeharbor-admin.service
+EOF
+
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    log "[dry-run] install ${sudoers_file}"
+    cat "${policy_tmp}"
+    rm -f "${policy_tmp}"
+    return
+  fi
+
+  run_as_root install -m 440 "${policy_tmp}" "${sudoers_file}" || fail "Failed to install ${sudoers_file}."
+  rm -f "${policy_tmp}"
+}
+
 print_summary() {
   log "All done."
   log "Runtime home: ${APP_DIR}"
@@ -385,6 +414,9 @@ print_summary() {
     log "systemd service: codeharbor.service (enabled)"
     if [[ "${ENABLE_ADMIN_SERVICE}" == "true" ]]; then
       log "systemd service: codeharbor-admin.service (enabled)"
+      if [[ "${RUN_USER}" != "root" ]]; then
+        log "sudoers policy: /etc/sudoers.d/codeharbor-restart"
+      fi
     fi
   fi
 

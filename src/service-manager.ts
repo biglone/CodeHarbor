@@ -8,12 +8,19 @@ import { RUNTIME_HOME_ENV_KEY, USER_RUNTIME_HOME_DIR } from "./runtime-home";
 const SYSTEMD_DIR = "/etc/systemd/system";
 const MAIN_SERVICE_NAME = "codeharbor.service";
 const ADMIN_SERVICE_NAME = "codeharbor-admin.service";
+const SUDOERS_DIR = "/etc/sudoers.d";
+const RESTART_SUDOERS_FILE = "codeharbor-restart";
 
 interface UnitBuildOptions {
   runUser: string;
   runtimeHome: string;
   nodeBinPath: string;
   cliScriptPath: string;
+}
+
+interface RestartSudoersPolicyOptions {
+  runUser: string;
+  systemctlPath: string;
 }
 
 export interface InstallSystemdServicesOptions {
@@ -34,6 +41,7 @@ export interface UninstallSystemdServicesOptions {
 export interface RestartSystemdServicesOptions {
   restartAdmin: boolean;
   output?: NodeJS.WritableStream;
+  allowSudoFallback?: boolean;
 }
 
 export function resolveDefaultRunUser(env: NodeJS.ProcessEnv = process.env): string {
@@ -132,6 +140,24 @@ export function buildAdminServiceUnit(options: UnitBuildOptions): string {
   ].join("\n");
 }
 
+export function buildRestartSudoersPolicy(options: RestartSudoersPolicyOptions): string {
+  const runUser = options.runUser.trim();
+  const systemctlPath = options.systemctlPath.trim();
+
+  validateSimpleValue(runUser, "runUser");
+  validateSimpleValue(systemctlPath, "systemctlPath");
+  if (!path.isAbsolute(systemctlPath)) {
+    throw new Error("systemctlPath must be an absolute path.");
+  }
+
+  return [
+    "# Managed by CodeHarbor service install; do not edit manually.",
+    `Defaults:${runUser} !requiretty`,
+    `${runUser} ALL=(root) NOPASSWD: ${systemctlPath} restart ${MAIN_SERVICE_NAME}, ${systemctlPath} restart ${ADMIN_SERVICE_NAME}`,
+    "",
+  ].join("\n");
+}
+
 export function installSystemdServices(options: InstallSystemdServicesOptions): void {
   assertLinuxWithSystemd();
   assertRootPrivileges();
@@ -153,6 +179,7 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
 
   const mainPath = path.join(SYSTEMD_DIR, MAIN_SERVICE_NAME);
   const adminPath = path.join(SYSTEMD_DIR, ADMIN_SERVICE_NAME);
+  const restartSudoersPath = path.join(SUDOERS_DIR, RESTART_SUDOERS_FILE);
 
   const unitOptions: UnitBuildOptions = {
     runUser,
@@ -165,6 +192,15 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
 
   if (options.installAdmin) {
     fs.writeFileSync(adminPath, buildAdminServiceUnit(unitOptions), "utf8");
+    if (runUser !== "root") {
+      const policy = buildRestartSudoersPolicy({
+        runUser,
+        systemctlPath: resolveSystemctlPath(),
+      });
+      fs.mkdirSync(SUDOERS_DIR, { recursive: true });
+      fs.writeFileSync(restartSudoersPath, policy, "utf8");
+      fs.chmodSync(restartSudoersPath, 0o440);
+    }
   }
 
   runSystemctl(["daemon-reload"]);
@@ -184,6 +220,9 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
   output.write(`Installed systemd unit: ${mainPath}\n`);
   if (options.installAdmin) {
     output.write(`Installed systemd unit: ${adminPath}\n`);
+    if (runUser !== "root") {
+      output.write(`Installed sudoers policy: ${restartSudoersPath}\n`);
+    }
   }
   output.write("Done. Check status with: systemctl status codeharbor --no-pager\n");
 }
@@ -195,6 +234,7 @@ export function uninstallSystemdServices(options: UninstallSystemdServicesOption
   const output = options.output ?? process.stdout;
   const mainPath = path.join(SYSTEMD_DIR, MAIN_SERVICE_NAME);
   const adminPath = path.join(SYSTEMD_DIR, ADMIN_SERVICE_NAME);
+  const restartSudoersPath = path.join(SUDOERS_DIR, RESTART_SUDOERS_FILE);
 
   stopAndDisableIfPresent(MAIN_SERVICE_NAME);
   if (fs.existsSync(mainPath)) {
@@ -206,6 +246,9 @@ export function uninstallSystemdServices(options: UninstallSystemdServicesOption
     if (fs.existsSync(adminPath)) {
       fs.unlinkSync(adminPath);
     }
+    if (fs.existsSync(restartSudoersPath)) {
+      fs.unlinkSync(restartSudoersPath);
+    }
   }
 
   runSystemctl(["daemon-reload"]);
@@ -214,20 +257,24 @@ export function uninstallSystemdServices(options: UninstallSystemdServicesOption
   output.write(`Removed systemd unit: ${mainPath}\n`);
   if (options.removeAdmin) {
     output.write(`Removed systemd unit: ${adminPath}\n`);
+    output.write(`Removed sudoers policy: ${restartSudoersPath}\n`);
   }
   output.write("Done.\n");
 }
 
 export function restartSystemdServices(options: RestartSystemdServicesOptions): void {
   assertLinuxWithSystemd();
-  assertRootPrivileges();
 
   const output = options.output ?? process.stdout;
-  runSystemctl(["restart", MAIN_SERVICE_NAME]);
+  const runWithSudoFallback = options.allowSudoFallback ?? true;
+  const systemctlRunner =
+    hasRootPrivileges() || !runWithSudoFallback ? runSystemctl : runSystemctlWithNonInteractiveSudo;
+
+  systemctlRunner(["restart", MAIN_SERVICE_NAME]);
   output.write(`Restarted service: ${MAIN_SERVICE_NAME}\n`);
 
   if (options.restartAdmin) {
-    runSystemctl(["restart", ADMIN_SERVICE_NAME]);
+    systemctlRunner(["restart", ADMIN_SERVICE_NAME]);
     output.write(`Restarted service: ${ADMIN_SERVICE_NAME}\n`);
   }
 
@@ -279,13 +326,16 @@ function assertLinuxWithSystemd(): void {
 }
 
 function assertRootPrivileges(): void {
-  if (typeof process.getuid !== "function") {
-    return;
-  }
-
-  if (process.getuid() !== 0) {
+  if (!hasRootPrivileges()) {
     throw new Error("Root privileges are required. Run with sudo.");
   }
+}
+
+function hasRootPrivileges(): boolean {
+  if (typeof process.getuid !== "function") {
+    return true;
+  }
+  return process.getuid() === 0;
 }
 
 function ensureUserExists(runUser: string): void {
@@ -300,6 +350,18 @@ function runSystemctl(args: string[]): void {
   runCommand("systemctl", args);
 }
 
+function runSystemctlWithNonInteractiveSudo(args: string[]): void {
+  const systemctlPath = resolveSystemctlPath();
+  try {
+    runCommand("sudo", ["-n", systemctlPath, ...args]);
+  } catch (error) {
+    throw new Error(
+      "Root privileges are required. Configure passwordless sudo for the CodeHarbor service user or run the CLI command manually with sudo.",
+      { cause: error },
+    );
+  }
+}
+
 function stopAndDisableIfPresent(unitName: string): void {
   runSystemctlIgnoreFailure(["disable", "--now", unitName]);
 }
@@ -310,6 +372,23 @@ function runSystemctlIgnoreFailure(args: string[]): void {
   } catch {
     // Ignore best-effort cleanup failures.
   }
+}
+
+function resolveSystemctlPath(): string {
+  const candidates: string[] = [];
+  const pathEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    candidates.push(path.join(entry, "systemctl"));
+  }
+  candidates.push("/usr/bin/systemctl", "/bin/systemctl", "/usr/local/bin/systemctl");
+
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate) && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error("Unable to resolve absolute systemctl path.");
 }
 
 function runCommand(file: string, args: string[]): string {
