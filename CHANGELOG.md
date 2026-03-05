@@ -17,6 +17,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - `AGENT_WORKFLOW_ENABLED` (default `false`)
   - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS` (default `1`)
 - Added Admin global-config support for `agentWorkflow` settings (API + UI + `.env` persistence).
+- Fixed Admin runtime compatibility when legacy config objects do not include `agentWorkflow` (defaults now auto-filled).
 - Improved `service` UX with automatic sudo elevation:
   - `codeharbor service install|restart|uninstall` now auto re-executes via sudo when needed.
   - no more mandatory `sudo "$(command -v codeharbor)" ...` in normal interactive environments.

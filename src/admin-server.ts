@@ -468,20 +468,21 @@ export class AdminServer {
 
     if ("agentWorkflow" in body) {
       const workflow = asObject(body.agentWorkflow, "agentWorkflow");
+      const currentAgentWorkflow = ensureAgentWorkflowConfig(this.config);
       if ("enabled" in workflow) {
-        const value = normalizeBoolean(workflow.enabled, this.config.agentWorkflow.enabled);
-        this.config.agentWorkflow.enabled = value;
+        const value = normalizeBoolean(workflow.enabled, currentAgentWorkflow.enabled);
+        currentAgentWorkflow.enabled = value;
         envUpdates.AGENT_WORKFLOW_ENABLED = String(value);
         updatedKeys.push("agentWorkflow.enabled");
       }
       if ("autoRepairMaxRounds" in workflow) {
         const value = normalizePositiveInt(
           workflow.autoRepairMaxRounds,
-          this.config.agentWorkflow.autoRepairMaxRounds,
+          currentAgentWorkflow.autoRepairMaxRounds,
           0,
           10,
         );
-        this.config.agentWorkflow.autoRepairMaxRounds = value;
+        currentAgentWorkflow.autoRepairMaxRounds = value;
         envUpdates.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS = String(value);
         updatedKeys.push("agentWorkflow.autoRepairMaxRounds");
       }
@@ -639,8 +640,23 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     matrixTypingTimeoutMs: config.matrixTypingTimeoutMs,
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     cliCompat: { ...config.cliCompat },
-    agentWorkflow: { ...config.agentWorkflow },
+    agentWorkflow: { ...ensureAgentWorkflowConfig(config) },
   };
+}
+
+function ensureAgentWorkflowConfig(config: AppConfig): AppConfig["agentWorkflow"] {
+  const mutable = config as AppConfig & { agentWorkflow?: AppConfig["agentWorkflow"] };
+  const existing = mutable.agentWorkflow;
+  if (existing && typeof existing.enabled === "boolean" && Number.isFinite(existing.autoRepairMaxRounds)) {
+    return existing;
+  }
+
+  const fallback: AppConfig["agentWorkflow"] = {
+    enabled: false,
+    autoRepairMaxRounds: 1,
+  };
+  mutable.agentWorkflow = fallback;
+  return fallback;
 }
 
 function formatAuditEntry(entry: ConfigRevisionRecord): {
