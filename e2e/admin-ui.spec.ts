@@ -132,7 +132,27 @@ test("loads global settings page and fetches initial config", async ({ page }) =
   await expect(page).toHaveTitle(/CodeHarbor Admin Console/);
   await expect(page.locator('[data-view="settings-global"]')).toBeVisible();
   await expect(page.locator("#global-matrix-prefix")).toHaveValue("!code");
+  await expect(page.locator("#global-agent-enabled")).not.toBeChecked();
+  await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("1");
   await expect(page.locator("#notice")).toContainText("Global config loaded.");
+});
+
+test("saves global agent workflow settings and persists to env", async ({ page }) => {
+  await page.goto(`${baseUrl}/settings/global`);
+
+  await page.check("#global-agent-enabled");
+  await page.fill("#global-agent-repair-rounds", "3");
+  await page.click("#global-save-btn");
+
+  await expect(page.locator("#global-agent-enabled")).toBeChecked();
+  await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
+  await page.click("#global-reload-btn");
+  await expect(page.locator("#global-agent-enabled")).toBeChecked();
+  await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
+
+  const envRaw = fs.readFileSync(path.join(paths.dir, ".env"), "utf8");
+  expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");
+  expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=3");
 });
 
 test("saves room config and shows in room list", async ({ page }) => {

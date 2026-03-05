@@ -275,6 +275,103 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("已请求停止当前任务"))).toBe(true);
   });
 
+  it("runs /agents workflow and reports /agents status when enabled", async () => {
+    const channel = new FakeChannel();
+    const store = new InMemoryStateStore();
+    const executor = new ScriptedExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "planner-thread",
+            reply: "1) plan\n2) execute\n3) verify",
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: APPROVED\nSUMMARY: pass\nISSUES:\n- none",
+          }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "executor-thread",
+          reply: "delivery result",
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/agents run 生成发布摘要" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/agents status" }));
+
+    expect(executor.calls[0]?.prompt).toContain("[role:planner]");
+    expect(executor.calls[1]?.prompt).toContain("[role:executor]");
+    expect(executor.calls[2]?.prompt).toContain("[role:reviewer]");
+    expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("approved: yes"))).toBe(true);
+  });
+
+  it("cancels in-flight /agents run with /stop", async () => {
+    const channel = new FakeChannel();
+    const store = new InMemoryStateStore();
+    let rejectRunning: ((error: unknown) => void) | null = null;
+    const executor = new ScriptedExecutor((input) => {
+      if (!input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "thread-fast",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      }
+      const result = new Promise<{ sessionId: string; reply: string }>((_resolve, reject) => {
+        rejectRunning = reject;
+      });
+      return {
+        result,
+        cancel: () => {
+          rejectRunning?.(new CodexExecutionCancelledError());
+        },
+      };
+    });
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    const running = orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/agents run 长任务" }));
+    await Promise.resolve();
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/stop" }));
+    await expect(running).resolves.toBeUndefined();
+
+    expect(channel.notices.some((entry) => entry.text.includes("已请求停止当前任务"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow 已取消"))).toBe(true);
+  });
+
   it("rejects over-limit requests", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor();

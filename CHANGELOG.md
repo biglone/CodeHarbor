@@ -11,6 +11,22 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - `Restart Main + Admin`
 - Added Admin API endpoint `POST /api/admin/service/restart` (token/cors protected) to trigger managed service restart.
 
+## [0.1.11] - 2026-03-05
+
+- Added dedicated workflow unit tests for Phase B multi-agent runner:
+  - `/agents` command parsing
+  - reviewer malformed verdict fallback behavior
+  - auto-repair round cap and session reuse behavior
+  - cancellation propagation from orchestrator to runner
+- Added matrix regression coverage for multi-agent command flow:
+  - `/agents run` execution path
+  - `/agents status` snapshot reporting
+  - `/stop` cancellation during in-flight workflow
+- Added Admin UI Playwright coverage for global `agentWorkflow` controls:
+  - default value rendering for enable toggle and repair rounds
+  - save + reload consistency
+  - `.env` persistence assertions for workflow settings
+
 ## [0.1.10] - 2026-03-05
 
 - Added Phase B opt-in multi-agent workflow engine (`Planner -> Executor -> Reviewer`) with automatic repair rounds.
