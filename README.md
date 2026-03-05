@@ -391,6 +391,17 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/status` show session + limiter + metrics + runtime worker status
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
+  - `/agents status` show multi-agent workflow status for current session (when enabled)
+  - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
+
+### Multi-Agent Workflow (Phase B, Opt-In)
+
+- `AGENT_WORKFLOW_ENABLED=true`
+  - enable `/agents` workflow commands
+- `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`
+  - reviewer reject loop upper bound (default `1`)
+
+Default is disabled to keep legacy behavior unchanged.
 
 ## CLI Compatibility Mode
 

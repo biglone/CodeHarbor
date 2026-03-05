@@ -45,6 +45,15 @@ const configSchema = z
     CODEX_APPROVAL_POLICY: z.string().optional(),
     CODEX_EXTRA_ARGS: z.string().default(""),
     CODEX_EXTRA_ENV_JSON: z.string().default(""),
+    AGENT_WORKFLOW_ENABLED: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS: z
+      .string()
+      .default("1")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(0).max(10)),
     STATE_DB_PATH: z.string().default("data/state.db"),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
@@ -189,6 +198,10 @@ const configSchema = z
     codexApprovalPolicy: v.CODEX_APPROVAL_POLICY?.trim() || null,
     codexExtraArgs: parseExtraArgs(v.CODEX_EXTRA_ARGS),
     codexExtraEnv: parseExtraEnv(v.CODEX_EXTRA_ENV_JSON),
+    agentWorkflow: {
+      enabled: v.AGENT_WORKFLOW_ENABLED,
+      autoRepairMaxRounds: v.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS,
+    },
     stateDbPath: path.resolve(v.STATE_DB_PATH),
     legacyStateJsonPath: v.STATE_PATH.trim() ? path.resolve(v.STATE_PATH) : null,
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,

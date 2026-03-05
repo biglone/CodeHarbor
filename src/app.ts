@@ -56,6 +56,7 @@ export class CodeHarborApp {
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,
       cliCompat: config.cliCompat,
+      multiAgentWorkflow: config.agentWorkflow,
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
     });

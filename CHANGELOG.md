@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows semantic versioning.
 
+## [Unreleased]
+
+- Added Phase B opt-in multi-agent workflow engine (`Planner -> Executor -> Reviewer`) with automatic repair rounds.
+- Added workflow chat commands:
+  - `/agents run <objective>` to execute multi-agent pipeline
+  - `/agents status` to inspect latest workflow state for current session
+- Added workflow cancellation compatibility so existing `/stop` can cancel active multi-agent runs.
+- Added new runtime config:
+  - `AGENT_WORKFLOW_ENABLED` (default `false`)
+  - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS` (default `1`)
+- Updated docs and config snapshot export/import schema to include the new workflow settings.
+- Added regression tests to verify:
+  - legacy behavior remains unchanged when workflow is disabled
+  - workflow execution/status works when explicitly enabled
+
 ## [0.1.9] - 2026-03-04
 
 - Fixed systemd unit defaults to avoid Codex session write failures under user-home runtime.

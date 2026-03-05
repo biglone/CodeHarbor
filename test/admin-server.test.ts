@@ -34,6 +34,10 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     codexApprovalPolicy: null,
     codexExtraArgs: [],
     codexExtraEnv: {},
+    agentWorkflow: {
+      enabled: false,
+      autoRepairMaxRounds: 1,
+    },
     stateDbPath: dbPath,
     legacyStateJsonPath: legacyPath,
     maxProcessedEventsPerSession: 200,

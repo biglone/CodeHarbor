@@ -152,6 +152,50 @@ class CancellableExecutor {
   }
 }
 
+class WorkflowExecutor {
+  callCount = 0;
+  reviewCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null }> = [];
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
+
+    let reply = `echo:${text}`;
+    if (text.includes("[role:planner]")) {
+      reply = "1) 拆解任务\n2) 编写实现\n3) 验证并交付";
+    } else if (text.includes("[role:executor]") && text.includes("[reviewer_feedback]")) {
+      reply = "已根据审查反馈完成修复版本。";
+    } else if (text.includes("[role:executor]")) {
+      reply = "初始交付版本。";
+    } else if (text.includes("[role:reviewer]")) {
+      this.reviewCount += 1;
+      if (this.reviewCount === 1) {
+        reply = "VERDICT: REJECTED\nSUMMARY: 首轮不通过\nISSUES:\n- 缺少关键细节";
+      } else {
+        reply = "VERDICT: APPROVED\nSUMMARY: 通过\nISSUES:\n- none";
+      }
+    }
+
+    return {
+      result: Promise.resolve({
+        sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+        reply,
+      }),
+      cancel: () => {},
+    };
+  }
+}
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -374,5 +418,63 @@ describe("Orchestrator", () => {
 
     expect(executor.calls).toHaveLength(1);
     expect(channel.sent[0]?.text).toBe("ok:do this");
+  });
+
+  it("keeps legacy behavior when workflow is disabled", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 生成方案",
+        eventId: "$legacy-workflow",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.text).toBe("/agents run 生成方案");
+    expect(channel.sent[0]?.text).toBe("ok:/agents run 生成方案");
+  });
+
+  it("runs multi-agent workflow when enabled", async () => {
+    const channel = new FakeChannel();
+    const executor = new WorkflowExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 分析并落盘",
+        eventId: "$wf-1",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents status",
+        eventId: "$wf-status",
+      }),
+    );
+
+    expect(executor.callCount).toBeGreaterThanOrEqual(5);
+    expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
+    expect(channel.sent.some((entry) => entry.text.includes("[planner]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
   });
 });

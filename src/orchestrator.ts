@@ -17,6 +17,12 @@ import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./
 import { StateStore } from "./store/state-store";
 import { InboundMessage } from "./types";
 import { extractCommandText } from "./utils/message";
+import {
+  createIdleWorkflowSnapshot,
+  MultiAgentWorkflowRunner,
+  parseWorkflowCommand,
+  type WorkflowRunSnapshot,
+} from "./workflow/multi-agent-workflow";
 
 interface OrchestratorOptions {
   lockTtlMs?: number;
@@ -31,6 +37,10 @@ interface OrchestratorOptions {
   roomTriggerPolicies?: RoomTriggerPolicyOverrides;
   rateLimiterOptions?: RateLimiterOptions;
   cliCompat?: CliCompatConfig;
+  multiAgentWorkflow?: {
+    enabled: boolean;
+    autoRepairMaxRounds: number;
+  };
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
 }
@@ -175,6 +185,8 @@ export class Orchestrator {
   private readonly rateLimiter: RateLimiter;
   private readonly cliCompat: CliCompatConfig;
   private readonly cliCompatRecorder: CliCompatRecorder | null;
+  private readonly workflowRunner: MultiAgentWorkflowRunner;
+  private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
@@ -228,6 +240,10 @@ export class Orchestrator {
         maxConcurrentPerRoom: 4,
       },
     );
+    this.workflowRunner = new MultiAgentWorkflowRunner(this.executor, this.logger, {
+      enabled: options?.multiAgentWorkflow?.enabled ?? false,
+      autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
+    });
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
@@ -278,6 +294,13 @@ export class Orchestrator {
         return;
       }
 
+      const workflowCommand = this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
+      if (workflowCommand?.kind === "status") {
+        await this.handleWorkflowStatusCommand(sessionKey, message);
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        return;
+      }
+
       const rateDecision = this.rateLimiter.tryAcquire({
         userId: message.senderId,
         roomId: message.conversationId,
@@ -293,6 +316,38 @@ export class Orchestrator {
           retryAfterMs: rateDecision.retryAfterMs ?? null,
           queueWaitMs,
         });
+        return;
+      }
+
+      if (workflowCommand?.kind === "run") {
+        const executionStartedAt = Date.now();
+        let sendDurationMs = 0;
+        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+        try {
+          const sendStartedAt = Date.now();
+          await this.handleWorkflowRunCommand(
+            workflowCommand.objective,
+            sessionKey,
+            message,
+            requestId,
+            roomConfig.workdir,
+          );
+          sendDurationMs += Date.now() - sendStartedAt;
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+        } catch (error) {
+          sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
+          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+          const status = classifyExecutionOutcome(error);
+          this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+          this.logger.error("Workflow request failed", {
+            requestId,
+            sessionKey,
+            error: formatError(error),
+          });
+        } finally {
+          rateDecision.release?.();
+        }
         return;
       }
 
@@ -553,6 +608,7 @@ export class Orchestrator {
     const metrics = this.metrics.snapshot(this.runningExecutions.size);
     const limiter = this.rateLimiter.snapshot();
     const runtime = this.sessionRuntime.getRuntimeStats();
+    const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -568,8 +624,137 @@ export class Orchestrator {
 - 限流并发: global=${limiter.activeGlobal}, users=${limiter.activeUsers}, rooms=${limiter.activeRooms}
 - CLI runtime: workers=${runtime.workerCount}, running=${runtime.runningCount}, compat_mode=${
         this.cliCompat.enabled ? "on" : "off"
-      }`,
+      }
+- Multi-Agent workflow: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${workflow.state}`,
     );
+  }
+
+  private async handleWorkflowStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
+    const snapshot = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] Multi-Agent 工作流状态
+- state: ${snapshot.state}
+- startedAt: ${snapshot.startedAt ?? "N/A"}
+- endedAt: ${snapshot.endedAt ?? "N/A"}
+- objective: ${snapshot.objective ?? "N/A"}
+- approved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
+- repairRounds: ${snapshot.repairRounds}
+- error: ${snapshot.error ?? "N/A"}`,
+    );
+  }
+
+  private async handleWorkflowRunCommand(
+    objective: string,
+    sessionKey: string,
+    message: InboundMessage,
+    requestId: string,
+    workdir: string,
+  ): Promise<void> {
+    const normalizedObjective = objective.trim();
+    if (!normalizedObjective) {
+      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] /agents run 需要提供任务目标。");
+      return;
+    }
+
+    const requestStartedAt = Date.now();
+    let progressNoticeEventId: string | null = null;
+    const progressCtx: SendProgressContext = {
+      conversationId: message.conversationId,
+      isDirectMessage: message.isDirectMessage,
+      getProgressNoticeEventId: () => progressNoticeEventId,
+      setProgressNoticeEventId: (next) => {
+        progressNoticeEventId = next;
+      },
+    };
+
+    const startedAtIso = new Date().toISOString();
+    this.workflowSnapshots.set(sessionKey, {
+      state: "running",
+      startedAt: startedAtIso,
+      endedAt: null,
+      objective: normalizedObjective,
+      approved: null,
+      repairRounds: 0,
+      error: null,
+    });
+
+    const stopTyping = this.startTypingHeartbeat(message.conversationId);
+    let cancelWorkflow = (): void => {};
+    let cancelRequested = false;
+    this.runningExecutions.set(sessionKey, {
+      requestId,
+      startedAt: requestStartedAt,
+      cancel: () => {
+        cancelRequested = true;
+        cancelWorkflow();
+      },
+    });
+
+    await this.sendProgressUpdate(progressCtx, "[CodeHarbor] Multi-Agent workflow 启动：Planner -> Executor -> Reviewer");
+
+    try {
+      const result = await this.workflowRunner.run({
+        objective: normalizedObjective,
+        workdir,
+        onRegisterCancel: (cancel) => {
+          cancelWorkflow = cancel;
+          if (cancelRequested) {
+            cancelWorkflow();
+          }
+        },
+        onProgress: async (event) => {
+          const stepLabel = event.stage.toUpperCase();
+          await this.sendProgressUpdate(progressCtx, `[CodeHarbor] [${stepLabel}] ${event.message}`);
+        },
+      });
+
+      const endedAtIso = new Date().toISOString();
+      this.workflowSnapshots.set(sessionKey, {
+        state: "succeeded",
+        startedAt: startedAtIso,
+        endedAt: endedAtIso,
+        objective: normalizedObjective,
+        approved: result.approved,
+        repairRounds: result.repairRounds,
+        error: null,
+      });
+
+      await this.channel.sendMessage(message.conversationId, buildWorkflowResultReply(result));
+      await this.finishProgress(progressCtx, `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`);
+    } catch (error) {
+      const status = classifyExecutionOutcome(error);
+      const endedAtIso = new Date().toISOString();
+      this.workflowSnapshots.set(sessionKey, {
+        state: status === "cancelled" ? "idle" : "failed",
+        startedAt: startedAtIso,
+        endedAt: endedAtIso,
+        objective: normalizedObjective,
+        approved: null,
+        repairRounds: 0,
+        error: formatError(error),
+      });
+      await this.finishProgress(progressCtx, buildFailureProgressSummary(status, requestStartedAt, error));
+      throw error;
+    } finally {
+      const running = this.runningExecutions.get(sessionKey);
+      if (running?.requestId === requestId) {
+        this.runningExecutions.delete(sessionKey);
+      }
+      await stopTyping();
+    }
+  }
+
+  private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
+    const startedAt = Date.now();
+    const status = classifyExecutionOutcome(error);
+    if (status === "cancelled") {
+      await this.channel.sendNotice(conversationId, "[CodeHarbor] Multi-Agent workflow 已取消。");
+      return Date.now() - startedAt;
+    }
+
+    await this.channel.sendMessage(conversationId, `[CodeHarbor] Multi-Agent workflow 失败: ${formatError(error)}`);
+    return Date.now() - startedAt;
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
@@ -940,4 +1125,32 @@ function buildFailureProgressSummary(
     return `处理超时（耗时 ${elapsed}）: ${formatError(error)}`;
   }
   return `处理失败（耗时 ${elapsed}）: ${formatError(error)}`;
+}
+
+function buildWorkflowResultReply(result: {
+  objective: string;
+  plan: string;
+  output: string;
+  review: string;
+  approved: boolean;
+  repairRounds: number;
+  durationMs: number;
+}): string {
+  return `[CodeHarbor] Multi-Agent workflow 完成
+- objective: ${result.objective}
+- approved: ${result.approved ? "yes" : "no"}
+- repairRounds: ${result.repairRounds}
+- duration: ${formatDurationMs(result.durationMs)}
+
+[planner]
+${result.plan}
+[/planner]
+
+[executor]
+${result.output}
+[/executor]
+
+[reviewer]
+${result.review}
+[/reviewer]`;
 }
