@@ -403,13 +403,22 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
   - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
+  - `/autodev status` show AutoDev doc/task summary + run snapshot (when enabled)
+  - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 
 - `AGENT_WORKFLOW_ENABLED=true`
-  - enable `/agents` workflow commands
+  - enable `/agents` and `/autodev` workflow commands
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`
   - reviewer reject loop upper bound (default `1`)
+
+AutoDev (`/autodev`) conventions:
+
+- Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
+- `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
+- `/autodev run` selects `🔄` task first, then `⬜` task.
+- When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 
 Default is disabled to keep legacy behavior unchanged.
 

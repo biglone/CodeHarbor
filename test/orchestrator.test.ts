@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
@@ -441,6 +445,120 @@ describe("Orchestrator", () => {
     expect(executor.calls).toHaveLength(1);
     expect(executor.calls[0]?.text).toBe("/agents run 生成方案");
     expect(channel.sent[0]?.text).toBe("ok:/agents run 生成方案");
+  });
+
+  it("keeps legacy behavior for /autodev when workflow is disabled", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev run T1.1",
+        eventId: "$legacy-autodev",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]?.text).toBe("/autodev run T1.1");
+    expect(channel.sent[0]?.text).toBe("ok:/autodev run T1.1");
+  });
+
+  it("runs /autodev and marks selected task completed when approved", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Requirements\n- implement T9.1\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |",
+        "|--------|----------|----------|--------|------|------|",
+        "| T9.1 | 实现自动化能力 | 1h | P0 | - | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T9.1 | 实现自动化能力 | 1h | P0 | - | ✅ |");
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 启动任务 T9.1"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 任务结果"))).toBe(true);
+      expect(executor.calls.some((call) => call.text.includes("[role:planner]"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports /autodev status with task summary and next task", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T1.1 | first | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("nextTask: T1.1 first (⬜)"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("runs multi-agent workflow when enabled", async () => {

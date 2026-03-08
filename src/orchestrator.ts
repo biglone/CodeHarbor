@@ -21,8 +21,19 @@ import {
   createIdleWorkflowSnapshot,
   MultiAgentWorkflowRunner,
   parseWorkflowCommand,
+  type MultiAgentWorkflowRunResult,
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
+import {
+  buildAutoDevObjective,
+  formatTaskForDisplay,
+  loadAutoDevContext,
+  parseAutoDevCommand,
+  selectAutoDevTask,
+  statusToSymbol,
+  summarizeAutoDevTasks,
+  updateAutoDevTaskStatus,
+} from "./workflow/autodev";
 
 interface OrchestratorOptions {
   lockTtlMs?: number;
@@ -82,6 +93,17 @@ interface RoomRuntimeConfig {
   enabled: boolean;
   triggerPolicy: TriggerPolicy;
   workdir: string;
+}
+
+interface AutoDevRunSnapshot {
+  state: "idle" | "running" | "succeeded" | "failed";
+  startedAt: string | null;
+  endedAt: string | null;
+  taskId: string | null;
+  taskDescription: string | null;
+  approved: boolean | null;
+  repairRounds: number;
+  error: string | null;
 }
 
 class RequestMetrics {
@@ -187,6 +209,7 @@ export class Orchestrator {
   private readonly cliCompatRecorder: CliCompatRecorder | null;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
+  private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
@@ -295,8 +318,14 @@ export class Orchestrator {
       }
 
       const workflowCommand = this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
+      const autoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
       if (workflowCommand?.kind === "status") {
         await this.handleWorkflowStatusCommand(sessionKey, message);
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        return;
+      }
+      if (autoDevCommand?.kind === "status") {
+        await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
         this.stateStore.markEventProcessed(sessionKey, message.eventId);
         return;
       }
@@ -341,6 +370,38 @@ export class Orchestrator {
           const status = classifyExecutionOutcome(error);
           this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
           this.logger.error("Workflow request failed", {
+            requestId,
+            sessionKey,
+            error: formatError(error),
+          });
+        } finally {
+          rateDecision.release?.();
+        }
+        return;
+      }
+
+      if (autoDevCommand?.kind === "run") {
+        const executionStartedAt = Date.now();
+        let sendDurationMs = 0;
+        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+        try {
+          const sendStartedAt = Date.now();
+          await this.handleAutoDevRunCommand(
+            autoDevCommand.taskId,
+            sessionKey,
+            message,
+            requestId,
+            roomConfig.workdir,
+          );
+          sendDurationMs += Date.now() - sendStartedAt;
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+        } catch (error) {
+          sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
+          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+          const status = classifyExecutionOutcome(error);
+          this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+          this.logger.error("AutoDev request failed", {
             requestId,
             sessionKey,
             error: formatError(error),
@@ -609,6 +670,7 @@ export class Orchestrator {
     const limiter = this.rateLimiter.snapshot();
     const runtime = this.sessionRuntime.getRuntimeStats();
     const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
+    const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -625,7 +687,8 @@ export class Orchestrator {
 - CLI runtime: workers=${runtime.workerCount}, running=${runtime.runningCount}, compat_mode=${
         this.cliCompat.enabled ? "on" : "off"
       }
-- Multi-Agent workflow: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${workflow.state}`,
+- Multi-Agent workflow: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${workflow.state}
+- AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, task=${autoDev.taskId ?? "N/A"}`,
     );
   }
 
@@ -644,17 +707,185 @@ export class Orchestrator {
     );
   }
 
+  private async handleAutoDevStatusCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    workdir: string,
+  ): Promise<void> {
+    const snapshot = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
+    try {
+      const context = await loadAutoDevContext(workdir);
+      const summary = summarizeAutoDevTasks(context.tasks);
+      const nextTask = selectAutoDevTask(context.tasks);
+
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] AutoDev 状态
+- workdir: ${workdir}
+- REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
+- TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
+- nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}
+- runState: ${snapshot.state}
+- runTask: ${snapshot.taskId ? `${snapshot.taskId} ${snapshot.taskDescription ?? ""}`.trim() : "N/A"}
+- runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
+- runError: ${snapshot.error ?? "N/A"}`,
+      );
+    } catch (error) {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
+    }
+  }
+
+  private async handleAutoDevRunCommand(
+    taskId: string | null,
+    sessionKey: string,
+    message: InboundMessage,
+    requestId: string,
+    workdir: string,
+  ): Promise<void> {
+    const requestedTaskId = taskId?.trim() || null;
+    const context = await loadAutoDevContext(workdir);
+    if (!context.requirementsContent) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] AutoDev 需要 ${context.requirementsPath}，请先准备需求文档。`,
+      );
+      return;
+    }
+    if (!context.taskListContent) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] AutoDev 需要 ${context.taskListPath}，请先准备任务清单。`,
+      );
+      return;
+    }
+    if (context.tasks.length === 0) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 未在 TASK_LIST.md 识别到任务（需包含任务 ID 与状态列）。",
+      );
+      return;
+    }
+
+    const selectedTask = selectAutoDevTask(context.tasks, requestedTaskId);
+    if (!selectedTask) {
+      if (requestedTaskId) {
+        await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 未找到任务 ${requestedTaskId}。`);
+        return;
+      }
+      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+      return;
+    }
+    if (selectedTask.status === "completed") {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已完成（✅）。`);
+      return;
+    }
+    if (selectedTask.status === "cancelled") {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已取消（❌）。`);
+      return;
+    }
+
+    let activeTask = selectedTask;
+    let promotedToInProgress = false;
+    if (selectedTask.status === "pending") {
+      activeTask = await updateAutoDevTaskStatus(context.taskListPath, selectedTask, "in_progress");
+      promotedToInProgress = true;
+    }
+
+    const startedAtIso = new Date().toISOString();
+    this.autoDevSnapshots.set(sessionKey, {
+      state: "running",
+      startedAt: startedAtIso,
+      endedAt: null,
+      taskId: activeTask.id,
+      taskDescription: activeTask.description,
+      approved: null,
+      repairRounds: 0,
+      error: null,
+    });
+
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+    );
+
+    try {
+      const result = await this.handleWorkflowRunCommand(
+        buildAutoDevObjective(activeTask),
+        sessionKey,
+        message,
+        requestId,
+        workdir,
+      );
+      if (!result) {
+        return;
+      }
+
+      let finalTask = activeTask;
+      if (result.approved) {
+        finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
+      }
+      const endedAtIso = new Date().toISOString();
+      this.autoDevSnapshots.set(sessionKey, {
+        state: "succeeded",
+        startedAt: startedAtIso,
+        endedAt: endedAtIso,
+        taskId: finalTask.id,
+        taskDescription: finalTask.description,
+        approved: result.approved,
+        repairRounds: result.repairRounds,
+        error: null,
+      });
+
+      const refreshed = await loadAutoDevContext(workdir);
+      const nextTask = selectAutoDevTask(refreshed.tasks);
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] AutoDev 任务结果
+- task: ${finalTask.id}
+- reviewer approved: ${result.approved ? "yes" : "no"}
+- task status: ${statusToSymbol(finalTask.status)}
+- nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
+      );
+    } catch (error) {
+      if (promotedToInProgress) {
+        try {
+          await updateAutoDevTaskStatus(context.taskListPath, activeTask, "pending");
+        } catch (restoreError) {
+          this.logger.warn("Failed to restore AutoDev task status after failure", {
+            taskId: activeTask.id,
+            error: formatError(restoreError),
+          });
+        }
+      }
+
+      const status = classifyExecutionOutcome(error);
+      const endedAtIso = new Date().toISOString();
+      this.autoDevSnapshots.set(sessionKey, {
+        state: status === "cancelled" ? "idle" : "failed",
+        startedAt: startedAtIso,
+        endedAt: endedAtIso,
+        taskId: activeTask.id,
+        taskDescription: activeTask.description,
+        approved: null,
+        repairRounds: 0,
+        error: formatError(error),
+      });
+      throw error;
+    }
+  }
+
   private async handleWorkflowRunCommand(
     objective: string,
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
     workdir: string,
-  ): Promise<void> {
+  ): Promise<MultiAgentWorkflowRunResult | null> {
     const normalizedObjective = objective.trim();
     if (!normalizedObjective) {
       await this.channel.sendNotice(message.conversationId, "[CodeHarbor] /agents run 需要提供任务目标。");
-      return;
+      return null;
     }
 
     const requestStartedAt = Date.now();
@@ -722,6 +953,7 @@ export class Orchestrator {
 
       await this.channel.sendMessage(message.conversationId, buildWorkflowResultReply(result));
       await this.finishProgress(progressCtx, `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`);
+      return result;
     } catch (error) {
       const status = classifyExecutionOutcome(error);
       const endedAtIso = new Date().toISOString();
@@ -754,6 +986,18 @@ export class Orchestrator {
     }
 
     await this.channel.sendMessage(conversationId, `[CodeHarbor] Multi-Agent workflow 失败: ${formatError(error)}`);
+    return Date.now() - startedAt;
+  }
+
+  private async sendAutoDevFailure(conversationId: string, error: unknown): Promise<number> {
+    const startedAt = Date.now();
+    const status = classifyExecutionOutcome(error);
+    if (status === "cancelled") {
+      await this.channel.sendNotice(conversationId, "[CodeHarbor] AutoDev 已取消。");
+      return Date.now() - startedAt;
+    }
+
+    await this.channel.sendMessage(conversationId, `[CodeHarbor] AutoDev 失败: ${formatError(error)}`);
     return Date.now() - startedAt;
   }
 
@@ -990,6 +1234,19 @@ export class Orchestrator {
       this.sessionLocks.delete(sessionKey);
     }
   }
+}
+
+function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
+  return {
+    state: "idle",
+    startedAt: null,
+    endedAt: null,
+    taskId: null,
+    taskDescription: null,
+    approved: null,
+    repairRounds: 0,
+    error: null,
+  };
 }
 
 export function buildSessionKey(message: InboundMessage): string {
