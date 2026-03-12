@@ -50,14 +50,18 @@ jobs:
 
       - name: Checkout
         if: steps.intent.outputs.publish == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
         if: steps.intent.outputs.publish == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
+
+      - name: Upgrade npm for trusted publishing
+        if: steps.intent.outputs.publish == 'true'
+        run: npm install -g npm@11.5.1
 
       - name: Install dependencies
         if: steps.intent.outputs.publish == 'true'
