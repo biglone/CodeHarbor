@@ -92,6 +92,12 @@ These must be valid before `codeharbor start`.
 | `ADMIN_ALLOWED_ORIGINS` | No | empty | No | Restart | Optional browser origin allowlist for CORS (`https://admin.example.com`) |
 | `LOG_LEVEL` | No | `info` | No | Restart | Logger level |
 
+`ADMIN_TOKENS_JSON` example:
+
+```json
+[{"token":"admin-secret","role":"admin","actor":"ops-admin"},{"token":"viewer-secret","role":"viewer","actor":"ops-audit"}]
+```
+
 ## Recommended Operating Profiles
 
 1. Local single machine

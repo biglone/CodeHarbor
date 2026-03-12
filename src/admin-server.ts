@@ -219,6 +219,20 @@ export class AdminServer {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/admin/auth/status") {
+        this.sendJson(res, 200, {
+          ok: true,
+          data: {
+            authenticated: Boolean(authIdentity),
+            role: authIdentity?.role ?? null,
+            source: authIdentity?.source ?? "none",
+            actor: resolveIdentityActor(authIdentity),
+            canWrite: authIdentity ? hasRequiredAdminRole(authIdentity.role, "admin") : false,
+          },
+        });
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/admin/config/global") {
         this.sendJson(res, 200, {
           ok: true,
@@ -988,12 +1002,20 @@ function readAdminToken(req: http.IncomingMessage): string | null {
   return fromHeader || null;
 }
 
+function resolveIdentityActor(identity: AdminAuthIdentity | null): string | null {
+  if (!identity || identity.source !== "scoped") {
+    return null;
+  }
+  if (identity.actor) {
+    return identity.actor;
+  }
+  return identity.role === "admin" ? "admin-token" : "viewer-token";
+}
+
 function resolveAuditActor(req: http.IncomingMessage, identity: AdminAuthIdentity | null): string | null {
-  if (identity?.source === "scoped") {
-    if (identity.actor) {
-      return identity.actor;
-    }
-    return identity.role === "admin" ? "admin-token" : "viewer-token";
+  const scopedActor = resolveIdentityActor(identity);
+  if (scopedActor) {
+    return scopedActor;
   }
 
   const actor = normalizeHeaderValue(req.headers["x-admin-actor"]);
@@ -1278,6 +1300,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
           <button id="auth-clear-btn" type="button" class="secondary">Clear Auth</button>
         </div>
         <div id="notice" class="notice">Ready.</div>
+        <p id="auth-role" class="muted">Permission: unknown</p>
       </section>
 
       <section class="panel" data-view="settings-global">
@@ -1477,6 +1500,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
         var tokenInput = document.getElementById("auth-token");
         var actorInput = document.getElementById("auth-actor");
         var noticeNode = document.getElementById("notice");
+        var authRoleNode = document.getElementById("auth-role");
         var roomListBody = document.getElementById("room-list-body");
         var healthBody = document.getElementById("health-body");
         var auditBody = document.getElementById("audit-body");
@@ -1488,6 +1512,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
           localStorage.setItem(storageTokenKey, tokenInput.value.trim());
           localStorage.setItem(storageActorKey, actorInput.value.trim());
           showNotice("ok", "Auth settings saved to localStorage.");
+          void refreshAuthStatus();
         });
 
         document.getElementById("auth-clear-btn").addEventListener("click", function () {
@@ -1496,6 +1521,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
           localStorage.removeItem(storageTokenKey);
           localStorage.removeItem(storageActorKey);
           showNotice("warn", "Auth settings cleared.");
+          void refreshAuthStatus();
         });
 
         document.getElementById("global-save-btn").addEventListener("click", saveGlobal);
@@ -1520,6 +1546,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
         } else {
           handleRoute();
         }
+        void refreshAuthStatus();
 
         function getCurrentView() {
           return routeToView[window.location.hash] || "settings-global";
@@ -1608,6 +1635,29 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
         function showNotice(type, message) {
           noticeNode.className = "notice " + type;
           noticeNode.textContent = message;
+        }
+
+        async function refreshAuthStatus() {
+          try {
+            var response = await apiRequest("/api/admin/auth/status", "GET");
+            var data = response.data || {};
+            if (!data.role) {
+              authRoleNode.textContent = "Permission: unauthenticated";
+              return;
+            }
+
+            var role = String(data.role).toUpperCase();
+            var source = data.source ? " (" + String(data.source) + ")" : "";
+            var actor = data.actor ? " as " + String(data.actor) : "";
+            authRoleNode.textContent = "Permission: " + role + source + actor;
+          } catch (error) {
+            var message = error && error.message ? String(error.message) : "";
+            if (/Unauthorized/i.test(message)) {
+              authRoleNode.textContent = "Permission: unauthenticated";
+              return;
+            }
+            authRoleNode.textContent = "Permission: unknown";
+          }
         }
 
         function renderEmptyRow(body, columns, text) {

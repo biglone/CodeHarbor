@@ -231,6 +231,15 @@ describe("AdminServer", () => {
     });
     expect(viewerRead.status).toBe(200);
 
+    const viewerStatus = await fetchJson(`${baseUrl}/api/admin/auth/status`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerStatus.status).toBe(200);
+    expect(JSON.stringify(viewerStatus.body)).toContain('"role":"viewer"');
+    expect(JSON.stringify(viewerStatus.body)).toContain('"canWrite":false');
+
     const viewerWrite = await fetchJson(`${baseUrl}/api/admin/config/global`, {
       method: "PUT",
       headers: {

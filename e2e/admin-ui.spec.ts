@@ -82,6 +82,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     adminBindHost: "127.0.0.1",
     adminPort: 0,
     adminToken: null,
+    adminTokens: [],
     adminIpAllowlist: [],
     adminAllowedOrigins: [],
     logLevel: "error",
@@ -197,4 +198,49 @@ test("renders audit records after config changes", async ({ page }) => {
 
   await expect(page.locator("#audit-body")).toContainText("update global config");
   await expect(page.locator("#audit-body")).toContainText("room_settings_upsert");
+});
+
+test("viewer token cannot write global config (403)", async ({ page }) => {
+  const isolated = createPaths("codeharbor-admin-e2e-viewer-");
+  fs.writeFileSync(path.join(isolated.dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
+  const config = createBaseConfig(isolated.dir, isolated.db, isolated.legacy);
+  config.adminTokens = [
+    { token: "viewer-token", role: "viewer", actor: "ops-viewer" },
+    { token: "admin-token", role: "admin", actor: "ops-admin" },
+  ];
+
+  const store = new StateStore(isolated.db, isolated.legacy, 200, 30, 5000);
+  const service = new ConfigService(store, isolated.dir);
+  const logger = new Logger("error");
+  const isolatedServer = new AdminServer(config, logger, store, service, {
+    host: "127.0.0.1",
+    port: 0,
+    adminToken: null,
+    adminTokens: config.adminTokens,
+    cwd: isolated.dir,
+    checkCodex: async () => ({ ok: true, version: "codex 1.0.0", error: null }),
+    checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1.10"], error: null }),
+  });
+
+  await isolatedServer.start();
+  const address = isolatedServer.getAddress();
+  if (!address) {
+    await isolatedServer.stop();
+    throw new Error("isolated admin server address is empty");
+  }
+  const isolatedUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    await page.goto(`${isolatedUrl}/settings/global`);
+    await page.fill("#auth-token", "viewer-token");
+    await page.click("#auth-save-btn");
+    await expect(page.locator("#auth-role")).toContainText("VIEWER");
+
+    await page.fill("#global-matrix-prefix", "!viewer");
+    await page.click("#global-save-btn");
+    await expect(page.locator("#notice")).toContainText("admin write permission");
+  } finally {
+    await isolatedServer.stop();
+    await store.flush();
+  }
 });

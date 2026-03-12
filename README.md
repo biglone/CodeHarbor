@@ -327,6 +327,7 @@ Open these UI routes in browser:
 
 Main endpoints:
 
+- `GET /api/admin/auth/status`
 - `GET /api/admin/config/global`
 - `PUT /api/admin/config/global`
 - `GET /api/admin/config/rooms`
@@ -354,6 +355,14 @@ RBAC behavior:
 - `viewer` tokens can call read endpoints (`GET /api/admin/*`)
 - `admin` tokens can call read + write endpoints (`PUT/POST/DELETE /api/admin/*`)
 - for `ADMIN_TOKENS_JSON`, audit actor is derived from token identity (`actor` field), not `x-admin-actor`
+- Admin UI shows current permission status (role/source) after saving auth
+
+Rotate tokens quickly (repository script):
+
+```bash
+./scripts/rotate-admin-token.sh --target rbac --role admin --actor ops-admin
+./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
+```
 
 Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
 

@@ -137,3 +137,10 @@ curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
 2. Do not treat tunnel as authentication. Keep `ADMIN_TOKEN` enabled.
 3. If exposing to broader audience, add additional gateway controls (WAF/Access rules).
 4. For config changes that are restart-scoped, restart related service after save.
+
+Token rotation helper (from repository root):
+
+```bash
+./scripts/rotate-admin-token.sh --target rbac --role admin --actor ops-admin
+./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
+```
