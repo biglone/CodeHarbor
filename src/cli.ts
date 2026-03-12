@@ -256,7 +256,11 @@ async function loadConfigWithPreflight(
   commandName: string,
   runtimeHomePath: string,
 ): Promise<ReturnType<typeof loadConfig> | null> {
-  const preflight = await runStartupPreflight({ cwd: runtimeHomePath });
+  const env = { ...process.env };
+  const preflight = await runStartupPreflight({ cwd: runtimeHomePath, env });
+  if (preflight.resolvedCodexBin) {
+    env.CODEX_BIN = preflight.resolvedCodexBin;
+  }
   if (preflight.issues.length > 0) {
     const report = formatPreflightReport(preflight, commandName);
     if (preflight.ok) {
@@ -268,7 +272,7 @@ async function loadConfigWithPreflight(
   }
 
   try {
-    return loadConfig();
+    return loadConfig(env);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`Configuration error: ${message}\n`);

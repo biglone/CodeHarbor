@@ -4,6 +4,8 @@ import { createInterface } from "node:readline/promises";
 
 import dotenv from "dotenv";
 
+import { findWorkingCodexBin } from "./codex-bin";
+
 interface InitQuestion {
   key: string;
   label: string;
@@ -47,6 +49,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 
     output.write("CodeHarbor setup wizard\n");
     output.write(`Target file: ${envPath}\n`);
+    const detectedCodexBin = await findWorkingCodexBin(existingValues.CODEX_BIN ?? "codex");
 
     const questions: InitQuestion[] = [
       {
@@ -87,7 +90,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       {
         key: "CODEX_BIN",
         label: "Codex binary",
-        fallbackValue: "codex",
+        fallbackValue: detectedCodexBin ?? "codex",
       },
       {
         key: "CODEX_WORKDIR",

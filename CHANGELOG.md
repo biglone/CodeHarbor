@@ -6,10 +6,16 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-03-12
+
 - Added Admin Console service control actions on Global settings page:
   - `Restart Main Service`
   - `Restart Main + Admin`
 - Added Admin API endpoint `POST /api/admin/service/restart` (token/cors protected) to trigger managed service restart.
+- Added Codex binary auto-detection helper and startup fallback probing when configured `CODEX_BIN` is stale.
+- Updated startup config loading to use preflight-resolved `CODEX_BIN`, reducing ENOENT failures after Codex install path changes.
+- Updated `codeharbor init` to prefill `CODEX_BIN` with detected executable path.
+- Updated `scripts/install-linux-easy.sh` to write detected absolute `CODEX_BIN` by default and support `--codex-bin`.
 
 ## [0.1.13] - 2026-03-05
 

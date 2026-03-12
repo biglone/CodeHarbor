@@ -5,6 +5,7 @@ APP_DIR="${APP_DIR:-/opt/codeharbor}"
 PACKAGE_SPEC="${PACKAGE_SPEC:-codeharbor@latest}"
 RUN_USER="${RUN_USER:-${SUDO_USER:-${USER:-}}}"
 CODEX_WORKDIR="${CODEX_WORKDIR:-${APP_DIR}}"
+CODEX_BIN_VALUE="${CODEX_BIN_VALUE:-}"
 MATRIX_COMMAND_PREFIX="${MATRIX_COMMAND_PREFIX:-!code}"
 MATRIX_HOMESERVER="${MATRIX_HOMESERVER:-}"
 MATRIX_USER_ID="${MATRIX_USER_ID:-}"
@@ -30,6 +31,7 @@ Options:
   -p, --package <spec>             npm package spec (default: codeharbor@latest)
   -u, --run-user <user>            Service and runtime owner (default: SUDO_USER or current user)
       --codex-workdir <path>       Default CODEX_WORKDIR written to .env
+      --codex-bin <path>           CODEX_BIN value written to .env (auto-detect by default)
       --matrix-homeserver <url>    MATRIX_HOMESERVER value
       --matrix-user-id <id>        MATRIX_USER_ID value
       --matrix-access-token <tok>  MATRIX_ACCESS_TOKEN value
@@ -119,6 +121,11 @@ parse_args() {
         CODEX_WORKDIR="$2"
         shift 2
         ;;
+      --codex-bin)
+        [[ $# -ge 2 ]] || fail "Missing value for $1"
+        CODEX_BIN_VALUE="$2"
+        shift 2
+        ;;
       --matrix-homeserver)
         [[ $# -ge 2 ]] || fail "Missing value for $1"
         MATRIX_HOMESERVER="$2"
@@ -185,9 +192,24 @@ validate() {
     fail "systemctl is required for service automation. Use --no-service to skip."
   fi
 
-  if [[ "${SKIP_CODEX_CHECK}" != "true" ]] && ! command -v codex >/dev/null 2>&1; then
-    fail "Cannot find `codex` in PATH. Install Codex CLI first (or pass --skip-codex-check)."
+  if [[ -n "${CODEX_BIN_VALUE}" ]]; then
+    if [[ "${SKIP_CODEX_CHECK}" != "true" ]] && ! "${CODEX_BIN_VALUE}" --version >/dev/null 2>&1; then
+      fail "Configured --codex-bin is not executable: ${CODEX_BIN_VALUE}"
+    fi
+    return
   fi
+
+  local detected_codex
+  detected_codex="$(command -v codex || true)"
+  if [[ -z "${detected_codex}" ]]; then
+    if [[ "${SKIP_CODEX_CHECK}" != "true" ]]; then
+      fail "Cannot find \`codex\` in PATH. Install Codex CLI first (or pass --skip-codex-check)."
+    fi
+    CODEX_BIN_VALUE="codex"
+    return
+  fi
+
+  CODEX_BIN_VALUE="${detected_codex}"
 }
 
 prompt_if_missing() {
@@ -251,7 +273,7 @@ MATRIX_USER_ID=$(quote_env_value "${MATRIX_USER_ID}")
 MATRIX_ACCESS_TOKEN=$(quote_env_value "${MATRIX_ACCESS_TOKEN}")
 MATRIX_COMMAND_PREFIX=$(quote_env_value "${MATRIX_COMMAND_PREFIX}")
 CODEX_WORKDIR=$(quote_env_value "${CODEX_WORKDIR}")
-CODEX_BIN=codex
+CODEX_BIN=$(quote_env_value "${CODEX_BIN_VALUE}")
 ADMIN_BIND_HOST=127.0.0.1
 ADMIN_PORT=8787
 EOF
@@ -410,6 +432,7 @@ EOF
 print_summary() {
   log "All done."
   log "Runtime home: ${APP_DIR}"
+  log "Configured CODEX_BIN: ${CODEX_BIN_VALUE}"
   if [[ "${INSTALL_SERVICE}" == "true" ]]; then
     log "systemd service: codeharbor.service (enabled)"
     if [[ "${ENABLE_ADMIN_SERVICE}" == "true" ]]; then

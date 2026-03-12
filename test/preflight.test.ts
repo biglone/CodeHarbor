@@ -42,6 +42,41 @@ describe("runStartupPreflight", () => {
     expect(result.issues.some((issue) => issue.code === "missing_codex_bin")).toBe(true);
   });
 
+  it("falls back to discovered codex binary when configured path is stale", async () => {
+    const checks: string[] = [];
+    const result = await runStartupPreflight({
+      cwd: "/tmp/work",
+      env: {
+        MATRIX_HOMESERVER: "https://matrix.example.com",
+        MATRIX_USER_ID: "@bot:example.com",
+        MATRIX_ACCESS_TOKEN: "token",
+        CODEX_BIN: "/tmp/missing/codex",
+        CODEX_WORKDIR: "/tmp/work",
+        HOME: "/home/tester",
+      },
+      checkCodexBinary: async (bin) => {
+        checks.push(bin);
+        if (bin === "/usr/bin/codex") {
+          return;
+        }
+        throw new Error("ENOENT");
+      },
+      fileExists: () => true,
+      isDirectory: () => true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.resolvedCodexBin).toBe("/usr/bin/codex");
+    expect(result.usedCodexFallback).toBe(true);
+    expect(checks[0]).toBe("/tmp/missing/codex");
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        code: "codex_bin_fallback",
+      }),
+    );
+  });
+
   it("keeps warnings non-fatal", async () => {
     const cwd = "/tmp/work";
     const envPath = path.resolve(cwd, ".env");

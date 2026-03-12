@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { findWorkingCodexBin } from "./codex-bin";
+
 const execFileAsync = promisify(execFile);
 
 const REQUIRED_ENV_KEYS = ["MATRIX_HOMESERVER", "MATRIX_USER_ID", "MATRIX_ACCESS_TOKEN"] as const;
@@ -13,6 +15,7 @@ type PreflightIssueCode =
   | "invalid_matrix_homeserver"
   | "invalid_matrix_user_id"
   | "missing_codex_bin"
+  | "codex_bin_fallback"
   | "invalid_codex_workdir";
 
 export interface PreflightIssue {
@@ -26,6 +29,8 @@ export interface PreflightIssue {
 export interface PreflightResult {
   ok: boolean;
   issues: PreflightIssue[];
+  resolvedCodexBin?: string | null;
+  usedCodexFallback?: boolean;
 }
 
 export interface PreflightOptions {
@@ -45,6 +50,8 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
 
   const issues: PreflightIssue[] = [];
   const envPath = path.resolve(cwd, ".env");
+  let resolvedCodexBin: string | null = null;
+  let usedCodexFallback = false;
 
   if (!fileExists(envPath)) {
     issues.push({
@@ -97,15 +104,31 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
   const codexBin = readEnv(env, "CODEX_BIN") || "codex";
   try {
     await checkCodexBinary(codexBin);
+    resolvedCodexBin = codexBin;
   } catch (error) {
-    const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
-    issues.push({
-      level: "error",
-      code: "missing_codex_bin",
-      check: "CODEX_BIN",
-      message: `Unable to execute "${codexBin}"${reason}.`,
-      fix: `Install Codex CLI and ensure "${codexBin}" is in PATH, or set CODEX_BIN=/absolute/path/to/codex.`,
-    });
+    const fallbackBin = await findWorkingCodexBin(codexBin, { env, checkBinary: checkCodexBinary });
+    if (fallbackBin && fallbackBin !== codexBin) {
+      resolvedCodexBin = fallbackBin;
+      usedCodexFallback = true;
+      issues.push({
+        level: "warn",
+        code: "codex_bin_fallback",
+        check: "CODEX_BIN",
+        message: `Configured CODEX_BIN "${codexBin}" is unavailable; fallback to "${fallbackBin}".`,
+        fix: `Update CODEX_BIN=${fallbackBin} in .env to avoid fallback probing on startup.`,
+      });
+    } else if (fallbackBin) {
+      resolvedCodexBin = fallbackBin;
+    } else {
+      const reason = error instanceof Error && error.message ? ` (${error.message})` : "";
+      issues.push({
+        level: "error",
+        code: "missing_codex_bin",
+        check: "CODEX_BIN",
+        message: `Unable to execute "${codexBin}"${reason}.`,
+        fix: `Install Codex CLI and ensure "${codexBin}" is in PATH, or set CODEX_BIN=/absolute/path/to/codex.`,
+      });
+    }
   }
 
   const configuredWorkdir = readEnv(env, "CODEX_WORKDIR");
@@ -123,6 +146,8 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
   return {
     ok: issues.every((issue) => issue.level !== "error"),
     issues,
+    resolvedCodexBin,
+    usedCodexFallback,
   };
 }
 
