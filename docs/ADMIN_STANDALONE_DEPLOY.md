@@ -17,14 +17,14 @@ For any non-local access, set:
 
 - `ADMIN_BIND_HOST=127.0.0.1`
 - `ADMIN_PORT=8787`
-- `ADMIN_TOKEN=<a-long-random-token>`
+- `ADMIN_TOKEN=<a-long-random-token>` or `ADMIN_TOKENS_JSON=[...]`
 - `ADMIN_ALLOWED_ORIGINS=https://admin.example.com` (when browser UI is served from a separate origin)
 
 Why this baseline:
 
 - Local bind prevents accidental direct internet exposure.
 - Public access is delegated to the gateway/tunnel layer.
-- Token protects `/api/admin/*` operations.
+- Token protects `/api/admin/*` operations (`ADMIN_TOKENS_JSON` supports viewer/admin RBAC).
 - Origin allowlist limits browser-based cross-origin access to trusted admin domains.
 
 ## 3) Start Admin Service Only
@@ -41,7 +41,7 @@ codeharbor admin serve --host 127.0.0.1 --port 8787
 
 Security guardrail:
 
-- If host is non-loopback and `ADMIN_TOKEN` is empty, startup is rejected by default.
+- If host is non-loopback and both `ADMIN_TOKEN` and `ADMIN_TOKENS_JSON` are empty, startup is rejected by default.
 - You can bypass with `--allow-insecure-no-token` (not recommended).
 
 ## 4) systemd (Recommended for Servers)

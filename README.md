@@ -311,7 +311,7 @@ Optional overrides:
 codeharbor admin serve --host 127.0.0.1 --port 8787
 ```
 
-If you bind Admin to a non-loopback host and `ADMIN_TOKEN` is empty, startup is rejected by default.
+If you bind Admin to a non-loopback host and both `ADMIN_TOKEN` and `ADMIN_TOKENS_JSON` are empty, startup is rejected by default.
 Explicit bypass exists but is not recommended:
 
 ```bash
@@ -336,7 +336,7 @@ Main endpoints:
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50`
 
-When `ADMIN_TOKEN` is set, requests must include:
+When `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON` is set, requests must include:
 
 ```http
 Authorization: Bearer <ADMIN_TOKEN>
@@ -345,8 +345,15 @@ Authorization: Bearer <ADMIN_TOKEN>
 Access control options:
 
 - `ADMIN_TOKEN`: require bearer token for `/api/admin/*`
+- `ADMIN_TOKENS_JSON`: optional multi-token RBAC list (supports `admin` and `viewer` roles)
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
 - `ADMIN_ALLOWED_ORIGINS`: optional CORS origin allowlist for browser-based cross-origin admin access
+
+RBAC behavior:
+
+- `viewer` tokens can call read endpoints (`GET /api/admin/*`)
+- `admin` tokens can call read + write endpoints (`PUT/POST/DELETE /api/admin/*`)
+- for `ADMIN_TOKENS_JSON`, audit actor is derived from token identity (`actor` field), not `x-admin-actor`
 
 Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
 

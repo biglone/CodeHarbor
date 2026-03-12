@@ -99,12 +99,13 @@ admin
     const host = options.host?.trim() || config.adminBindHost;
     const port = options.port ? parsePortOption(options.port, config.adminPort) : config.adminPort;
     const allowInsecureNoToken = options.allowInsecureNoToken ?? false;
+    const hasAdminAuth = Boolean(config.adminToken) || config.adminTokens.length > 0;
 
-    if (!config.adminToken && !allowInsecureNoToken && isNonLoopbackHost(host)) {
+    if (!hasAdminAuth && !allowInsecureNoToken && isNonLoopbackHost(host)) {
       process.stderr.write(
         [
-          "Refusing to start admin server on non-loopback host without ADMIN_TOKEN.",
-          "Fix: set ADMIN_TOKEN in .env, or explicitly pass --allow-insecure-no-token.",
+          "Refusing to start admin server on non-loopback host without admin auth token.",
+          "Fix: set ADMIN_TOKEN or ADMIN_TOKENS_JSON in .env, or explicitly pass --allow-insecure-no-token.",
           "",
         ].join("\n"),
       );

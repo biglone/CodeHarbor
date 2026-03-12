@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-03-12
+
+- Added optional `ADMIN_TOKENS_JSON` with scoped Admin API RBAC (`admin`/`viewer`) while keeping `ADMIN_TOKEN` backward compatible.
+- Enforced write protection for Admin API mutating endpoints (`PUT/POST/DELETE`) so `viewer` tokens are read-only.
+- Hardened audit attribution for scoped tokens by deriving actor from token identity instead of trusting `x-admin-actor`.
+- Updated config snapshot schema/export/import, CLI non-loopback auth guard, and admin startup logging to support multi-token auth.
+- Added Admin API tests for scoped RBAC behavior and actor anti-spoofing coverage.
+- Updated `.env.example`, README, and ops docs with RBAC configuration guidance.
+
 ## [0.1.14] - 2026-03-12
 
 - Added Admin Console service control actions on Global settings page:

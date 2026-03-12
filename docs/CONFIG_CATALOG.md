@@ -87,6 +87,7 @@ These must be valid before `codeharbor start`.
 | `ADMIN_BIND_HOST` | No | `127.0.0.1` | No | Restart | Admin listener host |
 | `ADMIN_PORT` | No | `8787` | No | Restart | Admin listener port |
 | `ADMIN_TOKEN` | No (functional), **Yes (public exposure)** | empty | UI can set header only | Restart | API bearer auth. Required for non-loopback/public usage |
+| `ADMIN_TOKENS_JSON` | No | empty | UI can set header only | Restart | Optional RBAC token list (`admin`/`viewer`) |
 | `ADMIN_IP_ALLOWLIST` | No | empty | No | Restart | Optional client IP allowlist |
 | `ADMIN_ALLOWED_ORIGINS` | No | empty | No | Restart | Optional browser origin allowlist for CORS (`https://admin.example.com`) |
 | `LOG_LEVEL` | No | `info` | No | Restart | Logger level |
@@ -99,11 +100,11 @@ These must be valid before `codeharbor start`.
 
 2. Team internal network
 - `ADMIN_BIND_HOST=0.0.0.0`
-- Set strong `ADMIN_TOKEN`
+- Set strong `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON`
 - Prefer reverse proxy/TLS and optional `ADMIN_IP_ALLOWLIST`
 
 3. Public domain via tunnel/reverse proxy
 - Keep `ADMIN_BIND_HOST=127.0.0.1`
-- Set strong `ADMIN_TOKEN`
+- Set strong `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON`
 - Expose only through trusted gateway (for example Cloudflare Tunnel)
 - Do not use `--allow-insecure-no-token`

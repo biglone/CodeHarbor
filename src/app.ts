@@ -104,6 +104,7 @@ export class CodeHarborAdminApp {
       host: options?.host ?? config.adminBindHost,
       port: options?.port ?? config.adminPort,
       adminToken: config.adminToken,
+      adminTokens: config.adminTokens,
       adminIpAllowlist: config.adminIpAllowlist,
       adminAllowedOrigins: config.adminAllowedOrigins,
     });
@@ -115,7 +116,7 @@ export class CodeHarborAdminApp {
     this.logger.info("CodeHarbor admin server started", {
       host: address?.host ?? this.config.adminBindHost,
       port: address?.port ?? this.config.adminPort,
-      tokenProtected: Boolean(this.config.adminToken),
+      tokenProtected: Boolean(this.config.adminToken) || this.config.adminTokens.length > 0,
     });
   }
 

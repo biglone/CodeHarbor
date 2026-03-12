@@ -23,6 +23,14 @@ export interface CliCompatConfig {
   recordPath: string | null;
 }
 
+export type AdminTokenRole = "admin" | "viewer";
+
+export interface AdminTokenConfig {
+  token: string;
+  role: AdminTokenRole;
+  actor: string | null;
+}
+
 const configSchema = z
   .object({
     MATRIX_HOMESERVER: z.string().url(),
@@ -180,6 +188,7 @@ const configSchema = z
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(1).max(65535)),
     ADMIN_TOKEN: z.string().default(""),
+    ADMIN_TOKENS_JSON: z.string().default(""),
     ADMIN_IP_ALLOWLIST: z.string().default(""),
     ADMIN_ALLOWED_ORIGINS: z.string().default(""),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -240,6 +249,7 @@ const configSchema = z
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,
+    adminTokens: parseAdminTokens(v.ADMIN_TOKENS_JSON),
     adminIpAllowlist: parseCsvList(v.ADMIN_IP_ALLOWLIST),
     adminAllowedOrigins: parseCsvList(v.ADMIN_ALLOWED_ORIGINS),
     logLevel: v.LOG_LEVEL,
@@ -354,4 +364,60 @@ function parseCsvList(raw: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+function parseAdminTokens(raw: string): AdminTokenConfig[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("ADMIN_TOKENS_JSON must be valid JSON.");
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("ADMIN_TOKENS_JSON must be a JSON array.");
+  }
+
+  const seenTokens = new Set<string>();
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`ADMIN_TOKENS_JSON[${index}] must be an object.`);
+    }
+
+    const payload = entry as Record<string, unknown>;
+    const tokenValue = payload.token;
+    if (typeof tokenValue !== "string" || !tokenValue.trim()) {
+      throw new Error(`ADMIN_TOKENS_JSON[${index}].token must be a non-empty string.`);
+    }
+
+    const token = tokenValue.trim();
+    if (seenTokens.has(token)) {
+      throw new Error(`ADMIN_TOKENS_JSON contains duplicated token at index ${index}.`);
+    }
+    seenTokens.add(token);
+
+    let role: AdminTokenRole = "admin";
+    if (payload.role !== undefined) {
+      if (payload.role !== "admin" && payload.role !== "viewer") {
+        throw new Error(`ADMIN_TOKENS_JSON[${index}].role must be "admin" or "viewer".`);
+      }
+      role = payload.role;
+    }
+
+    if (payload.actor !== undefined && payload.actor !== null && typeof payload.actor !== "string") {
+      throw new Error(`ADMIN_TOKENS_JSON[${index}].actor must be a string when provided.`);
+    }
+    const actor = typeof payload.actor === "string" ? payload.actor.trim() || null : null;
+
+    return {
+      token,
+      role,
+      actor,
+    };
+  });
 }

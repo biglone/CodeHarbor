@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { ConfigService } from "./config-service";
-import { AppConfig } from "./config";
+import { AdminTokenConfig, AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
 import { restartSystemdServices } from "./service-manager";
@@ -30,10 +30,20 @@ interface RestartServicesResult {
   restarted: string[];
 }
 
+type AdminAccessRole = "admin" | "viewer";
+type AdminAuthSource = "open" | "legacy" | "scoped";
+
+interface AdminAuthIdentity {
+  role: AdminAccessRole;
+  actor: string | null;
+  source: AdminAuthSource;
+}
+
 interface AdminServerOptions {
   host: string;
   port: number;
   adminToken: string | null;
+  adminTokens?: AdminTokenConfig[];
   adminIpAllowlist?: string[];
   adminAllowedOrigins?: string[];
   cwd?: string;
@@ -64,6 +74,7 @@ export class AdminServer {
   private readonly host: string;
   private readonly port: number;
   private readonly adminToken: string | null;
+  private readonly adminTokens: Map<string, Omit<AdminAuthIdentity, "source">>;
   private readonly adminIpAllowlist: string[];
   private readonly adminAllowedOrigins: string[];
   private readonly cwd: string;
@@ -87,6 +98,7 @@ export class AdminServer {
     this.host = options.host;
     this.port = options.port;
     this.adminToken = options.adminToken;
+    this.adminTokens = buildAdminTokenMap(options.adminTokens ?? []);
     this.adminIpAllowlist = normalizeAllowlist(options.adminIpAllowlist ?? []);
     this.adminAllowedOrigins = normalizeOriginAllowlist(options.adminAllowedOrigins ?? []);
     this.cwd = options.cwd ?? process.cwd();
@@ -190,10 +202,19 @@ export class AdminServer {
         return;
       }
 
-      if (url.pathname.startsWith("/api/admin/") && !this.isAuthorized(req)) {
+      const requiredRole = requiredAdminRoleForRequest(req.method, url.pathname);
+      const authIdentity = requiredRole ? this.resolveAdminIdentity(req) : null;
+      if (requiredRole && !authIdentity) {
         this.sendJson(res, 401, {
           ok: false,
-          error: "Unauthorized. Provide Authorization: Bearer <ADMIN_TOKEN>.",
+          error: "Unauthorized. Provide Authorization: Bearer <ADMIN_TOKEN> (or token from ADMIN_TOKENS_JSON).",
+        });
+        return;
+      }
+      if (requiredRole && authIdentity && !hasRequiredAdminRole(authIdentity.role, requiredRole)) {
+        this.sendJson(res, 403, {
+          ok: false,
+          error: "Forbidden. This endpoint requires admin write permission.",
         });
         return;
       }
@@ -209,7 +230,7 @@ export class AdminServer {
 
       if (req.method === "PUT" && url.pathname === "/api/admin/config/global") {
         const body = await readJsonBody(req);
-        const actor = readActor(req);
+        const actor = resolveAuditActor(req, authIdentity);
         const result = this.updateGlobalConfig(body, actor);
         this.sendJson(res, 200, {
           ok: true,
@@ -241,14 +262,14 @@ export class AdminServer {
 
         if (req.method === "PUT") {
           const body = await readJsonBody(req);
-          const actor = readActor(req);
+          const actor = resolveAuditActor(req, authIdentity);
           const room = this.updateRoomConfig(roomId, body, actor);
           this.sendJson(res, 200, { ok: true, data: room });
           return;
         }
 
         if (req.method === "DELETE") {
-          const actor = readActor(req);
+          const actor = resolveAuditActor(req, authIdentity);
           this.configService.deleteRoomSettings(roomId, actor);
           this.sendJson(res, 200, { ok: true, roomId });
           return;
@@ -281,7 +302,7 @@ export class AdminServer {
       if (req.method === "POST" && url.pathname === "/api/admin/service/restart") {
         const body = asObject(await readJsonBody(req), "service restart payload");
         const restartAdmin = normalizeBoolean(body.withAdmin, false);
-        const actor = readActor(req);
+        const actor = resolveAuditActor(req, authIdentity);
         try {
           const result = await this.restartServices(restartAdmin);
           this.stateStore.appendConfigRevision(
@@ -562,14 +583,38 @@ export class AdminServer {
     });
   }
 
-  private isAuthorized(req: http.IncomingMessage): boolean {
-    if (!this.adminToken) {
-      return true;
+  private resolveAdminIdentity(req: http.IncomingMessage): AdminAuthIdentity | null {
+    if (!this.adminToken && this.adminTokens.size === 0) {
+      return {
+        role: "admin",
+        actor: null,
+        source: "open",
+      };
     }
-    const authorization = req.headers.authorization ?? "";
-    const bearer = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
-    const fromHeader = normalizeHeaderValue(req.headers["x-admin-token"]);
-    return bearer === this.adminToken || fromHeader === this.adminToken;
+
+    const token = readAdminToken(req);
+    if (!token) {
+      return null;
+    }
+
+    if (this.adminToken && token === this.adminToken) {
+      return {
+        role: "admin",
+        actor: null,
+        source: "legacy",
+      };
+    }
+
+    const mappedIdentity = this.adminTokens.get(token);
+    if (!mappedIdentity) {
+      return null;
+    }
+
+    return {
+      role: mappedIdentity.role,
+      actor: mappedIdentity.actor,
+      source: "scoped",
+    };
   }
 
   private isClientAllowed(req: http.IncomingMessage): boolean {
@@ -929,9 +974,60 @@ function normalizeHeaderValue(value: string | string[] | undefined): string {
   return value.trim();
 }
 
-function readActor(req: http.IncomingMessage): string | null {
+function readAdminToken(req: http.IncomingMessage): string | null {
+  const authorization = normalizeHeaderValue(req.headers.authorization);
+  if (authorization) {
+    const match = /^bearer\s+(.+)$/i.exec(authorization);
+    const token = match?.[1]?.trim() ?? "";
+    if (token) {
+      return token;
+    }
+  }
+
+  const fromHeader = normalizeHeaderValue(req.headers["x-admin-token"]);
+  return fromHeader || null;
+}
+
+function resolveAuditActor(req: http.IncomingMessage, identity: AdminAuthIdentity | null): string | null {
+  if (identity?.source === "scoped") {
+    if (identity.actor) {
+      return identity.actor;
+    }
+    return identity.role === "admin" ? "admin-token" : "viewer-token";
+  }
+
   const actor = normalizeHeaderValue(req.headers["x-admin-actor"]);
   return actor || null;
+}
+
+function requiredAdminRoleForRequest(method: string | undefined, pathname: string): AdminAccessRole | null {
+  if (!pathname.startsWith("/api/admin/")) {
+    return null;
+  }
+
+  const normalizedMethod = (method ?? "GET").toUpperCase();
+  if (normalizedMethod === "GET" || normalizedMethod === "HEAD") {
+    return "viewer";
+  }
+  return "admin";
+}
+
+function hasRequiredAdminRole(role: AdminAccessRole, requiredRole: AdminAccessRole): boolean {
+  if (requiredRole === "viewer") {
+    return role === "viewer" || role === "admin";
+  }
+  return role === "admin";
+}
+
+function buildAdminTokenMap(tokens: AdminTokenConfig[]): Map<string, Omit<AdminAuthIdentity, "source">> {
+  const mapped = new Map<string, Omit<AdminAuthIdentity, "source">>();
+  for (const token of tokens) {
+    mapped.set(token.token, {
+      role: token.role,
+      actor: token.actor,
+    });
+  }
+  return mapped;
 }
 
 function formatError(error: unknown): string {

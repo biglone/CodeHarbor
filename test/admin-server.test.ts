@@ -76,6 +76,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     adminBindHost: "127.0.0.1",
     adminPort: 0,
     adminToken: null,
+    adminTokens: [],
     adminIpAllowlist: [],
     adminAllowedOrigins: [],
     logLevel: "info",
@@ -196,6 +197,108 @@ describe("AdminServer", () => {
     const ui = await fetchText(`${baseUrl}/`);
     expect(ui.status).toBe(200);
     expect(ui.body).toContain("CodeHarbor Admin Console");
+  });
+
+  it("supports scoped admin/viewer tokens with write protection", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        { token: "viewer-token", role: "viewer", actor: "ops-viewer" },
+        { token: "admin-token", role: "admin", actor: "ops-admin" },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const viewerRead = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerRead.status).toBe(200);
+
+    const viewerWrite = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer viewer-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        matrixCommandPrefix: "!viewer",
+      }),
+    });
+    expect(viewerWrite.status).toBe(403);
+
+    const adminWrite = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        matrixCommandPrefix: "!admin",
+      }),
+    });
+    expect(adminWrite.status).toBe(200);
+  });
+
+  it("derives audit actor from scoped token identity", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [{ token: "admin-token", role: "admin", actor: "ops-admin" }],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const updated = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+        "x-admin-actor": "spoofed-actor",
+      },
+      body: JSON.stringify({
+        matrixCommandPrefix: "!secure",
+      }),
+    });
+    expect(updated.status).toBe(200);
+
+    const audit = await fetchJson(`${baseUrl}/api/admin/audit?limit=5`, {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(audit.status).toBe(200);
+    expect(JSON.stringify(audit.body)).toContain('"actor":"ops-admin"');
+    expect(JSON.stringify(audit.body)).not.toContain("spoofed-actor");
   });
 
   it("writes supported global config changes into .env", async () => {

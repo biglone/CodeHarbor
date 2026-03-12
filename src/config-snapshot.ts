@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { loadConfig, type AppConfig } from "./config";
+import { loadConfig, type AdminTokenConfig, type AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { RoomSettingsRecord, RoomSettingsUpsertInput, StateStore } from "./store/state-store";
 
@@ -57,6 +57,7 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "ADMIN_BIND_HOST",
   "ADMIN_PORT",
   "ADMIN_TOKEN",
+  "ADMIN_TOKENS_JSON",
   "ADMIN_IP_ALLOWLIST",
   "ADMIN_ALLOWED_ORIGINS",
   "LOG_LEVEL",
@@ -165,6 +166,7 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     ADMIN_BIND_HOST: z.string(),
     ADMIN_PORT: integerStringSchema("ADMIN_PORT", 1, 65_535),
     ADMIN_TOKEN: z.string(),
+    ADMIN_TOKENS_JSON: jsonArrayStringSchema("ADMIN_TOKENS_JSON", true).default(""),
     ADMIN_IP_ALLOWLIST: z.string(),
     ADMIN_ALLOWED_ORIGINS: z.string().default(""),
     LOG_LEVEL: z.enum(LOG_LEVELS),
@@ -375,6 +377,7 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     ADMIN_BIND_HOST: config.adminBindHost,
     ADMIN_PORT: String(config.adminPort),
     ADMIN_TOKEN: config.adminToken ?? "",
+    ADMIN_TOKENS_JSON: serializeAdminTokens(config.adminTokens),
     ADMIN_IP_ALLOWLIST: config.adminIpAllowlist.join(","),
     ADMIN_ALLOWED_ORIGINS: config.adminAllowedOrigins.join(","),
     LOG_LEVEL: config.logLevel,
@@ -485,6 +488,10 @@ function serializeJsonObject(value: object): string {
   return Object.keys(value).length > 0 ? JSON.stringify(value) : "";
 }
 
+function serializeAdminTokens(tokens: AdminTokenConfig[]): string {
+  return tokens.length > 0 ? JSON.stringify(tokens) : "";
+}
+
 function booleanStringSchema(key: string): z.ZodString {
   return z.string().refine((value) => BOOLEAN_STRING.test(value), {
     message: `${key} must be a boolean string (true/false).`,
@@ -524,5 +531,25 @@ function jsonObjectStringSchema(key: string, allowEmpty: boolean): z.ZodString {
     return Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed);
   }, {
     message: `${key} must be an empty string or a JSON object string.`,
+  });
+}
+
+function jsonArrayStringSchema(key: string, allowEmpty: boolean): z.ZodString {
+  return z.string().refine((value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return allowEmpty;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return false;
+    }
+
+    return Array.isArray(parsed);
+  }, {
+    message: `${key} must be an empty string or a JSON array string.`,
   });
 }
