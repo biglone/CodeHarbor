@@ -103,6 +103,16 @@ function createSendResponse(eventId: string): Response {
   } as unknown as Response;
 }
 
+function createErrorResponse(status: number, statusText = "Error", body = "failed"): Response {
+  return {
+    ok: false,
+    status,
+    statusText,
+    text: async () => body,
+    json: async () => ({ error: body }),
+  } as unknown as Response;
+}
+
 describe("MatrixChannel", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -287,6 +297,28 @@ describe("MatrixChannel", () => {
         event_id: "$notice-1",
       },
     });
+
+    await channel.stop();
+  });
+
+  it("retries transient send failures before succeeding", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    fetchMock
+      .mockResolvedValueOnce(createErrorResponse(503, "Service Unavailable", "temporary"))
+      .mockResolvedValueOnce(createSendResponse("$retry-ok"));
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendMessage("!room:example.com", "retry me");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/send/m.room.message/");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/send/m.room.message/");
 
     await channel.stop();
   });

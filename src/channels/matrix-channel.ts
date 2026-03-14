@@ -21,6 +21,10 @@ import { splitText } from "../utils/message";
 
 export type InboundHandler = (message: InboundMessage) => Promise<void>;
 const LOCAL_TXN_PREFIX = "codeharbor-";
+const MATRIX_HTTP_TIMEOUT_MS = 15_000;
+const MATRIX_HTTP_MAX_RETRIES = 2;
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const ACCEPTED_MSG_TYPES = new Set(["m.text", "m.image", "m.file", "m.audio", "m.video"]);
 
 export class MatrixChannel {
   private readonly config: AppConfig;
@@ -170,8 +174,7 @@ export class MatrixChannel {
     }
 
     const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
-    const acceptedMsgtypes = new Set(["m.text", "m.image", "m.file", "m.audio", "m.video"]);
-    if (!acceptedMsgtypes.has(msgtype)) {
+    if (!ACCEPTED_MSG_TYPES.has(msgtype)) {
       return;
     }
 
@@ -303,8 +306,9 @@ export class MatrixChannel {
     content: Record<string, unknown>,
   ): Promise<{ event_id: string }> {
     const txnId = `${LOCAL_TXN_PREFIX}${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-    const response = await fetch(
-      `${this.config.matrixHomeserver}/_matrix/client/v3/rooms/${encodeURIComponent(conversationId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+    const url = `${this.config.matrixHomeserver}/_matrix/client/v3/rooms/${encodeURIComponent(conversationId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
+    const response = await fetchWithRetry(
+      url,
       {
         method: "PUT",
         headers: {
@@ -313,10 +317,17 @@ export class MatrixChannel {
         },
         body: JSON.stringify(content),
       },
+      {
+        timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
+        maxRetries: MATRIX_HTTP_MAX_RETRIES,
+      },
     );
 
     if (!response.ok) {
-      throw new Error(`Matrix send failed (${response.status} ${response.statusText})`);
+      const responseSnippet = await readResponseSnippet(response);
+      throw new Error(
+        `Matrix send failed (${response.status} ${response.statusText})${responseSnippet ? `: ${responseSnippet}` : ""}`,
+      );
     }
 
     const payload = (await response.json()) as { event_id?: unknown };
@@ -386,15 +397,25 @@ export class MatrixChannel {
     };
 
     let response: Response | null = null;
+    const failedStatuses: number[] = [];
     for (const url of mediaUrls) {
-      const candidate = await fetch(url, { headers });
+      const candidate = await fetchWithRetry(
+        url,
+        { headers },
+        {
+          timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
+          maxRetries: MATRIX_HTTP_MAX_RETRIES,
+        },
+      );
       if (candidate.ok) {
         response = candidate;
         break;
       }
+      failedStatuses.push(candidate.status);
     }
     if (!response) {
-      throw new Error(`Failed to download media for ${mxcUrl}`);
+      const suffix = failedStatuses.length > 0 ? ` (statuses: ${failedStatuses.join(",")})` : "";
+      throw new Error(`Failed to download media for ${mxcUrl}${suffix}`);
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -406,6 +427,81 @@ export class MatrixChannel {
     await fs.writeFile(targetPath, bytes);
     return targetPath;
   }
+}
+
+interface FetchRetryOptions {
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, options: FetchRetryOptions): Promise<Response> {
+  let attempt = 0;
+  let lastError: unknown = null;
+
+  while (attempt <= options.maxRetries) {
+    try {
+      const response = await fetchWithTimeout(url, init, options.timeoutMs);
+      if (response.ok || !RETRYABLE_HTTP_STATUS.has(response.status) || attempt === options.maxRetries) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === options.maxRetries) {
+        throw error;
+      }
+    }
+
+    const delayMs = computeRetryDelayMs(attempt);
+    await sleep(delayMs);
+    attempt += 1;
+  }
+
+  throw new Error(`HTTP request failed for ${url}: ${formatError(lastError)}`);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function computeRetryDelayMs(attempt: number): number {
+  const base = 250;
+  return Math.min(2_000, base * 2 ** attempt);
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    timer.unref?.();
+  });
+}
+
+async function readResponseSnippet(response: Response): Promise<string> {
+  try {
+    const text = (await response.text()).trim();
+    if (!text) {
+      return "";
+    }
+    return text.length > 300 ? `${text.slice(0, 300)}...` : text;
+  } catch {
+    return "";
+  }
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function buildRequestId(eventId: string): string {
