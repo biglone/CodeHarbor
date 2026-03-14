@@ -334,10 +334,61 @@ function parseExtraArgs(raw: string): string[] {
   if (!trimmed) {
     return [];
   }
-  return trimmed
-    .split(/\s+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+
+  const args: string[] = [];
+  let current = "";
+  let quoteMode: "'" | '"' | null = null;
+  let escaping = false;
+
+  const pushCurrent = (): void => {
+    if (!current) {
+      return;
+    }
+    args.push(current);
+    current = "";
+  };
+
+  for (const char of trimmed) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (quoteMode === null) {
+      if (/\s/.test(char)) {
+        pushCurrent();
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quoteMode = char;
+        continue;
+      }
+      if (char === "\\") {
+        escaping = true;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === quoteMode) {
+      quoteMode = null;
+      continue;
+    }
+    if (quoteMode === '"' && char === "\\") {
+      escaping = true;
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaping || quoteMode !== null) {
+    throw new Error("CODEX_EXTRA_ARGS contains unmatched quote or trailing escape.");
+  }
+
+  pushCurrent();
+  return args;
 }
 
 function parseExtraEnv(raw: string): Record<string, string> {

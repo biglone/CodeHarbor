@@ -81,3 +81,34 @@ describe("loadConfig ADMIN_TOKENS_JSON", () => {
     ).toThrow(/"admin" or "viewer"/);
   });
 });
+
+describe("loadConfig CODEX_EXTRA_ARGS", () => {
+  it("parses quoted arguments and escaped spaces", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        CODEX_EXTRA_ARGS: '--sandbox workspace-write --note "hello world" --tag \'alpha beta\' --path a\\ b',
+      }),
+    );
+
+    expect(config.codexExtraArgs).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--note",
+      "hello world",
+      "--tag",
+      "alpha beta",
+      "--path",
+      "a b",
+    ]);
+  });
+
+  it("rejects unmatched quote in CODEX_EXTRA_ARGS", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          CODEX_EXTRA_ARGS: '--note "broken',
+        }),
+      ),
+    ).toThrow(/CODEX_EXTRA_ARGS/i);
+  });
+});
