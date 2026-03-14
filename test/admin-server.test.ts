@@ -266,6 +266,42 @@ describe("AdminServer", () => {
     expect(adminWrite.status).toBe(200);
   });
 
+  it("rejects oversized JSON request payloads", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const oversizedPayload = JSON.stringify({
+      matrixCommandPrefix: `!${"x".repeat(1_100_000)}`,
+    });
+    const response = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: oversizedPayload,
+    });
+
+    expect(response.status).toBe(413);
+    expect(JSON.stringify(response.body)).toContain("Request body too large");
+  });
+
   it("derives audit actor from scoped token identity", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
