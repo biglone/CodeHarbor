@@ -497,6 +497,13 @@ export class AdminServer {
       updatedKeys.push("sessionActiveWindowMinutes");
     }
 
+    if ("groupDirectModeEnabled" in body) {
+      const value = normalizeBoolean(body.groupDirectModeEnabled, this.config.groupDirectModeEnabled);
+      this.config.groupDirectModeEnabled = value;
+      envUpdates.GROUP_DIRECT_MODE_ENABLED = String(value);
+      updatedKeys.push("groupDirectModeEnabled");
+    }
+
     if ("cliCompat" in body) {
       const compat = asObject(body.cliCompat, "cliCompat");
       if ("enabled" in compat) {
@@ -717,6 +724,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   matrixCommandPrefix: string;
   codexWorkdir: string;
   rateLimiter: AppConfig["rateLimiter"];
+  groupDirectModeEnabled: boolean;
   defaultGroupTriggerPolicy: AppConfig["defaultGroupTriggerPolicy"];
   matrixProgressUpdates: boolean;
   matrixProgressMinIntervalMs: number;
@@ -729,6 +737,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     matrixCommandPrefix: config.matrixCommandPrefix,
     codexWorkdir: config.codexWorkdir,
     rateLimiter: { ...config.rateLimiter },
+    groupDirectModeEnabled: config.groupDirectModeEnabled,
     defaultGroupTriggerPolicy: { ...config.defaultGroupTriggerPolicy },
     matrixProgressUpdates: config.matrixProgressUpdates,
     matrixProgressMinIntervalMs: config.matrixProgressMinIntervalMs,
@@ -1356,6 +1365,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-concurrency-room" type="number" min="0" />
           </label>
 
+          <label class="checkbox"><input id="global-direct-mode" type="checkbox" /><span>Group direct mode (no trigger required)</span></label>
           <label class="checkbox"><input id="global-trigger-mention" type="checkbox" /><span>Trigger: mention</span></label>
           <label class="checkbox"><input id="global-trigger-reply" type="checkbox" /><span>Trigger: reply</span></label>
           <label class="checkbox"><input id="global-trigger-window" type="checkbox" /><span>Trigger: active window</span></label>
@@ -1691,6 +1701,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-concurrency-global").value = String(rateLimiter.maxConcurrentGlobal || 0);
             document.getElementById("global-concurrency-user").value = String(rateLimiter.maxConcurrentPerUser || 0);
             document.getElementById("global-concurrency-room").value = String(rateLimiter.maxConcurrentPerRoom || 0);
+            document.getElementById("global-direct-mode").checked = Boolean(data.groupDirectModeEnabled);
 
             document.getElementById("global-trigger-mention").checked = Boolean(trigger.allowMention);
             document.getElementById("global-trigger-reply").checked = Boolean(trigger.allowReply);
@@ -1723,6 +1734,7 @@ const ADMIN_CONSOLE_HTML = `<!doctype html>
               matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
               matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),
               sessionActiveWindowMinutes: asNumber("global-active-window", 20),
+              groupDirectModeEnabled: asBool("global-direct-mode"),
               rateLimiter: {
                 windowMs: asNumber("global-rate-window", 60000),
                 maxRequestsPerUser: asNumber("global-rate-user", 20),

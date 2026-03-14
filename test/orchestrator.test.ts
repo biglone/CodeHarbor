@@ -257,6 +257,29 @@ describe("Orchestrator", () => {
     expect(channel.sent[0]?.text).toBe("ok:你好");
   });
 
+  it("processes plain group messages when group direct mode is enabled", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      groupDirectModeEnabled: true,
+      progressUpdatesEnabled: false,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        text: "直接处理这条群消息",
+        mentionsBot: false,
+        repliesToBot: false,
+      }),
+    );
+
+    expect(executor.callCount).toBe(1);
+    expect(channel.sent[0]?.text).toBe("ok:直接处理这条群消息");
+  });
+
   it("rejects requests when user is rate-limited", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();

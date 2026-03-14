@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   ClientEvent,
   createClient,
-  EventType,
   MatrixClient,
   type MatrixEvent,
   RoomEvent,
@@ -21,6 +20,7 @@ import { InboundAttachment, InboundMessage } from "../types";
 import { splitText } from "../utils/message";
 
 export type InboundHandler = (message: InboundMessage) => Promise<void>;
+const LOCAL_TXN_PREFIX = "codeharbor-";
 
 export class MatrixChannel {
   private readonly config: AppConfig;
@@ -66,7 +66,7 @@ export class MatrixChannel {
 
     const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
     for (const chunk of chunks) {
-      await this.client.sendTextMessage(conversationId, chunk);
+      await this.sendRichText(conversationId, chunk, "m.text");
     }
   }
 
@@ -77,7 +77,7 @@ export class MatrixChannel {
 
     const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
     for (const chunk of chunks) {
-      await this.client.sendNotice(conversationId, chunk);
+      await this.sendRichText(conversationId, chunk, "m.notice");
     }
   }
 
@@ -92,7 +92,10 @@ export class MatrixChannel {
     }
 
     if (!replaceEventId) {
-      const response = await this.client.sendNotice(conversationId, normalized);
+      const response = await this.sendRawEvent(
+        conversationId,
+        buildMatrixRichMessageContent(normalized, "m.notice"),
+      );
       return response.event_id;
     }
 
@@ -109,12 +112,7 @@ export class MatrixChannel {
       },
     } as const;
 
-    const sendEditEvent = this.client.sendEvent as unknown as (
-      roomId: string,
-      eventType: string,
-      payload: Record<string, unknown>,
-    ) => Promise<{ event_id: string }>;
-    const response = await sendEditEvent(conversationId, EventType.RoomMessage, content as Record<string, unknown>);
+    const response = await this.sendRawEvent(conversationId, content as Record<string, unknown>);
     return response.event_id;
   }
 
@@ -159,7 +157,10 @@ export class MatrixChannel {
       return;
     }
     const senderId = event.getSender();
-    if (!senderId || senderId === this.config.matrixUserId) {
+    if (!senderId) {
+      return;
+    }
+    if (senderId === this.config.matrixUserId && isLikelyLocalEcho(event)) {
       return;
     }
 
@@ -288,6 +289,43 @@ export class MatrixChannel {
     }
   }
 
+  private async sendRichText(
+    conversationId: string,
+    text: string,
+    msgtype: "m.text" | "m.notice",
+  ): Promise<void> {
+    const payload = buildMatrixRichMessageContent(text, msgtype);
+    await this.sendRawEvent(conversationId, payload);
+  }
+
+  private async sendRawEvent(
+    conversationId: string,
+    content: Record<string, unknown>,
+  ): Promise<{ event_id: string }> {
+    const txnId = `${LOCAL_TXN_PREFIX}${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const response = await fetch(
+      `${this.config.matrixHomeserver}/_matrix/client/v3/rooms/${encodeURIComponent(conversationId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${this.config.matrixAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(content),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Matrix send failed (${response.status} ${response.statusText})`);
+    }
+
+    const payload = (await response.json()) as { event_id?: unknown };
+    if (!payload.event_id || typeof payload.event_id !== "string") {
+      throw new Error("Matrix send failed (missing event_id)");
+    }
+    return { event_id: payload.event_id };
+  }
+
   private async hydrateAttachments(
     attachments: InboundAttachment[],
     eventId: string,
@@ -373,6 +411,18 @@ export class MatrixChannel {
 function buildRequestId(eventId: string): string {
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${eventId}:${suffix}`;
+}
+
+function isLikelyLocalEcho(event: MatrixEvent): boolean {
+  const unsigned = event.getUnsigned();
+  if (!unsigned || typeof unsigned !== "object") {
+    return false;
+  }
+  const transactionId = (unsigned as { transaction_id?: unknown }).transaction_id;
+  if (typeof transactionId !== "string" || !transactionId) {
+    return false;
+  }
+  return transactionId.startsWith(LOCAL_TXN_PREFIX);
 }
 
 function isDirectRoom(room: Room): boolean {
@@ -477,4 +527,84 @@ function resolveFileExtension(fileName: string, mimeType: string | null): string
     return ".webp";
   }
   return ".bin";
+}
+
+function buildMatrixRichMessageContent(
+  body: string,
+  msgtype: "m.text" | "m.notice",
+): Record<string, unknown> {
+  return {
+    msgtype,
+    body,
+    format: "org.matrix.custom.html",
+    formatted_body: renderMatrixHtml(body, msgtype),
+  };
+}
+
+function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const sections: string[] = [];
+  const codeFencePattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeFencePattern.exec(normalized)) !== null) {
+    const before = normalized.slice(cursor, match.index);
+    const renderedBefore = renderTextSection(before);
+    if (renderedBefore) {
+      sections.push(renderedBefore);
+    }
+
+    const language = escapeHtml(match[1]?.trim() || "text");
+    const code = escapeHtml(match[2].replace(/\n$/, ""));
+    const label = language && language !== "text" ? `代码 (${language})` : "代码";
+    sections.push(
+      `<p><font color="#3558d1"><b>${label}</b></font></p><pre><code>${code}</code></pre>`,
+    );
+
+    cursor = match.index + match[0].length;
+  }
+
+  const tail = normalized.slice(cursor);
+  const renderedTail = renderTextSection(tail);
+  if (renderedTail) {
+    sections.push(renderedTail);
+  }
+
+  if (sections.length === 0) {
+    sections.push("<p>(空消息)</p>");
+  }
+
+  const badge =
+    msgtype === "m.notice"
+      ? `<p><font color="#8a5a00"><b>📣 CodeHarbor 提示</b></font></p>`
+      : `<p><font color="#1f7a5a"><b>🤖 AI 回复</b></font></p>`;
+
+  return `<div>${badge}${sections.join("")}</div>`;
+}
+
+function renderTextSection(raw: string): string {
+  if (!raw.trim()) {
+    return "";
+  }
+
+  const normalized = raw.replace(/\r\n/g, "\n").trim();
+  const paragraphs = normalized.split(/\n{2,}/);
+  const rendered = paragraphs
+    .map((paragraph) => {
+      const escaped = escapeHtml(paragraph);
+      const inlineCode = escaped.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+      return `<p>${inlineCode.replace(/\n/g, "<br/>")}</p>`;
+    })
+    .join("");
+  return rendered;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

@@ -402,12 +402,14 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
 - Direct Message (DM)
   - all text messages are processed by default (no prefix required)
 - Group Room
+  - when `GROUP_DIRECT_MODE_ENABLED=true`, all non-empty messages are processed directly (no prefix/mention/reply required)
   - processed when **any allowed trigger** matches:
     - message mentions bot user id
     - message replies to a bot message
     - sender has an active conversation window
     - optional explicit prefix match (`MATRIX_COMMAND_PREFIX`)
 - Trigger Policy
+  - `GROUP_DIRECT_MODE_ENABLED` controls whether groups bypass trigger matching entirely
   - global defaults via `GROUP_TRIGGER_ALLOW_*`
   - per-room overrides via `ROOM_TRIGGER_POLICY_JSON`
 - Active Conversation Window

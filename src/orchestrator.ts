@@ -44,6 +44,7 @@ interface OrchestratorOptions {
   commandPrefix?: string;
   matrixUserId?: string;
   sessionActiveWindowMinutes?: number;
+  groupDirectModeEnabled?: boolean;
   defaultGroupTriggerPolicy?: TriggerPolicy;
   roomTriggerPolicies?: RoomTriggerPolicyOverrides;
   rateLimiterOptions?: RateLimiterOptions;
@@ -200,6 +201,7 @@ export class Orchestrator {
   private readonly commandPrefix: string;
   private readonly matrixUserId: string;
   private readonly sessionActiveWindowMs: number;
+  private readonly groupDirectModeEnabled: boolean;
   private readonly defaultGroupTriggerPolicy: TriggerPolicy;
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
   private readonly configService: ConfigService | null;
@@ -244,6 +246,7 @@ export class Orchestrator {
     this.matrixUserId = options?.matrixUserId ?? "";
     const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
     this.sessionActiveWindowMs = Math.max(1, sessionActiveWindowMinutes) * 60_000;
+    this.groupDirectModeEnabled = options?.groupDirectModeEnabled ?? false;
     this.defaultGroupTriggerPolicy = options?.defaultGroupTriggerPolicy ?? {
       allowMention: true,
       allowReply: true,
@@ -611,6 +614,7 @@ export class Orchestrator {
 
     const conversationalTrigger =
       message.isDirectMessage ||
+      this.groupDirectModeEnabled ||
       (Boolean(groupPolicy?.allowMention) && message.mentionsBot) ||
       (Boolean(groupPolicy?.allowReply) && message.repliesToBot) ||
       activeSession;
@@ -664,7 +668,11 @@ export class Orchestrator {
 
     const status = this.stateStore.getSessionStatus(sessionKey);
     const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-    const scope = message.isDirectMessage ? "私聊（免前缀）" : "群聊（按房间触发策略）";
+    const scope = message.isDirectMessage
+      ? "私聊（免前缀）"
+      : this.groupDirectModeEnabled
+        ? "群聊（默认直通）"
+        : "群聊（按房间触发策略）";
     const activeUntil = status.activeUntil ?? "未激活";
     const metrics = this.metrics.snapshot(this.runningExecutions.size);
     const limiter = this.rateLimiter.snapshot();

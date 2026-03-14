@@ -48,6 +48,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     matrixProgressMinIntervalMs: 2500,
     matrixTypingTimeoutMs: 10_000,
     sessionActiveWindowMinutes: 20,
+    groupDirectModeEnabled: false,
     defaultGroupTriggerPolicy: {
       allowMention: true,
       allowReply: true,

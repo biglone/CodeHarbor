@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-03-14
+
+- Fixed Matrix reply send failures caused by SDK thread-relation assumptions by switching outbound message/notice/progress sends to raw Matrix client API calls.
+- Fixed self-account deployments by only filtering local echo events (transaction-id based) instead of dropping all events from `MATRIX_USER_ID`.
+- Added richer Matrix reply formatting (`formatted_body`) for text/code blocks to improve chat readability.
+- Added `GROUP_DIRECT_MODE_ENABLED` (default `false`) to support default group pass-through mode without mention/reply/prefix triggers.
+- Added Admin Global Config support for group direct mode and documented the new routing option in `.env.example`, README, and config catalog.
+
 ## [0.1.15] - 2026-03-12
 
 - Added optional `ADMIN_TOKENS_JSON` with scoped Admin API RBAC (`admin`/`viewer`) while keeping `ADMIN_TOKEN` backward compatible.

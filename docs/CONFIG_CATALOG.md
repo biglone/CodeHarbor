@@ -40,6 +40,7 @@ These must be valid before `codeharbor start`.
 |---|---|---|---|---|---|
 | `MATRIX_COMMAND_PREFIX` | No | `!code` | Yes | Restart | Group explicit trigger prefix |
 | `SESSION_ACTIVE_WINDOW_MINUTES` | No | `20` | Yes | Restart | Active window for group follow-up |
+| `GROUP_DIRECT_MODE_ENABLED` | No | `false` | Yes | Restart | Process all group messages without trigger matching |
 | `GROUP_TRIGGER_ALLOW_MENTION` | No | `true` | Yes | Restart | Default group policy |
 | `GROUP_TRIGGER_ALLOW_REPLY` | No | `true` | Yes | Restart | Default group policy |
 | `GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW` | No | `true` | Yes | Restart | Default group policy |

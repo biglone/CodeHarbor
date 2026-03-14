@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createClientMock = vi.hoisted(() => vi.fn());
+const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("matrix-js-sdk", () => ({
   createClient: createClientMock,
@@ -93,7 +94,26 @@ const logger = {
   error: vi.fn(),
 };
 
+function createSendResponse(eventId: string): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({ event_id: eventId }),
+  } as unknown as Response;
+}
+
 describe("MatrixChannel", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(createSendResponse("$event-default"));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("starts successfully when sync event fires immediately after startClient", async () => {
     const client = new FakeMatrixClient();
     client.startClient.mockImplementation(() => {
@@ -232,7 +252,9 @@ describe("MatrixChannel", () => {
     client.startClient.mockImplementation(() => {
       client.emit("sync", "PREPARED");
     });
-    client.sendNotice.mockResolvedValue({ event_id: "$notice-1" });
+    fetchMock
+      .mockResolvedValueOnce(createSendResponse("$notice-1"))
+      .mockResolvedValueOnce(createSendResponse("$edited"));
     createClientMock.mockReturnValue(client);
 
     const channel = new MatrixChannel(config as never, logger as never);
@@ -243,8 +265,69 @@ describe("MatrixChannel", () => {
 
     expect(firstId).toBe("$notice-1");
     expect(secondId).toBe("$edited");
-    expect(client.sendNotice).toHaveBeenCalledTimes(1);
-    expect(client.sendEvent).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstPayload = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1]?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+    expect(firstPayload).toMatchObject({
+      msgtype: "m.notice",
+      body: "[CodeHarbor] thinking 1",
+      format: "org.matrix.custom.html",
+    });
+    const secondPayload = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1]?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+    expect(secondPayload).toMatchObject({
+      msgtype: "m.notice",
+      body: "* [CodeHarbor] thinking 2",
+      "m.relates_to": {
+        rel_type: "m.replace",
+        event_id: "$notice-1",
+      },
+    });
+
+    await channel.stop();
+  });
+
+  it("sends rich html for AI chat replies", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    const reply = [
+      "这是普通文本，含 `inline` 代码。",
+      "",
+      "```ts",
+      "const answer = 42;",
+      "```",
+    ].join("\n");
+
+    await channel.sendMessage("!room:example.com", reply);
+
+    expect(client.sendTextMessage).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(firstSendCall[0]).toContain(
+      "/_matrix/client/v3/rooms/!room%3Aexample.com/send/m.room.message/codeharbor-",
+    );
+    expect(firstSendCall[1]?.method).toBe("PUT");
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      msgtype: "m.text",
+      body: reply,
+      format: "org.matrix.custom.html",
+    });
+    const formatted = String(payload.formatted_body ?? "");
+    expect(formatted).toContain("🤖 AI 回复");
+    expect(formatted).toContain("<code>inline</code>");
+    expect(formatted).toContain("<pre><code>const answer = 42;");
 
     await channel.stop();
   });

@@ -52,6 +52,7 @@ export class CodeHarborApp {
       commandPrefix: config.matrixCommandPrefix,
       matrixUserId: config.matrixUserId,
       sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
+      groupDirectModeEnabled: config.groupDirectModeEnabled,
       defaultGroupTriggerPolicy: config.defaultGroupTriggerPolicy,
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,

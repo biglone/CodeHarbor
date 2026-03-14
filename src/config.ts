@@ -103,6 +103,10 @@ const configSchema = z
       .default("20")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    GROUP_DIRECT_MODE_ENABLED: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
     GROUP_TRIGGER_ALLOW_MENTION: z
       .string()
       .default("true")
@@ -221,6 +225,7 @@ const configSchema = z
     matrixProgressMinIntervalMs: v.MATRIX_PROGRESS_MIN_INTERVAL_MS,
     matrixTypingTimeoutMs: v.MATRIX_TYPING_TIMEOUT_MS,
     sessionActiveWindowMinutes: v.SESSION_ACTIVE_WINDOW_MINUTES,
+    groupDirectModeEnabled: v.GROUP_DIRECT_MODE_ENABLED,
     defaultGroupTriggerPolicy: {
       allowMention: v.GROUP_TRIGGER_ALLOW_MENTION,
       allowReply: v.GROUP_TRIGGER_ALLOW_REPLY,
