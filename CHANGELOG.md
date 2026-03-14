@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-03-15
+
+- Enhanced Matrix AI reply rendering with markdown-like rich text support (headings, lists, blockquotes, links, emphasis, inline code, and fenced code blocks) for better in-room readability.
+- Improved rich-message badge copy to use cleaner text labels in formatted replies.
+
 ## [0.1.17] - 2026-03-14
 
 - Hardened Admin API by enforcing a JSON payload size limit and extracting the embedded Admin Console HTML into a dedicated module for maintainability.
