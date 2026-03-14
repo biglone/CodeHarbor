@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-03-14
+
+- Hardened Admin API by enforcing a JSON payload size limit and extracting the embedded Admin Console HTML into a dedicated module for maintainability.
+- Improved Matrix reliability with timeout/retry handling for outbound message sends and media downloads.
+- Fixed attachment temp-file lifecycle so hydrated files are cleaned up even when requests are ignored or rate-limited.
+- Added workflow/AutoDev snapshot pruning (TTL + capacity control) to keep long-running orchestrator memory bounded.
+- Improved `CODEX_EXTRA_ARGS` parsing to support quoted/escaped arguments with validation for malformed inputs.
+- Optimized rate-limit window pruning to reduce per-request allocations under load.
+- Updated tooling and dependency health: upgraded lint toolchain, pinned patched `flatted`, and improved legacy test runner/docs.
+
 ## [0.1.16] - 2026-03-14
 
 - Fixed Matrix reply send failures caused by SDK thread-relation assumptions by switching outbound message/notice/progress sends to raw Matrix client API calls.
