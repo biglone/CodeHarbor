@@ -107,6 +107,9 @@ interface AutoDevRunSnapshot {
   error: string | null;
 }
 
+const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
+const RUN_SNAPSHOT_MAX_ENTRIES = 500;
+
 class RequestMetrics {
   private total = 0;
   private success = 0;
@@ -274,321 +277,325 @@ export class Orchestrator {
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
-    const receivedAt = Date.now();
-    const requestId = message.requestId || message.eventId;
-    const sessionKey = buildSessionKey(message);
+    const attachmentPaths = collectImagePaths(message);
+    try {
+      const receivedAt = Date.now();
+      const requestId = message.requestId || message.eventId;
+      const sessionKey = buildSessionKey(message);
 
-    const directCommand = parseControlCommand(message.text.trim());
-    if (directCommand === "stop") {
-      if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-        this.metrics.record("duplicate", 0, 0, 0);
-        this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
-        return;
-      }
-      await this.handleStopCommand(sessionKey, message, requestId);
-      this.stateStore.markEventProcessed(sessionKey, message.eventId);
-      return;
-    }
-
-    const lock = this.getLock(sessionKey);
-    await lock.runExclusive(async () => {
-      const queueWaitMs = Date.now() - receivedAt;
-
-      if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-        this.metrics.record("duplicate", queueWaitMs, 0, 0);
-        this.logger.debug("Duplicate event ignored", { requestId, eventId: message.eventId, sessionKey, queueWaitMs });
+      const directCommand = parseControlCommand(message.text.trim());
+      if (directCommand === "stop") {
+        if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
+          this.metrics.record("duplicate", 0, 0, 0);
+          this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
+          return;
+        }
+        await this.handleStopCommand(sessionKey, message, requestId);
+        this.stateStore.markEventProcessed(sessionKey, message.eventId);
         return;
       }
 
-      const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-      const route = this.routeMessage(message, sessionKey, roomConfig);
-      if (route.kind === "ignore") {
-        this.metrics.record("ignored", queueWaitMs, 0, 0);
-        this.logger.debug("Message ignored by routing policy", {
+      const lock = this.getLock(sessionKey);
+      await lock.runExclusive(async () => {
+        const queueWaitMs = Date.now() - receivedAt;
+
+        if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
+          this.metrics.record("duplicate", queueWaitMs, 0, 0);
+          this.logger.debug("Duplicate event ignored", { requestId, eventId: message.eventId, sessionKey, queueWaitMs });
+          return;
+        }
+
+        const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
+        const route = this.routeMessage(message, sessionKey, roomConfig);
+        if (route.kind === "ignore") {
+          this.metrics.record("ignored", queueWaitMs, 0, 0);
+          this.logger.debug("Message ignored by routing policy", {
+            requestId,
+            sessionKey,
+            isDirectMessage: message.isDirectMessage,
+            mentionsBot: message.mentionsBot,
+            repliesToBot: message.repliesToBot,
+          });
+          return;
+        }
+
+        if (route.kind === "command") {
+          await this.handleControlCommand(route.command, sessionKey, message, requestId);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
+
+        const workflowCommand = this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
+        const autoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
+        if (workflowCommand?.kind === "status") {
+          await this.handleWorkflowStatusCommand(sessionKey, message);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
+        if (autoDevCommand?.kind === "status") {
+          await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
+
+        const rateDecision = this.rateLimiter.tryAcquire({
+          userId: message.senderId,
+          roomId: message.conversationId,
+        });
+        if (!rateDecision.allowed) {
+          this.metrics.record("rate_limited", queueWaitMs, 0, 0);
+          await this.channel.sendNotice(message.conversationId, buildRateLimitNotice(rateDecision));
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          this.logger.warn("Request rejected by rate limiter", {
+            requestId,
+            sessionKey,
+            reason: rateDecision.reason,
+            retryAfterMs: rateDecision.retryAfterMs ?? null,
+            queueWaitMs,
+          });
+          return;
+        }
+
+        if (workflowCommand?.kind === "run") {
+          const executionStartedAt = Date.now();
+          let sendDurationMs = 0;
+          this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+          try {
+            const sendStartedAt = Date.now();
+            await this.handleWorkflowRunCommand(
+              workflowCommand.objective,
+              sessionKey,
+              message,
+              requestId,
+              roomConfig.workdir,
+            );
+            sendDurationMs += Date.now() - sendStartedAt;
+            this.stateStore.markEventProcessed(sessionKey, message.eventId);
+            this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+          } catch (error) {
+            sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
+            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            const status = classifyExecutionOutcome(error);
+            this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.logger.error("Workflow request failed", {
+              requestId,
+              sessionKey,
+              error: formatError(error),
+            });
+          } finally {
+            rateDecision.release?.();
+          }
+          return;
+        }
+
+        if (autoDevCommand?.kind === "run") {
+          const executionStartedAt = Date.now();
+          let sendDurationMs = 0;
+          this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+          try {
+            const sendStartedAt = Date.now();
+            await this.handleAutoDevRunCommand(
+              autoDevCommand.taskId,
+              sessionKey,
+              message,
+              requestId,
+              roomConfig.workdir,
+            );
+            sendDurationMs += Date.now() - sendStartedAt;
+            this.stateStore.markEventProcessed(sessionKey, message.eventId);
+            this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+          } catch (error) {
+            sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
+            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            const status = classifyExecutionOutcome(error);
+            this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.logger.error("AutoDev request failed", {
+              requestId,
+              sessionKey,
+              error: formatError(error),
+            });
+          } finally {
+            rateDecision.release?.();
+          }
+          return;
+        }
+
+        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+        const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
+        const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
+        const imagePaths = collectImagePaths(message);
+        let lastProgressAt = 0;
+        let lastProgressText = "";
+        let progressNoticeEventId: string | null = null;
+        let progressChain: Promise<void> = Promise.resolve();
+        let executionHandle: CodexExecutionHandle | null = null;
+        let executionDurationMs = 0;
+        let sendDurationMs = 0;
+        const requestStartedAt = Date.now();
+        let cancelRequested = false;
+
+        this.runningExecutions.set(sessionKey, {
+          requestId,
+          startedAt: requestStartedAt,
+          cancel: () => {
+            cancelRequested = true;
+            executionHandle?.cancel();
+          },
+        });
+
+        await this.recordCliCompatPrompt({
           requestId,
           sessionKey,
+          conversationId: message.conversationId,
+          senderId: message.senderId,
+          prompt: executionPrompt,
+          imageCount: imagePaths.length,
+        });
+        this.logger.info("Processing message", {
+          requestId,
+          sessionKey,
+          hasCodexSession: Boolean(previousCodexSessionId),
+          queueWaitMs,
+          attachmentCount: message.attachments.length,
+          workdir: roomConfig.workdir,
+          roomConfigSource: roomConfig.source,
           isDirectMessage: message.isDirectMessage,
           mentionsBot: message.mentionsBot,
           repliesToBot: message.repliesToBot,
         });
-        return;
-      }
 
-      if (route.kind === "command") {
-        await this.handleControlCommand(route.command, sessionKey, message, requestId);
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
-        return;
-      }
+        const stopTyping = this.startTypingHeartbeat(message.conversationId);
 
-      const workflowCommand = this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
-      const autoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
-      if (workflowCommand?.kind === "status") {
-        await this.handleWorkflowStatusCommand(sessionKey, message);
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
-        return;
-      }
-      if (autoDevCommand?.kind === "status") {
-        await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
-        return;
-      }
-
-      const rateDecision = this.rateLimiter.tryAcquire({
-        userId: message.senderId,
-        roomId: message.conversationId,
-      });
-      if (!rateDecision.allowed) {
-        this.metrics.record("rate_limited", queueWaitMs, 0, 0);
-        await this.channel.sendNotice(message.conversationId, buildRateLimitNotice(rateDecision));
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
-        this.logger.warn("Request rejected by rate limiter", {
-          requestId,
-          sessionKey,
-          reason: rateDecision.reason,
-          retryAfterMs: rateDecision.retryAfterMs ?? null,
-          queueWaitMs,
-        });
-        return;
-      }
-
-      if (workflowCommand?.kind === "run") {
-        const executionStartedAt = Date.now();
-        let sendDurationMs = 0;
-        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
         try {
-          const sendStartedAt = Date.now();
-          await this.handleWorkflowRunCommand(
-            workflowCommand.objective,
+          const executionStartedAt = Date.now();
+          executionHandle = this.sessionRuntime.startExecution(
             sessionKey,
-            message,
-            requestId,
-            roomConfig.workdir,
-          );
-          sendDurationMs += Date.now() - sendStartedAt;
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-        } catch (error) {
-          sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
-          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-          const status = classifyExecutionOutcome(error);
-          this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-          this.logger.error("Workflow request failed", {
-            requestId,
-            sessionKey,
-            error: formatError(error),
-          });
-        } finally {
-          rateDecision.release?.();
-        }
-        return;
-      }
-
-      if (autoDevCommand?.kind === "run") {
-        const executionStartedAt = Date.now();
-        let sendDurationMs = 0;
-        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-        try {
-          const sendStartedAt = Date.now();
-          await this.handleAutoDevRunCommand(
-            autoDevCommand.taskId,
-            sessionKey,
-            message,
-            requestId,
-            roomConfig.workdir,
-          );
-          sendDurationMs += Date.now() - sendStartedAt;
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-        } catch (error) {
-          sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
-          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-          const status = classifyExecutionOutcome(error);
-          this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-          this.logger.error("AutoDev request failed", {
-            requestId,
-            sessionKey,
-            error: formatError(error),
-          });
-        } finally {
-          rateDecision.release?.();
-        }
-        return;
-      }
-
-      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-      const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
-      const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
-      const imagePaths = collectImagePaths(message);
-      let lastProgressAt = 0;
-      let lastProgressText = "";
-      let progressNoticeEventId: string | null = null;
-      let progressChain: Promise<void> = Promise.resolve();
-      let executionHandle: CodexExecutionHandle | null = null;
-      let executionDurationMs = 0;
-      let sendDurationMs = 0;
-      const requestStartedAt = Date.now();
-      let cancelRequested = false;
-
-      this.runningExecutions.set(sessionKey, {
-        requestId,
-        startedAt: requestStartedAt,
-        cancel: () => {
-          cancelRequested = true;
-          executionHandle?.cancel();
-        },
-      });
-
-      await this.recordCliCompatPrompt({
-        requestId,
-        sessionKey,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        prompt: executionPrompt,
-        imageCount: imagePaths.length,
-      });
-      this.logger.info("Processing message", {
-        requestId,
-        sessionKey,
-        hasCodexSession: Boolean(previousCodexSessionId),
-        queueWaitMs,
-        attachmentCount: message.attachments.length,
-        workdir: roomConfig.workdir,
-        roomConfigSource: roomConfig.source,
-        isDirectMessage: message.isDirectMessage,
-        mentionsBot: message.mentionsBot,
-        repliesToBot: message.repliesToBot,
-      });
-
-      const stopTyping = this.startTypingHeartbeat(message.conversationId);
-
-      try {
-        const executionStartedAt = Date.now();
-        executionHandle = this.sessionRuntime.startExecution(
-          sessionKey,
-          executionPrompt,
-          previousCodexSessionId,
-          (progress) => {
-            progressChain = progressChain
-              .then(() =>
-                this.handleProgress(
-                  message.conversationId,
-                  message.isDirectMessage,
-                  progress,
-                  () => lastProgressAt,
-                  (next) => {
-                    lastProgressAt = next;
-                  },
-                  () => lastProgressText,
-                  (next) => {
-                    lastProgressText = next;
-                  },
-                  () => progressNoticeEventId,
-                  (next) => {
-                    progressNoticeEventId = next;
-                  },
-                ),
-              )
-              .catch((progressError) => {
-                this.logger.debug("Failed to process progress callback", { progressError });
-              });
-          },
-          {
-            passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
-            imagePaths,
-            workdir: roomConfig.workdir,
-          },
-        );
-        const running = this.runningExecutions.get(sessionKey);
-        if (running?.requestId === requestId) {
-          running.startedAt = executionStartedAt;
-          running.cancel = () => {
-            cancelRequested = true;
-            executionHandle?.cancel();
-          };
-        }
-        if (cancelRequested) {
-          executionHandle.cancel();
-        }
-
-        const result = await executionHandle.result;
-        executionDurationMs = Date.now() - executionStartedAt;
-        await progressChain;
-
-        const sendStartedAt = Date.now();
-        await this.channel.sendMessage(message.conversationId, result.reply);
-        await this.finishProgress(
-          {
-            conversationId: message.conversationId,
-            isDirectMessage: message.isDirectMessage,
-            getProgressNoticeEventId: () => progressNoticeEventId,
-            setProgressNoticeEventId: (next) => {
-              progressNoticeEventId = next;
+            executionPrompt,
+            previousCodexSessionId,
+            (progress) => {
+              progressChain = progressChain
+                .then(() =>
+                  this.handleProgress(
+                    message.conversationId,
+                    message.isDirectMessage,
+                    progress,
+                    () => lastProgressAt,
+                    (next) => {
+                      lastProgressAt = next;
+                    },
+                    () => lastProgressText,
+                    (next) => {
+                      lastProgressText = next;
+                    },
+                    () => progressNoticeEventId,
+                    (next) => {
+                      progressNoticeEventId = next;
+                    },
+                  ),
+                )
+                .catch((progressError) => {
+                  this.logger.debug("Failed to process progress callback", { progressError });
+                });
             },
-          },
-          `处理完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
-        );
-        sendDurationMs = Date.now() - sendStartedAt;
-
-        this.stateStore.commitExecutionSuccess(sessionKey, message.eventId, result.sessionId);
-        this.metrics.record("success", queueWaitMs, executionDurationMs, sendDurationMs);
-        this.logger.info("Request completed", {
-          requestId,
-          sessionKey,
-          status: "success",
-          queueWaitMs,
-          executionDurationMs,
-          sendDurationMs,
-          totalDurationMs: Date.now() - receivedAt,
-        });
-      } catch (error) {
-        const status = classifyExecutionOutcome(error);
-        executionDurationMs = Date.now() - requestStartedAt;
-        await progressChain;
-
-        await this.finishProgress(
-          {
-            conversationId: message.conversationId,
-            isDirectMessage: message.isDirectMessage,
-            getProgressNoticeEventId: () => progressNoticeEventId,
-            setProgressNoticeEventId: (next) => {
-              progressNoticeEventId = next;
+            {
+              passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
+              imagePaths,
+              workdir: roomConfig.workdir,
             },
-          },
-          buildFailureProgressSummary(status, requestStartedAt, error),
-        );
-
-        if (status !== "cancelled") {
-          try {
-            await this.channel.sendMessage(
-              message.conversationId,
-              `[CodeHarbor] Failed to process request: ${formatError(error)}`,
-            );
-          } catch (sendError) {
-            this.logger.error("Failed to send error reply to Matrix", sendError);
+          );
+          const running = this.runningExecutions.get(sessionKey);
+          if (running?.requestId === requestId) {
+            running.startedAt = executionStartedAt;
+            running.cancel = () => {
+              cancelRequested = true;
+              executionHandle?.cancel();
+            };
           }
-        }
+          if (cancelRequested) {
+            executionHandle.cancel();
+          }
 
-        this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-        this.metrics.record(status, queueWaitMs, executionDurationMs, sendDurationMs);
-        this.logger.error("Request failed", {
-          requestId,
-          sessionKey,
-          status,
-          queueWaitMs,
-          executionDurationMs,
-          totalDurationMs: Date.now() - receivedAt,
-          error: formatError(error),
-        });
-      } finally {
-        const running = this.runningExecutions.get(sessionKey);
-        if (running?.requestId === requestId) {
-          this.runningExecutions.delete(sessionKey);
+          const result = await executionHandle.result;
+          executionDurationMs = Date.now() - executionStartedAt;
+          await progressChain;
+
+          const sendStartedAt = Date.now();
+          await this.channel.sendMessage(message.conversationId, result.reply);
+          await this.finishProgress(
+            {
+              conversationId: message.conversationId,
+              isDirectMessage: message.isDirectMessage,
+              getProgressNoticeEventId: () => progressNoticeEventId,
+              setProgressNoticeEventId: (next) => {
+                progressNoticeEventId = next;
+              },
+            },
+            `处理完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+          );
+          sendDurationMs = Date.now() - sendStartedAt;
+
+          this.stateStore.commitExecutionSuccess(sessionKey, message.eventId, result.sessionId);
+          this.metrics.record("success", queueWaitMs, executionDurationMs, sendDurationMs);
+          this.logger.info("Request completed", {
+            requestId,
+            sessionKey,
+            status: "success",
+            queueWaitMs,
+            executionDurationMs,
+            sendDurationMs,
+            totalDurationMs: Date.now() - receivedAt,
+          });
+        } catch (error) {
+          const status = classifyExecutionOutcome(error);
+          executionDurationMs = Date.now() - requestStartedAt;
+          await progressChain;
+
+          await this.finishProgress(
+            {
+              conversationId: message.conversationId,
+              isDirectMessage: message.isDirectMessage,
+              getProgressNoticeEventId: () => progressNoticeEventId,
+              setProgressNoticeEventId: (next) => {
+                progressNoticeEventId = next;
+              },
+            },
+            buildFailureProgressSummary(status, requestStartedAt, error),
+          );
+
+          if (status !== "cancelled") {
+            try {
+              await this.channel.sendMessage(
+                message.conversationId,
+                `[CodeHarbor] Failed to process request: ${formatError(error)}`,
+              );
+            } catch (sendError) {
+              this.logger.error("Failed to send error reply to Matrix", sendError);
+            }
+          }
+
+          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+          this.metrics.record(status, queueWaitMs, executionDurationMs, sendDurationMs);
+          this.logger.error("Request failed", {
+            requestId,
+            sessionKey,
+            status,
+            queueWaitMs,
+            executionDurationMs,
+            totalDurationMs: Date.now() - receivedAt,
+            error: formatError(error),
+          });
+        } finally {
+          const running = this.runningExecutions.get(sessionKey);
+          if (running?.requestId === requestId) {
+            this.runningExecutions.delete(sessionKey);
+          }
+          rateDecision.release?.();
+          await stopTyping();
         }
-        rateDecision.release?.();
-        await stopTyping();
-        await cleanupAttachmentFiles(imagePaths);
-      }
-    });
+      });
+    } finally {
+      await cleanupAttachmentFiles(attachmentPaths);
+    }
   }
 
   private routeMessage(message: InboundMessage, sessionKey: string, roomConfig: RoomRuntimeConfig): RouteDecision {
@@ -659,6 +666,8 @@ export class Orchestrator {
       this.stateStore.clearCodexSessionId(sessionKey);
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       this.sessionRuntime.clearSession(sessionKey);
+      this.workflowSnapshots.delete(sessionKey);
+      this.autoDevSnapshots.delete(sessionKey);
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
@@ -801,7 +810,7 @@ export class Orchestrator {
     }
 
     const startedAtIso = new Date().toISOString();
-    this.autoDevSnapshots.set(sessionKey, {
+    this.setAutoDevSnapshot(sessionKey, {
       state: "running",
       startedAt: startedAtIso,
       endedAt: null,
@@ -834,7 +843,7 @@ export class Orchestrator {
         finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
       }
       const endedAtIso = new Date().toISOString();
-      this.autoDevSnapshots.set(sessionKey, {
+      this.setAutoDevSnapshot(sessionKey, {
         state: "succeeded",
         startedAt: startedAtIso,
         endedAt: endedAtIso,
@@ -869,7 +878,7 @@ export class Orchestrator {
 
       const status = classifyExecutionOutcome(error);
       const endedAtIso = new Date().toISOString();
-      this.autoDevSnapshots.set(sessionKey, {
+      this.setAutoDevSnapshot(sessionKey, {
         state: status === "cancelled" ? "idle" : "failed",
         startedAt: startedAtIso,
         endedAt: endedAtIso,
@@ -908,7 +917,7 @@ export class Orchestrator {
     };
 
     const startedAtIso = new Date().toISOString();
-    this.workflowSnapshots.set(sessionKey, {
+    this.setWorkflowSnapshot(sessionKey, {
       state: "running",
       startedAt: startedAtIso,
       endedAt: null,
@@ -949,7 +958,7 @@ export class Orchestrator {
       });
 
       const endedAtIso = new Date().toISOString();
-      this.workflowSnapshots.set(sessionKey, {
+      this.setWorkflowSnapshot(sessionKey, {
         state: "succeeded",
         startedAt: startedAtIso,
         endedAt: endedAtIso,
@@ -965,7 +974,7 @@ export class Orchestrator {
     } catch (error) {
       const status = classifyExecutionOutcome(error);
       const endedAtIso = new Date().toISOString();
-      this.workflowSnapshots.set(sessionKey, {
+      this.setWorkflowSnapshot(sessionKey, {
         state: status === "cancelled" ? "idle" : "failed",
         startedAt: startedAtIso,
         endedAt: endedAtIso,
@@ -1211,11 +1220,37 @@ export class Orchestrator {
     }
   }
 
+  private setWorkflowSnapshot(sessionKey: string, snapshot: WorkflowRunSnapshot): void {
+    this.workflowSnapshots.set(sessionKey, snapshot);
+    this.pruneRunSnapshots(Date.now());
+  }
+
+  private setAutoDevSnapshot(sessionKey: string, snapshot: AutoDevRunSnapshot): void {
+    this.autoDevSnapshots.set(sessionKey, snapshot);
+    this.pruneRunSnapshots(Date.now());
+  }
+
+  private pruneRunSnapshots(now: number): void {
+    pruneSnapshotMap(
+      this.workflowSnapshots,
+      now,
+      (snapshot) => snapshot.state !== "running",
+      (snapshot) => snapshot.endedAt ?? snapshot.startedAt,
+    );
+    pruneSnapshotMap(
+      this.autoDevSnapshots,
+      now,
+      (snapshot) => snapshot.state !== "running",
+      (snapshot) => snapshot.endedAt ?? snapshot.startedAt,
+    );
+  }
+
   private getLock(key: string): Mutex {
     const now = Date.now();
     if (now - this.lastLockPruneAt >= this.lockPruneIntervalMs) {
       this.lastLockPruneAt = now;
       this.pruneSessionLocks(now);
+      this.pruneRunSnapshots(now);
     }
 
     let entry = this.sessionLocks.get(key);
@@ -1241,6 +1276,59 @@ export class Orchestrator {
       }
       this.sessionLocks.delete(sessionKey);
     }
+  }
+}
+
+function pruneSnapshotMap<T>(
+  snapshots: Map<string, T>,
+  now: number,
+  isPrunable: (snapshot: T) => boolean,
+  resolveSnapshotTimeIso: (snapshot: T) => string | null,
+): void {
+  const staleKeys: string[] = [];
+  const candidatesForOverflow: Array<{ key: string; timestamp: number }> = [];
+
+  for (const [key, snapshot] of snapshots.entries()) {
+    if (!isPrunable(snapshot)) {
+      continue;
+    }
+
+    const timeIso = resolveSnapshotTimeIso(snapshot);
+    if (!timeIso) {
+      staleKeys.push(key);
+      continue;
+    }
+
+    const timestamp = Date.parse(timeIso);
+    if (!Number.isFinite(timestamp)) {
+      staleKeys.push(key);
+      continue;
+    }
+
+    if (now - timestamp > RUN_SNAPSHOT_TTL_MS) {
+      staleKeys.push(key);
+      continue;
+    }
+
+    candidatesForOverflow.push({ key, timestamp });
+  }
+
+  for (const key of staleKeys) {
+    snapshots.delete(key);
+  }
+
+  if (snapshots.size <= RUN_SNAPSHOT_MAX_ENTRIES) {
+    return;
+  }
+
+  const overflow = snapshots.size - RUN_SNAPSHOT_MAX_ENTRIES;
+  if (overflow <= 0) {
+    return;
+  }
+
+  candidatesForOverflow.sort((a, b) => a.timestamp - b.timestamp);
+  for (let i = 0; i < overflow && i < candidatesForOverflow.length; i += 1) {
+    snapshots.delete(candidatesForOverflow[i].key);
   }
 }
 

@@ -414,6 +414,48 @@ describe("Orchestrator", () => {
     expect(channel.sent).toHaveLength(0);
   });
 
+  it("cleans up hydrated attachment files for ignored messages", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-ignored-attachment-"));
+    const imagePath = path.join(tempRoot, "input.png");
+    await fs.writeFile(imagePath, "payload", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: false,
+          mentionsBot: false,
+          repliesToBot: false,
+          text: "普通群聊消息",
+          eventId: "$ignored-attachment",
+          attachments: [
+            {
+              kind: "image",
+              name: "input.png",
+              mxcUrl: "mxc://example.com/media",
+              mimeType: "image/png",
+              sizeBytes: 7,
+              localPath: imagePath,
+            },
+          ],
+        }),
+      );
+
+      await expect(fs.access(imagePath)).rejects.toBeDefined();
+      expect(executor.calls).toHaveLength(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("applies roomTriggerPolicies override when config service is absent", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
@@ -445,6 +487,54 @@ describe("Orchestrator", () => {
 
     expect(executor.calls).toHaveLength(1);
     expect(channel.sent[0]?.text).toBe("ok:do this");
+  });
+
+  it("prunes stale workflow snapshots during lock maintenance", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      lockPruneIntervalMs: 0,
+    });
+
+    const oldIso = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+    const runtime = orchestrator as unknown as {
+      workflowSnapshots: Map<string, unknown>;
+      autoDevSnapshots: Map<string, unknown>;
+    };
+    runtime.workflowSnapshots.set("old-workflow", {
+      state: "succeeded",
+      startedAt: oldIso,
+      endedAt: oldIso,
+      objective: "legacy",
+      approved: true,
+      repairRounds: 0,
+      error: null,
+    });
+    runtime.autoDevSnapshots.set("old-autodev", {
+      state: "failed",
+      startedAt: oldIso,
+      endedAt: oldIso,
+      taskId: "T0.1",
+      taskDescription: "legacy",
+      approved: null,
+      repairRounds: 0,
+      error: "stale",
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "触发一次清理",
+        eventId: "$snapshot-prune",
+      }),
+    );
+
+    expect(runtime.workflowSnapshots.has("old-workflow")).toBe(false);
+    expect(runtime.autoDevSnapshots.has("old-autodev")).toBe(false);
   });
 
   it("keeps legacy behavior when workflow is disabled", async () => {
