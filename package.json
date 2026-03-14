@@ -54,9 +54,8 @@
     "test:e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",
     "test:watch": "vitest test",
-    "test:legacy": ".venv/bin/python -m pytest -q tests",
+    "test:legacy": "bash ./scripts/run-legacy-tests.sh",
     "prepare": "npm run build",
-    "prepack": "npm run build",
     "prepublishOnly": "npm run changelog:check && npm run typecheck && npm run lint && npm run test:coverage && npm run build",
     "changelog:check": "bash ./scripts/check-changelog.sh",
     "lint": "eslint .",
@@ -70,17 +69,20 @@
     "matrix-js-sdk": "^39.2.0",
     "zod": "^4.1.12"
   },
+  "overrides": {
+    "flatted": "^3.4.1"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
-    "@types/node": "^24.4.0",
+    "@types/node": "^24.12.0",
     "@vitest/coverage-v8": "^3.2.4",
-    "eslint": "^10.0.2",
+    "eslint": "^10.0.3",
     "globals": "^17.4.0",
     "tsup": "^8.5.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.56.1",
+    "typescript-eslint": "^8.57.0",
     "vitest": "^3.2.4"
   }
 }

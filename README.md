@@ -538,6 +538,12 @@ npm run build
 npm run test:legacy
 ```
 
+If Python legacy dependencies are missing, install them first:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
 ## Legacy Runtime
 
 - Legacy Python runtime exists in `app/` and `tests/`.
