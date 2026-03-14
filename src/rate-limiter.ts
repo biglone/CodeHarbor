@@ -129,13 +129,22 @@ export class RateLimiter {
       return [];
     }
     const threshold = now - this.options.windowMs;
-    const pruned = existing.filter((ts) => ts > threshold);
-    if (pruned.length === 0) {
+    let writeIndex = 0;
+    for (let readIndex = 0; readIndex < existing.length; readIndex += 1) {
+      const timestamp = existing[readIndex];
+      if (timestamp > threshold) {
+        existing[writeIndex] = timestamp;
+        writeIndex += 1;
+      }
+    }
+
+    if (writeIndex === 0) {
       container.delete(key);
       return [];
     }
-    container.set(key, pruned);
-    return pruned;
+
+    existing.length = writeIndex;
+    return existing;
   }
 
   private decrementCounter(container: Map<string, number>, key: string): void {
