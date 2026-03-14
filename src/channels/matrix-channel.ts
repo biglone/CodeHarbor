@@ -646,7 +646,7 @@ function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string 
 
   while ((match = codeFencePattern.exec(normalized)) !== null) {
     const before = normalized.slice(cursor, match.index);
-    const renderedBefore = renderTextSection(before);
+    const renderedBefore = renderMarkdownSection(before);
     if (renderedBefore) {
       sections.push(renderedBefore);
     }
@@ -662,7 +662,7 @@ function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string 
   }
 
   const tail = normalized.slice(cursor);
-  const renderedTail = renderTextSection(tail);
+  const renderedTail = renderMarkdownSection(tail);
   if (renderedTail) {
     sections.push(renderedTail);
   }
@@ -673,27 +673,160 @@ function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string 
 
   const badge =
     msgtype === "m.notice"
-      ? `<p><font color="#8a5a00"><b>📣 CodeHarbor 提示</b></font></p>`
-      : `<p><font color="#1f7a5a"><b>🤖 AI 回复</b></font></p>`;
+      ? `<p><font color="#8a5a00"><b>CodeHarbor 提示</b></font></p>`
+      : `<p><font color="#1f7a5a"><b>CodeHarbor AI 回复</b></font></p>`;
 
   return `<div>${badge}${sections.join("")}</div>`;
 }
 
-function renderTextSection(raw: string): string {
+function renderMarkdownSection(raw: string): string {
   if (!raw.trim()) {
     return "";
   }
 
-  const normalized = raw.replace(/\r\n/g, "\n").trim();
-  const paragraphs = normalized.split(/\n{2,}/);
-  const rendered = paragraphs
-    .map((paragraph) => {
-      const escaped = escapeHtml(paragraph);
-      const inlineCode = escaped.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-      return `<p>${inlineCode.replace(/\n/g, "<br/>")}</p>`;
-    })
-    .join("");
+  const lines = raw.replace(/\r\n/g, "\n").trim().split("\n");
+  const blocks: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      const level = Math.min(6, headingMatch[1].length + 1);
+      blocks.push(`<h${level}>${renderInlineMarkup(headingMatch[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      blocks.push("<hr/>");
+      index += 1;
+      continue;
+    }
+
+    if (/^>\s?/.test(trimmed)) {
+      const quoteLines: string[] = [];
+      while (index < lines.length) {
+        const current = lines[index].trim();
+        if (!current) {
+          break;
+        }
+        if (!/^>\s?/.test(current)) {
+          break;
+        }
+        quoteLines.push(current.replace(/^>\s?/, ""));
+        index += 1;
+      }
+      if (quoteLines.length > 0) {
+        blocks.push(`<blockquote><p>${quoteLines.map((entry) => renderInlineMarkup(entry)).join("<br/>")}</p></blockquote>`);
+      }
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, "").trim());
+        index += 1;
+      }
+      blocks.push(`<ul>${items.map((item) => `<li>${renderInlineMarkup(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, "").trim());
+        index += 1;
+      }
+      blocks.push(`<ol>${items.map((item) => `<li>${renderInlineMarkup(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const current = lines[index];
+      if (!current.trim()) {
+        break;
+      }
+      if (isBlockBoundaryLine(current)) {
+        break;
+      }
+      paragraphLines.push(current.trimEnd());
+      index += 1;
+    }
+    if (paragraphLines.length > 0) {
+      blocks.push(`<p>${paragraphLines.map((entry) => renderInlineMarkup(entry)).join("<br/>")}</p>`);
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return blocks.join("");
+}
+
+function isBlockBoundaryLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return (
+    /^(#{1,6})\s+/.test(trimmed) ||
+    /^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed) ||
+    /^>\s?/.test(trimmed) ||
+    /^\s*[-*]\s+/.test(trimmed) ||
+    /^\s*\d+\.\s+/.test(trimmed)
+  );
+}
+
+function renderInlineMarkup(raw: string): string {
+  if (!raw) {
+    return "";
+  }
+
+  const inlineCodeSegments: string[] = [];
+  const withPlaceholders = raw.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+    const token = `@@CHCODE${inlineCodeSegments.length}@@`;
+    inlineCodeSegments.push(`<code>${escapeHtml(code)}</code>`);
+    return token;
+  });
+
+  let rendered = escapeHtml(withPlaceholders);
+  rendered = rendered.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label: string, url: string) => {
+    const safeUrl = sanitizeLinkUrl(url);
+    if (!safeUrl) {
+      return escapeHtml(label);
+    }
+    return `<a href="${escapeHtml(safeUrl)}">${escapeHtml(label)}</a>`;
+  });
+  rendered = rendered.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  rendered = rendered.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  rendered = rendered.replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
+
+  for (let i = 0; i < inlineCodeSegments.length; i += 1) {
+    rendered = rendered.replace(`@@CHCODE${i}@@`, inlineCodeSegments[i]);
+  }
+
   return rendered;
+}
+
+function sanitizeLinkUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function escapeHtml(value: string): string {

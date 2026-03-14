@@ -334,6 +334,13 @@ describe("MatrixChannel", () => {
     await channel.start(async (_message: unknown) => {});
 
     const reply = [
+      "# 会话结果",
+      "",
+      "- 完成 **发布**",
+      "- 查看 [CodeHarbor](https://github.com/biglone/CodeHarbor)",
+      "",
+      "> 保持小步提交",
+      "",
       "这是普通文本，含 `inline` 代码。",
       "",
       "```ts",
@@ -357,7 +364,11 @@ describe("MatrixChannel", () => {
       format: "org.matrix.custom.html",
     });
     const formatted = String(payload.formatted_body ?? "");
-    expect(formatted).toContain("🤖 AI 回复");
+    expect(formatted).toContain("CodeHarbor AI 回复");
+    expect(formatted).toContain("<h2>会话结果</h2>");
+    expect(formatted).toContain("<ul><li>完成 <strong>发布</strong></li>");
+    expect(formatted).toContain('<a href="https://github.com/biglone/CodeHarbor">CodeHarbor</a>');
+    expect(formatted).toContain("<blockquote><p>保持小步提交</p></blockquote>");
     expect(formatted).toContain("<code>inline</code>");
     expect(formatted).toContain("<pre><code>const answer = 42;");
 
