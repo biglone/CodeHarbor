@@ -582,6 +582,37 @@ export class AdminServer {
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS = String(value);
         updatedKeys.push("cliCompat.audioTranscribeMaxChars");
       }
+      if ("audioTranscribeMaxRetries" in compat) {
+        const value = normalizePositiveInt(
+          compat.audioTranscribeMaxRetries,
+          this.config.cliCompat.audioTranscribeMaxRetries,
+          0,
+          10,
+        );
+        this.config.cliCompat.audioTranscribeMaxRetries = value;
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES = String(value);
+        updatedKeys.push("cliCompat.audioTranscribeMaxRetries");
+      }
+      if ("audioTranscribeRetryDelayMs" in compat) {
+        const value = normalizeNonNegativeInt(
+          compat.audioTranscribeRetryDelayMs,
+          this.config.cliCompat.audioTranscribeRetryDelayMs,
+        );
+        this.config.cliCompat.audioTranscribeRetryDelayMs = value;
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS = String(value);
+        updatedKeys.push("cliCompat.audioTranscribeRetryDelayMs");
+      }
+      if ("audioTranscribeMaxBytes" in compat) {
+        const value = normalizePositiveInt(
+          compat.audioTranscribeMaxBytes,
+          this.config.cliCompat.audioTranscribeMaxBytes,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.audioTranscribeMaxBytes = value;
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES = String(value);
+        updatedKeys.push("cliCompat.audioTranscribeMaxBytes");
+      }
       if ("audioLocalWhisperCommand" in compat) {
         const value = normalizeString(
           compat.audioLocalWhisperCommand,

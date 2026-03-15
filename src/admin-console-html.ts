@@ -324,6 +324,18 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-cli-audio-max-chars" type="number" min="1" />
           </label>
           <label class="field">
+            <span class="field-label">Audio transcribe max retries</span>
+            <input id="global-cli-audio-max-retries" type="number" min="0" max="10" />
+          </label>
+          <label class="field">
+            <span class="field-label">Audio transcribe retry delay (ms)</span>
+            <input id="global-cli-audio-retry-delay" type="number" min="0" />
+          </label>
+          <label class="field">
+            <span class="field-label">Audio max bytes</span>
+            <input id="global-cli-audio-max-bytes" type="number" min="1" />
+          </label>
+          <label class="field">
             <span class="field-label">Local whisper command</span>
             <input id="global-cli-audio-local-command" type="text" placeholder='python3 /opt/whisper/transcribe.py --input {input}' />
           </label>
@@ -669,6 +681,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-audio-model").value = cliCompat.audioTranscribeModel || "gpt-4o-mini-transcribe";
             document.getElementById("global-cli-audio-timeout").value = String(cliCompat.audioTranscribeTimeoutMs || 120000);
             document.getElementById("global-cli-audio-max-chars").value = String(cliCompat.audioTranscribeMaxChars || 6000);
+            document.getElementById("global-cli-audio-max-retries").value = String(
+              typeof cliCompat.audioTranscribeMaxRetries === "number" ? cliCompat.audioTranscribeMaxRetries : 1
+            );
+            document.getElementById("global-cli-audio-retry-delay").value = String(cliCompat.audioTranscribeRetryDelayMs || 800);
+            document.getElementById("global-cli-audio-max-bytes").value = String(cliCompat.audioTranscribeMaxBytes || 26214400);
             document.getElementById("global-cli-audio-local-command").value = cliCompat.audioLocalWhisperCommand || "";
             document.getElementById("global-cli-audio-local-timeout").value = String(cliCompat.audioLocalWhisperTimeoutMs || 180000);
             document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
@@ -717,6 +734,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
                 audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
                 audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000),
+                audioTranscribeMaxRetries: asNumber("global-cli-audio-max-retries", 1),
+                audioTranscribeRetryDelayMs: asNumber("global-cli-audio-retry-delay", 800),
+                audioTranscribeMaxBytes: asNumber("global-cli-audio-max-bytes", 26214400),
                 audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
                 audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000)
               },

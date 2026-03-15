@@ -24,6 +24,9 @@ export interface CliCompatConfig {
   audioTranscribeModel: string;
   audioTranscribeTimeoutMs: number;
   audioTranscribeMaxChars: number;
+  audioTranscribeMaxRetries: number;
+  audioTranscribeRetryDelayMs: number;
+  audioTranscribeMaxBytes: number;
   audioLocalWhisperCommand: string | null;
   audioLocalWhisperTimeoutMs: number;
   recordPath: string | null;
@@ -200,6 +203,21 @@ const configSchema = z
       .default("6000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES: z
+      .string()
+      .default("1")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(0).max(10)),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS: z
+      .string()
+      .default("800")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES: z
+      .string()
+      .default("26214400")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: z.string().default(""),
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: z
       .string()
@@ -279,6 +297,9 @@ const configSchema = z
       audioTranscribeModel: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL.trim() || "gpt-4o-mini-transcribe",
       audioTranscribeTimeoutMs: v.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS,
       audioTranscribeMaxChars: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS,
+      audioTranscribeMaxRetries: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES,
+      audioTranscribeRetryDelayMs: v.CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS,
+      audioTranscribeMaxBytes: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES,
       audioLocalWhisperCommand: v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND.trim()
         ? v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND.trim()
         : null,

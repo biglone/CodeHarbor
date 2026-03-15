@@ -57,6 +57,9 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL",
   "CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS",
   "CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS",
+  "CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES",
+  "CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS",
+  "CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES",
   "CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND",
   "CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS",
   "CLI_COMPAT_RECORD_PATH",
@@ -176,6 +179,16 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     ),
     CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: integerStringSchema("CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS", 1).default(
       "6000",
+    ),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES: integerStringSchema("CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES", 0, 10).default(
+      "1",
+    ),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS: integerStringSchema(
+      "CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS",
+      0,
+    ).default("800"),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES: integerStringSchema("CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES", 1).default(
+      "26214400",
     ),
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: z.string().default(""),
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: integerStringSchema(
@@ -398,6 +411,9 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: config.cliCompat.audioTranscribeModel,
     CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: String(config.cliCompat.audioTranscribeTimeoutMs),
     CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: String(config.cliCompat.audioTranscribeMaxChars),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES: String(config.cliCompat.audioTranscribeMaxRetries),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS: String(config.cliCompat.audioTranscribeRetryDelayMs),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES: String(config.cliCompat.audioTranscribeMaxBytes),
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: config.cliCompat.audioLocalWhisperCommand ?? "",
     CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: String(config.cliCompat.audioLocalWhisperTimeoutMs),
     CLI_COMPAT_RECORD_PATH: config.cliCompat.recordPath ?? "",
