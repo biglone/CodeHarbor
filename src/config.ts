@@ -20,6 +20,10 @@ export interface CliCompatConfig {
   disableReplyChunkSplit: boolean;
   progressThrottleMs: number;
   fetchMedia: boolean;
+  transcribeAudio: boolean;
+  audioTranscribeModel: string;
+  audioTranscribeTimeoutMs: number;
+  audioTranscribeMaxChars: number;
   recordPath: string | null;
 }
 
@@ -179,6 +183,21 @@ const configSchema = z
       .string()
       .default("true")
       .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_TRANSCRIBE_AUDIO: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: z
+      .string()
+      .default("120000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: z
+      .string()
+      .default("6000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     CLI_COMPAT_RECORD_PATH: z.string().default(""),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
@@ -248,6 +267,10 @@ const configSchema = z
       disableReplyChunkSplit: v.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT,
       progressThrottleMs: v.CLI_COMPAT_PROGRESS_THROTTLE_MS,
       fetchMedia: v.CLI_COMPAT_FETCH_MEDIA,
+      transcribeAudio: v.CLI_COMPAT_TRANSCRIBE_AUDIO,
+      audioTranscribeModel: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL.trim() || "gpt-4o-mini-transcribe",
+      audioTranscribeTimeoutMs: v.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS,
+      audioTranscribeMaxChars: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS,
       recordPath: v.CLI_COMPAT_RECORD_PATH.trim() ? path.resolve(v.CLI_COMPAT_RECORD_PATH) : null,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,

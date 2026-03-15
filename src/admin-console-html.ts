@@ -310,6 +310,19 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-cli-throttle" type="number" min="0" />
           </label>
           <label class="checkbox"><input id="global-cli-fetch-media" type="checkbox" /><span>Fetch media attachments</span></label>
+          <label class="checkbox"><input id="global-cli-transcribe-audio" type="checkbox" /><span>Transcribe audio attachments</span></label>
+          <label class="field">
+            <span class="field-label">Audio transcribe model</span>
+            <input id="global-cli-audio-model" type="text" />
+          </label>
+          <label class="field">
+            <span class="field-label">Audio transcribe timeout (ms)</span>
+            <input id="global-cli-audio-timeout" type="number" min="1" />
+          </label>
+          <label class="field">
+            <span class="field-label">Audio transcript max chars</span>
+            <input id="global-cli-audio-max-chars" type="number" min="1" />
+          </label>
           <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span>Enable multi-agent workflow</span></label>
           <label class="field">
             <span class="field-label">Workflow auto-repair rounds</span>
@@ -644,6 +657,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-disable-split").checked = Boolean(cliCompat.disableReplyChunkSplit);
             document.getElementById("global-cli-throttle").value = String(cliCompat.progressThrottleMs || 0);
             document.getElementById("global-cli-fetch-media").checked = Boolean(cliCompat.fetchMedia);
+            document.getElementById("global-cli-transcribe-audio").checked = Boolean(cliCompat.transcribeAudio);
+            document.getElementById("global-cli-audio-model").value = cliCompat.audioTranscribeModel || "gpt-4o-mini-transcribe";
+            document.getElementById("global-cli-audio-timeout").value = String(cliCompat.audioTranscribeTimeoutMs || 120000);
+            document.getElementById("global-cli-audio-max-chars").value = String(cliCompat.audioTranscribeMaxChars || 6000);
             document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
             document.getElementById("global-agent-repair-rounds").value = String(
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
@@ -685,7 +702,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 preserveWhitespace: asBool("global-cli-whitespace"),
                 disableReplyChunkSplit: asBool("global-cli-disable-split"),
                 progressThrottleMs: asNumber("global-cli-throttle", 300),
-                fetchMedia: asBool("global-cli-fetch-media")
+                fetchMedia: asBool("global-cli-fetch-media"),
+                transcribeAudio: asBool("global-cli-transcribe-audio"),
+                audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
+                audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
+                audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000)
               },
               agentWorkflow: {
                 enabled: asBool("global-agent-enabled"),

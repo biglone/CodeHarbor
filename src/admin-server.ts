@@ -544,6 +544,44 @@ export class AdminServer {
         envUpdates.CLI_COMPAT_FETCH_MEDIA = String(value);
         updatedKeys.push("cliCompat.fetchMedia");
       }
+      if ("transcribeAudio" in compat) {
+        const value = normalizeBoolean(compat.transcribeAudio, this.config.cliCompat.transcribeAudio);
+        this.config.cliCompat.transcribeAudio = value;
+        envUpdates.CLI_COMPAT_TRANSCRIBE_AUDIO = String(value);
+        updatedKeys.push("cliCompat.transcribeAudio");
+      }
+      if ("audioTranscribeModel" in compat) {
+        const value = normalizeString(
+          compat.audioTranscribeModel,
+          this.config.cliCompat.audioTranscribeModel,
+          "cliCompat.audioTranscribeModel",
+        );
+        this.config.cliCompat.audioTranscribeModel = value || "gpt-4o-mini-transcribe";
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL = this.config.cliCompat.audioTranscribeModel;
+        updatedKeys.push("cliCompat.audioTranscribeModel");
+      }
+      if ("audioTranscribeTimeoutMs" in compat) {
+        const value = normalizePositiveInt(
+          compat.audioTranscribeTimeoutMs,
+          this.config.cliCompat.audioTranscribeTimeoutMs,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.audioTranscribeTimeoutMs = value;
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS = String(value);
+        updatedKeys.push("cliCompat.audioTranscribeTimeoutMs");
+      }
+      if ("audioTranscribeMaxChars" in compat) {
+        const value = normalizePositiveInt(
+          compat.audioTranscribeMaxChars,
+          this.config.cliCompat.audioTranscribeMaxChars,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.audioTranscribeMaxChars = value;
+        envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS = String(value);
+        updatedKeys.push("cliCompat.audioTranscribeMaxChars");
+      }
     }
 
     if ("agentWorkflow" in body) {

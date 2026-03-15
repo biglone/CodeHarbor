@@ -112,3 +112,30 @@ describe("loadConfig CODEX_EXTRA_ARGS", () => {
     ).toThrow(/CODEX_EXTRA_ARGS/i);
   });
 });
+
+describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
+  it("uses safe defaults", () => {
+    const config = loadConfig(createBaseEnv());
+
+    expect(config.cliCompat.transcribeAudio).toBe(false);
+    expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-mini-transcribe");
+    expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(120000);
+    expect(config.cliCompat.audioTranscribeMaxChars).toBe(6000);
+  });
+
+  it("parses custom transcription settings", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        CLI_COMPAT_TRANSCRIBE_AUDIO: "true",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: "gpt-4o-transcribe",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: "45000",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: "3200",
+      }),
+    );
+
+    expect(config.cliCompat.transcribeAudio).toBe(true);
+    expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-transcribe");
+    expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(45000);
+    expect(config.cliCompat.audioTranscribeMaxChars).toBe(3200);
+  });
+});
