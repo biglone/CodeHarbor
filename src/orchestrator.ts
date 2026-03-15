@@ -247,6 +247,8 @@ export class Orchestrator {
       audioTranscribeModel: "gpt-4o-mini-transcribe",
       audioTranscribeTimeoutMs: 120_000,
       audioTranscribeMaxChars: 6_000,
+      audioLocalWhisperCommand: null,
+      audioLocalWhisperTimeoutMs: 180_000,
       recordPath: null,
     };
     this.cliCompatRecorder = this.cliCompat.recordPath ? new CliCompatRecorder(this.cliCompat.recordPath) : null;
@@ -258,6 +260,8 @@ export class Orchestrator {
         model: this.cliCompat.audioTranscribeModel,
         timeoutMs: this.cliCompat.audioTranscribeTimeoutMs,
         maxChars: this.cliCompat.audioTranscribeMaxChars,
+        localWhisperCommand: this.cliCompat.audioLocalWhisperCommand,
+        localWhisperTimeoutMs: this.cliCompat.audioLocalWhisperTimeoutMs,
       });
     const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
     this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;

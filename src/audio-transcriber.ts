@@ -1,5 +1,9 @@
+import { exec as execCallback } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execAsync = promisify(execCallback);
 
 export interface AudioAttachmentForTranscription {
   name: string;
@@ -23,6 +27,8 @@ interface AudioTranscriberOptions {
   model: string;
   timeoutMs: number;
   maxChars: number;
+  localWhisperCommand: string | null;
+  localWhisperTimeoutMs: number;
 }
 
 export class AudioTranscriber implements AudioTranscriberLike {
@@ -31,6 +37,8 @@ export class AudioTranscriber implements AudioTranscriberLike {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly maxChars: number;
+  private readonly localWhisperCommand: string | null;
+  private readonly localWhisperTimeoutMs: number;
 
   constructor(options: AudioTranscriberOptions) {
     this.enabled = options.enabled;
@@ -38,6 +46,8 @@ export class AudioTranscriber implements AudioTranscriberLike {
     this.model = options.model;
     this.timeoutMs = options.timeoutMs;
     this.maxChars = options.maxChars;
+    this.localWhisperCommand = options.localWhisperCommand;
+    this.localWhisperTimeoutMs = options.localWhisperTimeoutMs;
   }
 
   isEnabled(): boolean {
@@ -48,15 +58,22 @@ export class AudioTranscriber implements AudioTranscriberLike {
     if (!this.enabled || attachments.length === 0) {
       return [];
     }
-    if (!this.apiKey) {
+
+    const hasLocalWhisper = Boolean(this.localWhisperCommand);
+    const hasOpenAi = Boolean(this.apiKey);
+    if (!hasLocalWhisper && !hasOpenAi) {
       throw new Error(
-        "Audio transcription is enabled but OPENAI_API_KEY is missing. Set OPENAI_API_KEY or disable CLI_COMPAT_TRANSCRIBE_AUDIO.",
+        "Audio transcription is enabled but no backend is configured. Set CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND or OPENAI_API_KEY.",
       );
     }
 
     const transcripts: AudioTranscript[] = [];
+    const failures: string[] = [];
     for (const attachment of attachments) {
-      const text = await this.transcribeOne(attachment);
+      const text = await this.transcribeWithFallback(attachment, hasLocalWhisper, hasOpenAi).catch((error) => {
+        failures.push(formatError(error));
+        return "";
+      });
       if (!text) {
         continue;
       }
@@ -65,10 +82,55 @@ export class AudioTranscriber implements AudioTranscriberLike {
         text,
       });
     }
+
+    if (transcripts.length === 0 && failures.length > 0) {
+      throw new Error(`Audio transcription failed: ${failures.join(" | ")}`);
+    }
     return transcripts;
   }
 
-  private async transcribeOne(attachment: AudioAttachmentForTranscription): Promise<string> {
+  private async transcribeWithFallback(
+    attachment: AudioAttachmentForTranscription,
+    hasLocalWhisper: boolean,
+    hasOpenAi: boolean,
+  ): Promise<string> {
+    let localError: unknown = null;
+    if (hasLocalWhisper) {
+      try {
+        const localText = await this.transcribeOneWithLocalWhisper(attachment);
+        if (localText) {
+          return localText;
+        }
+      } catch (error) {
+        localError = error;
+      }
+    }
+
+    if (hasOpenAi) {
+      try {
+        return await this.transcribeOneWithOpenAi(attachment);
+      } catch (error) {
+        if (!localError) {
+          throw error;
+        }
+        throw new Error(
+          `local whisper failed (${formatError(localError)}), and OpenAI fallback also failed (${formatError(error)}).`,
+          { cause: error },
+        );
+      }
+    }
+
+    if (localError) {
+      throw localError;
+    }
+    return "";
+  }
+
+  private async transcribeOneWithOpenAi(attachment: AudioAttachmentForTranscription): Promise<string> {
+    if (!this.apiKey) {
+      return "";
+    }
+
     const buffer = await fs.readFile(attachment.localPath);
     const formData = new FormData();
     formData.append("model", this.model);
@@ -113,6 +175,35 @@ export class AudioTranscriber implements AudioTranscriberLike {
     }
 
     const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    return this.normalizeTranscriptText(text);
+  }
+
+  private async transcribeOneWithLocalWhisper(attachment: AudioAttachmentForTranscription): Promise<string> {
+    if (!this.localWhisperCommand) {
+      return "";
+    }
+
+    const command = buildLocalWhisperCommand(this.localWhisperCommand, attachment.localPath);
+    const result = await execAsync(command, {
+      timeout: this.localWhisperTimeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+      shell: "/bin/bash",
+    });
+
+    const text = result.stdout.trim();
+    if (!text) {
+      const stderr = result.stderr.trim();
+      throw new Error(
+        stderr
+          ? `Local whisper command produced empty output for ${attachment.name}: ${stderr}`
+          : `Local whisper command produced empty output for ${attachment.name}.`,
+      );
+    }
+    return this.normalizeTranscriptText(text);
+  }
+
+  private normalizeTranscriptText(rawText: string): string {
+    const text = rawText.trim();
     if (!text) {
       return "";
     }
@@ -121,4 +212,23 @@ export class AudioTranscriber implements AudioTranscriberLike {
     }
     return text;
   }
+}
+
+function buildLocalWhisperCommand(template: string, inputPath: string): string {
+  const escapedInput = shellEscape(inputPath);
+  if (template.includes("{input}")) {
+    return template.replaceAll("{input}", escapedInput);
+  }
+  return `${template} ${escapedInput}`;
+}
+
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
