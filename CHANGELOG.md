@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-03-15
+
+- Added package author metadata for npm package attribution.
+- Improved npm package discoverability:
+  - updated package description with self-hosted Matrix bot / Codex CLI wording
+  - expanded package keywords with bridge, chat, messaging, and Matrix-specific terms
+- Updated README opening summary to better describe Matrix room routing and SQLite-backed session state.
+
 ## [0.1.25] - 2026-03-15
 
 - Added bot `/status` message version visibility:
