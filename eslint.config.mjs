@@ -48,4 +48,17 @@ export default tseslint.config(
       },
     },
   },
+  {
+    files: ["scripts/**/*.cjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "commonjs",
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 );

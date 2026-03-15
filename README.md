@@ -93,6 +93,8 @@ Notes:
 - Service commands auto-elevate with `sudo` when root privileges are required.
 - `codeharbor service install --with-admin` and `install-linux-easy.sh --enable-admin-service` now install
   `/etc/sudoers.d/codeharbor-restart` for non-root service users, so Admin UI restart actions work out-of-box.
+- `npm install -g codeharbor@latest` now performs best-effort restart for active `codeharbor(.service)` units on Linux
+  so upgrades take effect immediately (set `CODEHARBOR_SKIP_POSTINSTALL_RESTART=1` to disable).
 - If your environment blocks interactive `sudo`, use explicit fallback:
   - `sudo <node-bin> <codeharbor-cli-script> service ...`
 

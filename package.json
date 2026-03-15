@@ -17,6 +17,7 @@
   },
   "files": [
     "dist",
+    "scripts/postinstall-restart.cjs",
     ".env.example",
     "README.md",
     "LICENSE"
@@ -55,6 +56,7 @@
     "e2e:install": "playwright install chromium",
     "test:watch": "vitest test",
     "test:legacy": "bash ./scripts/run-legacy-tests.sh",
+    "postinstall": "node ./scripts/postinstall-restart.cjs",
     "prepare": "npm run build",
     "prepublishOnly": "npm run changelog:check && npm run typecheck && npm run lint && npm run test:coverage && npm run build",
     "changelog:check": "bash ./scripts/check-changelog.sh",
