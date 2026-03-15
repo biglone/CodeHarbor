@@ -31,6 +31,26 @@ program
   .description("Instant-messaging bridge for Codex CLI sessions")
   .version(cliVersion);
 
+program.addHelpText(
+  "after",
+  [
+    "",
+    "Prerequisites:",
+    "  - codex CLI installed and authenticated (run: codex login)",
+    "  - Matrix bot credentials in .env: MATRIX_HOMESERVER, MATRIX_USER_ID, MATRIX_ACCESS_TOKEN",
+    "",
+    "Runtime:",
+    "  - default CODEHARBOR_HOME: ~/.codeharbor (legacy /opt/codeharbor/.env is auto-detected)",
+    "  - running without subcommand defaults to: codeharbor start",
+    "",
+    "Common commands:",
+    "  - codeharbor init",
+    "  - codeharbor doctor",
+    "  - codeharbor service install --with-admin",
+    "  - codeharbor admin serve --host 127.0.0.1 --port 8787",
+  ].join("\n"),
+);
+
 program
   .command("init")
   .description("Create or update .env via guided prompts")
@@ -83,6 +103,36 @@ program
 const admin = program.command("admin").description("Admin utilities");
 const configCommand = program.command("config").description("Config snapshot utilities");
 const serviceCommand = program.command("service").description("Systemd service management");
+
+admin.addHelpText(
+  "after",
+  [
+    "",
+    "Notes:",
+    "  - For non-loopback host binding, set ADMIN_TOKEN or ADMIN_TOKENS_JSON.",
+    "  - Admin UI routes: /settings/global, /settings/rooms, /health, /audit.",
+  ].join("\n"),
+);
+
+configCommand.addHelpText(
+  "after",
+  [
+    "",
+    "Examples:",
+    "  - codeharbor config export -o backup.json",
+    "  - codeharbor config import backup.json --dry-run",
+  ].join("\n"),
+);
+
+serviceCommand.addHelpText(
+  "after",
+  [
+    "",
+    "Notes:",
+    "  - Service subcommands auto-elevate with sudo when required.",
+    "  - Use --with-admin to manage both main and admin services together.",
+  ].join("\n"),
+);
 
 admin
   .command("serve")
