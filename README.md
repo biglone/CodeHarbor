@@ -1,7 +1,7 @@
 # CodeHarbor
 
-CodeHarbor is an instant-messaging bridge for `codex CLI`.
-Users send messages in Matrix, CodeHarbor routes each message to a Codex session, then sends the final result back to the same Matrix room.
+CodeHarbor is a self-hosted Matrix bot and chat bridge for OpenAI `codex` CLI.
+Users send messages in Matrix rooms, CodeHarbor routes each message to a Codex session, keeps room-to-session state in SQLite, then sends the final result back to the same room.
 
 ## What It Does
 
