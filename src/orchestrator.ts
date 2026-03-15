@@ -1,6 +1,7 @@
 import { Mutex } from "async-mutex";
 import fs from "node:fs/promises";
 
+import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { MatrixChannel } from "./channels/matrix-channel";
 import { CliCompatRecorder } from "./compat/cli-compat-recorder";
 import { ConfigService } from "./config-service";
@@ -53,6 +54,7 @@ interface OrchestratorOptions {
     enabled: boolean;
     autoRepairMaxRounds: number;
   };
+  audioTranscriber?: AudioTranscriberLike;
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
 }
@@ -196,6 +198,7 @@ export class Orchestrator {
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
   private readonly runningExecutions = new Map<string, RunningExecution>();
+  private readonly pendingStopRequests = new Set<string>();
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
   private readonly progressUpdatesEnabled: boolean;
@@ -212,6 +215,7 @@ export class Orchestrator {
   private readonly rateLimiter: RateLimiter;
   private readonly cliCompat: CliCompatConfig;
   private readonly cliCompatRecorder: CliCompatRecorder | null;
+  private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
@@ -239,9 +243,22 @@ export class Orchestrator {
       disableReplyChunkSplit: false,
       progressThrottleMs: 300,
       fetchMedia: false,
+      transcribeAudio: false,
+      audioTranscribeModel: "gpt-4o-mini-transcribe",
+      audioTranscribeTimeoutMs: 120_000,
+      audioTranscribeMaxChars: 6_000,
       recordPath: null,
     };
     this.cliCompatRecorder = this.cliCompat.recordPath ? new CliCompatRecorder(this.cliCompat.recordPath) : null;
+    this.audioTranscriber =
+      options?.audioTranscriber ??
+      new AudioTranscriber({
+        enabled: this.cliCompat.transcribeAudio,
+        apiKey: process.env.OPENAI_API_KEY?.trim() || null,
+        model: this.cliCompat.audioTranscribeModel,
+        timeoutMs: this.cliCompat.audioTranscribeTimeoutMs,
+        maxChars: this.cliCompat.audioTranscribeMaxChars,
+      });
     const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
     this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;
     this.typingTimeoutMs = options?.typingTimeoutMs ?? 10_000;
@@ -277,7 +294,7 @@ export class Orchestrator {
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
-    const attachmentPaths = collectImagePaths(message);
+    const attachmentPaths = collectLocalAttachmentPaths(message);
     try {
       const receivedAt = Date.now();
       const requestId = message.requestId || message.eventId;
@@ -422,7 +439,8 @@ export class Orchestrator {
 
         this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
         const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
-        const executionPrompt = this.buildExecutionPrompt(route.prompt, message);
+        const audioTranscripts = await this.transcribeAudioAttachments(message, requestId, sessionKey);
+        const executionPrompt = this.buildExecutionPrompt(route.prompt, message, audioTranscripts);
         const imagePaths = collectImagePaths(message);
         let lastProgressAt = 0;
         let lastProgressText = "";
@@ -432,7 +450,7 @@ export class Orchestrator {
         let executionDurationMs = 0;
         let sendDurationMs = 0;
         const requestStartedAt = Date.now();
-        let cancelRequested = false;
+        let cancelRequested = this.consumePendingStopRequest(sessionKey);
 
         this.runningExecutions.set(sessionKey, {
           requestId,
@@ -1025,6 +1043,7 @@ export class Orchestrator {
 
     const running = this.runningExecutions.get(sessionKey);
     if (running) {
+      this.pendingStopRequests.delete(sessionKey);
       this.sessionRuntime.cancelRunningExecution(sessionKey);
       running.cancel();
       await this.channel.sendNotice(
@@ -1040,10 +1059,33 @@ export class Orchestrator {
       return;
     }
 
+    const lockEntry = this.sessionLocks.get(sessionKey);
+    if (lockEntry?.mutex.isLocked()) {
+      this.pendingStopRequests.add(sessionKey);
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 已请求停止当前任务，并已清理会话上下文。",
+      );
+      this.logger.info("Stop command queued for pending execution", {
+        requestId,
+        sessionKey,
+      });
+      return;
+    }
+
+    this.pendingStopRequests.delete(sessionKey);
     await this.channel.sendNotice(
       message.conversationId,
       "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
     );
+  }
+
+  private consumePendingStopRequest(sessionKey: string): boolean {
+    if (!this.pendingStopRequests.has(sessionKey)) {
+      return false;
+    }
+    this.pendingStopRequests.delete(sessionKey);
+    return true;
   }
 
   private startTypingHeartbeat(conversationId: string): () => Promise<void> {
@@ -1172,8 +1214,51 @@ export class Orchestrator {
     return this.configService.resolveRoomConfig(conversationId, fallbackPolicy);
   }
 
-  private buildExecutionPrompt(prompt: string, message: InboundMessage): string {
-    if (message.attachments.length === 0) {
+  private async transcribeAudioAttachments(
+    message: InboundMessage,
+    requestId: string,
+    sessionKey: string,
+  ): Promise<AudioTranscript[]> {
+    if (!this.audioTranscriber.isEnabled()) {
+      return [];
+    }
+
+    const audioAttachments = message.attachments
+      .filter((attachment) => attachment.kind === "audio" && Boolean(attachment.localPath))
+      .map((attachment) => ({
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        localPath: attachment.localPath as string,
+      }));
+
+    if (audioAttachments.length === 0) {
+      return [];
+    }
+
+    try {
+      const transcripts = await this.audioTranscriber.transcribeMany(audioAttachments);
+      if (transcripts.length > 0) {
+        this.logger.info("Audio transcription completed", {
+          requestId,
+          sessionKey,
+          attachmentCount: audioAttachments.length,
+          transcriptCount: transcripts.length,
+        });
+      }
+      return transcripts;
+    } catch (error) {
+      this.logger.warn("Audio transcription failed, continuing without transcripts", {
+        requestId,
+        sessionKey,
+        attachmentCount: audioAttachments.length,
+        error: formatError(error),
+      });
+      return [];
+    }
+  }
+
+  private buildExecutionPrompt(prompt: string, message: InboundMessage, audioTranscripts: AudioTranscript[]): string {
+    if (message.attachments.length === 0 && audioTranscripts.length === 0) {
       return prompt;
     }
 
@@ -1188,7 +1273,19 @@ export class Orchestrator {
       .join("\n");
 
     const promptBody = prompt.trim() ? prompt : "(no text body)";
-    return `${promptBody}\n\n[attachments]\n${attachmentSummary}\n[/attachments]`;
+    const sections = [promptBody];
+    if (attachmentSummary) {
+      sections.push(`[attachments]\n${attachmentSummary}\n[/attachments]`);
+    }
+
+    if (audioTranscripts.length > 0) {
+      const transcriptSummary = audioTranscripts
+        .map((transcript) => `- name=${transcript.name} text=${transcript.text.replace(/\s+/g, " ").trim()}`)
+        .join("\n");
+      sections.push(`[audio_transcripts]\n${transcriptSummary}\n[/audio_transcripts]`);
+    }
+
+    return sections.join("\n\n");
   }
 
   private async recordCliCompatPrompt(entry: {
@@ -1367,11 +1464,22 @@ function collectImagePaths(message: InboundMessage): string[] {
   return [...seen];
 }
 
-async function cleanupAttachmentFiles(imagePaths: string[]): Promise<void> {
+function collectLocalAttachmentPaths(message: InboundMessage): string[] {
+  const seen = new Set<string>();
+  for (const attachment of message.attachments) {
+    if (!attachment.localPath) {
+      continue;
+    }
+    seen.add(attachment.localPath);
+  }
+  return [...seen];
+}
+
+async function cleanupAttachmentFiles(attachmentPaths: string[]): Promise<void> {
   await Promise.all(
-    imagePaths.map(async (imagePath) => {
+    attachmentPaths.map(async (attachmentPath) => {
       try {
-        await fs.unlink(imagePath);
+        await fs.unlink(attachmentPath);
       } catch {
         // Ignore cleanup failure: temp files are best-effort.
       }

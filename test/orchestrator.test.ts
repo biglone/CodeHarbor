@@ -417,7 +417,9 @@ describe("Orchestrator", () => {
   it("cleans up hydrated attachment files for ignored messages", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-ignored-attachment-"));
     const imagePath = path.join(tempRoot, "input.png");
+    const audioPath = path.join(tempRoot, "voice.m4a");
     await fs.writeFile(imagePath, "payload", "utf8");
+    await fs.writeFile(audioPath, "payload", "utf8");
 
     try {
       const channel = new FakeChannel();
@@ -445,12 +447,71 @@ describe("Orchestrator", () => {
               sizeBytes: 7,
               localPath: imagePath,
             },
+            {
+              kind: "audio",
+              name: "voice.m4a",
+              mxcUrl: "mxc://example.com/audio",
+              mimeType: "audio/mp4",
+              sizeBytes: 9,
+              localPath: audioPath,
+            },
           ],
         }),
       );
 
       await expect(fs.access(imagePath)).rejects.toBeDefined();
+      await expect(fs.access(audioPath)).rejects.toBeDefined();
       expect(executor.calls).toHaveLength(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("appends audio transcript context to prompt", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-audio-"));
+    const audioPath = path.join(tempRoot, "voice.m4a");
+    await fs.writeFile(audioPath, "payload", "utf8");
+
+    const transcriber = {
+      isEnabled: () => true,
+      transcribeMany: vi.fn(async () => [{ name: "voice.m4a", text: "请帮我总结会议重点" }]),
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        audioTranscriber: transcriber as never,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请处理这个语音",
+          eventId: "$audio-transcript",
+          attachments: [
+            {
+              kind: "audio",
+              name: "voice.m4a",
+              mxcUrl: "mxc://example.com/audio",
+              mimeType: "audio/mp4",
+              sizeBytes: 99,
+              localPath: audioPath,
+            },
+          ],
+        }),
+      );
+
+      expect(transcriber.transcribeMany).toHaveBeenCalledTimes(1);
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).toContain("[audio_transcripts]");
+      expect(executor.calls[0]?.text).toContain("voice.m4a");
+      expect(executor.calls[0]?.text).toContain("请帮我总结会议重点");
+      await expect(fs.access(audioPath)).rejects.toBeDefined();
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

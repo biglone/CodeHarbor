@@ -461,10 +461,9 @@ describe("Matrix e2e regression", () => {
       }),
     );
 
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(executor.calls).toHaveLength(2);
+    await vi.waitFor(() => {
+      expect(executor.calls).toHaveLength(2);
+    });
     expect(executor.calls.map((call) => call.workdir).sort()).toEqual(["/tmp/project-a", "/tmp/project-b"]);
 
     for (const release of releases) {

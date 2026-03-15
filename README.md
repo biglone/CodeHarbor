@@ -460,6 +460,14 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - lower update throttle for near-real-time progress
 - `CLI_COMPAT_FETCH_MEDIA=true|false`
   - download Matrix `mxc://` media (image) to temp file and pass it to codex via `--image`
+- `CLI_COMPAT_TRANSCRIBE_AUDIO=true|false`
+  - download Matrix `m.audio` attachments and transcribe them into prompt context
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL`
+  - OpenAI transcription model (default `gpt-4o-mini-transcribe`)
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS`
+  - timeout for each audio transcription request
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS`
+  - max transcript length appended to prompt for one attachment
 - `CLI_COMPAT_RECORD_PATH=/abs/path/records.jsonl`
   - append executed prompts as JSONL for replay benchmarking
 
@@ -502,6 +510,15 @@ When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor
 2. pass local file paths as `--image` to codex exec
 3. best-effort cleanup temp files after the request
 4. optional prompt record append (`CLI_COMPAT_RECORD_PATH`) for deterministic replay input
+
+When audio attachments are present and both `CLI_COMPAT_FETCH_MEDIA=true` and `CLI_COMPAT_TRANSCRIBE_AUDIO=true`, CodeHarbor will:
+
+1. download `m.audio` media to a temp file
+2. call OpenAI audio transcription API and append transcript to `[audio_transcripts]` prompt block
+3. continue request even if transcription fails (warn log + no transcript)
+4. best-effort cleanup temp files after the request
+
+`OPENAI_API_KEY` is required only when audio transcription is enabled.
 
 ## Replay Benchmark
 
