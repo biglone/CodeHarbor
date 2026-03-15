@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-03-15
+
+- Added Linux postinstall auto-restart for global upgrades so active `codeharbor` services pick up new versions immediately after `npm install -g codeharbor@latest`.
+- Added best-effort safeguards for postinstall restart flow:
+  - only runs for global installs by default
+  - supports non-interactive `sudo -n` fallback for non-root users
+  - never fails package installation when restart is unavailable
+  - allows opt-out via `CODEHARBOR_SKIP_POSTINSTALL_RESTART=1`
+- Updated docs and lint configuration for packaged postinstall restart script.
+
 ## [0.1.18] - 2026-03-15
 
 - Enhanced Matrix AI reply rendering with markdown-like rich text support (headings, lists, blockquotes, links, emphasis, inline code, and fenced code blocks) for better in-room readability.
