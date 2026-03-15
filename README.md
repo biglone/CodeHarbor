@@ -200,6 +200,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 
 - `REQUIREMENTS.md`: current baseline + next-stage requirements
 - `TASK_LIST.md`: implementation task breakdown and status
+- `docs/USER_MANUAL_ZH.md`: Chinese user manual (installation, configuration, verification)
 - `docs/COMPLETE_CONFIGURATION_GUIDE.md`: end-to-end setup flow + full feature-to-config mapping
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
