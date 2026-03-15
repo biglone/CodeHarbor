@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-03-15
+
+- Added bot `/status` message version visibility:
+  - shows current running `codeharbor` version
+  - shows npm update hint (`up-to-date`, `new version available`, or `check unavailable`)
+- Added npm latest-version checker with cache and timeout guard for status reporting.
+- Added regression/unit coverage for version comparison, update-check result formatting, and status message output.
+
 ## [0.1.24] - 2026-03-15
 
 - Improved CLI help output with prerequisite guidance (`codex login`, Matrix credential requirements), runtime-home notes, and quick-start command hints.
