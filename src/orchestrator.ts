@@ -1194,7 +1194,14 @@ export class Orchestrator {
     if (!this.progressUpdatesEnabled) {
       return;
     }
-    await this.sendProgressUpdate(ctx, `${this.botNoticePrefix} ${summary}`);
+    let updateHint = "";
+    try {
+      const packageUpdate = await this.packageUpdateChecker.getStatus();
+      updateHint = `；${formatPackageUpdateHint(packageUpdate)}`;
+    } catch (error) {
+      this.logger.debug("Failed to resolve package update status for progress summary", { error });
+    }
+    await this.sendProgressUpdate(ctx, `${this.botNoticePrefix} ${summary}${updateHint}`);
   }
 
   private async sendProgressUpdate(ctx: SendProgressContext, text: string): Promise<void> {
