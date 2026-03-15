@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-03-15
+
+- Improved CLI help output with prerequisite guidance (`codex login`, Matrix credential requirements), runtime-home notes, and quick-start command hints.
+- Added a Chinese user manual covering install, configuration, verification, security, and upgrade workflow:
+  - `docs/USER_MANUAL_ZH.md`
+- Added a complete configuration guide with end-to-end setup flow and full feature-to-config mapping:
+  - `docs/COMPLETE_CONFIGURATION_GUIDE.md`
+- Updated configuration documentation to include missing CLI audio transcription controls in config catalog:
+  - `docs/CONFIG_CATALOG.md`
+- Updated README documentation index to link new manuals and configuration guides.
+- Clarified prerequisite requirements across docs: using CodeHarbor requires both Codex CLI availability and Matrix account credentials.
+
 ## [0.1.23] - 2026-03-15
 
 - Added Admin Console runtime language switcher (`中文` / `English`) with default locale set to Chinese (`zh`).
