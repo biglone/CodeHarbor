@@ -470,6 +470,7 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - max transcript length appended to prompt for one attachment
 - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`
   - optional local whisper command template (use `{input}` placeholder for audio file path)
+  - helper command shipped by package: `codeharbor-whisper-transcribe --input {input} --model small`
 - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS`
   - timeout for local whisper command execution
 - `CLI_COMPAT_RECORD_PATH=/abs/path/records.jsonl`
@@ -525,6 +526,7 @@ When audio attachments are present and both `CLI_COMPAT_FETCH_MEDIA=true` and `C
 6. best-effort cleanup temp files after the request
 
 `OPENAI_API_KEY` is optional when local whisper command is configured, and required only for OpenAI fallback.
+For `codeharbor-whisper-transcribe`, install runtime first: `python3 -m pip install faster-whisper`.
 
 ## Replay Benchmark
 

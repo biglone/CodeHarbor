@@ -13,11 +13,13 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "codeharbor": "dist/cli.js"
+    "codeharbor": "dist/cli.js",
+    "codeharbor-whisper-transcribe": "scripts/local-whisper-transcribe.py"
   },
   "files": [
     "dist",
     "scripts/postinstall-restart.cjs",
+    "scripts/local-whisper-transcribe.py",
     ".env.example",
     "README.md",
     "LICENSE"
