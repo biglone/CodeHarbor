@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-03-15
+
+- Added Admin Console runtime language switcher (`中文` / `English`) with default locale set to Chinese (`zh`).
+- Localized major Admin Console UI surfaces (global settings, room config, health check, and audit page labels/buttons/placeholders).
+- Localized dynamic notices, status text, and confirmation dialogs in the Admin Console.
+- Persisted language preference via `localStorage` and auto-applied it on page reload.
+
 ## [0.1.22] - 2026-03-15
 
 - Added audio transcription resilience controls:
