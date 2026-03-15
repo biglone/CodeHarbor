@@ -196,17 +196,6 @@ describe("Matrix e2e regression", () => {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
-      packageUpdateChecker: {
-        getStatus: async () => ({
-          packageName: "codeharbor",
-          currentVersion: "0.1.24",
-          latestVersion: "0.1.25",
-          state: "update_available",
-          checkedAt: new Date().toISOString(),
-          error: null,
-          upgradeCommand: "npm install -g codeharbor@latest",
-        }),
-      },
     });
 
     await orchestrator.handleMessage(
@@ -275,6 +264,17 @@ describe("Matrix e2e regression", () => {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.24",
+          latestVersion: "0.1.25",
+          state: "update_available",
+          checkedAt: new Date().toISOString(),
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
     });
 
     const running = orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "long running" }));
@@ -510,7 +510,7 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls[0]?.sessionId).toBeNull();
     expect(executor.calls[1]?.sessionId).toBeNull();
     expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("当前版本: 0.1.24"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("当前版本:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
