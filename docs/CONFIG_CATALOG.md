@@ -78,6 +78,15 @@ These must be valid before `codeharbor start`.
 | `CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT` | No | `false` | Yes | Restart | Disable chunk splitting |
 | `CLI_COMPAT_PROGRESS_THROTTLE_MS` | No | `300` | Yes | Restart | Compatibility progress throttle |
 | `CLI_COMPAT_FETCH_MEDIA` | No | `true` | Yes | Restart | Download media for prompts |
+| `CLI_COMPAT_TRANSCRIBE_AUDIO` | No | `false` | Yes | Restart | Enable transcription for Matrix `m.audio` attachments |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL` | No | `gpt-4o-mini-transcribe` | Yes | Restart | OpenAI transcription model |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS` | No | `120000` | Yes | Restart | Timeout per transcription request |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS` | No | `6000` | Yes | Restart | Max characters appended from one transcript |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES` | No | `1` | Yes | Restart | Retry count for local/OpenAI transcription failures |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS` | No | `800` | Yes | Restart | Base delay between retries |
+| `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES` | No | `26214400` | Yes | Restart | Skip transcription for oversized audio files |
+| `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND` | No | empty | Yes | Restart | Optional local whisper command template (use `{input}` placeholder) |
+| `CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS` | No | `180000` | Yes | Restart | Timeout for local whisper command execution |
 | `CLI_COMPAT_RECORD_PATH` | No | empty | No | Restart | JSONL replay record path |
 
 ## 7) Admin / Ops / Security
