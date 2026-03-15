@@ -1,9 +1,9 @@
 export const ADMIN_CONSOLE_HTML = `<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CodeHarbor Admin Console</title>
+    <title>CodeHarbor 管理后台 / Admin Console</title>
     <style>
       :root {
         --bg-start: #0f172a;
@@ -86,13 +86,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         color: var(--muted);
       }
       input,
+      select,
       button,
       textarea {
         font: inherit;
       }
       input[type="text"],
       input[type="password"],
-      input[type="number"] {
+      input[type="number"],
+      select {
         border: 1px solid var(--panel-border);
         background: #0f172acc;
         color: var(--text);
@@ -218,181 +220,188 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
   <body>
     <main class="shell">
       <section class="header">
-        <h1 class="title">CodeHarbor Admin Console</h1>
-        <p class="subtitle">Manage global settings, room policies, health checks, and config audit records.</p>
+        <h1 class="title" data-i18n="header.title">CodeHarbor 管理后台</h1>
+        <p class="subtitle" data-i18n="header.subtitle">管理全局配置、房间策略、健康检查与配置审计记录。</p>
         <nav class="tabs">
-          <a class="tab" data-page="settings-global" href="#/settings/global">Global</a>
-          <a class="tab" data-page="settings-rooms" href="#/settings/rooms">Rooms</a>
-          <a class="tab" data-page="health" href="#/health">Health</a>
-          <a class="tab" data-page="audit" href="#/audit">Audit</a>
+          <a class="tab" data-page="settings-global" href="#/settings/global" data-i18n="tab.global">全局</a>
+          <a class="tab" data-page="settings-rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间</a>
+          <a class="tab" data-page="health" href="#/health" data-i18n="tab.health">健康</a>
+          <a class="tab" data-page="audit" href="#/audit" data-i18n="tab.audit">审计</a>
         </nav>
         <div class="auth-row">
           <label class="field">
-            <span class="field-label">Admin Token (optional)</span>
-            <input id="auth-token" type="password" placeholder="ADMIN_TOKEN" />
+            <span class="field-label" data-i18n="auth.token.label">管理员令牌（可选）</span>
+            <input id="auth-token" type="password" placeholder="ADMIN_TOKEN" data-i18n-placeholder="auth.token.placeholder" />
           </label>
           <label class="field">
-            <span class="field-label">Actor (for audit logs)</span>
-            <input id="auth-actor" type="text" placeholder="your-name" />
+            <span class="field-label" data-i18n="auth.actor.label">操作者（用于审计日志）</span>
+            <input id="auth-actor" type="text" placeholder="你的名字" data-i18n-placeholder="auth.actor.placeholder" />
           </label>
-          <button id="auth-save-btn" type="button" class="secondary">Save Auth</button>
-          <button id="auth-clear-btn" type="button" class="secondary">Clear Auth</button>
+          <label class="field">
+            <span class="field-label" data-i18n="auth.language.label">界面语言</span>
+            <select id="lang-select">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <button id="auth-save-btn" type="button" class="secondary" data-i18n="auth.save">保存认证</button>
+          <button id="auth-clear-btn" type="button" class="secondary" data-i18n="auth.clear">清除认证</button>
         </div>
-        <div id="notice" class="notice">Ready.</div>
-        <p id="auth-role" class="muted">Permission: unknown</p>
+        <div id="notice" class="notice" data-i18n="notice.ready">就绪。</div>
+        <p id="auth-role" class="muted" data-i18n="auth.permission.unknown">权限：未知</p>
       </section>
 
       <section class="panel" data-view="settings-global">
-        <h2 class="panel-title">Global Config</h2>
+        <h2 class="panel-title" data-i18n="global.title">全局配置</h2>
         <div class="grid">
           <label class="field">
-            <span class="field-label">Command Prefix</span>
+            <span class="field-label" data-i18n="global.commandPrefix">命令前缀</span>
             <input id="global-matrix-prefix" type="text" />
           </label>
           <label class="field">
-            <span class="field-label">Default Workdir</span>
+            <span class="field-label" data-i18n="global.defaultWorkdir">默认工作目录</span>
             <input id="global-workdir" type="text" />
           </label>
           <label class="field">
-            <span class="field-label">Progress Interval (ms)</span>
+            <span class="field-label" data-i18n="global.progressInterval">进度更新间隔（毫秒）</span>
             <input id="global-progress-interval" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Typing Timeout (ms)</span>
+            <span class="field-label" data-i18n="global.typingTimeout">输入状态超时（毫秒）</span>
             <input id="global-typing-timeout" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Session Active Window (minutes)</span>
+            <span class="field-label" data-i18n="global.sessionWindow">会话活跃窗口（分钟）</span>
             <input id="global-active-window" type="number" min="1" />
           </label>
           <label class="checkbox">
             <input id="global-progress-enabled" type="checkbox" />
-            <span>Enable progress updates</span>
+            <span data-i18n="global.progressEnabled">启用进度更新</span>
           </label>
 
           <label class="field">
-            <span class="field-label">Rate Window (ms)</span>
+            <span class="field-label" data-i18n="global.rateWindow">限流窗口（毫秒）</span>
             <input id="global-rate-window" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Rate Max Requests / User</span>
+            <span class="field-label" data-i18n="global.rateUser">单用户窗口最大请求数</span>
             <input id="global-rate-user" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">Rate Max Requests / Room</span>
+            <span class="field-label" data-i18n="global.rateRoom">单房间窗口最大请求数</span>
             <input id="global-rate-room" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">Max Concurrent Global</span>
+            <span class="field-label" data-i18n="global.concurrentGlobal">全局最大并发</span>
             <input id="global-concurrency-global" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">Max Concurrent / User</span>
+            <span class="field-label" data-i18n="global.concurrentUser">单用户最大并发</span>
             <input id="global-concurrency-user" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">Max Concurrent / Room</span>
+            <span class="field-label" data-i18n="global.concurrentRoom">单房间最大并发</span>
             <input id="global-concurrency-room" type="number" min="0" />
           </label>
 
-          <label class="checkbox"><input id="global-direct-mode" type="checkbox" /><span>Group direct mode (no trigger required)</span></label>
-          <label class="checkbox"><input id="global-trigger-mention" type="checkbox" /><span>Trigger: mention</span></label>
-          <label class="checkbox"><input id="global-trigger-reply" type="checkbox" /><span>Trigger: reply</span></label>
-          <label class="checkbox"><input id="global-trigger-window" type="checkbox" /><span>Trigger: active window</span></label>
-          <label class="checkbox"><input id="global-trigger-prefix" type="checkbox" /><span>Trigger: prefix</span></label>
+          <label class="checkbox"><input id="global-direct-mode" type="checkbox" /><span data-i18n="global.groupDirect">群聊直通模式（无需触发）</span></label>
+          <label class="checkbox"><input id="global-trigger-mention" type="checkbox" /><span data-i18n="global.triggerMention">触发：提及机器人</span></label>
+          <label class="checkbox"><input id="global-trigger-reply" type="checkbox" /><span data-i18n="global.triggerReply">触发：回复机器人</span></label>
+          <label class="checkbox"><input id="global-trigger-window" type="checkbox" /><span data-i18n="global.triggerWindow">触发：活跃窗口</span></label>
+          <label class="checkbox"><input id="global-trigger-prefix" type="checkbox" /><span data-i18n="global.triggerPrefix">触发：命令前缀</span></label>
 
-          <label class="checkbox"><input id="global-cli-enabled" type="checkbox" /><span>CLI compat mode</span></label>
-          <label class="checkbox"><input id="global-cli-pass" type="checkbox" /><span>CLI passthrough events</span></label>
-          <label class="checkbox"><input id="global-cli-whitespace" type="checkbox" /><span>Preserve whitespace</span></label>
-          <label class="checkbox"><input id="global-cli-disable-split" type="checkbox" /><span>Disable reply split</span></label>
+          <label class="checkbox"><input id="global-cli-enabled" type="checkbox" /><span data-i18n="global.cliEnabled">CLI 兼容模式</span></label>
+          <label class="checkbox"><input id="global-cli-pass" type="checkbox" /><span data-i18n="global.cliPass">CLI 透传事件</span></label>
+          <label class="checkbox"><input id="global-cli-whitespace" type="checkbox" /><span data-i18n="global.cliWhitespace">保留空白符</span></label>
+          <label class="checkbox"><input id="global-cli-disable-split" type="checkbox" /><span data-i18n="global.cliDisableSplit">禁用回复分片</span></label>
           <label class="field">
-            <span class="field-label">CLI progress throttle (ms)</span>
+            <span class="field-label" data-i18n="global.cliThrottle">CLI 进度节流（毫秒）</span>
             <input id="global-cli-throttle" type="number" min="0" />
           </label>
-          <label class="checkbox"><input id="global-cli-fetch-media" type="checkbox" /><span>Fetch media attachments</span></label>
-          <label class="checkbox"><input id="global-cli-transcribe-audio" type="checkbox" /><span>Transcribe audio attachments</span></label>
+          <label class="checkbox"><input id="global-cli-fetch-media" type="checkbox" /><span data-i18n="global.cliFetchMedia">下载媒体附件</span></label>
+          <label class="checkbox"><input id="global-cli-transcribe-audio" type="checkbox" /><span data-i18n="global.cliTranscribeAudio">转写音频附件</span></label>
           <label class="field">
-            <span class="field-label">Audio transcribe model</span>
+            <span class="field-label" data-i18n="global.audioModel">音频转写模型</span>
             <input id="global-cli-audio-model" type="text" />
           </label>
           <label class="field">
-            <span class="field-label">Audio transcribe timeout (ms)</span>
+            <span class="field-label" data-i18n="global.audioTimeout">音频转写超时（毫秒）</span>
             <input id="global-cli-audio-timeout" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Audio transcript max chars</span>
+            <span class="field-label" data-i18n="global.audioMaxChars">音频转写最大字符数</span>
             <input id="global-cli-audio-max-chars" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Audio transcribe max retries</span>
+            <span class="field-label" data-i18n="global.audioMaxRetries">音频转写最大重试次数</span>
             <input id="global-cli-audio-max-retries" type="number" min="0" max="10" />
           </label>
           <label class="field">
-            <span class="field-label">Audio transcribe retry delay (ms)</span>
+            <span class="field-label" data-i18n="global.audioRetryDelay">音频转写重试间隔（毫秒）</span>
             <input id="global-cli-audio-retry-delay" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">Audio max bytes</span>
+            <span class="field-label" data-i18n="global.audioMaxBytes">音频最大字节数</span>
             <input id="global-cli-audio-max-bytes" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">Local whisper command</span>
-            <input id="global-cli-audio-local-command" type="text" placeholder='python3 /opt/whisper/transcribe.py --input {input}' />
+            <span class="field-label" data-i18n="global.audioLocalCommand">本地 Whisper 命令</span>
+            <input id="global-cli-audio-local-command" type="text" placeholder='python3 /opt/whisper/transcribe.py --input {input}' data-i18n-placeholder="global.audioLocalCommandPlaceholder" />
           </label>
           <label class="field">
-            <span class="field-label">Local whisper timeout (ms)</span>
+            <span class="field-label" data-i18n="global.audioLocalTimeout">本地 Whisper 超时（毫秒）</span>
             <input id="global-cli-audio-local-timeout" type="number" min="1" />
           </label>
-          <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span>Enable multi-agent workflow</span></label>
+          <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span data-i18n="global.agentEnabled">启用多智能体工作流</span></label>
           <label class="field">
-            <span class="field-label">Workflow auto-repair rounds</span>
+            <span class="field-label" data-i18n="global.agentRounds">工作流自动修复轮次</span>
             <input id="global-agent-repair-rounds" type="number" min="0" max="10" />
           </label>
         </div>
         <div class="actions">
-          <button id="global-save-btn" type="button">Save Global Config</button>
-          <button id="global-reload-btn" type="button" class="secondary">Reload</button>
-          <button id="global-restart-main-btn" type="button" class="secondary">Restart Main Service</button>
-          <button id="global-restart-all-btn" type="button" class="secondary">Restart Main + Admin</button>
+          <button id="global-save-btn" type="button" data-i18n="global.save">保存全局配置</button>
+          <button id="global-reload-btn" type="button" class="secondary" data-i18n="global.reload">重新加载</button>
+          <button id="global-restart-main-btn" type="button" class="secondary" data-i18n="global.restartMain">重启主服务</button>
+          <button id="global-restart-all-btn" type="button" class="secondary" data-i18n="global.restartAll">重启主服务+管理后台</button>
         </div>
-        <p class="muted">Saving global config updates .env and requires restart to fully take effect.</p>
+        <p class="muted" data-i18n="global.restartHint">保存全局配置会更新 .env，并需要重启后完全生效。</p>
       </section>
 
       <section class="panel" data-view="settings-rooms" hidden>
-        <h2 class="panel-title">Room Config</h2>
+        <h2 class="panel-title" data-i18n="rooms.title">房间配置</h2>
         <div class="grid">
           <label class="field">
-            <span class="field-label">Room ID</span>
-            <input id="room-id" type="text" placeholder="!room:example.com" />
+            <span class="field-label" data-i18n="rooms.roomId">房间 ID</span>
+            <input id="room-id" type="text" placeholder="!room:example.com" data-i18n-placeholder="rooms.roomIdPlaceholder" />
           </label>
           <label class="field">
-            <span class="field-label">Audit Summary (optional)</span>
-            <input id="room-summary" type="text" placeholder="bind room to project A" />
+            <span class="field-label" data-i18n="rooms.summary">审计摘要（可选）</span>
+            <input id="room-summary" type="text" placeholder="绑定房间到项目 A" data-i18n-placeholder="rooms.summaryPlaceholder" />
           </label>
           <label class="field full">
-            <span class="field-label">Workdir</span>
+            <span class="field-label" data-i18n="rooms.workdir">工作目录</span>
             <input id="room-workdir" type="text" />
           </label>
-          <label class="checkbox"><input id="room-enabled" type="checkbox" /><span>Enabled</span></label>
-          <label class="checkbox"><input id="room-mention" type="checkbox" /><span>Allow mention trigger</span></label>
-          <label class="checkbox"><input id="room-reply" type="checkbox" /><span>Allow reply trigger</span></label>
-          <label class="checkbox"><input id="room-window" type="checkbox" /><span>Allow active-window trigger</span></label>
-          <label class="checkbox"><input id="room-prefix" type="checkbox" /><span>Allow prefix trigger</span></label>
+          <label class="checkbox"><input id="room-enabled" type="checkbox" /><span data-i18n="rooms.enabled">启用</span></label>
+          <label class="checkbox"><input id="room-mention" type="checkbox" /><span data-i18n="rooms.allowMention">允许提及触发</span></label>
+          <label class="checkbox"><input id="room-reply" type="checkbox" /><span data-i18n="rooms.allowReply">允许回复触发</span></label>
+          <label class="checkbox"><input id="room-window" type="checkbox" /><span data-i18n="rooms.allowWindow">允许活跃窗口触发</span></label>
+          <label class="checkbox"><input id="room-prefix" type="checkbox" /><span data-i18n="rooms.allowPrefix">允许前缀触发</span></label>
         </div>
         <div class="actions">
-          <button id="room-load-btn" type="button" class="secondary">Load Room</button>
-          <button id="room-save-btn" type="button">Save Room</button>
-          <button id="room-delete-btn" type="button" class="danger">Delete Room</button>
-          <button id="room-refresh-btn" type="button" class="secondary">Refresh List</button>
+          <button id="room-load-btn" type="button" class="secondary" data-i18n="rooms.load">加载房间</button>
+          <button id="room-save-btn" type="button" data-i18n="rooms.save">保存房间</button>
+          <button id="room-delete-btn" type="button" class="danger" data-i18n="rooms.delete">删除房间</button>
+          <button id="room-refresh-btn" type="button" class="secondary" data-i18n="rooms.refresh">刷新列表</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Room ID</th>
-                <th>Enabled</th>
-                <th>Workdir</th>
-                <th>Updated At</th>
+                <th data-i18n="rooms.table.roomId">房间 ID</th>
+                <th data-i18n="rooms.table.enabled">启用</th>
+                <th data-i18n="rooms.table.workdir">工作目录</th>
+                <th data-i18n="rooms.table.updatedAt">更新时间</th>
               </tr>
             </thead>
             <tbody id="room-list-body"></tbody>
@@ -401,17 +410,17 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       </section>
 
       <section class="panel" data-view="health" hidden>
-        <h2 class="panel-title">Health Check</h2>
+        <h2 class="panel-title" data-i18n="health.title">健康检查</h2>
         <div class="actions">
-          <button id="health-refresh-btn" type="button">Run Health Check</button>
+          <button id="health-refresh-btn" type="button" data-i18n="health.run">执行健康检查</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Component</th>
-                <th>Status</th>
-                <th>Details</th>
+                <th data-i18n="health.table.component">组件</th>
+                <th data-i18n="health.table.status">状态</th>
+                <th data-i18n="health.table.details">详情</th>
               </tr>
             </thead>
             <tbody id="health-body"></tbody>
@@ -420,23 +429,23 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       </section>
 
       <section class="panel" data-view="audit" hidden>
-        <h2 class="panel-title">Config Audit</h2>
+        <h2 class="panel-title" data-i18n="audit.title">配置审计</h2>
         <div class="actions">
           <label class="field" style="max-width: 120px;">
-            <span class="field-label">Limit</span>
+            <span class="field-label" data-i18n="audit.limit">条数</span>
             <input id="audit-limit" type="number" min="1" max="200" value="30" />
           </label>
-          <button id="audit-refresh-btn" type="button">Refresh Audit</button>
+          <button id="audit-refresh-btn" type="button" data-i18n="audit.refresh">刷新审计</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Time</th>
-                <th>Actor</th>
-                <th>Summary</th>
-                <th>Payload</th>
+                <th data-i18n="audit.table.id">ID</th>
+                <th data-i18n="audit.table.time">时间</th>
+                <th data-i18n="audit.table.actor">操作者</th>
+                <th data-i18n="audit.table.summary">摘要</th>
+                <th data-i18n="audit.table.payload">载荷</th>
               </tr>
             </thead>
             <tbody id="audit-body"></tbody>
@@ -463,6 +472,264 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         };
         var storageTokenKey = "codeharbor.admin.token";
         var storageActorKey = "codeharbor.admin.actor";
+        var storageLangKey = "codeharbor.admin.lang";
+        var defaultLang = "zh";
+        var i18n = {
+          zh: {
+            "header.title": "CodeHarbor 管理后台",
+            "header.subtitle": "管理全局配置、房间策略、健康检查与配置审计记录。",
+            "tab.global": "全局",
+            "tab.rooms": "房间",
+            "tab.health": "健康",
+            "tab.audit": "审计",
+            "auth.token.label": "管理员令牌（可选）",
+            "auth.token.placeholder": "ADMIN_TOKEN",
+            "auth.actor.label": "操作者（用于审计日志）",
+            "auth.actor.placeholder": "你的名字",
+            "auth.language.label": "界面语言",
+            "auth.save": "保存认证",
+            "auth.clear": "清除认证",
+            "auth.permission.unknown": "权限：未知",
+            "auth.permission.unauth": "权限：未认证",
+            "auth.permission.prefix": "权限：{role}{source}{actor}",
+            "auth.permission.actorSuffix": "（用户：{actor}）",
+            "notice.ready": "就绪。",
+            "notice.authSaved": "认证设置已保存到 localStorage。",
+            "notice.authCleared": "认证设置已清除。",
+            "global.title": "全局配置",
+            "global.commandPrefix": "命令前缀",
+            "global.defaultWorkdir": "默认工作目录",
+            "global.progressInterval": "进度更新间隔（毫秒）",
+            "global.typingTimeout": "输入状态超时（毫秒）",
+            "global.sessionWindow": "会话活跃窗口（分钟）",
+            "global.progressEnabled": "启用进度更新",
+            "global.rateWindow": "限流窗口（毫秒）",
+            "global.rateUser": "单用户窗口最大请求数",
+            "global.rateRoom": "单房间窗口最大请求数",
+            "global.concurrentGlobal": "全局最大并发",
+            "global.concurrentUser": "单用户最大并发",
+            "global.concurrentRoom": "单房间最大并发",
+            "global.groupDirect": "群聊直通模式（无需触发）",
+            "global.triggerMention": "触发：提及机器人",
+            "global.triggerReply": "触发：回复机器人",
+            "global.triggerWindow": "触发：活跃窗口",
+            "global.triggerPrefix": "触发：命令前缀",
+            "global.cliEnabled": "CLI 兼容模式",
+            "global.cliPass": "CLI 透传事件",
+            "global.cliWhitespace": "保留空白符",
+            "global.cliDisableSplit": "禁用回复分片",
+            "global.cliThrottle": "CLI 进度节流（毫秒）",
+            "global.cliFetchMedia": "下载媒体附件",
+            "global.cliTranscribeAudio": "转写音频附件",
+            "global.audioModel": "音频转写模型",
+            "global.audioTimeout": "音频转写超时（毫秒）",
+            "global.audioMaxChars": "音频转写最大字符数",
+            "global.audioMaxRetries": "音频转写最大重试次数",
+            "global.audioRetryDelay": "音频转写重试间隔（毫秒）",
+            "global.audioMaxBytes": "音频最大字节数",
+            "global.audioLocalCommand": "本地 Whisper 命令",
+            "global.audioLocalCommandPlaceholder": "python3 /opt/whisper/transcribe.py --input {input}",
+            "global.audioLocalTimeout": "本地 Whisper 超时（毫秒）",
+            "global.agentEnabled": "启用多智能体工作流",
+            "global.agentRounds": "工作流自动修复轮次",
+            "global.save": "保存全局配置",
+            "global.reload": "重新加载",
+            "global.restartMain": "重启主服务",
+            "global.restartAll": "重启主服务+管理后台",
+            "global.restartHint": "保存全局配置会更新 .env，并需要重启后完全生效。",
+            "notice.globalLoaded": "全局配置已加载。",
+            "notice.globalLoadFailed": "加载全局配置失败：{error}",
+            "notice.globalSaved": "保存成功：{keys}。需要重启后生效。",
+            "notice.globalSaveFailed": "保存全局配置失败：{error}",
+            "notice.restartRequested": "已请求重启：{services}。{suffix}",
+            "notice.restartFailed": "重启服务失败：{error}",
+            "notice.restartSuffixAll": "管理后台页面可能在重启期间短暂断连。",
+            "rooms.title": "房间配置",
+            "rooms.roomId": "房间 ID",
+            "rooms.roomIdPlaceholder": "!room:example.com",
+            "rooms.summary": "审计摘要（可选）",
+            "rooms.summaryPlaceholder": "绑定房间到项目 A",
+            "rooms.workdir": "工作目录",
+            "rooms.enabled": "启用",
+            "rooms.allowMention": "允许提及触发",
+            "rooms.allowReply": "允许回复触发",
+            "rooms.allowWindow": "允许活跃窗口触发",
+            "rooms.allowPrefix": "允许前缀触发",
+            "rooms.load": "加载房间",
+            "rooms.save": "保存房间",
+            "rooms.delete": "删除房间",
+            "rooms.refresh": "刷新列表",
+            "rooms.table.roomId": "房间 ID",
+            "rooms.table.enabled": "启用",
+            "rooms.table.workdir": "工作目录",
+            "rooms.table.updatedAt": "更新时间",
+            "notice.roomsEmpty": "暂无房间配置。",
+            "notice.roomsLoaded": "已加载 {count} 条房间配置。",
+            "notice.roomsLoadFailed": "加载房间列表失败：{error}",
+            "notice.roomIdRequired": "房间 ID 不能为空。",
+            "notice.roomLoaded": "房间配置已加载：{roomId}。",
+            "notice.roomLoadFailed": "加载房间配置失败：{error}",
+            "notice.roomSaved": "房间配置已保存：{roomId}。",
+            "notice.roomSaveFailed": "保存房间配置失败：{error}",
+            "notice.roomDeleted": "房间配置已删除：{roomId}。",
+            "notice.roomDeleteFailed": "删除房间配置失败：{error}",
+            "confirm.roomDelete": "确认删除房间配置：{roomId}？",
+            "health.title": "健康检查",
+            "health.run": "执行健康检查",
+            "health.table.component": "组件",
+            "health.table.status": "状态",
+            "health.table.details": "详情",
+            "health.component.codex": "Codex",
+            "health.component.matrix": "Matrix",
+            "health.component.overall": "整体",
+            "health.status.ok": "正常",
+            "health.status.fail": "失败",
+            "notice.healthDone": "健康检查完成。",
+            "notice.healthFailed": "健康检查失败：{error}",
+            "notice.healthEmptyFailed": "健康检查执行失败。",
+            "audit.title": "配置审计",
+            "audit.limit": "条数",
+            "audit.refresh": "刷新审计",
+            "audit.table.id": "ID",
+            "audit.table.time": "时间",
+            "audit.table.actor": "操作者",
+            "audit.table.summary": "摘要",
+            "audit.table.payload": "载荷",
+            "notice.auditEmpty": "暂无审计记录。",
+            "notice.auditLoaded": "审计记录已加载：{count} 条。",
+            "notice.auditLoadFailed": "加载审计记录失败：{error}",
+            "table.loadFailed": "加载失败。"
+          },
+          en: {
+            "header.title": "CodeHarbor Admin Console",
+            "header.subtitle": "Manage global settings, room policies, health checks, and config audit records.",
+            "tab.global": "Global",
+            "tab.rooms": "Rooms",
+            "tab.health": "Health",
+            "tab.audit": "Audit",
+            "auth.token.label": "Admin Token (optional)",
+            "auth.token.placeholder": "ADMIN_TOKEN",
+            "auth.actor.label": "Actor (for audit logs)",
+            "auth.actor.placeholder": "your-name",
+            "auth.language.label": "Language",
+            "auth.save": "Save Auth",
+            "auth.clear": "Clear Auth",
+            "auth.permission.unknown": "Permission: unknown",
+            "auth.permission.unauth": "Permission: unauthenticated",
+            "auth.permission.prefix": "Permission: {role}{source}{actor}",
+            "auth.permission.actorSuffix": " as {actor}",
+            "notice.ready": "Ready.",
+            "notice.authSaved": "Auth settings saved to localStorage.",
+            "notice.authCleared": "Auth settings cleared.",
+            "global.title": "Global Config",
+            "global.commandPrefix": "Command Prefix",
+            "global.defaultWorkdir": "Default Workdir",
+            "global.progressInterval": "Progress Interval (ms)",
+            "global.typingTimeout": "Typing Timeout (ms)",
+            "global.sessionWindow": "Session Active Window (minutes)",
+            "global.progressEnabled": "Enable progress updates",
+            "global.rateWindow": "Rate Window (ms)",
+            "global.rateUser": "Rate Max Requests / User",
+            "global.rateRoom": "Rate Max Requests / Room",
+            "global.concurrentGlobal": "Max Concurrent Global",
+            "global.concurrentUser": "Max Concurrent / User",
+            "global.concurrentRoom": "Max Concurrent / Room",
+            "global.groupDirect": "Group direct mode (no trigger required)",
+            "global.triggerMention": "Trigger: mention",
+            "global.triggerReply": "Trigger: reply",
+            "global.triggerWindow": "Trigger: active window",
+            "global.triggerPrefix": "Trigger: prefix",
+            "global.cliEnabled": "CLI compat mode",
+            "global.cliPass": "CLI passthrough events",
+            "global.cliWhitespace": "Preserve whitespace",
+            "global.cliDisableSplit": "Disable reply split",
+            "global.cliThrottle": "CLI progress throttle (ms)",
+            "global.cliFetchMedia": "Fetch media attachments",
+            "global.cliTranscribeAudio": "Transcribe audio attachments",
+            "global.audioModel": "Audio transcribe model",
+            "global.audioTimeout": "Audio transcribe timeout (ms)",
+            "global.audioMaxChars": "Audio transcript max chars",
+            "global.audioMaxRetries": "Audio transcribe max retries",
+            "global.audioRetryDelay": "Audio transcribe retry delay (ms)",
+            "global.audioMaxBytes": "Audio max bytes",
+            "global.audioLocalCommand": "Local whisper command",
+            "global.audioLocalCommandPlaceholder": "python3 /opt/whisper/transcribe.py --input {input}",
+            "global.audioLocalTimeout": "Local whisper timeout (ms)",
+            "global.agentEnabled": "Enable multi-agent workflow",
+            "global.agentRounds": "Workflow auto-repair rounds",
+            "global.save": "Save Global Config",
+            "global.reload": "Reload",
+            "global.restartMain": "Restart Main Service",
+            "global.restartAll": "Restart Main + Admin",
+            "global.restartHint": "Saving global config updates .env and requires restart to fully take effect.",
+            "notice.globalLoaded": "Global config loaded.",
+            "notice.globalLoadFailed": "Failed to load global config: {error}",
+            "notice.globalSaved": "Saved: {keys}. Restart is required.",
+            "notice.globalSaveFailed": "Failed to save global config: {error}",
+            "notice.restartRequested": "Restart requested: {services}. {suffix}",
+            "notice.restartFailed": "Failed to restart service(s): {error}",
+            "notice.restartSuffixAll": "Admin page may reconnect during restart.",
+            "rooms.title": "Room Config",
+            "rooms.roomId": "Room ID",
+            "rooms.roomIdPlaceholder": "!room:example.com",
+            "rooms.summary": "Audit Summary (optional)",
+            "rooms.summaryPlaceholder": "bind room to project A",
+            "rooms.workdir": "Workdir",
+            "rooms.enabled": "Enabled",
+            "rooms.allowMention": "Allow mention trigger",
+            "rooms.allowReply": "Allow reply trigger",
+            "rooms.allowWindow": "Allow active-window trigger",
+            "rooms.allowPrefix": "Allow prefix trigger",
+            "rooms.load": "Load Room",
+            "rooms.save": "Save Room",
+            "rooms.delete": "Delete Room",
+            "rooms.refresh": "Refresh List",
+            "rooms.table.roomId": "Room ID",
+            "rooms.table.enabled": "Enabled",
+            "rooms.table.workdir": "Workdir",
+            "rooms.table.updatedAt": "Updated At",
+            "notice.roomsEmpty": "No room settings.",
+            "notice.roomsLoaded": "Loaded {count} room setting(s).",
+            "notice.roomsLoadFailed": "Failed to load room list: {error}",
+            "notice.roomIdRequired": "Room ID is required.",
+            "notice.roomLoaded": "Room config loaded for {roomId}.",
+            "notice.roomLoadFailed": "Failed to load room config: {error}",
+            "notice.roomSaved": "Room config saved for {roomId}.",
+            "notice.roomSaveFailed": "Failed to save room config: {error}",
+            "notice.roomDeleted": "Room config deleted for {roomId}.",
+            "notice.roomDeleteFailed": "Failed to delete room config: {error}",
+            "confirm.roomDelete": "Delete room config for {roomId}?",
+            "health.title": "Health Check",
+            "health.run": "Run Health Check",
+            "health.table.component": "Component",
+            "health.table.status": "Status",
+            "health.table.details": "Details",
+            "health.component.codex": "Codex",
+            "health.component.matrix": "Matrix",
+            "health.component.overall": "Overall",
+            "health.status.ok": "OK",
+            "health.status.fail": "FAIL",
+            "notice.healthDone": "Health check completed.",
+            "notice.healthFailed": "Health check failed: {error}",
+            "notice.healthEmptyFailed": "Failed to run health check.",
+            "audit.title": "Config Audit",
+            "audit.limit": "Limit",
+            "audit.refresh": "Refresh Audit",
+            "audit.table.id": "ID",
+            "audit.table.time": "Time",
+            "audit.table.actor": "Actor",
+            "audit.table.summary": "Summary",
+            "audit.table.payload": "Payload",
+            "notice.auditEmpty": "No audit records.",
+            "notice.auditLoaded": "Audit loaded: {count} record(s).",
+            "notice.auditLoadFailed": "Failed to load audit: {error}",
+            "table.loadFailed": "Failed to load."
+          }
+        };
+        var currentLang = localStorage.getItem(storageLangKey);
+        if (currentLang !== "en" && currentLang !== "zh") {
+          currentLang = defaultLang;
+        }
         var loaded = {
           "settings-global": false,
           "settings-rooms": false,
@@ -472,6 +739,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         var tokenInput = document.getElementById("auth-token");
         var actorInput = document.getElementById("auth-actor");
+        var langSelect = document.getElementById("lang-select");
         var noticeNode = document.getElementById("notice");
         var authRoleNode = document.getElementById("auth-role");
         var roomListBody = document.getElementById("room-list-body");
@@ -480,11 +748,19 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         tokenInput.value = localStorage.getItem(storageTokenKey) || "";
         actorInput.value = localStorage.getItem(storageActorKey) || "";
+        langSelect.value = currentLang;
+
+        langSelect.addEventListener("change", function () {
+          currentLang = langSelect.value === "en" ? "en" : "zh";
+          localStorage.setItem(storageLangKey, currentLang);
+          applyLanguage();
+          void refreshAuthStatus();
+        });
 
         document.getElementById("auth-save-btn").addEventListener("click", function () {
           localStorage.setItem(storageTokenKey, tokenInput.value.trim());
           localStorage.setItem(storageActorKey, actorInput.value.trim());
-          showNotice("ok", "Auth settings saved to localStorage.");
+          showNotice("ok", t("notice.authSaved"));
           void refreshAuthStatus();
         });
 
@@ -493,7 +769,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           actorInput.value = "";
           localStorage.removeItem(storageTokenKey);
           localStorage.removeItem(storageActorKey);
-          showNotice("warn", "Auth settings cleared.");
+          showNotice("warn", t("notice.authCleared"));
           void refreshAuthStatus();
         });
 
@@ -519,6 +795,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         } else {
           handleRoute();
         }
+        applyLanguage();
+        showNotice("ok", t("notice.ready"));
         void refreshAuthStatus();
 
         function getCurrentView() {
@@ -605,6 +883,42 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           return document.getElementById(inputId).value.trim();
         }
 
+        function t(key, vars) {
+          var dict = i18n[currentLang] || i18n[defaultLang];
+          var template = dict[key] || key;
+          if (!vars) {
+            return template;
+          }
+          return template.replace(/{([a-zA-Z0-9_]+)}/g, function (_all, name) {
+            return vars[name] === undefined || vars[name] === null ? "" : String(vars[name]);
+          });
+        }
+
+        function applyLanguage() {
+          var nodes = document.querySelectorAll("[data-i18n]");
+          for (var i = 0; i < nodes.length; i += 1) {
+            var node = nodes[i];
+            var key = node.getAttribute("data-i18n");
+            if (!key) {
+              continue;
+            }
+            node.textContent = t(key);
+          }
+          var placeholderNodes = document.querySelectorAll("[data-i18n-placeholder]");
+          for (var j = 0; j < placeholderNodes.length; j += 1) {
+            var input = placeholderNodes[j];
+            var placeholderKey = input.getAttribute("data-i18n-placeholder");
+            if (!placeholderKey) {
+              continue;
+            }
+            input.setAttribute("placeholder", t(placeholderKey));
+          }
+          document.documentElement.lang = currentLang === "en" ? "en" : "zh-CN";
+          if (langSelect.value !== currentLang) {
+            langSelect.value = currentLang;
+          }
+        }
+
         function showNotice(type, message) {
           noticeNode.className = "notice " + type;
           noticeNode.textContent = message;
@@ -615,21 +929,25 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var response = await apiRequest("/api/admin/auth/status", "GET");
             var data = response.data || {};
             if (!data.role) {
-              authRoleNode.textContent = "Permission: unauthenticated";
+              authRoleNode.textContent = t("auth.permission.unauth");
               return;
             }
 
             var role = String(data.role).toUpperCase();
             var source = data.source ? " (" + String(data.source) + ")" : "";
-            var actor = data.actor ? " as " + String(data.actor) : "";
-            authRoleNode.textContent = "Permission: " + role + source + actor;
+            var actor = data.actor ? t("auth.permission.actorSuffix", { actor: String(data.actor) }) : "";
+            authRoleNode.textContent = t("auth.permission.prefix", {
+              role: role,
+              source: source,
+              actor: actor
+            });
           } catch (error) {
             var message = error && error.message ? String(error.message) : "";
             if (/Unauthorized/i.test(message)) {
-              authRoleNode.textContent = "Permission: unauthenticated";
+              authRoleNode.textContent = t("auth.permission.unauth");
               return;
             }
-            authRoleNode.textContent = "Permission: unknown";
+            authRoleNode.textContent = t("auth.permission.unknown");
           }
         }
 
@@ -693,9 +1011,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
             );
 
-            showNotice("ok", "Global config loaded.");
+            showNotice("ok", t("notice.globalLoaded"));
           } catch (error) {
-            showNotice("error", "Failed to load global config: " + error.message);
+            showNotice("error", t("notice.globalLoadFailed", { error: error.message }));
           }
         }
 
@@ -747,10 +1065,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             };
             var response = await apiRequest("/api/admin/config/global", "PUT", body);
             var keys = Array.isArray(response.updatedKeys) ? response.updatedKeys.join(", ") : "global config";
-            showNotice("warn", "Saved: " + keys + ". Restart is required.");
+            showNotice("warn", t("notice.globalSaved", { keys: keys }));
             await loadAudit();
           } catch (error) {
-            showNotice("error", "Failed to save global config: " + error.message);
+            showNotice("error", t("notice.globalSaveFailed", { error: error.message }));
           }
         }
 
@@ -760,10 +1078,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               withAdmin: Boolean(withAdmin)
             });
             var restarted = Array.isArray(response.restarted) ? response.restarted.join(", ") : "codeharbor";
-            var suffix = withAdmin ? " Admin page may reconnect during restart." : "";
-            showNotice("warn", "Restart requested: " + restarted + "." + suffix);
+            var suffix = withAdmin ? t("notice.restartSuffixAll") : "";
+            showNotice("warn", t("notice.restartRequested", { services: restarted, suffix: suffix }));
           } catch (error) {
-            showNotice("error", "Failed to restart service(s): " + error.message);
+            showNotice("error", t("notice.restartFailed", { error: error.message }));
           }
         }
 
@@ -773,7 +1091,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var items = Array.isArray(response.data) ? response.data : [];
             roomListBody.innerHTML = "";
             if (items.length === 0) {
-              renderEmptyRow(roomListBody, 4, "No room settings.");
+              renderEmptyRow(roomListBody, 4, t("notice.roomsEmpty"));
               return;
             }
             for (var i = 0; i < items.length; i += 1) {
@@ -785,10 +1103,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               appendCell(row, item.updatedAt ? new Date(item.updatedAt).toISOString() : "-");
               roomListBody.appendChild(row);
             }
-            showNotice("ok", "Loaded " + items.length + " room setting(s).");
+            showNotice("ok", t("notice.roomsLoaded", { count: items.length }));
           } catch (error) {
-            showNotice("error", "Failed to load room list: " + error.message);
-            renderEmptyRow(roomListBody, 4, "Failed to load room settings.");
+            showNotice("error", t("notice.roomsLoadFailed", { error: error.message }));
+            renderEmptyRow(roomListBody, 4, t("table.loadFailed"));
           }
         }
 
@@ -801,15 +1119,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         async function loadRoom() {
           var roomId = asText("room-id");
           if (!roomId) {
-            showNotice("warn", "Room ID is required.");
+            showNotice("warn", t("notice.roomIdRequired"));
             return;
           }
           try {
             var response = await apiRequest("/api/admin/config/rooms/" + encodeURIComponent(roomId), "GET");
             fillRoomForm(response.data || {});
-            showNotice("ok", "Room config loaded for " + roomId + ".");
+            showNotice("ok", t("notice.roomLoaded", { roomId: roomId }));
           } catch (error) {
-            showNotice("error", "Failed to load room config: " + error.message);
+            showNotice("error", t("notice.roomLoadFailed", { error: error.message }));
           }
         }
 
@@ -825,7 +1143,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         async function saveRoom() {
           var roomId = asText("room-id");
           if (!roomId) {
-            showNotice("warn", "Room ID is required.");
+            showNotice("warn", t("notice.roomIdRequired"));
             return;
           }
           try {
@@ -839,30 +1157,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               summary: asText("room-summary")
             };
             await apiRequest("/api/admin/config/rooms/" + encodeURIComponent(roomId), "PUT", body);
-            showNotice("ok", "Room config saved for " + roomId + ".");
+            showNotice("ok", t("notice.roomSaved", { roomId: roomId }));
             await refreshRoomList();
             await loadAudit();
           } catch (error) {
-            showNotice("error", "Failed to save room config: " + error.message);
+            showNotice("error", t("notice.roomSaveFailed", { error: error.message }));
           }
         }
 
         async function deleteRoom() {
           var roomId = asText("room-id");
           if (!roomId) {
-            showNotice("warn", "Room ID is required.");
+            showNotice("warn", t("notice.roomIdRequired"));
             return;
           }
-          if (!window.confirm("Delete room config for " + roomId + "?")) {
+          if (!window.confirm(t("confirm.roomDelete", { roomId: roomId }))) {
             return;
           }
           try {
             await apiRequest("/api/admin/config/rooms/" + encodeURIComponent(roomId), "DELETE");
-            showNotice("ok", "Room config deleted for " + roomId + ".");
+            showNotice("ok", t("notice.roomDeleted", { roomId: roomId }));
             await refreshRoomList();
             await loadAudit();
           } catch (error) {
-            showNotice("error", "Failed to delete room config: " + error.message);
+            showNotice("error", t("notice.roomDeleteFailed", { error: error.message }));
           }
         }
 
@@ -874,24 +1192,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var codex = response.codex || {};
             var matrix = response.matrix || {};
 
-            appendHealthRow("Codex", Boolean(codex.ok), codex.ok ? (codex.version || "ok") : (codex.error || "failed"));
             appendHealthRow(
-              "Matrix",
-              Boolean(matrix.ok),
-              matrix.ok ? "HTTP " + matrix.status + " " + JSON.stringify(matrix.versions || []) : (matrix.error || "failed")
+              t("health.component.codex"),
+              Boolean(codex.ok),
+              codex.ok ? (codex.version || t("health.status.ok")) : (codex.error || t("health.status.fail"))
             );
-            appendHealthRow("Overall", Boolean(response.ok), response.timestamp || "");
-            showNotice("ok", "Health check completed.");
+            appendHealthRow(
+              t("health.component.matrix"),
+              Boolean(matrix.ok),
+              matrix.ok
+                ? "HTTP " + matrix.status + " " + JSON.stringify(matrix.versions || [])
+                : (matrix.error || t("health.status.fail"))
+            );
+            appendHealthRow(t("health.component.overall"), Boolean(response.ok), response.timestamp || "");
+            showNotice("ok", t("notice.healthDone"));
           } catch (error) {
-            showNotice("error", "Health check failed: " + error.message);
-            renderEmptyRow(healthBody, 3, "Failed to run health check.");
+            showNotice("error", t("notice.healthFailed", { error: error.message }));
+            renderEmptyRow(healthBody, 3, t("notice.healthEmptyFailed"));
           }
         }
 
         function appendHealthRow(component, ok, detail) {
           var row = document.createElement("tr");
           appendCell(row, component);
-          appendCell(row, ok ? "OK" : "FAIL");
+          appendCell(row, ok ? t("health.status.ok") : t("health.status.fail"));
           appendCell(row, detail);
           healthBody.appendChild(row);
         }
@@ -909,7 +1233,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var items = Array.isArray(response.data) ? response.data : [];
             auditBody.innerHTML = "";
             if (items.length === 0) {
-              renderEmptyRow(auditBody, 5, "No audit records.");
+              renderEmptyRow(auditBody, 5, t("notice.auditEmpty"));
               return;
             }
             for (var i = 0; i < items.length; i += 1) {
@@ -926,10 +1250,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               row.appendChild(payloadCell);
               auditBody.appendChild(row);
             }
-            showNotice("ok", "Audit loaded: " + items.length + " record(s).");
+            showNotice("ok", t("notice.auditLoaded", { count: items.length }));
           } catch (error) {
-            showNotice("error", "Failed to load audit: " + error.message);
-            renderEmptyRow(auditBody, 5, "Failed to load audit records.");
+            showNotice("error", t("notice.auditLoadFailed", { error: error.message }));
+            renderEmptyRow(auditBody, 5, t("table.loadFailed"));
           }
         }
 
