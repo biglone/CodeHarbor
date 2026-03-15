@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-03-15
+
+- Added local Whisper-first audio transcription pipeline for Matrix `m.audio` attachments:
+  - new optional local command config `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND` and timeout control
+  - fallback to OpenAI audio transcription when local command fails and `OPENAI_API_KEY` is available
+  - clearer error behavior when no transcription backend is configured
+- Added bundled helper command `codeharbor-whisper-transcribe` (Python `faster-whisper`) for quick local deployment.
+- Extended config surfaces for local whisper options:
+  - `.env` / config schema
+  - config snapshot export/import
+  - Admin API global config + Admin Console fields
+- Added regression coverage for local whisper success, fallback, and backend-missing scenarios.
+- Updated docs and examples for local whisper setup and runtime requirements.
+
 ## [0.1.20] - 2026-03-15
 
 - Added Matrix voice understanding pipeline:
