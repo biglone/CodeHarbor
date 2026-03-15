@@ -24,6 +24,8 @@ export interface CliCompatConfig {
   audioTranscribeModel: string;
   audioTranscribeTimeoutMs: number;
   audioTranscribeMaxChars: number;
+  audioLocalWhisperCommand: string | null;
+  audioLocalWhisperTimeoutMs: number;
   recordPath: string | null;
 }
 
@@ -198,6 +200,12 @@ const configSchema = z
       .default("6000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: z.string().default(""),
+    CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: z
+      .string()
+      .default("180000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     CLI_COMPAT_RECORD_PATH: z.string().default(""),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
@@ -271,6 +279,10 @@ const configSchema = z
       audioTranscribeModel: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL.trim() || "gpt-4o-mini-transcribe",
       audioTranscribeTimeoutMs: v.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS,
       audioTranscribeMaxChars: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS,
+      audioLocalWhisperCommand: v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND.trim()
+        ? v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND.trim()
+        : null,
+      audioLocalWhisperTimeoutMs: v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS,
       recordPath: v.CLI_COMPAT_RECORD_PATH.trim() ? path.resolve(v.CLI_COMPAT_RECORD_PATH) : null,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,

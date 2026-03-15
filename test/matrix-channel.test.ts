@@ -86,6 +86,8 @@ const config = {
     audioTranscribeModel: "gpt-4o-mini-transcribe",
     audioTranscribeTimeoutMs: 120000,
     audioTranscribeMaxChars: 6000,
+    audioLocalWhisperCommand: null,
+    audioLocalWhisperTimeoutMs: 180000,
     recordPath: null,
   },
   doctorHttpTimeoutMs: 10_000,

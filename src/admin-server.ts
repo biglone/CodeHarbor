@@ -582,6 +582,27 @@ export class AdminServer {
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS = String(value);
         updatedKeys.push("cliCompat.audioTranscribeMaxChars");
       }
+      if ("audioLocalWhisperCommand" in compat) {
+        const value = normalizeString(
+          compat.audioLocalWhisperCommand,
+          this.config.cliCompat.audioLocalWhisperCommand ?? "",
+          "cliCompat.audioLocalWhisperCommand",
+        );
+        this.config.cliCompat.audioLocalWhisperCommand = value || null;
+        envUpdates.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND = this.config.cliCompat.audioLocalWhisperCommand ?? "";
+        updatedKeys.push("cliCompat.audioLocalWhisperCommand");
+      }
+      if ("audioLocalWhisperTimeoutMs" in compat) {
+        const value = normalizePositiveInt(
+          compat.audioLocalWhisperTimeoutMs,
+          this.config.cliCompat.audioLocalWhisperTimeoutMs,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.audioLocalWhisperTimeoutMs = value;
+        envUpdates.CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS = String(value);
+        updatedKeys.push("cliCompat.audioLocalWhisperTimeoutMs");
+      }
     }
 
     if ("agentWorkflow" in body) {

@@ -323,6 +323,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label">Audio transcript max chars</span>
             <input id="global-cli-audio-max-chars" type="number" min="1" />
           </label>
+          <label class="field">
+            <span class="field-label">Local whisper command</span>
+            <input id="global-cli-audio-local-command" type="text" placeholder='python3 /opt/whisper/transcribe.py --input {input}' />
+          </label>
+          <label class="field">
+            <span class="field-label">Local whisper timeout (ms)</span>
+            <input id="global-cli-audio-local-timeout" type="number" min="1" />
+          </label>
           <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span>Enable multi-agent workflow</span></label>
           <label class="field">
             <span class="field-label">Workflow auto-repair rounds</span>
@@ -661,6 +669,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-audio-model").value = cliCompat.audioTranscribeModel || "gpt-4o-mini-transcribe";
             document.getElementById("global-cli-audio-timeout").value = String(cliCompat.audioTranscribeTimeoutMs || 120000);
             document.getElementById("global-cli-audio-max-chars").value = String(cliCompat.audioTranscribeMaxChars || 6000);
+            document.getElementById("global-cli-audio-local-command").value = cliCompat.audioLocalWhisperCommand || "";
+            document.getElementById("global-cli-audio-local-timeout").value = String(cliCompat.audioLocalWhisperTimeoutMs || 180000);
             document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
             document.getElementById("global-agent-repair-rounds").value = String(
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
@@ -706,7 +716,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 transcribeAudio: asBool("global-cli-transcribe-audio"),
                 audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
                 audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
-                audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000)
+                audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000),
+                audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
+                audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000)
               },
               agentWorkflow: {
                 enabled: asBool("global-agent-enabled"),

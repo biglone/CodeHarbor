@@ -121,6 +121,8 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-mini-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(120000);
     expect(config.cliCompat.audioTranscribeMaxChars).toBe(6000);
+    expect(config.cliCompat.audioLocalWhisperCommand).toBeNull();
+    expect(config.cliCompat.audioLocalWhisperTimeoutMs).toBe(180000);
   });
 
   it("parses custom transcription settings", () => {
@@ -130,6 +132,8 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
         CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: "gpt-4o-transcribe",
         CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: "45000",
         CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: "3200",
+        CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: "python3 /opt/whisper/transcribe.py --input {input}",
+        CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: "90000",
       }),
     );
 
@@ -137,5 +141,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(45000);
     expect(config.cliCompat.audioTranscribeMaxChars).toBe(3200);
+    expect(config.cliCompat.audioLocalWhisperCommand).toBe(
+      "python3 /opt/whisper/transcribe.py --input {input}",
+    );
+    expect(config.cliCompat.audioLocalWhisperTimeoutMs).toBe(90000);
   });
 });
