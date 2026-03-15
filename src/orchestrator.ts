@@ -18,6 +18,7 @@ import {
   formatPackageUpdateHint,
   NpmRegistryUpdateChecker,
   type PackageUpdateChecker,
+  resolvePackageVersion,
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import { StateStore } from "./store/state-store";
@@ -224,6 +225,7 @@ export class Orchestrator {
   private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
+  private readonly botNoticePrefix: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly metrics = new RequestMetrics();
@@ -306,10 +308,13 @@ export class Orchestrator {
       enabled: options?.multiAgentWorkflow?.enabled ?? false,
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
     });
+    const currentVersion = resolvePackageVersion();
+    this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
     this.packageUpdateChecker =
       options?.packageUpdateChecker ??
       new NpmRegistryUpdateChecker({
         packageName: "codeharbor",
+        currentVersion,
       });
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
@@ -731,7 +736,7 @@ export class Orchestrator {
 
     await this.channel.sendNotice(
       message.conversationId,
-      `[CodeHarbor] 当前状态
+      `${this.botNoticePrefix} 当前状态
 - 会话类型: ${scope}
 - 激活中: ${status.isActive ? "是" : "否"}
 - activeUntil: ${activeUntil}
@@ -1181,7 +1186,7 @@ export class Orchestrator {
         getProgressNoticeEventId,
         setProgressNoticeEventId,
       },
-      `[CodeHarbor] ${progressText}`,
+      `${this.botNoticePrefix} ${progressText}`,
     );
   }
 
@@ -1189,7 +1194,7 @@ export class Orchestrator {
     if (!this.progressUpdatesEnabled) {
       return;
     }
-    await this.sendProgressUpdate(ctx, `[CodeHarbor] ${summary}`);
+    await this.sendProgressUpdate(ctx, `${this.botNoticePrefix} ${summary}`);
   }
 
   private async sendProgressUpdate(ctx: SendProgressContext, text: string): Promise<void> {

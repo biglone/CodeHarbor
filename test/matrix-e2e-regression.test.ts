@@ -238,6 +238,7 @@ describe("Matrix e2e regression", () => {
     await orchestrator.handleMessage(makeInbound({ text: "@bot:example.com run", mentionsBot: true }));
 
     expect(channel.upserts.length).toBeGreaterThanOrEqual(2);
+    expect(channel.upserts[0]?.text).toContain("[CodeHarbor v");
     expect(channel.upserts[0]?.replaceEventId).toBeNull();
     expect(channel.upserts.slice(1).every((entry) => Boolean(entry.replaceEventId))).toBe(true);
   });
