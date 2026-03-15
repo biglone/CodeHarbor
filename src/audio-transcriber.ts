@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(execCallback);
+const RETRYABLE_OPENAI_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export interface AudioAttachmentForTranscription {
   name: string;
@@ -27,6 +28,8 @@ interface AudioTranscriberOptions {
   model: string;
   timeoutMs: number;
   maxChars: number;
+  maxRetries: number;
+  retryDelayMs: number;
   localWhisperCommand: string | null;
   localWhisperTimeoutMs: number;
 }
@@ -37,6 +40,8 @@ export class AudioTranscriber implements AudioTranscriberLike {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly maxChars: number;
+  private readonly maxRetries: number;
+  private readonly retryDelayMs: number;
   private readonly localWhisperCommand: string | null;
   private readonly localWhisperTimeoutMs: number;
 
@@ -46,6 +51,8 @@ export class AudioTranscriber implements AudioTranscriberLike {
     this.model = options.model;
     this.timeoutMs = options.timeoutMs;
     this.maxChars = options.maxChars;
+    this.maxRetries = options.maxRetries;
+    this.retryDelayMs = options.retryDelayMs;
     this.localWhisperCommand = options.localWhisperCommand;
     this.localWhisperTimeoutMs = options.localWhisperTimeoutMs;
   }
@@ -97,7 +104,7 @@ export class AudioTranscriber implements AudioTranscriberLike {
     let localError: unknown = null;
     if (hasLocalWhisper) {
       try {
-        const localText = await this.transcribeOneWithLocalWhisper(attachment);
+        const localText = await this.transcribeOneWithLocalWhisperWithRetry(attachment);
         if (localText) {
           return localText;
         }
@@ -108,7 +115,7 @@ export class AudioTranscriber implements AudioTranscriberLike {
 
     if (hasOpenAi) {
       try {
-        return await this.transcribeOneWithOpenAi(attachment);
+        return await this.transcribeOneWithOpenAiWithRetry(attachment);
       } catch (error) {
         if (!localError) {
           throw error;
@@ -124,6 +131,36 @@ export class AudioTranscriber implements AudioTranscriberLike {
       throw localError;
     }
     return "";
+  }
+
+  private async transcribeOneWithOpenAiWithRetry(attachment: AudioAttachmentForTranscription): Promise<string> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await this.transcribeOneWithOpenAi(attachment);
+      } catch (error) {
+        if (!isRetryableOpenAiError(error) || attempt >= this.maxRetries) {
+          throw error;
+        }
+        attempt += 1;
+        await sleep(this.retryDelayMs * attempt);
+      }
+    }
+  }
+
+  private async transcribeOneWithLocalWhisperWithRetry(attachment: AudioAttachmentForTranscription): Promise<string> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await this.transcribeOneWithLocalWhisper(attachment);
+      } catch (error) {
+        if (attempt >= this.maxRetries) {
+          throw error;
+        }
+        attempt += 1;
+        await sleep(this.retryDelayMs * attempt);
+      }
+    }
   }
 
   private async transcribeOneWithOpenAi(attachment: AudioAttachmentForTranscription): Promise<string> {
@@ -171,7 +208,7 @@ export class AudioTranscriber implements AudioTranscriberLike {
         typeof payload?.error?.message === "string"
           ? payload.error.message
           : `HTTP ${response.status} ${response.statusText}`;
-      throw new Error(`Audio transcription failed for ${attachment.name}: ${message}`);
+      throw new OpenAiTranscriptionHttpError(response.status, `Audio transcription failed for ${attachment.name}: ${message}`);
     }
 
     const text = typeof payload.text === "string" ? payload.text.trim() : "";
@@ -226,9 +263,39 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+function isRetryableOpenAiError(error: unknown): boolean {
+  if (error instanceof OpenAiTranscriptionHttpError) {
+    return RETRYABLE_OPENAI_STATUS.has(error.status);
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+  return true;
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, delayMs);
+    timer.unref?.();
+  });
+}
+
 function formatError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
   return String(error);
+}
+
+class OpenAiTranscriptionHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "OpenAiTranscriptionHttpError";
+    this.status = status;
+  }
 }

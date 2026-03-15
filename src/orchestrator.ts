@@ -247,6 +247,9 @@ export class Orchestrator {
       audioTranscribeModel: "gpt-4o-mini-transcribe",
       audioTranscribeTimeoutMs: 120_000,
       audioTranscribeMaxChars: 6_000,
+      audioTranscribeMaxRetries: 1,
+      audioTranscribeRetryDelayMs: 800,
+      audioTranscribeMaxBytes: 26_214_400,
       audioLocalWhisperCommand: null,
       audioLocalWhisperTimeoutMs: 180_000,
       recordPath: null,
@@ -260,6 +263,8 @@ export class Orchestrator {
         model: this.cliCompat.audioTranscribeModel,
         timeoutMs: this.cliCompat.audioTranscribeTimeoutMs,
         maxChars: this.cliCompat.audioTranscribeMaxChars,
+        maxRetries: this.cliCompat.audioTranscribeMaxRetries,
+        retryDelayMs: this.cliCompat.audioTranscribeRetryDelayMs,
         localWhisperCommand: this.cliCompat.audioLocalWhisperCommand,
         localWhisperTimeoutMs: this.cliCompat.audioLocalWhisperTimeoutMs,
       });
@@ -1227,37 +1232,75 @@ export class Orchestrator {
       return [];
     }
 
-    const audioAttachments = message.attachments
-      .filter((attachment) => attachment.kind === "audio" && Boolean(attachment.localPath))
-      .map((attachment) => ({
+    const rawAudioAttachments = message.attachments.filter(
+      (attachment) => attachment.kind === "audio" && Boolean(attachment.localPath),
+    );
+    if (rawAudioAttachments.length === 0) {
+      return [];
+    }
+
+    const maxBytes = this.cliCompat.audioTranscribeMaxBytes;
+    const audioAttachments: Array<{ name: string; mimeType: string | null; localPath: string }> = [];
+    let skippedTooLarge = 0;
+    for (const attachment of rawAudioAttachments) {
+      const localPath = attachment.localPath as string;
+      const sizeBytes = await this.resolveAudioAttachmentSizeBytes(attachment.sizeBytes, localPath);
+      if (sizeBytes !== null && sizeBytes > maxBytes) {
+        skippedTooLarge += 1;
+        this.logger.warn("Skip audio transcription for oversized attachment", {
+          requestId,
+          sessionKey,
+          name: attachment.name,
+          sizeBytes,
+          maxBytes,
+        });
+        continue;
+      }
+      audioAttachments.push({
         name: attachment.name,
         mimeType: attachment.mimeType,
-        localPath: attachment.localPath as string,
-      }));
+        localPath,
+      });
+    }
 
     if (audioAttachments.length === 0) {
       return [];
     }
 
+    const startedAt = Date.now();
     try {
       const transcripts = await this.audioTranscriber.transcribeMany(audioAttachments);
-      if (transcripts.length > 0) {
-        this.logger.info("Audio transcription completed", {
-          requestId,
-          sessionKey,
-          attachmentCount: audioAttachments.length,
-          transcriptCount: transcripts.length,
-        });
-      }
+      this.logger.info("Audio transcription completed", {
+        requestId,
+        sessionKey,
+        attachmentCount: audioAttachments.length,
+        transcriptCount: transcripts.length,
+        skippedTooLarge,
+        durationMs: Date.now() - startedAt,
+      });
       return transcripts;
     } catch (error) {
       this.logger.warn("Audio transcription failed, continuing without transcripts", {
         requestId,
         sessionKey,
         attachmentCount: audioAttachments.length,
+        skippedTooLarge,
+        durationMs: Date.now() - startedAt,
         error: formatError(error),
       });
       return [];
+    }
+  }
+
+  private async resolveAudioAttachmentSizeBytes(sizeBytes: number | null, localPath: string): Promise<number | null> {
+    if (sizeBytes !== null) {
+      return sizeBytes;
+    }
+    try {
+      const stats = await fs.stat(localPath);
+      return stats.size;
+    } catch {
+      return null;
     }
   }
 
