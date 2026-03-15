@@ -33,6 +33,7 @@ export class MatrixChannel {
   private readonly splitReplies: boolean;
   private readonly preserveWhitespace: boolean;
   private readonly fetchMedia: boolean;
+  private readonly transcribeAudio: boolean;
   private readonly client: MatrixClient;
   private handler: InboundHandler | null = null;
   private started = false;
@@ -44,6 +45,7 @@ export class MatrixChannel {
     this.splitReplies = !config.cliCompat.disableReplyChunkSplit;
     this.preserveWhitespace = config.cliCompat.preserveWhitespace;
     this.fetchMedia = config.cliCompat.fetchMedia;
+    this.transcribeAudio = config.cliCompat.transcribeAudio;
     this.client = createClient({
       baseUrl: config.matrixHomeserver,
       accessToken: config.matrixAccessToken,
@@ -347,7 +349,7 @@ export class MatrixChannel {
 
     const hydrated = await Promise.all(
       attachments.map(async (attachment, index) => {
-        if (attachment.kind !== "image" || !attachment.mxcUrl) {
+        if (!shouldHydrateAttachment(attachment.kind, this.transcribeAudio) || !attachment.mxcUrl) {
           return attachment;
         }
         try {
@@ -604,6 +606,16 @@ function parseMxcUrl(mxcUrl: string): { serverName: string; mediaId: string } | 
   return { serverName, mediaId };
 }
 
+function shouldHydrateAttachment(kind: InboundAttachment["kind"], transcribeAudio: boolean): boolean {
+  if (kind === "image") {
+    return true;
+  }
+  if (kind === "audio") {
+    return transcribeAudio;
+  }
+  return false;
+}
+
 function sanitizeFilename(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
 }
@@ -621,6 +633,21 @@ function resolveFileExtension(fileName: string, mimeType: string | null): string
   }
   if (mimeType === "image/webp") {
     return ".webp";
+  }
+  if (mimeType === "audio/mpeg") {
+    return ".mp3";
+  }
+  if (mimeType === "audio/mp4" || mimeType === "audio/x-m4a") {
+    return ".m4a";
+  }
+  if (mimeType === "audio/wav" || mimeType === "audio/x-wav") {
+    return ".wav";
+  }
+  if (mimeType === "audio/ogg") {
+    return ".ogg";
+  }
+  if (mimeType === "audio/flac") {
+    return ".flac";
   }
   return ".bin";
 }

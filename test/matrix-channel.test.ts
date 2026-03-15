@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +82,10 @@ const config = {
     disableReplyChunkSplit: false,
     progressThrottleMs: 300,
     fetchMedia: false,
+    transcribeAudio: false,
+    audioTranscribeModel: "gpt-4o-mini-transcribe",
+    audioTranscribeTimeoutMs: 120000,
+    audioTranscribeMaxChars: 6000,
     recordPath: null,
   },
   doctorHttpTimeoutMs: 10_000,
@@ -110,6 +115,15 @@ function createErrorResponse(status: number, statusText = "Error", body = "faile
     statusText,
     text: async () => body,
     json: async () => ({ error: body }),
+  } as unknown as Response;
+}
+
+function createMediaResponse(body = "media-payload"): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    arrayBuffer: async () => Buffer.from(body),
   } as unknown as Response;
 }
 
@@ -253,6 +267,65 @@ describe("MatrixChannel", () => {
         },
       ],
     });
+
+    await channel.stop();
+  });
+
+  it("hydrates audio attachment to local file when transcription is enabled", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+    fetchMock.mockResolvedValue(createMediaResponse());
+
+    const channel = new MatrixChannel(
+      {
+        ...config,
+        cliCompat: {
+          ...config.cliCompat,
+          fetchMedia: true,
+          transcribeAudio: true,
+        },
+      } as never,
+      logger as never,
+    );
+    const handler = vi.fn(async (_message: unknown) => {});
+    await channel.start(handler);
+
+    const event = {
+      getType: () => "m.room.message",
+      getSender: () => "@alice:example.com",
+      getContent: () => ({
+        msgtype: "m.audio",
+        body: "voice.m4a",
+        url: "mxc://example.com/audio123",
+        info: {
+          mimetype: "audio/mp4",
+          size: 2048,
+        },
+      }),
+      getId: () => "$event-audio",
+    };
+
+    const room = {
+      roomId: "!room:example.com",
+      getJoinedMemberCount: () => 2,
+      findEventById: (_eventId: string) => undefined,
+    };
+
+    client.emit("Room.timeline", event, room, false);
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+    const message = handler.mock.calls[0]?.[0] as { attachments: Array<{ localPath: string | null }> };
+    const localPath = message.attachments[0]?.localPath;
+    expect(localPath).toBeTruthy();
+    expect(localPath).toContain("codeharbor-media");
+    expect(localPath).toMatch(/\.m4a$/);
+    if (localPath) {
+      await fs.unlink(localPath).catch(() => {});
+    }
 
     await channel.stop();
   });
