@@ -14,6 +14,21 @@
 
 ---
 
+## 0. 使用前提（必须先准备）
+
+在安装前，请先确认以下条件：
+
+- 已安装并可执行 `codex` CLI
+- 已完成 `codex login`（确保本机可调用 Codex）
+- 有可用的 Matrix 账号（建议单独机器人账号）
+- 已获取 Matrix 机器人的 access token（用于 `MATRIX_ACCESS_TOKEN`）
+
+可选但常见：
+
+- 若你要启用“语音转写 OpenAI 回退”，还需要配置 `OPENAI_API_KEY`
+
+---
+
 ## 1. 安装（推荐 Linux）
 
 ### 方式 A：先安装，再手动配置

@@ -12,6 +12,20 @@ For the exhaustive key catalog (required/default/Admin UI/effect timing), see:
 
 ---
 
+## 0) Prerequisites
+
+Prepare these before installation:
+
+- Node.js 22+
+- `codex` CLI installed and authenticated (`codex login`)
+- a Matrix bot account (or dedicated Matrix user) and valid access token
+
+Optional:
+
+- `OPENAI_API_KEY` if you plan to use OpenAI fallback for audio transcription
+
+---
+
 ## 1) End-to-End Setup Flow
 
 Use this sequence for first-time deployment.
