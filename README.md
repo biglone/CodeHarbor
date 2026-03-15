@@ -468,6 +468,10 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - timeout for each audio transcription request
 - `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS`
   - max transcript length appended to prompt for one attachment
+- `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`
+  - optional local whisper command template (use `{input}` placeholder for audio file path)
+- `CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS`
+  - timeout for local whisper command execution
 - `CLI_COMPAT_RECORD_PATH=/abs/path/records.jsonl`
   - append executed prompts as JSONL for replay benchmarking
 
@@ -514,11 +518,13 @@ When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor
 When audio attachments are present and both `CLI_COMPAT_FETCH_MEDIA=true` and `CLI_COMPAT_TRANSCRIBE_AUDIO=true`, CodeHarbor will:
 
 1. download `m.audio` media to a temp file
-2. call OpenAI audio transcription API and append transcript to `[audio_transcripts]` prompt block
-3. continue request even if transcription fails (warn log + no transcript)
-4. best-effort cleanup temp files after the request
+2. if `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND` is configured, execute local whisper first
+3. if local whisper fails and `OPENAI_API_KEY` is available, fallback to OpenAI transcription API
+4. append transcript to `[audio_transcripts]` prompt block
+5. continue request even if transcription fails (warn log + no transcript)
+6. best-effort cleanup temp files after the request
 
-`OPENAI_API_KEY` is required only when audio transcription is enabled.
+`OPENAI_API_KEY` is optional when local whisper command is configured, and required only for OpenAI fallback.
 
 ## Replay Benchmark
 
