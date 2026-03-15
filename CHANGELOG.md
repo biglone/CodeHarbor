@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-03-15
+
+- Added Matrix voice understanding pipeline:
+  - optional `m.audio` media hydration to local temp files
+  - OpenAI-based transcription (`CLI_COMPAT_TRANSCRIBE_AUDIO`) with configurable model/timeout/max transcript length
+  - transcript injection into codex prompt via `[audio_transcripts]` context block
+- Extended CLI compat/global config surfaces for audio transcription:
+  - `.env` keys, config snapshot import/export, Admin API global config, and Admin Console UI fields
+- Improved orchestrator cancellation behavior by handling `/stop` requests that race with in-flight execution startup.
+- Updated docs and tests for audio transcription flow and attachment lifecycle cleanup.
+
 ## [0.1.19] - 2026-03-15
 
 - Added Linux postinstall auto-restart for global upgrades so active `codeharbor` services pick up new versions immediately after `npm install -g codeharbor@latest`.
