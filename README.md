@@ -422,7 +422,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
-  - `/status` show session + limiter + metrics + runtime worker status
+  - `/status` show session + limiter + metrics + runtime worker status, current version, and update hint
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)

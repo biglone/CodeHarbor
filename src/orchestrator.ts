@@ -14,6 +14,11 @@ import {
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
 import { Logger } from "./logger";
+import {
+  formatPackageUpdateHint,
+  NpmRegistryUpdateChecker,
+  type PackageUpdateChecker,
+} from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import { StateStore } from "./store/state-store";
 import { InboundMessage } from "./types";
@@ -54,6 +59,7 @@ interface OrchestratorOptions {
     enabled: boolean;
     autoRepairMaxRounds: number;
   };
+  packageUpdateChecker?: PackageUpdateChecker;
   audioTranscriber?: AudioTranscriberLike;
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
@@ -217,6 +223,7 @@ export class Orchestrator {
   private readonly cliCompatRecorder: CliCompatRecorder | null;
   private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
+  private readonly packageUpdateChecker: PackageUpdateChecker;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly metrics = new RequestMetrics();
@@ -299,6 +306,11 @@ export class Orchestrator {
       enabled: options?.multiAgentWorkflow?.enabled ?? false,
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
     });
+    this.packageUpdateChecker =
+      options?.packageUpdateChecker ??
+      new NpmRegistryUpdateChecker({
+        packageName: "codeharbor",
+      });
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
@@ -715,6 +727,7 @@ export class Orchestrator {
     const runtime = this.sessionRuntime.getRuntimeStats();
     const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
     const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
+    const packageUpdate = await this.packageUpdateChecker.getStatus();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -724,6 +737,8 @@ export class Orchestrator {
 - activeUntil: ${activeUntil}
 - 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}
 - 当前工作目录: ${roomConfig.workdir}
+- 当前版本: ${packageUpdate.currentVersion}
+- 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
