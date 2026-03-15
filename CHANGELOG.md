@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-03-15
+
+- Added audio transcription resilience controls:
+  - `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES`
+  - `CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS`
+  - `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES`
+- Added retry behavior for both local whisper and OpenAI fallback transcription flows.
+- Added oversized-audio guard to skip transcription for files above configured byte limit.
+- Added audio transcription timing logs (`durationMs`) and skipped-count telemetry for easier production diagnosis.
+- Added regression tests for retry and size-limit behavior, and updated docs/config surfaces (Admin API/UI, snapshot, `.env.example`, README).
+
 ## [0.1.21] - 2026-03-15
 
 - Added local Whisper-first audio transcription pipeline for Matrix `m.audio` attachments:
