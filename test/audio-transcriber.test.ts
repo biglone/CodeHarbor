@@ -33,6 +33,8 @@ describe("AudioTranscriber", () => {
         model: "gpt-4o-mini-transcribe",
         timeoutMs: 120000,
         maxChars: 6000,
+        maxRetries: 1,
+        retryDelayMs: 10,
         localWhisperCommand: "printf 'local transcript'",
         localWhisperTimeoutMs: 180000,
       });
@@ -69,6 +71,8 @@ describe("AudioTranscriber", () => {
         model: "gpt-4o-mini-transcribe",
         timeoutMs: 120000,
         maxChars: 6000,
+        maxRetries: 1,
+        retryDelayMs: 10,
         localWhisperCommand: "false",
         localWhisperTimeoutMs: 180000,
       });
@@ -88,6 +92,52 @@ describe("AudioTranscriber", () => {
     }
   });
 
+  it("retries transient OpenAI failures", async () => {
+    const filePath = await createAudioFixture();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: "Service Unavailable",
+          json: async () => ({ error: { message: "temporary" } }),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({ text: "retried transcript" }),
+        } as Response);
+      vi.stubGlobal("fetch", fetchMock);
+
+      const transcriber = new AudioTranscriber({
+        enabled: true,
+        apiKey: "test-key",
+        model: "gpt-4o-mini-transcribe",
+        timeoutMs: 120000,
+        maxChars: 6000,
+        maxRetries: 1,
+        retryDelayMs: 10,
+        localWhisperCommand: null,
+        localWhisperTimeoutMs: 180000,
+      });
+
+      const transcripts = await transcriber.transcribeMany([
+        {
+          name: "voice.ogg",
+          mimeType: "audio/ogg",
+          localPath: filePath,
+        },
+      ]);
+
+      expect(transcripts).toEqual([{ name: "voice.ogg", text: "retried transcript" }]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await cleanupFixture(filePath);
+    }
+  });
+
   it("throws when no transcription backend is configured", async () => {
     const filePath = await createAudioFixture();
     try {
@@ -97,6 +147,8 @@ describe("AudioTranscriber", () => {
         model: "gpt-4o-mini-transcribe",
         timeoutMs: 120000,
         maxChars: 6000,
+        maxRetries: 1,
+        retryDelayMs: 10,
         localWhisperCommand: null,
         localWhisperTimeoutMs: 180000,
       });

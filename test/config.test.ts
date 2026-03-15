@@ -121,6 +121,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-mini-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(120000);
     expect(config.cliCompat.audioTranscribeMaxChars).toBe(6000);
+    expect(config.cliCompat.audioTranscribeMaxRetries).toBe(1);
+    expect(config.cliCompat.audioTranscribeRetryDelayMs).toBe(800);
+    expect(config.cliCompat.audioTranscribeMaxBytes).toBe(26214400);
     expect(config.cliCompat.audioLocalWhisperCommand).toBeNull();
     expect(config.cliCompat.audioLocalWhisperTimeoutMs).toBe(180000);
   });
@@ -132,6 +135,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
         CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: "gpt-4o-transcribe",
         CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: "45000",
         CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS: "3200",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES: "3",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS: "1200",
+        CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES: "1234567",
         CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND: "python3 /opt/whisper/transcribe.py --input {input}",
         CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS: "90000",
       }),
@@ -141,6 +147,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(45000);
     expect(config.cliCompat.audioTranscribeMaxChars).toBe(3200);
+    expect(config.cliCompat.audioTranscribeMaxRetries).toBe(3);
+    expect(config.cliCompat.audioTranscribeRetryDelayMs).toBe(1200);
+    expect(config.cliCompat.audioTranscribeMaxBytes).toBe(1234567);
     expect(config.cliCompat.audioLocalWhisperCommand).toBe(
       "python3 /opt/whisper/transcribe.py --input {input}",
     );

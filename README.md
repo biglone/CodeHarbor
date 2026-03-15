@@ -468,6 +468,12 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - timeout for each audio transcription request
 - `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS`
   - max transcript length appended to prompt for one attachment
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES`
+  - retry count for local/OpenAI transcription failures (default `1`)
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS`
+  - base retry delay between attempts
+- `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES`
+  - skip transcription when attachment is larger than this size
 - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`
   - optional local whisper command template (use `{input}` placeholder for audio file path)
   - helper command shipped by package: `codeharbor-whisper-transcribe --input {input} --model small`
@@ -519,11 +525,13 @@ When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor
 When audio attachments are present and both `CLI_COMPAT_FETCH_MEDIA=true` and `CLI_COMPAT_TRANSCRIBE_AUDIO=true`, CodeHarbor will:
 
 1. download `m.audio` media to a temp file
-2. if `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND` is configured, execute local whisper first
-3. if local whisper fails and `OPENAI_API_KEY` is available, fallback to OpenAI transcription API
-4. append transcript to `[audio_transcripts]` prompt block
-5. continue request even if transcription fails (warn log + no transcript)
-6. best-effort cleanup temp files after the request
+2. skip oversized audio files based on `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES`
+3. if `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND` is configured, execute local whisper first
+4. if local whisper fails and `OPENAI_API_KEY` is available, fallback to OpenAI transcription API
+5. retry transient failures using `CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES`
+6. append transcript to `[audio_transcripts]` prompt block
+7. continue request even if transcription fails (warn log + no transcript)
+8. best-effort cleanup temp files after the request
 
 `OPENAI_API_KEY` is optional when local whisper command is configured, and required only for OpenAI fallback.
 For `codeharbor-whisper-transcribe`, install runtime first: `python3 -m pip install faster-whisper`.

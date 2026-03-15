@@ -517,6 +517,72 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("skips audio transcription for oversized attachments", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-audio-limit-"));
+    const audioPath = path.join(tempRoot, "voice.m4a");
+    await fs.writeFile(audioPath, "payload", "utf8");
+
+    const transcriber = {
+      isEnabled: () => true,
+      transcribeMany: vi.fn(async () => [{ name: "voice.m4a", text: "ignored" }]),
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        audioTranscriber: transcriber as never,
+        cliCompat: {
+          enabled: false,
+          passThroughEvents: false,
+          preserveWhitespace: false,
+          disableReplyChunkSplit: false,
+          progressThrottleMs: 300,
+          fetchMedia: false,
+          transcribeAudio: true,
+          audioTranscribeModel: "gpt-4o-mini-transcribe",
+          audioTranscribeTimeoutMs: 120000,
+          audioTranscribeMaxChars: 6000,
+          audioTranscribeMaxRetries: 1,
+          audioTranscribeRetryDelayMs: 800,
+          audioTranscribeMaxBytes: 1,
+          audioLocalWhisperCommand: null,
+          audioLocalWhisperTimeoutMs: 180000,
+          recordPath: null,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请处理这个语音",
+          eventId: "$audio-limit",
+          attachments: [
+            {
+              kind: "audio",
+              name: "voice.m4a",
+              mxcUrl: "mxc://example.com/audio",
+              mimeType: "audio/mp4",
+              sizeBytes: 9999,
+              localPath: audioPath,
+            },
+          ],
+        }),
+      );
+
+      expect(transcriber.transcribeMany).not.toHaveBeenCalled();
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).not.toContain("[audio_transcripts]");
+      await expect(fs.access(audioPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("applies roomTriggerPolicies override when config service is absent", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
