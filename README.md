@@ -200,6 +200,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 
 - `REQUIREMENTS.md`: current baseline + next-stage requirements
 - `TASK_LIST.md`: implementation task breakdown and status
+- `docs/COMPLETE_CONFIGURATION_GUIDE.md`: end-to-end setup flow + full feature-to-config mapping
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
 - `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
@@ -249,6 +250,7 @@ node dist/cli.js start
 Use this layered reference to avoid mixing boot-only and runtime tuning items:
 
 - [`docs/CONFIG_CATALOG.md`](docs/CONFIG_CATALOG.md)
+- [`docs/COMPLETE_CONFIGURATION_GUIDE.md`](docs/COMPLETE_CONFIGURATION_GUIDE.md)
 
 It documents:
 
@@ -256,6 +258,7 @@ It documents:
 - which keys can be edited in Admin UI
 - whether changes are immediate or restart-scoped
 - recommended profiles for local/internal/public deployment
+- a complete setup sequence from install to production operations
 
 ## Commands
 
