@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-03-15
+
+- Improved bot notice visibility by adding version prefix to status/progress notices:
+  - notice prefix format is now `CodeHarbor v<version>`
+- Enhanced completion notice with update hint so users can directly see whether a newer npm version is available after each request.
+- Added regression coverage for versioned progress/status notice output.
+
 ## [0.1.26] - 2026-03-15
 
 - Added package author metadata for npm package attribution.
