@@ -76,6 +76,7 @@ interface OrchestratorOptions {
   selfUpdateTimeoutMs?: number;
   selfUpdateRunner?: SelfUpdateRunner;
   upgradeRestartPlanner?: UpgradeRestartPlanner;
+  upgradeVersionProbe?: UpgradeVersionProbe;
 }
 
 interface SessionLockEntry {
@@ -136,6 +137,11 @@ interface SelfUpdateResult {
   stdout: string;
   stderr: string;
 }
+interface UpgradeVersionProbeResult {
+  version: string | null;
+  source: string;
+  error: string | null;
+}
 
 type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
 interface UpgradeRestartPlan {
@@ -143,6 +149,7 @@ interface UpgradeRestartPlan {
   apply: () => Promise<void>;
 }
 type UpgradeRestartPlanner = () => Promise<UpgradeRestartPlan>;
+type UpgradeVersionProbe = () => Promise<UpgradeVersionProbeResult>;
 type UpgradeStateStore = Pick<
   StateStore,
   "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun" | "listRecentUpgradeRuns"
@@ -274,6 +281,7 @@ export class Orchestrator {
   private readonly upgradeAllowedUsers: Set<string>;
   private readonly selfUpdateRunner: SelfUpdateRunner;
   private readonly upgradeRestartPlanner: UpgradeRestartPlanner;
+  private readonly upgradeVersionProbe: UpgradeVersionProbe;
   private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
@@ -386,6 +394,7 @@ export class Orchestrator {
         buildDefaultUpgradeRestartPlan({
           logger: this.logger,
         }));
+    this.upgradeVersionProbe = options?.upgradeVersionProbe ?? (() => probeInstalledVersion(selfUpdateTimeoutMs));
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
@@ -1662,21 +1671,46 @@ export class Orchestrator {
           version: parsed.version,
         });
         const restartPlan = await this.upgradeRestartPlanner();
+        const versionProbe = await this.upgradeVersionProbe();
+        const postCheck = evaluateUpgradePostCheck({
+          targetVersion: parsed.version,
+          selfUpdateVersion: result.installedVersion,
+          versionProbe,
+        });
         const elapsed = formatDurationMs(Date.now() - startedAt);
-        const installedVersion = result.installedVersion ?? "unknown";
-        await this.channel.sendNotice(
-          message.conversationId,
-          `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
+        if (postCheck.ok) {
+          const installedVersion = postCheck.installedVersion ?? "unknown";
+          await this.channel.sendNotice(
+            message.conversationId,
+            `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
 - 目标版本: ${targetLabel}
 - 已安装版本: ${installedVersion}
+- 升级校验: 通过（${postCheck.checkDetail}）
 - 服务重启: ${restartPlan.summary}
 - 校验建议: 稍后发送 /diag version 或 /version`,
-        );
-        this.finishUpgradeRun(upgradeRunId, {
-          status: "succeeded",
-          installedVersion,
-          error: null,
-        });
+          );
+          this.finishUpgradeRun(upgradeRunId, {
+            status: "succeeded",
+            installedVersion,
+            error: null,
+          });
+        } else {
+          const observedVersion = postCheck.installedVersion ?? "unknown";
+          await this.channel.sendNotice(
+            message.conversationId,
+            `${this.botNoticePrefix} 升级后校验失败（耗时 ${elapsed}）
+- 目标版本: ${targetLabel}
+- 观测版本: ${observedVersion}
+- 失败原因: ${postCheck.checkDetail}
+- 服务重启: ${restartPlan.summary}
+- 恢复建议: 发送 /diag version 查看实例路径；必要时执行 codeharbor self-update --with-admin`,
+          );
+          this.finishUpgradeRun(upgradeRunId, {
+            status: "failed",
+            installedVersion: postCheck.installedVersion,
+            error: `post-check failed: ${postCheck.checkDetail}`,
+          });
+        }
         try {
           await restartPlan.apply();
         } catch (restartError) {
@@ -2298,6 +2332,73 @@ function isLikelySystemdServiceProcess(env: NodeJS.ProcessEnv = process.env): bo
   return Boolean(env.INVOCATION_ID || env.SYSTEMD_EXEC_PID || env.JOURNAL_STREAM);
 }
 
+async function probeInstalledVersion(timeoutMs: number): Promise<UpgradeVersionProbeResult> {
+  const invocations = resolveSelfUpdateInvocations();
+  let firstError: unknown = null;
+
+  for (const invocation of invocations) {
+    const args = [...invocation.prefixArgs, "--version"];
+    try {
+      const { stdout, stderr } = await execFileAsync(invocation.file, args, {
+        timeout: Math.max(1_000, timeoutMs),
+        maxBuffer: 256 * 1024,
+        env: process.env,
+      });
+      const output = `${normalizeCommandOutput(stdout)}\n${normalizeCommandOutput(stderr)}`;
+      const version = parseSemanticVersion(output);
+      if (version) {
+        return {
+          version,
+          source: invocation.label,
+          error: null,
+        };
+      }
+    } catch (error) {
+      if (!firstError && !isCommandNotFound(error)) {
+        firstError = error;
+      }
+    }
+  }
+
+  return {
+    version: null,
+    source: "unavailable",
+    error: firstError ? formatSelfUpdateError(firstError) : null,
+  };
+}
+
+function evaluateUpgradePostCheck(input: {
+  targetVersion: string | null;
+  selfUpdateVersion: string | null;
+  versionProbe: UpgradeVersionProbeResult;
+}): { ok: boolean; installedVersion: string | null; checkDetail: string } {
+  const installedVersion = input.versionProbe.version ?? input.selfUpdateVersion;
+  const source = input.versionProbe.version ? `version probe (${input.versionProbe.source})` : "self-update output";
+
+  if (!installedVersion) {
+    const probeError = input.versionProbe.error ? `; probe=${input.versionProbe.error}` : "";
+    return {
+      ok: false,
+      installedVersion: null,
+      checkDetail: `无法确认安装版本${probeError}`,
+    };
+  }
+
+  if (input.targetVersion && installedVersion !== input.targetVersion) {
+    return {
+      ok: false,
+      installedVersion,
+      checkDetail: `期望 ${input.targetVersion}，实际 ${installedVersion}`,
+    };
+  }
+
+  return {
+    ok: true,
+    installedVersion,
+    checkDetail: `installed=${installedVersion}; source=${source}`,
+  };
+}
+
 function resolveSelfUpdateInvocations(): Array<{ file: string; prefixArgs: string[]; label: string }> {
   const candidates: Array<{ file: string; prefixArgs: string[]; label: string }> = [];
 
@@ -2343,6 +2444,11 @@ function parseInstalledVersionFromSelfUpdateOutput(output: string): string | nul
   return match?.[1] ?? null;
 }
 
+function parseSemanticVersion(text: string): string | null {
+  const match = text.match(/\b([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match?.[1] ?? null;
+}
+
 function normalizeCommandOutput(value: string | Buffer): string {
   if (typeof value === "string") {
     return value.trim();
@@ -2360,22 +2466,41 @@ function isCommandNotFound(error: unknown): boolean {
 
 function formatSelfUpdateError(error: unknown): string {
   if (!error || typeof error !== "object") {
-    return formatError(error);
+    return sanitizeSelfUpdateErrorText(formatError(error)) || "unknown self-update error";
   }
   const maybeError = error as ExecFileException & {
     stderr?: string | Buffer;
     stdout?: string | Buffer;
     message?: string;
   };
-  const stderr = normalizeOptionalCommandOutput(maybeError.stderr);
+  const stderr = sanitizeSelfUpdateErrorText(normalizeOptionalCommandOutput(maybeError.stderr));
   if (stderr) {
     return summarizeCommandOutput(stderr);
   }
-  const stdout = normalizeOptionalCommandOutput(maybeError.stdout);
+  const stdout = sanitizeSelfUpdateErrorText(normalizeOptionalCommandOutput(maybeError.stdout));
   if (stdout) {
     return summarizeCommandOutput(stdout);
   }
-  return maybeError.message?.trim() || formatError(error);
+  return sanitizeSelfUpdateErrorText(maybeError.message?.trim() || formatError(error)) || "unknown self-update error";
+}
+
+function sanitizeSelfUpdateErrorText(text: string): string {
+  const withoutWarning = text
+    .replace(
+      /\(\s*node:\d+\)\s*ExperimentalWarning:\s*SQLite is an experimental feature and might change at any time/gi,
+      "",
+    )
+    .replace(/\(Use [`"]?node --trace-warnings[^)]*\)/gi, "");
+  const filtered = withoutWarning
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) {
+        return false;
+      }
+      return true;
+    });
+  return filtered.join("\n").trim();
 }
 
 function normalizeOptionalCommandOutput(value: string | Buffer | null | undefined): string {

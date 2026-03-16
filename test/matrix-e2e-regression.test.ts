@@ -596,6 +596,11 @@ describe("Matrix e2e regression", () => {
         summary: "test-noop",
         apply: async () => {},
       }),
+      upgradeVersionProbe: async () => ({
+        version: "0.1.34",
+        source: "test",
+        error: null,
+      }),
     });
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade v0.1.34" }));
@@ -605,6 +610,42 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("已开始升级"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("升级任务完成"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("已安装版本: 0.1.34"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("升级校验: 通过"))).toBe(true);
+  });
+
+  it("reports post-check failure when installed version mismatches target", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@alice:example.com"],
+      selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
+      upgradeVersionProbe: async () => ({
+        version: "0.1.33",
+        source: "test",
+        error: null,
+      }),
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade 0.1.34" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).toHaveBeenCalledWith({ version: "0.1.34" });
+    expect(channel.notices.some((entry) => entry.text.includes("升级后校验失败"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("期望 0.1.34，实际 0.1.33"))).toBe(true);
   });
 
   it("supports plain-text upgrade alias and rejects unauthorized users", async () => {
@@ -668,6 +709,42 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls).toHaveLength(0);
     expect(selfUpdateRunner).not.toHaveBeenCalled();
     expect(channel.notices.some((entry) => entry.text.includes("仅支持私聊"))).toBe(true);
+  });
+
+  it("suppresses benign sqlite experimental warnings in /upgrade failure notice", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => {
+      throw new Error(
+        "Self-update failed: Root privileges are required. (node:3380692) ExperimentalWarning: SQLite is an experimental feature and might change at any time (Use `node --trace-warnings ...` to show where the warning was created)",
+      );
+    });
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@alice:example.com"],
+      selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
+      upgradeVersionProbe: async () => ({
+        version: null,
+        source: "test",
+        error: "not-run",
+      }),
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade" }));
+
+    const failureNotice = channel.notices.find((entry) => entry.text.includes("升级失败"));
+    expect(failureNotice).toBeDefined();
+    expect(failureNotice?.text).toContain("Root privileges are required");
+    expect(failureNotice?.text).not.toContain("ExperimentalWarning");
+    expect(failureNotice?.text).not.toContain("--trace-warnings");
   });
 
   it("shows runtime diagnosis for /diag version command", async () => {
