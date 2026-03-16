@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-03-16
+
+- Added `/version` control command to return current package version and update hint in bot notice.
+- Added configurable package update-check controls:
+  - `PACKAGE_UPDATE_CHECK_ENABLED`
+  - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`
+- Enhanced Admin health API/UI:
+  - `/api/admin/health` now includes app-level version/update status
+  - health page now shows CodeHarbor current/latest version and update availability
+- Added Admin global settings support for update-check switch and timeout persistence.
+- Updated documentation and examples (`README`, config guides, `.env.example`) for `/version` and update-check behavior.
+
 ## [0.1.27] - 2026-03-15
 
 - Improved bot notice visibility by adding version prefix to status/progress notices:
