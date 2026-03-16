@@ -291,6 +291,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.upserts[0]?.text).toContain("[CodeHarbor v");
     expect(channel.upserts[0]?.replaceEventId).toBeNull();
     expect(channel.upserts.slice(1).every((entry) => Boolean(entry.replaceEventId))).toBe(true);
+    expect(channel.upserts.some((entry) => entry.text.includes("处理完成（后端工具: codex"))).toBe(true);
   });
 
   it("cancels an in-flight execution with /stop", async () => {
