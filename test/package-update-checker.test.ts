@@ -25,7 +25,13 @@ describe("compareSemver", () => {
 
 describe("NpmRegistryUpdateChecker", () => {
   it("returns update_available when npm latest is newer", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ version: "0.1.25" }), { status: 200 }));
+    const fetchImpl = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/latest")) {
+        return new Response(JSON.stringify({ version: "0.1.25" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ latest: "0.1.25" }), { status: 200 });
+    });
     const checker = new NpmRegistryUpdateChecker({
       packageName: "codeharbor",
       currentVersion: "0.1.24",
@@ -39,10 +45,22 @@ describe("NpmRegistryUpdateChecker", () => {
     expect(status.latestVersion).toBe("0.1.25");
     expect(status.currentVersion).toBe("0.1.24");
     expect(status.upgradeCommand).toBe("npm install -g codeharbor@latest");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const call of fetchImpl.mock.calls) {
+      expect(call[1]).toMatchObject({
+        cache: "no-store",
+      });
+    }
   });
 
   it("uses cached result inside ttl window", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ version: "0.1.24" }), { status: 200 }));
+    const fetchImpl = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/latest")) {
+        return new Response(JSON.stringify({ version: "0.1.24" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ latest: "0.1.24" }), { status: 200 });
+    });
     const checker = new NpmRegistryUpdateChecker({
       packageName: "codeharbor",
       currentVersion: "0.1.24",
@@ -53,15 +71,19 @@ describe("NpmRegistryUpdateChecker", () => {
 
     const first = await checker.getStatus();
     const second = await checker.getStatus();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(second).toEqual(first);
   });
 
   it("bypasses cache when forceRefresh is true", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.1.24" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.1.25" }), { status: 200 }));
+    const fetchImpl = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const latestVersion = url.includes("cache_bust") && fetchImpl.mock.calls.length > 2 ? "0.1.25" : "0.1.24";
+      if (url.includes("/latest")) {
+        return new Response(JSON.stringify({ version: latestVersion }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ latest: latestVersion }), { status: 200 });
+    });
     const checker = new NpmRegistryUpdateChecker({
       packageName: "codeharbor",
       currentVersion: "0.1.24",
@@ -72,7 +94,7 @@ describe("NpmRegistryUpdateChecker", () => {
 
     const first = await checker.getStatus();
     const second = await checker.getStatus({ forceRefresh: true });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(first.latestVersion).toBe("0.1.24");
     expect(second.latestVersion).toBe("0.1.25");
   });
@@ -92,6 +114,48 @@ describe("NpmRegistryUpdateChecker", () => {
     const status = await checker.getStatus();
     expect(status.state).toBe("unknown");
     expect(status.error).toContain("network down");
+  });
+
+  it("prefers the higher version between latest and dist-tags responses", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/latest")) {
+        return new Response(JSON.stringify({ version: "0.1.29" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ latest: "0.1.30" }), { status: 200 });
+    });
+    const checker = new NpmRegistryUpdateChecker({
+      packageName: "codeharbor",
+      currentVersion: "0.1.28",
+      enabled: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      ttlMs: 60_000,
+    });
+
+    const status = await checker.getStatus({ forceRefresh: true });
+    expect(status.latestVersion).toBe("0.1.30");
+    expect(status.state).toBe("update_available");
+  });
+
+  it("falls back to dist-tags when latest endpoint is stale or unavailable", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/latest")) {
+        return new Response("bad gateway", { status: 502 });
+      }
+      return new Response(JSON.stringify({ latest: "0.1.30" }), { status: 200 });
+    });
+    const checker = new NpmRegistryUpdateChecker({
+      packageName: "codeharbor",
+      currentVersion: "0.1.29",
+      enabled: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      ttlMs: 60_000,
+    });
+
+    const status = await checker.getStatus({ forceRefresh: true });
+    expect(status.latestVersion).toBe("0.1.30");
+    expect(status.state).toBe("update_available");
   });
 });
 
