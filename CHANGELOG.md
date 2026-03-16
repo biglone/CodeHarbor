@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-03-16
+
 - Improved `/status` observability:
   - now includes latest in-chat upgrade run result (target/installed version, time, and error summary when failed)
 
