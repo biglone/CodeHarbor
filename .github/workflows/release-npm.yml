@@ -149,3 +149,63 @@ jobs:
         run: |
           echo "Version already published:"
           echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
+
+      - name: Post-publish verification
+        if: steps.intent.outputs.publish == 'true'
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected="${PACKAGE_VERSION}"
+          name="${PACKAGE_NAME}"
+          if [ -z "${name}" ] || [ -z "${expected}" ]; then
+            echo "Missing package metadata for verification."
+            exit 1
+          fi
+
+          echo "Verifying npm latest version for ${name}@${expected}..."
+          latest=""
+          for i in $(seq 1 18); do
+            latest="$(npm view "${name}" version 2>/dev/null || true)"
+            if [ "${latest}" = "${expected}" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ "${latest}" != "${expected}" ]; then
+            echo "Expected npm latest=${expected}, got ${latest:-<empty>}"
+            exit 1
+          fi
+
+          npm install -g "${name}@${expected}"
+          installed="$(codeharbor --version | tr -d '\r\n')"
+          if [ "${installed}" != "${expected}" ]; then
+            echo "Installed CLI version mismatch: ${installed} != ${expected}"
+            exit 1
+          fi
+
+          node - <<'NODE'
+          const name = process.env.PACKAGE_NAME;
+          const expected = process.env.PACKAGE_VERSION;
+          const run = async () => {
+            const latestRes = await fetch(`https://registry.npmjs.org/${name}/latest`, { cache: "no-store" });
+            const distTagsRes = await fetch(`https://registry.npmjs.org/-/package/${name}/dist-tags`, { cache: "no-store" });
+            if (!latestRes.ok || !distTagsRes.ok) {
+              throw new Error(`registry endpoints unavailable: latest=${latestRes.status} dist-tags=${distTagsRes.status}`);
+            }
+            const latest = await latestRes.json();
+            const tags = await distTagsRes.json();
+            if (latest.version !== expected) {
+              throw new Error(`/latest mismatch: ${latest.version} != ${expected}`);
+            }
+            if (tags.latest !== expected) {
+              throw new Error(`/dist-tags latest mismatch: ${tags.latest} != ${expected}`);
+            }
+            console.log(`Registry verification OK: ${name}@${expected}`);
+          };
+          run().catch((error) => {
+            console.error(error instanceof Error ? error.message : String(error));
+            process.exit(1);
+          });
+          NODE
