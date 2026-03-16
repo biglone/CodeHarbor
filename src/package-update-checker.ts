@@ -34,6 +34,10 @@ interface NpmVersionPayload {
   version?: unknown;
 }
 
+interface NpmDistTagsPayload {
+  latest?: unknown;
+}
+
 export class NpmRegistryUpdateChecker implements PackageUpdateChecker {
   private readonly packageName: string;
   private readonly currentVersion: string;
@@ -83,38 +87,26 @@ export class NpmRegistryUpdateChecker implements PackageUpdateChecker {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     timer.unref?.();
     try {
-      const response = await this.fetchImpl(`https://registry.npmjs.org/${this.packageName}/latest`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
+      const resolved = await this.resolveLatestVersion(controller.signal);
+      if (!resolved.latestVersion) {
         return this.buildStatus({
           latestVersion: null,
           state: "unknown",
-          error: `HTTP ${response.status}`,
+          error: resolved.error ?? "invalid npm response",
         });
       }
 
-      const payload = (await response.json()) as NpmVersionPayload;
-      const latest = typeof payload.version === "string" ? payload.version.trim() : "";
-      if (!latest) {
-        return this.buildStatus({
-          latestVersion: null,
-          state: "unknown",
-          error: "invalid npm response",
-        });
-      }
-
-      const comparison = compareSemver(this.currentVersion, latest);
+      const comparison = compareSemver(this.currentVersion, resolved.latestVersion);
       if (comparison === null) {
         return this.buildStatus({
-          latestVersion: latest,
+          latestVersion: resolved.latestVersion,
           state: "unknown",
           error: "version compare unavailable",
         });
       }
 
       return this.buildStatus({
-        latestVersion: latest,
+        latestVersion: resolved.latestVersion,
         state: comparison < 0 ? "update_available" : "up_to_date",
         error: null,
       });
@@ -126,6 +118,71 @@ export class NpmRegistryUpdateChecker implements PackageUpdateChecker {
       });
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  private async resolveLatestVersion(signal: AbortSignal): Promise<{ latestVersion: string | null; error: string | null }> {
+    const cacheBust = Date.now().toString(36);
+    const latestResponse = await this.fetchVersionFromEndpoint(
+      `https://registry.npmjs.org/${this.packageName}/latest?cache_bust=${cacheBust}`,
+      signal,
+      (payload) => {
+        const body = payload as NpmVersionPayload;
+        return typeof body.version === "string" ? body.version : null;
+      },
+    );
+    const distTagResponse = await this.fetchVersionFromEndpoint(
+      `https://registry.npmjs.org/-/package/${this.packageName}/dist-tags?cache_bust=${cacheBust}`,
+      signal,
+      (payload) => {
+        const body = payload as NpmDistTagsPayload;
+        return typeof body.latest === "string" ? body.latest : null;
+      },
+    );
+
+    const candidates = [latestResponse.version, distTagResponse.version].filter((value): value is string => Boolean(value));
+    const latestVersion = pickHighestSemver(candidates);
+    if (latestVersion) {
+      return { latestVersion, error: null };
+    }
+    if (candidates.length > 0) {
+      return { latestVersion: candidates[0], error: null };
+    }
+
+    const errors = [latestResponse.error, distTagResponse.error].filter((value): value is string => Boolean(value));
+    return {
+      latestVersion: null,
+      error: errors.length > 0 ? errors.join("; ") : "invalid npm response",
+    };
+  }
+
+  private async fetchVersionFromEndpoint(
+    url: string,
+    signal: AbortSignal,
+    extractVersion: (payload: unknown) => string | null,
+  ): Promise<{ version: string | null; error: string | null }> {
+    try {
+      const response = await this.fetchImpl(url, {
+        signal,
+        cache: "no-store",
+        headers: {
+          accept: "application/json",
+          "cache-control": "no-cache",
+          pragma: "no-cache",
+        },
+      });
+      if (!response.ok) {
+        return { version: null, error: `HTTP ${response.status}` };
+      }
+
+      const payload = await response.json();
+      const version = extractVersion(payload)?.trim() ?? "";
+      if (!version) {
+        return { version: null, error: "invalid npm response" };
+      }
+      return { version, error: null };
+    } catch (error) {
+      return { version: null, error: normalizeError(error) };
     }
   }
 
@@ -186,6 +243,22 @@ export function compareSemver(current: string, latest: string): -1 | 0 | 1 | nul
     }
   }
   return 0;
+}
+
+function pickHighestSemver(versions: string[]): string | null {
+  const semverVersions = versions.filter((version) => parseSemver(version) !== null);
+  if (semverVersions.length === 0) {
+    return null;
+  }
+  let selected = semverVersions[0];
+  for (let i = 1; i < semverVersions.length; i += 1) {
+    const version = semverVersions[i];
+    const comparison = compareSemver(selected, version);
+    if (comparison !== null && comparison < 0) {
+      selected = version;
+    }
+  }
+  return selected;
 }
 
 function parseSemver(raw: string): [number, number, number] | null {
