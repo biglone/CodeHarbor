@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-03-16
+
 - Added Matrix in-chat upgrade control command:
   - new `/upgrade [version]` (with `upgrade` / `升级` aliases) triggers `self-update` flow and service restart
   - supports optional `MATRIX_UPGRADE_ALLOWED_USERS` allowlist for command authorization in direct messages
