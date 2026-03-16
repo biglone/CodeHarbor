@@ -65,6 +65,7 @@ interface OrchestratorOptions {
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
   aiCliProvider?: "codex" | "claude";
+  executorFactory?: (provider: "codex" | "claude") => CodexExecutor;
 }
 
 interface SessionLockEntry {
@@ -75,7 +76,7 @@ interface SessionLockEntry {
 type RouteDecision =
   | { kind: "ignore" }
   | { kind: "execute"; prompt: string }
-  | { kind: "command"; command: "status" | "version" | "stop" | "reset" };
+  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" };
 
 type RequestOutcome =
   | "success"
@@ -200,8 +201,9 @@ class RequestMetrics {
 
 export class Orchestrator {
   private readonly channel: MatrixChannel;
-  private readonly executor: CodexExecutor;
-  private readonly sessionRuntime: CodexSessionRuntime;
+  private executor: CodexExecutor;
+  private sessionRuntime: CodexSessionRuntime;
+  private readonly executorFactory: ((provider: "codex" | "claude") => CodexExecutor) | null;
   private readonly stateStore: StateStore;
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
@@ -226,7 +228,7 @@ export class Orchestrator {
   private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
-  private readonly aiCliProvider: "codex" | "claude";
+  private aiCliProvider: "codex" | "claude";
   private readonly botNoticePrefix: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
@@ -318,6 +320,7 @@ export class Orchestrator {
         packageName: "codeharbor",
         currentVersion,
       });
+    this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
@@ -699,7 +702,7 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "version" | "stop" | "reset",
+    command: "status" | "version" | "backend" | "stop" | "reset",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -728,6 +731,11 @@ export class Orchestrator {
         message.conversationId,
         `${this.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
       );
+      return;
+    }
+
+    if (command === "backend") {
+      await this.handleBackendCommand(sessionKey, message);
       return;
     }
 
@@ -1462,6 +1470,48 @@ export class Orchestrator {
       this.sessionLocks.delete(sessionKey);
     }
   }
+
+  private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
+    const target = parseBackendTarget(message.text);
+    if (!target || target === "status") {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] 当前后端工具: ${this.aiCliProvider}\n可用命令: /backend codex | /backend claude | /backend status`,
+      );
+      return;
+    }
+    if (target === this.aiCliProvider) {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 后端工具已是 ${target}。`);
+      return;
+    }
+    if (!this.executorFactory) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 当前运行模式不支持会话内切换后端，请修改 .env 后重启服务。",
+      );
+      return;
+    }
+    if (this.runningExecutions.size > 0) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 检测到仍有运行中任务，请等待任务完成后再切换后端工具。",
+      );
+      return;
+    }
+
+    this.executor = this.executorFactory(target);
+    this.sessionRuntime = new CodexSessionRuntime(this.executor);
+    this.aiCliProvider = target;
+    this.stateStore.clearCodexSessionId(sessionKey);
+    this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+    this.workflowSnapshots.delete(sessionKey);
+    this.autoDevSnapshots.delete(sessionKey);
+
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] 已切换后端工具为 ${target}，当前会话上下文已重置。`,
+    );
+  }
 }
 
 function pruneSnapshotMap<T>(
@@ -1603,7 +1653,7 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
   return null;
 }
 
-function parseControlCommand(text: string): "status" | "version" | "stop" | "reset" | null {
+function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | null {
   const command = text.split(/\s+/, 1)[0].toLowerCase();
   if (command === "/status") {
     return "status";
@@ -1611,11 +1661,32 @@ function parseControlCommand(text: string): "status" | "version" | "stop" | "res
   if (command === "/version") {
     return "version";
   }
+  if (command === "/backend") {
+    return "backend";
+  }
   if (command === "/stop") {
     return "stop";
   }
   if (command === "/reset") {
     return "reset";
+  }
+  return null;
+}
+
+function parseBackendTarget(text: string): "codex" | "claude" | "status" | null {
+  const tokens = text.trim().split(/\s+/);
+  if (tokens.length < 2) {
+    return "status";
+  }
+  const value = tokens[1]?.toLowerCase() ?? "";
+  if (value === "codex") {
+    return "codex";
+  }
+  if (value === "claude") {
+    return "claude";
+  }
+  if (value === "status") {
+    return "status";
   }
   return null;
 }

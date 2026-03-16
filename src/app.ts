@@ -33,18 +33,20 @@ export class CodeHarborApp {
       config.maxSessions,
     );
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
-    const executor = new CodexExecutor({
-      provider: config.aiCliProvider,
-      bin: config.codexBin,
-      model: config.codexModel,
-      workdir: config.codexWorkdir,
-      dangerousBypass: config.codexDangerousBypass,
-      timeoutMs: config.codexExecTimeoutMs,
-      sandboxMode: config.codexSandboxMode,
-      approvalPolicy: config.codexApprovalPolicy,
-      extraArgs: config.codexExtraArgs,
-      extraEnv: config.codexExtraEnv,
-    });
+    const buildExecutor = (provider: "codex" | "claude"): CodexExecutor =>
+      new CodexExecutor({
+        provider,
+        bin: resolveProviderBin(config, provider),
+        model: config.codexModel,
+        workdir: config.codexWorkdir,
+        dangerousBypass: config.codexDangerousBypass,
+        timeoutMs: config.codexExecTimeoutMs,
+        sandboxMode: config.codexSandboxMode,
+        approvalPolicy: config.codexApprovalPolicy,
+        extraArgs: config.codexExtraArgs,
+        extraEnv: config.codexExtraEnv,
+      });
+    const executor = buildExecutor(config.aiCliProvider);
 
     this.channel = new MatrixChannel(config, this.logger);
     const packageVersion = resolvePackageVersion();
@@ -71,6 +73,7 @@ export class CodeHarborApp {
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
       aiCliProvider: config.aiCliProvider,
+      executorFactory: buildExecutor,
     });
   }
 
@@ -177,4 +180,11 @@ export async function runDoctor(config: AppConfig): Promise<void> {
   }
 
   logger.info("Doctor check passed");
+}
+
+function resolveProviderBin(config: AppConfig, provider: "codex" | "claude"): string {
+  if (provider === config.aiCliProvider) {
+    return config.codexBin;
+  }
+  return provider === "claude" ? "claude" : "codex";
 }

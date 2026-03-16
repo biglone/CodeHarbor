@@ -550,6 +550,43 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("检查时间: 2026-03-16T03:11:22.000Z"))).toBe(true);
   });
 
+  it("switches backend provider via /backend command", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "thread-codex", reply: "from-codex" }),
+      cancel: () => {},
+    }));
+    const claudeExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "session-claude", reply: "from-claude" }),
+      cancel: () => {},
+    }));
+    const store = new InMemoryStateStore();
+    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+      provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
+    );
+
+    const orchestrator = new Orchestrator(channel as never, codexExecutor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      executorFactory: executorFactory as never,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
+
+    expect(codexExecutor.calls).toHaveLength(1);
+    expect(claudeExecutor.calls).toHaveLength(1);
+    expect(executorFactory).toHaveBeenCalledWith("claude");
+    expect(channel.notices.some((entry) => entry.text.includes("已切换后端工具为 claude"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("AI CLI: claude"))).toBe(true);
+    expect(channel.sent.some((entry) => entry.text === "from-codex")).toBe(true);
+    expect(channel.sent.some((entry) => entry.text === "from-claude")).toBe(true);
+  });
+
   it("returns failure message when executor errors", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor(() => ({
