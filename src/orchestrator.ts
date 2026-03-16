@@ -25,7 +25,7 @@ import {
   resolvePackageVersion,
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
-import { StateStore } from "./store/state-store";
+import { StateStore, type UpgradeRunRecord } from "./store/state-store";
 import { InboundMessage } from "./types";
 import { extractCommandText } from "./utils/message";
 import {
@@ -137,6 +137,7 @@ interface SelfUpdateResult {
 }
 
 type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
+type UpgradeStateStore = Pick<StateStore, "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun">;
 
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const RUN_SNAPSHOT_MAX_ENTRIES = 500;
@@ -834,6 +835,7 @@ export class Orchestrator {
     const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
     const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
     const packageUpdate = await this.packageUpdateChecker.getStatus();
+    const latestUpgrade = this.getLatestUpgradeRun();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -848,6 +850,7 @@ export class Orchestrator {
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 更新检查时间: ${packageUpdate.checkedAt}
 - 更新来源: 缓存结果（TTL=${formatCacheTtl(this.updateCheckTtlMs)}，发送 /version 可实时刷新）
+- 最近升级: ${formatLatestUpgradeSummary(latestUpgrade)}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
@@ -1628,6 +1631,7 @@ export class Orchestrator {
     }
 
     const targetLabel = parsed.version ? parsed.version : "latest";
+    const upgradeRunId = this.createUpgradeRun(message.senderId, parsed.version);
     const startedAt = Date.now();
     await this.channel.sendNotice(
       message.conversationId,
@@ -1649,14 +1653,25 @@ export class Orchestrator {
 - 服务重启: 已触发
 - 校验建议: 稍后发送 /diag version 或 /version`,
         );
+        this.finishUpgradeRun(upgradeRunId, {
+          status: "succeeded",
+          installedVersion,
+          error: null,
+        });
       } catch (error) {
+        const errorText = formatSelfUpdateError(error);
         const elapsed = formatDurationMs(Date.now() - startedAt);
         await this.channel.sendNotice(
           message.conversationId,
           `${this.botNoticePrefix} 升级失败（耗时 ${elapsed}）
-- 错误: ${formatSelfUpdateError(error)}
+- 错误: ${errorText}
 - 兜底命令: codeharbor self-update --with-admin`,
         );
+        this.finishUpgradeRun(upgradeRunId, {
+          status: "failed",
+          installedVersion: null,
+          error: errorText,
+        });
       }
     });
   }
@@ -1678,6 +1693,65 @@ export class Orchestrator {
       allowed: false,
       reason: "当前账号无执行 /upgrade 权限，请联系管理员添加 MATRIX_UPGRADE_ALLOWED_USERS 白名单。",
     };
+  }
+
+  private createUpgradeRun(requestedBy: string, targetVersion: string | null): number | null {
+    const store = this.getUpgradeStateStore();
+    if (!store) {
+      return null;
+    }
+    try {
+      return store.createUpgradeRun({
+        requestedBy,
+        targetVersion,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to create upgrade run record", { error });
+      return null;
+    }
+  }
+
+  private finishUpgradeRun(
+    runId: number | null,
+    input: { status: "succeeded" | "failed"; installedVersion: string | null; error: string | null },
+  ): void {
+    if (runId === null) {
+      return;
+    }
+    const store = this.getUpgradeStateStore();
+    if (!store) {
+      return;
+    }
+    try {
+      store.finishUpgradeRun(runId, input);
+    } catch (error) {
+      this.logger.warn("Failed to finalize upgrade run record", { runId, error });
+    }
+  }
+
+  private getLatestUpgradeRun(): UpgradeRunRecord | null {
+    const store = this.getUpgradeStateStore();
+    if (!store) {
+      return null;
+    }
+    try {
+      return store.getLatestUpgradeRun();
+    } catch (error) {
+      this.logger.warn("Failed to fetch latest upgrade run record", { error });
+      return null;
+    }
+  }
+
+  private getUpgradeStateStore(): UpgradeStateStore | null {
+    const maybeStore = this.stateStore as unknown as Partial<UpgradeStateStore>;
+    if (
+      typeof maybeStore.createUpgradeRun !== "function" ||
+      typeof maybeStore.finishUpgradeRun !== "function" ||
+      typeof maybeStore.getLatestUpgradeRun !== "function"
+    ) {
+      return null;
+    }
+    return maybeStore as UpgradeStateStore;
   }
 
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
@@ -2202,6 +2276,23 @@ function formatCacheTtl(ttlMs: number): string {
     return `${Math.round(ttlMs / 60_000)}m`;
   }
   return `${(ttlMs / (60 * 60_000)).toFixed(1)}h`;
+}
+
+function formatLatestUpgradeSummary(run: UpgradeRunRecord | null): string {
+  if (!run) {
+    return "暂无记录";
+  }
+  if (run.status === "running") {
+    return `进行中（startedAt=${new Date(run.startedAt).toISOString()}）`;
+  }
+  if (run.status === "succeeded") {
+    return `成功（target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
+      run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+    }）`;
+  }
+  return `失败（target=${run.targetVersion ?? "latest"}, at=${
+    run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+  }, error=${run.error ?? "unknown"}）`;
 }
 
 function buildRateLimitNotice(decision: RateLimitDecision): string {

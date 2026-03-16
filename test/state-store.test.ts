@@ -180,6 +180,42 @@ describe("StateStore", () => {
     );
   });
 
+  it("stores latest upgrade run status", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const runId = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.34",
+    });
+    let latest = store.getLatestUpgradeRun();
+    expect(latest).toEqual(
+      expect.objectContaining({
+        id: runId,
+        requestedBy: "@alice:example.com",
+        targetVersion: "0.1.34",
+        status: "running",
+      }),
+    );
+
+    store.finishUpgradeRun(runId, {
+      status: "succeeded",
+      installedVersion: "0.1.34",
+      error: null,
+    });
+
+    latest = store.getLatestUpgradeRun();
+    expect(latest).toEqual(
+      expect.objectContaining({
+        id: runId,
+        status: "succeeded",
+        installedVersion: "0.1.34",
+        error: null,
+      }),
+    );
+    expect(latest?.finishedAt).not.toBeNull();
+  });
+
   it("stores and loads local conversation history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

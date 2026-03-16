@@ -58,6 +58,17 @@ export interface SessionMessageRecord {
   createdAt: number;
 }
 
+export interface UpgradeRunRecord {
+  id: number;
+  requestedBy: string | null;
+  targetVersion: string | null;
+  status: "running" | "succeeded" | "failed";
+  installedVersion: string | null;
+  error: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 
 export class StateStore {
@@ -335,6 +346,66 @@ export class StateStore {
     }));
   }
 
+  createUpgradeRun(input: { requestedBy: string | null; targetVersion: string | null }): number {
+    const row = this.db
+      .prepare(
+        `INSERT INTO upgrade_runs (requested_by, target_version, status, installed_version, error, started_at, finished_at)
+         VALUES (?1, ?2, 'running', NULL, NULL, ?3, NULL)
+         RETURNING id`,
+      )
+      .get(input.requestedBy, input.targetVersion, Date.now()) as { id: number } | undefined;
+    if (!row || typeof row.id !== "number") {
+      throw new Error("Failed to create upgrade run record.");
+    }
+    return row.id;
+  }
+
+  finishUpgradeRun(
+    id: number,
+    input: { status: "succeeded" | "failed"; installedVersion: string | null; error: string | null },
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE upgrade_runs SET status = ?2, installed_version = ?3, error = ?4, finished_at = ?5 WHERE id = ?1",
+      )
+      .run(id, input.status, input.installedVersion, input.error, Date.now());
+  }
+
+  getLatestUpgradeRun(): UpgradeRunRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, requested_by, target_version, status, installed_version, error, started_at, finished_at
+         FROM upgrade_runs
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get() as
+      | {
+          id: number;
+          requested_by: string | null;
+          target_version: string | null;
+          status: "running" | "succeeded" | "failed";
+          installed_version: string | null;
+          error: string | null;
+          started_at: number;
+          finished_at: number | null;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      requestedBy: row.requested_by,
+      targetVersion: row.target_version,
+      status: row.status,
+      installedVersion: row.installed_version,
+      error: row.error,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+    };
+  }
+
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",
@@ -480,6 +551,19 @@ export class StateStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_config_revisions_created_at ON config_revisions(created_at);
+
+      CREATE TABLE IF NOT EXISTS upgrade_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        requested_by TEXT,
+        target_version TEXT,
+        status TEXT NOT NULL,
+        installed_version TEXT,
+        error TEXT,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_upgrade_runs_started_at ON upgrade_runs(started_at);
 
       CREATE TABLE IF NOT EXISTS session_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
