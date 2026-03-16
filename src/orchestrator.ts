@@ -1787,6 +1787,11 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
 }
 
 function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | null {
+  const normalized = text.trim().toLowerCase();
+  if (normalized === "help" || normalized === "帮助" || normalized === "菜单") {
+    return "help";
+  }
+
   const command = text.split(/\s+/, 1)[0].toLowerCase();
   if (command === "/status") {
     return "status";
