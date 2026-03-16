@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-03-16
+
+- Fixed version-check staleness experience:
+  - `/version` now forces a real-time npm latest-version refresh (bypasses cache)
+  - `/status` now includes update check timestamp (`checkedAt`) for observability
+- Added configurable update-check cache TTL:
+  - `PACKAGE_UPDATE_CHECK_TTL_MS` (default `21600000`, 6h)
+- Added Admin Global Config support for update-check TTL (UI + API + `.env` persistence).
+- Updated config snapshot import/export and docs for the new TTL and refresh behavior.
+
 ## [0.1.28] - 2026-03-16
 
 - Added `/version` control command to return current package version and update hint in bot notice.

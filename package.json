@@ -1,6 +1,6 @@
 {
   "name": "codeharbor",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "Self-hosted Matrix bot bridge for OpenAI Codex CLI sessions",
   "author": "biglone <jjoyceu@gmail.com> (https://github.com/biglone)",
   "license": "MIT",
