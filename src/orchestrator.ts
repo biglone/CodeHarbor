@@ -79,7 +79,7 @@ interface SessionLockEntry {
 type RouteDecision =
   | { kind: "ignore" }
   | { kind: "execute"; prompt: string }
-  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" | "diag" };
+  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" };
 
 type RequestOutcome =
   | "success"
@@ -719,7 +719,7 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "version" | "backend" | "stop" | "reset" | "diag",
+    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -759,6 +759,21 @@ export class Orchestrator {
 
     if (command === "diag") {
       await this.handleDiagCommand(message);
+      return;
+    }
+
+    if (command === "help") {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 可用命令
+- /help: 查看命令帮助
+- /status: 查看会话状态（版本检查为缓存结果）
+- /version: 实时检查最新版本
+- /diag version: 查看运行实例诊断信息
+- /backend codex|claude|status: 查看/切换后端工具
+- /reset: 清空当前会话上下文
+- /stop: 停止当前执行任务`,
+      );
       return;
     }
 
@@ -1771,7 +1786,7 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
   return null;
 }
 
-function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | "diag" | null {
+function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | null {
   const command = text.split(/\s+/, 1)[0].toLowerCase();
   if (command === "/status") {
     return "status";
@@ -1790,6 +1805,9 @@ function parseControlCommand(text: string): "status" | "version" | "backend" | "
   }
   if (command === "/diag") {
     return "diag";
+  }
+  if (command === "/help") {
+    return "help";
   }
   return null;
 }

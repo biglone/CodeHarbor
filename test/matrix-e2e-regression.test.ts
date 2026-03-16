@@ -555,6 +555,7 @@ describe("Matrix e2e regression", () => {
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first task" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/help" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/reset" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second task" }));
 
@@ -568,6 +569,8 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("更新检查时间:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新来源: 缓存结果"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
