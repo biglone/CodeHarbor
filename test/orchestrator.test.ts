@@ -40,6 +40,18 @@ interface FakeSessionState {
 
 class FakeStateStore {
   private readonly sessions = new Map<string, FakeSessionState>();
+  private readonly messages = new Map<
+    string,
+    Array<{
+      id: number;
+      sessionKey: string;
+      role: "user" | "assistant";
+      provider: "codex" | "claude";
+      content: string;
+      createdAt: number;
+    }>
+  >();
+  private messageId = 0;
 
   getCodexSessionId(sessionKey: string): string | null {
     return this.sessions.get(sessionKey)?.codexSessionId ?? null;
@@ -97,6 +109,44 @@ class FakeStateStore {
       activeUntil: session.activeUntil,
       isActive: this.isSessionActive(sessionKey),
     };
+  }
+
+  appendConversationMessage(
+    sessionKey: string,
+    role: "user" | "assistant",
+    provider: "codex" | "claude",
+    content: string,
+  ): void {
+    const normalized = content.trim();
+    if (!normalized) {
+      return;
+    }
+    const history = this.messages.get(sessionKey) ?? [];
+    this.messageId += 1;
+    history.push({
+      id: this.messageId,
+      sessionKey,
+      role,
+      provider,
+      content: normalized,
+      createdAt: Date.now(),
+    });
+    this.messages.set(sessionKey, history);
+  }
+
+  listRecentConversationMessages(
+    sessionKey: string,
+    limit: number,
+  ): Array<{
+    id: number;
+    sessionKey: string;
+    role: "user" | "assistant";
+    provider: "codex" | "claude";
+    content: string;
+    createdAt: number;
+  }> {
+    const history = this.messages.get(sessionKey) ?? [];
+    return history.slice(Math.max(0, history.length - Math.max(1, Math.floor(limit))));
   }
 
   private ensureSession(sessionKey: string): FakeSessionState {

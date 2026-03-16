@@ -33,6 +33,18 @@ interface SessionState {
 
 class InMemoryStateStore {
   private readonly sessions = new Map<string, SessionState>();
+  private readonly messages = new Map<
+    string,
+    Array<{
+      id: number;
+      sessionKey: string;
+      role: "user" | "assistant";
+      provider: "codex" | "claude";
+      content: string;
+      createdAt: number;
+    }>
+  >();
+  private messageId = 0;
 
   getCodexSessionId(sessionKey: string): string | null {
     return this.ensureSession(sessionKey).codexSessionId;
@@ -87,6 +99,44 @@ class InMemoryStateStore {
       activeUntil: session.activeUntil,
       isActive: this.isSessionActive(sessionKey),
     };
+  }
+
+  appendConversationMessage(
+    sessionKey: string,
+    role: "user" | "assistant",
+    provider: "codex" | "claude",
+    content: string,
+  ): void {
+    const normalized = content.trim();
+    if (!normalized) {
+      return;
+    }
+    const history = this.messages.get(sessionKey) ?? [];
+    this.messageId += 1;
+    history.push({
+      id: this.messageId,
+      sessionKey,
+      role,
+      provider,
+      content: normalized,
+      createdAt: Date.now(),
+    });
+    this.messages.set(sessionKey, history);
+  }
+
+  listRecentConversationMessages(
+    sessionKey: string,
+    limit: number,
+  ): Array<{
+    id: number;
+    sessionKey: string;
+    role: "user" | "assistant";
+    provider: "codex" | "claude";
+    content: string;
+    createdAt: number;
+  }> {
+    const history = this.messages.get(sessionKey) ?? [];
+    return history.slice(Math.max(0, history.length - Math.max(1, Math.floor(limit))));
   }
 
   private ensureSession(sessionKey: string): SessionState {
@@ -510,6 +560,7 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls).toHaveLength(2);
     expect(executor.calls[0]?.sessionId).toBeNull();
     expect(executor.calls[1]?.sessionId).toBeNull();
+    expect(executor.calls[1]?.prompt).not.toContain("[conversation_bridge]");
     expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("当前版本:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查:"))).toBe(true);
@@ -585,6 +636,9 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("AI CLI: claude"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text === "from-codex")).toBe(true);
     expect(channel.sent.some((entry) => entry.text === "from-claude")).toBe(true);
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[conversation_bridge]");
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] user: first");
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] assistant: from-codex");
   });
 
   it("returns failure message when executor errors", async () => {

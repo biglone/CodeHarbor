@@ -179,4 +179,44 @@ describe("StateStore", () => {
       }),
     );
   });
+
+  it("stores and loads local conversation history", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    store.appendConversationMessage("s1", "user", "codex", "hello");
+    store.appendConversationMessage("s1", "assistant", "codex", "hi");
+    store.appendConversationMessage("s1", "assistant", "codex", "   ");
+
+    const messages = store.listRecentConversationMessages("s1", 10);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual(
+      expect.objectContaining({
+        sessionKey: "s1",
+        role: "user",
+        provider: "codex",
+        content: "hello",
+      }),
+    );
+    expect(messages[1]).toEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: "hi",
+      }),
+    );
+  });
+
+  it("trims local conversation history per session", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    for (let i = 0; i < 205; i += 1) {
+      store.appendConversationMessage("s1", "user", "codex", `msg-${i}`);
+    }
+
+    const messages = store.listRecentConversationMessages("s1", 300);
+    expect(messages).toHaveLength(200);
+    expect(messages[0]?.content).toBe("msg-5");
+    expect(messages[199]?.content).toBe("msg-204");
+  });
 });
