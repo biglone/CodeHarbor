@@ -65,6 +65,7 @@ export class CodeHarborApp {
         currentVersion: packageVersion,
         enabled: config.updateCheck.enabled,
         timeoutMs: config.updateCheck.timeoutMs,
+        ttlMs: config.updateCheck.ttlMs,
       }),
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,

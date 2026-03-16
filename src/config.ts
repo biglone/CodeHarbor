@@ -35,6 +35,7 @@ export interface CliCompatConfig {
 export interface UpdateCheckConfig {
   enabled: boolean;
   timeoutMs: number;
+  ttlMs: number;
 }
 
 export type AdminTokenRole = "admin" | "viewer";
@@ -239,6 +240,11 @@ const configSchema = z
       .default("3000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    PACKAGE_UPDATE_CHECK_TTL_MS: z
+      .string()
+      .default("21600000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -323,6 +329,7 @@ const configSchema = z
     updateCheck: {
       enabled: v.PACKAGE_UPDATE_CHECK_ENABLED,
       timeoutMs: v.PACKAGE_UPDATE_CHECK_TIMEOUT_MS,
+      ttlMs: v.PACKAGE_UPDATE_CHECK_TTL_MS,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",

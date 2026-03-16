@@ -513,6 +513,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("当前版本:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("更新检查时间:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
@@ -520,30 +521,33 @@ describe("Matrix e2e regression", () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor();
     const store = new InMemoryStateStore();
+    const getStatus = vi.fn(async () => ({
+      packageName: "codeharbor",
+      currentVersion: "0.1.27",
+      latestVersion: "0.1.28",
+      state: "update_available" as const,
+      checkedAt: "2026-03-16T03:11:22.000Z",
+      error: null,
+      upgradeCommand: "npm install -g codeharbor@latest",
+    }));
 
     const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       packageUpdateChecker: {
-        getStatus: async () => ({
-          packageName: "codeharbor",
-          currentVersion: "0.1.27",
-          latestVersion: "0.1.28",
-          state: "update_available",
-          checkedAt: new Date().toISOString(),
-          error: null,
-          upgradeCommand: "npm install -g codeharbor@latest",
-        }),
+        getStatus,
       },
     });
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/version" }));
 
     expect(executor.calls).toHaveLength(0);
+    expect(getStatus).toHaveBeenCalledWith({ forceRefresh: true });
     expect(channel.notices.some((entry) => entry.text.includes("版本信息"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("当前版本: 0.1.27"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("发现新版本 0.1.28"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("检查时间: 2026-03-16T03:11:22.000Z"))).toBe(true);
   });
 
   it("returns failure message when executor errors", async () => {

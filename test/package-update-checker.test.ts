@@ -57,6 +57,26 @@ describe("NpmRegistryUpdateChecker", () => {
     expect(second).toEqual(first);
   });
 
+  it("bypasses cache when forceRefresh is true", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.1.24" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.1.25" }), { status: 200 }));
+    const checker = new NpmRegistryUpdateChecker({
+      packageName: "codeharbor",
+      currentVersion: "0.1.24",
+      enabled: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      ttlMs: 60_000,
+    });
+
+    const first = await checker.getStatus();
+    const second = await checker.getStatus({ forceRefresh: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(first.latestVersion).toBe("0.1.24");
+    expect(second.latestVersion).toBe("0.1.25");
+  });
+
   it("returns unknown status when fetch fails", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("network down");

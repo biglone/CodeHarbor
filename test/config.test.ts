@@ -163,6 +163,7 @@ describe("loadConfig PACKAGE_UPDATE_CHECK", () => {
 
     expect(config.updateCheck.enabled).toBe(true);
     expect(config.updateCheck.timeoutMs).toBe(3000);
+    expect(config.updateCheck.ttlMs).toBe(21600000);
   });
 
   it("parses custom update-check settings", () => {
@@ -170,10 +171,12 @@ describe("loadConfig PACKAGE_UPDATE_CHECK", () => {
       createBaseEnv({
         PACKAGE_UPDATE_CHECK_ENABLED: "false",
         PACKAGE_UPDATE_CHECK_TIMEOUT_MS: "1500",
+        PACKAGE_UPDATE_CHECK_TTL_MS: "600000",
       }),
     );
 
     expect(config.updateCheck.enabled).toBe(false);
     expect(config.updateCheck.timeoutMs).toBe(1500);
+    expect(config.updateCheck.ttlMs).toBe(600000);
   });
 });

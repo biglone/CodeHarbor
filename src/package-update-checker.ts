@@ -3,6 +3,10 @@ import path from "node:path";
 
 type PackageUpdateState = "up_to_date" | "update_available" | "unknown";
 
+export interface PackageUpdateQuery {
+  forceRefresh?: boolean;
+}
+
 export interface PackageUpdateStatus {
   packageName: string;
   currentVersion: string;
@@ -14,7 +18,7 @@ export interface PackageUpdateStatus {
 }
 
 export interface PackageUpdateChecker {
-  getStatus(): Promise<PackageUpdateStatus>;
+  getStatus(query?: PackageUpdateQuery): Promise<PackageUpdateStatus>;
 }
 
 interface NpmRegistryUpdateCheckerOptions {
@@ -51,9 +55,10 @@ export class NpmRegistryUpdateChecker implements PackageUpdateChecker {
     this.upgradeCommand = `npm install -g ${this.packageName}@latest`;
   }
 
-  async getStatus(): Promise<PackageUpdateStatus> {
+  async getStatus(query?: PackageUpdateQuery): Promise<PackageUpdateStatus> {
+    const forceRefresh = query?.forceRefresh === true;
     const now = Date.now();
-    if (this.cachedStatus && now < this.cacheExpiresAt) {
+    if (!forceRefresh && this.cachedStatus && now < this.cacheExpiresAt) {
       return this.cachedStatus;
     }
 

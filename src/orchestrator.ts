@@ -720,10 +720,10 @@ export class Orchestrator {
     }
 
     if (command === "version") {
-      const packageUpdate = await this.packageUpdateChecker.getStatus();
+      const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
       await this.channel.sendNotice(
         message.conversationId,
-        `${this.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}`,
+        `${this.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
       );
       return;
     }
@@ -753,6 +753,7 @@ export class Orchestrator {
 - 当前工作目录: ${roomConfig.workdir}
 - 当前版本: ${packageUpdate.currentVersion}
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
+- 更新检查时间: ${packageUpdate.checkedAt}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
