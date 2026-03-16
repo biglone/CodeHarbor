@@ -53,6 +53,7 @@ program.addHelpText(
     "  - codeharbor admin serve --host 127.0.0.1 --port 8787",
     "",
     "Common in-chat commands (send to bot in Matrix):",
+    "  - /help",
     "  - /status",
     "  - /version",
     "  - /diag version",

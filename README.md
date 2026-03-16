@@ -154,6 +154,7 @@ codeharbor service --help
 
 Common in-chat control commands:
 
+- `/help` show command help
 - `/status` show session status, version/update hint, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
@@ -450,6 +451,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
+  - `/help` show command cheat sheet for in-chat controls
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
