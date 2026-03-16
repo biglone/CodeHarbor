@@ -1,29 +1,33 @@
 # CodeHarbor
 
-CodeHarbor is a self-hosted Matrix bot and chat bridge for OpenAI `codex` CLI.
-Users send messages in Matrix rooms, CodeHarbor routes each message to a Codex session, keeps room-to-session state in SQLite, then sends the final result back to the same room.
+CodeHarbor is a self-hosted Matrix bot and AI chat bridge for `codex` and `claude` CLI.
+Users send messages in Matrix rooms, CodeHarbor routes each request to the selected backend,
+keeps room/session state in SQLite, and sends the final result back to the same room.
 
 ## What It Does
 
 - Matrix channel adapter (receive + reply)
-- Session-to-Codex mapping via persistent SQLite state
+- Session-to-backend mapping via persistent SQLite state
 - One-time migration import from legacy `state.json`
 - Duplicate Matrix event protection
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
 - Room-level trigger policy overrides
-- Real `/stop` cancellation (kills in-flight Codex process)
+- Runtime backend switch: `/backend codex|claude|status`
+- Cross-backend context bridge on next request after switch
+- Real `/stop` cancellation (kills in-flight AI CLI process)
 - Session runtime workers (logical worker per `channel:room:user`, with worker stats in `/status`)
 - Rate limiting + concurrency guardrails (user/room/global)
 - Progress + typing updates with group notice coalescing (`m.replace` edit)
 - CLI-compat mode (`cli_compat_mode`) for minimal prompt rewriting + raw event passthrough
-- Attachment metadata passthrough from Matrix events into prompt context
+- Image attachment metadata passthrough from Matrix events into prompt context
+- Voice attachment transcription (local Whisper/OpenAI fallback)
 - Request observability (request_id, queue/exec/send durations, status counters)
 - NPM-distributed CLI (`codeharbor`)
 
 ## Architecture
 
 ```text
-Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume)
+Matrix Room -> MatrixChannel -> Orchestrator -> AI CLI Executor (codex/claude)
                                           |
                                           -> StateStore (SQLite)
 ```
@@ -136,6 +140,25 @@ Build a local package tarball and install it:
 npm pack
 npm install -g ./codeharbor-<version>.tgz
 ```
+
+## CLI Help Quick Reference
+
+Show CLI help:
+
+```bash
+codeharbor --help
+codeharbor admin --help
+codeharbor config --help
+codeharbor service --help
+```
+
+Common in-chat control commands:
+
+- `/status` show session status, version/update hint, and runtime metrics
+- `/version` force-refresh latest version check
+- `/backend codex|claude|status` switch or inspect active AI backend
+- `/reset` clear current conversation context
+- `/stop` cancel current running request
 
 ## GitHub CI/CD Publish
 

@@ -1,7 +1,7 @@
 {
   "name": "codeharbor",
   "version": "0.1.29",
-  "description": "Self-hosted Matrix bot bridge for OpenAI Codex CLI sessions",
+  "description": "Self-hosted Matrix AI assistant bridge for Codex and Claude Code CLI sessions",
   "author": "biglone <jjoyceu@gmail.com> (https://github.com/biglone)",
   "license": "MIT",
   "main": "dist/cli.js",
@@ -36,6 +36,8 @@
   "keywords": [
     "codex",
     "codex-cli",
+    "claude",
+    "claude-code",
     "openai",
     "cli",
     "matrix",
@@ -43,6 +45,10 @@
     "matrix-bridge",
     "bot",
     "bridge",
+    "self-hosted",
+    "ai-assistant",
+    "agent-workflow",
+    "voice-transcription",
     "chat",
     "messaging",
     "assistant"
