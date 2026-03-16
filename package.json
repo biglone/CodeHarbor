@@ -1,6 +1,6 @@
 {
   "name": "codeharbor",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Self-hosted Matrix AI assistant bridge for Codex and Claude Code CLI sessions",
   "author": "biglone <jjoyceu@gmail.com> (https://github.com/biglone)",
   "license": "MIT",

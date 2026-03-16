@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-03-16
+
+- Improved in-chat transparency and diagnostics:
+  - completion progress notice now includes active backend tool/model label
+  - `/status` now explicitly marks update check as cached TTL result and points users to `/version` for real-time refresh
+  - added `/diag version` to inspect runtime process/version details (pid/start time/bin path/backend)
+- Added one-command upgrade flow:
+  - new `codeharbor self-update` command installs latest npm package and restarts installed services
+- Strengthened release verification workflow:
+  - release CI now performs post-publish npm latest checks, fresh global install verification, and registry endpoint consistency checks
+- Updated docs/help for new commands and version-check behavior (`README`, `USER_MANUAL_ZH`, CLI help).
+
 ## [0.1.31] - 2026-03-16
 
 - Hardened `/version` latest-version lookup to reduce stale npm results:
