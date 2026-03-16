@@ -6,6 +6,9 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- Improved `/status` observability:
+  - now includes latest in-chat upgrade run result (target/installed version, time, and error summary when failed)
+
 ## [0.1.34] - 2026-03-16
 
 - Added Matrix in-chat upgrade control command:
