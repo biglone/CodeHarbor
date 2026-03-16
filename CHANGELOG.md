@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-03-16
+
+- Hardened `/version` latest-version lookup to reduce stale npm results:
+  - add no-store/no-cache request headers with cache-bust query for forced refresh checks
+  - query both npm endpoints (`/<pkg>/latest` and `/-/package/<pkg>/dist-tags`) and prefer the higher semver
+  - fallback gracefully when one endpoint is stale/unavailable
+- Added regression coverage for dual-endpoint version resolution and stale-response fallback cases.
+
 ## [0.1.30] - 2026-03-16
 
 - Added cross-backend context bridge:
