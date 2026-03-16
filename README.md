@@ -155,7 +155,7 @@ codeharbor service --help
 Common in-chat control commands:
 
 - `/help` show command help
-- `/status` show session status, version/update hint, latest upgrade result, and runtime metrics
+- `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
@@ -453,7 +453,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, and update checked time (cached by TTL)
+  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
