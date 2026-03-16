@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-03-16
+
+- Added cross-backend context bridge:
+  - persist recent local conversation turns (`user`/`assistant`) per Matrix session in SQLite
+  - auto-inject `[conversation_bridge]` on the first request after `/backend codex|claude` switch
+  - one-shot bridge suppression after `/reset` and `/stop` to support explicit fresh-start sessions
+- Added regression coverage for history persistence, per-session trimming, and backend-switch bridge injection.
+- Improved release/readability docs:
+  - refreshed npm package metadata and discoverability keywords for Codex + Claude positioning
+  - expanded CLI help/manual references for common CLI and in-chat control commands
+
 ## [0.1.29] - 2026-03-16
 
 - Fixed version-check staleness experience:
