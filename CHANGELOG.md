@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-03-16
+
+- Added in-chat help control command:
+  - users can send `/help` to get a control-command cheatsheet directly in Matrix rooms
+- Improved Matrix client compatibility for help commands:
+  - added plain-text aliases `help`, `帮助`, and `菜单` for clients that intercept slash commands
+- Updated CLI/docs command references to include in-chat help usage (`README`, `USER_MANUAL_ZH`, CLI help output).
+
 ## [0.1.32] - 2026-03-16
 
 - Improved in-chat transparency and diagnostics:
