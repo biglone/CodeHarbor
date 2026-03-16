@@ -75,6 +75,8 @@ export class CodeHarborApp {
       defaultCodexWorkdir: config.codexWorkdir,
       aiCliProvider: config.aiCliProvider,
       aiCliModel: config.codexModel,
+      matrixAdminUsers: config.matrixAdminUsers,
+      upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,
     });
   }

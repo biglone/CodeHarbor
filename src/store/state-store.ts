@@ -69,6 +69,12 @@ export interface UpgradeRunRecord {
   finishedAt: number | null;
 }
 
+export interface UpgradeExecutionLockRecord {
+  owner: string;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 
 export class StateStore {
@@ -437,6 +443,80 @@ export class StateStore {
     }));
   }
 
+  acquireUpgradeExecutionLock(input: {
+    owner: string;
+    ttlMs: number;
+  }): { acquired: boolean; owner: string | null; expiresAt: number | null } {
+    const owner = input.owner.trim();
+    if (!owner) {
+      throw new Error("upgrade lock owner is required.");
+    }
+    const now = Date.now();
+    const ttlMs = Math.max(1_000, Math.floor(input.ttlMs));
+    const expiresAt = now + ttlMs;
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db
+        .prepare("SELECT owner, expires_at FROM upgrade_locks WHERE name = 'global_upgrade'")
+        .get() as { owner: string; expires_at: number } | undefined;
+      if (!existing || existing.expires_at <= now) {
+        this.db
+          .prepare(
+            `INSERT INTO upgrade_locks (name, owner, acquired_at, expires_at)
+             VALUES ('global_upgrade', ?1, ?2, ?3)
+             ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, acquired_at = excluded.acquired_at, expires_at = excluded.expires_at`,
+          )
+          .run(owner, now, expiresAt);
+        this.db.exec("COMMIT");
+        return {
+          acquired: true,
+          owner,
+          expiresAt,
+        };
+      }
+      this.db.exec("COMMIT");
+      return {
+        acquired: false,
+        owner: existing.owner,
+        expiresAt: existing.expires_at,
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  releaseUpgradeExecutionLock(owner: string): void {
+    const normalized = owner.trim();
+    if (!normalized) {
+      return;
+    }
+    this.db
+      .prepare("DELETE FROM upgrade_locks WHERE name = 'global_upgrade' AND owner = ?1")
+      .run(normalized);
+  }
+
+  getUpgradeExecutionLock(now = Date.now()): UpgradeExecutionLockRecord | null {
+    const row = this.db
+      .prepare("SELECT owner, acquired_at, expires_at FROM upgrade_locks WHERE name = 'global_upgrade'")
+      .get() as { owner: string; acquired_at: number; expires_at: number } | undefined;
+    if (!row) {
+      return null;
+    }
+    if (row.expires_at <= now) {
+      this.db
+        .prepare("DELETE FROM upgrade_locks WHERE name = 'global_upgrade' AND expires_at <= ?1")
+        .run(now);
+      return null;
+    }
+    return {
+      owner: row.owner,
+      acquiredAt: row.acquired_at,
+      expiresAt: row.expires_at,
+    };
+  }
+
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",
@@ -595,6 +675,13 @@ export class StateStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_upgrade_runs_started_at ON upgrade_runs(started_at);
+
+      CREATE TABLE IF NOT EXISTS upgrade_locks (
+        name TEXT PRIMARY KEY,
+        owner TEXT NOT NULL,
+        acquired_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS session_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

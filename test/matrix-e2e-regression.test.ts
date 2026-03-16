@@ -56,6 +56,7 @@ class InMemoryStateStore {
     startedAt: number;
     finishedAt: number | null;
   }> = [];
+  private upgradeLock: { owner: string; expiresAt: number } | null = null;
 
   getCodexSessionId(sessionKey: string): string | null {
     return this.ensureSession(sessionKey).codexSessionId;
@@ -209,6 +210,52 @@ class InMemoryStateStore {
   }> {
     const safeLimit = Math.max(1, Math.floor(limit));
     return this.upgradeRuns.slice(Math.max(0, this.upgradeRuns.length - safeLimit)).reverse();
+  }
+
+  acquireUpgradeExecutionLock(input: {
+    owner: string;
+    ttlMs: number;
+  }): { acquired: boolean; owner: string | null; expiresAt: number | null } {
+    const now = Date.now();
+    if (!this.upgradeLock || this.upgradeLock.expiresAt <= now) {
+      this.upgradeLock = {
+        owner: input.owner,
+        expiresAt: now + Math.max(1_000, Math.floor(input.ttlMs)),
+      };
+      return {
+        acquired: true,
+        owner: input.owner,
+        expiresAt: this.upgradeLock.expiresAt,
+      };
+    }
+    return {
+      acquired: false,
+      owner: this.upgradeLock.owner,
+      expiresAt: this.upgradeLock.expiresAt,
+    };
+  }
+
+  releaseUpgradeExecutionLock(owner: string): void {
+    if (this.upgradeLock?.owner === owner) {
+      this.upgradeLock = null;
+    }
+  }
+
+  getUpgradeExecutionLock():
+    | {
+        owner: string;
+        acquiredAt: number;
+        expiresAt: number;
+      }
+    | null {
+    if (!this.upgradeLock) {
+      return null;
+    }
+    return {
+      owner: this.upgradeLock.owner,
+      acquiredAt: this.upgradeLock.expiresAt - 60_000,
+      expiresAt: this.upgradeLock.expiresAt,
+    };
   }
 
   private ensureSession(sessionKey: string): SessionState {
@@ -747,6 +794,68 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls).toHaveLength(0);
     expect(selfUpdateRunner).not.toHaveBeenCalled();
     expect(channel.notices.some((entry) => entry.text.includes("无执行 /upgrade 权限"))).toBe(true);
+  });
+
+  it("uses MATRIX_ADMIN_USERS fallback when upgrade allowlist is empty", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      matrixAdminUsers: ["@ops:example.com"],
+      selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).not.toHaveBeenCalled();
+    expect(channel.notices.some((entry) => entry.text.includes("MATRIX_ADMIN_USERS"))).toBe(true);
+  });
+
+  it("rejects /upgrade when another instance holds distributed lock", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    store.acquireUpgradeExecutionLock({
+      owner: "instance-b",
+      ttlMs: 60_000,
+    });
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@alice:example.com"],
+      selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).not.toHaveBeenCalled();
+    expect(channel.notices.some((entry) => entry.text.includes("其他实例执行中"))).toBe(true);
   });
 
   it("rejects /upgrade command in group rooms", async () => {

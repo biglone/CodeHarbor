@@ -253,6 +253,35 @@ describe("StateStore", () => {
     expect(recent[1]?.status).toBe("failed");
   });
 
+  it("enforces cross-instance upgrade lock lease", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const acquired = store.acquireUpgradeExecutionLock({
+      owner: "instance-a",
+      ttlMs: 60_000,
+    });
+    expect(acquired.acquired).toBe(true);
+    expect(acquired.owner).toBe("instance-a");
+
+    const blocked = store.acquireUpgradeExecutionLock({
+      owner: "instance-b",
+      ttlMs: 60_000,
+    });
+    expect(blocked.acquired).toBe(false);
+    expect(blocked.owner).toBe("instance-a");
+
+    const lock = store.getUpgradeExecutionLock();
+    expect(lock).toEqual(
+      expect.objectContaining({
+        owner: "instance-a",
+      }),
+    );
+
+    store.releaseUpgradeExecutionLock("instance-a");
+    expect(store.getUpgradeExecutionLock()).toBeNull();
+  });
+
   it("stores and loads local conversation history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

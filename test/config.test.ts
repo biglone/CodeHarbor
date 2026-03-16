@@ -197,3 +197,17 @@ describe("loadConfig PACKAGE_UPDATE_CHECK", () => {
     expect(config.updateCheck.ttlMs).toBe(600000);
   });
 });
+
+describe("loadConfig MATRIX upgrade permissions", () => {
+  it("parses matrix admin and upgrade allowlist users", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        MATRIX_ADMIN_USERS: "@ops:example.com,@admin:example.com",
+        MATRIX_UPGRADE_ALLOWED_USERS: "@upgrade:example.com",
+      }),
+    );
+
+    expect(config.matrixAdminUsers).toEqual(["@ops:example.com", "@admin:example.com"]);
+    expect(config.matrixUpgradeAllowedUsers).toEqual(["@upgrade:example.com"]);
+  });
+});

@@ -2,6 +2,7 @@ import { Mutex } from "async-mutex";
 import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -71,6 +72,7 @@ interface OrchestratorOptions {
   defaultCodexWorkdir?: string;
   aiCliProvider?: "codex" | "claude";
   aiCliModel?: string | null;
+  matrixAdminUsers?: string[];
   executorFactory?: (provider: "codex" | "claude") => CodexExecutor;
   upgradeAllowedUsers?: string[];
   selfUpdateTimeoutMs?: number;
@@ -152,7 +154,13 @@ type UpgradeRestartPlanner = () => Promise<UpgradeRestartPlan>;
 type UpgradeVersionProbe = () => Promise<UpgradeVersionProbeResult>;
 type UpgradeStateStore = Pick<
   StateStore,
-  "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun" | "listRecentUpgradeRuns"
+  | "createUpgradeRun"
+  | "finishUpgradeRun"
+  | "getLatestUpgradeRun"
+  | "listRecentUpgradeRuns"
+  | "acquireUpgradeExecutionLock"
+  | "releaseUpgradeExecutionLock"
+  | "getUpgradeExecutionLock"
 >;
 
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
@@ -160,6 +168,7 @@ const RUN_SNAPSHOT_MAX_ENTRIES = 500;
 const CONTEXT_BRIDGE_HISTORY_LIMIT = 16;
 const CONTEXT_BRIDGE_MAX_CHARS = 8_000;
 const DEFAULT_SELF_UPDATE_TIMEOUT_MS = 20 * 60 * 1_000;
+const DEFAULT_UPGRADE_LOCK_TTL_MS = 30 * 60 * 1_000;
 
 const execFileAsync = promisify(execFile);
 
@@ -276,9 +285,11 @@ export class Orchestrator {
   private readonly aiCliModel: string | null;
   private readonly botNoticePrefix: string;
   private readonly processStartedAtIso: string;
+  private readonly matrixAdminUsers: Set<string>;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly upgradeAllowedUsers: Set<string>;
+  private readonly upgradeLockOwner: string;
   private readonly selfUpdateRunner: SelfUpdateRunner;
   private readonly upgradeRestartPlanner: UpgradeRestartPlanner;
   private readonly upgradeVersionProbe: UpgradeVersionProbe;
@@ -375,11 +386,17 @@ export class Orchestrator {
     this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.aiCliModel = options?.aiCliModel?.trim() || null;
+    this.matrixAdminUsers = new Set(
+      (options?.matrixAdminUsers ?? parseCsvValues(process.env.MATRIX_ADMIN_USERS ?? ""))
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    );
     this.upgradeAllowedUsers = new Set(
       (options?.upgradeAllowedUsers ?? parseCsvValues(process.env.MATRIX_UPGRADE_ALLOWED_USERS ?? ""))
         .map((value) => value.trim())
         .filter((value) => value.length > 0),
     );
+    this.upgradeLockOwner = `pid:${process.pid}@${os.hostname()}`;
     const selfUpdateTimeoutMs = Math.max(1_000, options?.selfUpdateTimeoutMs ?? DEFAULT_SELF_UPDATE_TIMEOUT_MS);
     this.selfUpdateRunner =
       options?.selfUpdateRunner ??
@@ -1657,6 +1674,15 @@ export class Orchestrator {
       );
       return;
     }
+    const distributedLock = this.acquireUpgradeExecutionLock();
+    if (!distributedLock.acquired) {
+      const lockUntil = distributedLock.expiresAt ? new Date(distributedLock.expiresAt).toISOString() : "unknown";
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] 已有升级任务在其他实例执行中（owner=${distributedLock.owner ?? "unknown"}，lockUntil=${lockUntil}）。请稍后再试。`,
+      );
+      return;
+    }
 
     const targetLabel = parsed.version ? parsed.version : "latest";
     const upgradeRunId = this.createUpgradeRun(message.senderId, parsed.version);
@@ -1666,73 +1692,77 @@ export class Orchestrator {
       `${this.botNoticePrefix} 已开始升级（目标: ${targetLabel}），将安装 npm 最新包并自动重启服务。`,
     );
 
-    await this.upgradeMutex.runExclusive(async () => {
-      try {
-        const result = await this.selfUpdateRunner({
-          version: parsed.version,
-        });
-        const restartPlan = await this.upgradeRestartPlanner();
-        const versionProbe = await this.upgradeVersionProbe();
-        const postCheck = evaluateUpgradePostCheck({
-          targetVersion: parsed.version,
-          selfUpdateVersion: result.installedVersion,
-          versionProbe,
-        });
-        const elapsed = formatDurationMs(Date.now() - startedAt);
-        if (postCheck.ok) {
-          const installedVersion = postCheck.installedVersion ?? "unknown";
-          await this.channel.sendNotice(
-            message.conversationId,
-            `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
+    try {
+      await this.upgradeMutex.runExclusive(async () => {
+        try {
+          const result = await this.selfUpdateRunner({
+            version: parsed.version,
+          });
+          const restartPlan = await this.upgradeRestartPlanner();
+          const versionProbe = await this.upgradeVersionProbe();
+          const postCheck = evaluateUpgradePostCheck({
+            targetVersion: parsed.version,
+            selfUpdateVersion: result.installedVersion,
+            versionProbe,
+          });
+          const elapsed = formatDurationMs(Date.now() - startedAt);
+          if (postCheck.ok) {
+            const installedVersion = postCheck.installedVersion ?? "unknown";
+            await this.channel.sendNotice(
+              message.conversationId,
+              `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
 - 目标版本: ${targetLabel}
 - 已安装版本: ${installedVersion}
 - 升级校验: 通过（${postCheck.checkDetail}）
 - 服务重启: ${restartPlan.summary}
 - 校验建议: 稍后发送 /diag version 或 /version`,
-          );
-          this.finishUpgradeRun(upgradeRunId, {
-            status: "succeeded",
-            installedVersion,
-            error: null,
-          });
-        } else {
-          const observedVersion = postCheck.installedVersion ?? "unknown";
-          await this.channel.sendNotice(
-            message.conversationId,
-            `${this.botNoticePrefix} 升级后校验失败（耗时 ${elapsed}）
+            );
+            this.finishUpgradeRun(upgradeRunId, {
+              status: "succeeded",
+              installedVersion,
+              error: null,
+            });
+          } else {
+            const observedVersion = postCheck.installedVersion ?? "unknown";
+            await this.channel.sendNotice(
+              message.conversationId,
+              `${this.botNoticePrefix} 升级后校验失败（耗时 ${elapsed}）
 - 目标版本: ${targetLabel}
 - 观测版本: ${observedVersion}
 - 失败原因: ${postCheck.checkDetail}
 - 服务重启: ${restartPlan.summary}
 - 恢复建议: 发送 /diag version 查看实例路径；必要时执行 codeharbor self-update --with-admin`,
+            );
+            this.finishUpgradeRun(upgradeRunId, {
+              status: "failed",
+              installedVersion: postCheck.installedVersion,
+              error: `post-check failed: ${postCheck.checkDetail}`,
+            });
+          }
+          try {
+            await restartPlan.apply();
+          } catch (restartError) {
+            this.logger.warn("Failed to apply post-upgrade restart plan", { restartError });
+          }
+        } catch (error) {
+          const errorText = formatSelfUpdateError(error);
+          const elapsed = formatDurationMs(Date.now() - startedAt);
+          await this.channel.sendNotice(
+            message.conversationId,
+            `${this.botNoticePrefix} 升级失败（耗时 ${elapsed}）
+- 错误: ${errorText}
+- 兜底命令: codeharbor self-update --with-admin`,
           );
           this.finishUpgradeRun(upgradeRunId, {
             status: "failed",
-            installedVersion: postCheck.installedVersion,
-            error: `post-check failed: ${postCheck.checkDetail}`,
+            installedVersion: null,
+            error: errorText,
           });
         }
-        try {
-          await restartPlan.apply();
-        } catch (restartError) {
-          this.logger.warn("Failed to apply post-upgrade restart plan", { restartError });
-        }
-      } catch (error) {
-        const errorText = formatSelfUpdateError(error);
-        const elapsed = formatDurationMs(Date.now() - startedAt);
-        await this.channel.sendNotice(
-          message.conversationId,
-          `${this.botNoticePrefix} 升级失败（耗时 ${elapsed}）
-- 错误: ${errorText}
-- 兜底命令: codeharbor self-update --with-admin`,
-        );
-        this.finishUpgradeRun(upgradeRunId, {
-          status: "failed",
-          installedVersion: null,
-          error: errorText,
-        });
-      }
-    });
+      });
+    } finally {
+      this.releaseUpgradeExecutionLock();
+    }
   }
 
   private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
@@ -1742,15 +1772,21 @@ export class Orchestrator {
         reason: "为保证安全，/upgrade 仅支持私聊中执行。",
       };
     }
-    if (this.upgradeAllowedUsers.size === 0) {
-      return { allowed: true };
+    if (this.upgradeAllowedUsers.size > 0) {
+      if (this.upgradeAllowedUsers.has(message.senderId)) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        reason: "当前账号无执行 /upgrade 权限，请联系管理员添加 MATRIX_UPGRADE_ALLOWED_USERS 白名单。",
+      };
     }
-    if (this.upgradeAllowedUsers.has(message.senderId)) {
+    if (this.matrixAdminUsers.size === 0 || this.matrixAdminUsers.has(message.senderId)) {
       return { allowed: true };
     }
     return {
       allowed: false,
-      reason: "当前账号无执行 /upgrade 权限，请联系管理员添加 MATRIX_UPGRADE_ALLOWED_USERS 白名单。",
+      reason: "当前账号不是 Matrix 管理员（MATRIX_ADMIN_USERS），无法执行 /upgrade。",
     };
   }
 
@@ -1811,6 +1847,42 @@ export class Orchestrator {
     } catch (error) {
       this.logger.warn("Failed to fetch recent upgrade run records", { error, limit });
       return [];
+    }
+  }
+
+  private acquireUpgradeExecutionLock(): { acquired: boolean; owner: string | null; expiresAt: number | null } {
+    const store = this.getUpgradeStateStore();
+    if (!store || typeof store.acquireUpgradeExecutionLock !== "function") {
+      return {
+        acquired: true,
+        owner: this.upgradeLockOwner,
+        expiresAt: null,
+      };
+    }
+    try {
+      return store.acquireUpgradeExecutionLock({
+        owner: this.upgradeLockOwner,
+        ttlMs: DEFAULT_UPGRADE_LOCK_TTL_MS,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to acquire distributed upgrade lock", { error });
+      return {
+        acquired: false,
+        owner: null,
+        expiresAt: null,
+      };
+    }
+  }
+
+  private releaseUpgradeExecutionLock(): void {
+    const store = this.getUpgradeStateStore();
+    if (!store || typeof store.releaseUpgradeExecutionLock !== "function") {
+      return;
+    }
+    try {
+      store.releaseUpgradeExecutionLock(this.upgradeLockOwner);
+    } catch (error) {
+      this.logger.warn("Failed to release distributed upgrade lock", { error });
     }
   }
 
