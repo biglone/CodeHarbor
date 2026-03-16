@@ -165,6 +165,7 @@ codeharbor admin serve
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
+  - 在 systemd `NoNewPrivileges=true` 场景下会自动走信号重启回退，无需手工 sudo 重启
 - `/backend codex|claude|status`：会话内切换后端工具；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查

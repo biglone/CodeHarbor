@@ -159,6 +159,7 @@ Common in-chat control commands:
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
+  - supports hardened systemd (`NoNewPrivileges=true`) by using signal-based restart fallback
 - `/backend codex|claude|status` switch or inspect active AI backend
 - `/reset` clear current conversation context
 - `/stop` cancel current running request
@@ -457,6 +458,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
+    - includes service-context signal restart fallback when sudo escalation is unavailable
   - `/backend codex|claude|status` switch backend AI CLI tool at runtime (next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
