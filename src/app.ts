@@ -73,6 +73,7 @@ export class CodeHarborApp {
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
       aiCliProvider: config.aiCliProvider,
+      aiCliModel: config.codexModel,
       executorFactory: buildExecutor,
     });
   }

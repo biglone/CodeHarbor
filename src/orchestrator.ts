@@ -65,6 +65,7 @@ interface OrchestratorOptions {
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
   aiCliProvider?: "codex" | "claude";
+  aiCliModel?: string | null;
   executorFactory?: (provider: "codex" | "claude") => CodexExecutor;
 }
 
@@ -232,6 +233,7 @@ export class Orchestrator {
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
   private aiCliProvider: "codex" | "claude";
+  private readonly aiCliModel: string | null;
   private readonly botNoticePrefix: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
@@ -325,6 +327,7 @@ export class Orchestrator {
       });
     this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
+    this.aiCliModel = options?.aiCliModel?.trim() || null;
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
@@ -588,7 +591,7 @@ export class Orchestrator {
                 progressNoticeEventId = next;
               },
             },
-            `处理完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+            `处理完成（后端工具: ${this.formatBackendToolLabel()}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
           );
           sendDurationMs = Date.now() - sendStartedAt;
 
@@ -1538,7 +1541,7 @@ export class Orchestrator {
     if (!target || target === "status") {
       await this.channel.sendNotice(
         message.conversationId,
-        `[CodeHarbor] 当前后端工具: ${this.aiCliProvider}\n可用命令: /backend codex | /backend claude | /backend status`,
+        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel()}\n可用命令: /backend codex | /backend claude | /backend status`,
       );
       return;
     }
@@ -1571,8 +1574,15 @@ export class Orchestrator {
 
     await this.channel.sendNotice(
       message.conversationId,
-      `[CodeHarbor] 已切换后端工具为 ${target}。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
+      `[CodeHarbor] 已切换后端工具为 ${this.formatBackendToolLabel()}。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
     );
+  }
+
+  private formatBackendToolLabel(): string {
+    if (!this.aiCliModel) {
+      return this.aiCliProvider;
+    }
+    return `${this.aiCliProvider} (${this.aiCliModel})`;
   }
 }
 
