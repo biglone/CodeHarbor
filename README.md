@@ -155,10 +155,12 @@ codeharbor service --help
 Common in-chat control commands:
 
 - `/help` show command help
-- `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids, and runtime metrics
+- `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids + upgrade metrics/lock, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
+- `/diag upgrade [count]` show upgrade diagnostics (distributed lock, aggregate stats, recent upgrade records)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
+  - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports hardened systemd (`NoNewPrivileges=true`) by using signal-based restart fallback
 - `/backend codex|claude|status` switch or inspect active AI backend
 - `/reset` clear current conversation context
@@ -454,10 +456,12 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, and update checked time (cached by TTL)
+  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
+  - `/diag upgrade [count]` show distributed lock + aggregate stats + recent upgrade run diagnostics
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
+    - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
   - `/backend codex|claude|status` switch backend AI CLI tool at runtime (next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
@@ -475,8 +479,10 @@ Version update check controls:
   - timeout (ms) for npm registry version lookup
 - `PACKAGE_UPDATE_CHECK_TTL_MS=21600000`
   - cache TTL (ms) for update-check results (`/status` reads cache; `/version` forces refresh)
+- `MATRIX_ADMIN_USERS=@admin:example.com,@ops:example.com`
+  - optional Matrix admin list used as `/upgrade` permission fallback when `MATRIX_UPGRADE_ALLOWED_USERS` is empty
 - `MATRIX_UPGRADE_ALLOWED_USERS=@admin:example.com,@ops:example.com`
-  - optional allowlist for `/upgrade`; empty means any DM user can trigger upgrade
+  - optional explicit `/upgrade` allowlist (higher priority than `MATRIX_ADMIN_USERS`)
 
 CLI update helper:
 

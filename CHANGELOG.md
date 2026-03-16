@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- Upgrade workflow hardening:
+  - added post-upgrade verification (target/installed version check) and explicit pass/fail notices with recovery hints
+  - filtered noisy SQLite ExperimentalWarning text from in-chat upgrade failure output
+  - added distributed upgrade lock (SQLite lease) to prevent concurrent `/upgrade` across multi-instance deployments
+  - added `/diag upgrade [count]` diagnostics (lock state, aggregate stats, recent records)
+  - `/status` now includes upgrade metrics (total/succeeded/failed/running/avg) and upgrade lock state
+- Upgrade permission model:
+  - added `MATRIX_ADMIN_USERS` fallback auth for `/upgrade` when `MATRIX_UPGRADE_ALLOWED_USERS` is empty
+  - `MATRIX_UPGRADE_ALLOWED_USERS` remains higher-priority explicit allowlist
+- Docs/help/config sync:
+  - updated CLI/in-chat command references, `.env.example`, and manuals for `/diag upgrade` and new upgrade auth precedence
+
 ## [0.1.37] - 2026-03-17
 
 - Fixed in-chat `/upgrade` restart reliability under hardened systemd services:

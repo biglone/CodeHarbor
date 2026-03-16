@@ -258,6 +258,33 @@ class InMemoryStateStore {
     };
   }
 
+  getUpgradeRunStats(): {
+    total: number;
+    succeeded: number;
+    failed: number;
+    running: number;
+    avgDurationMs: number;
+  } {
+    const total = this.upgradeRuns.length;
+    const succeeded = this.upgradeRuns.filter((run) => run.status === "succeeded").length;
+    const failed = this.upgradeRuns.filter((run) => run.status === "failed").length;
+    const running = this.upgradeRuns.filter((run) => run.status === "running").length;
+    const finished = this.upgradeRuns.filter((run) => run.finishedAt !== null);
+    const avgDurationMs =
+      finished.length === 0
+        ? 0
+        : Math.round(
+            finished.reduce((sum, run) => sum + ((run.finishedAt ?? run.startedAt) - run.startedAt), 0) / finished.length,
+          );
+    return {
+      total,
+      succeeded,
+      failed,
+      running,
+      avgDurationMs,
+    };
+  }
+
   private ensureSession(sessionKey: string): SessionState {
     const existing = this.sessions.get(sessionKey);
     if (existing) {
@@ -689,6 +716,8 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("更新来源: 缓存结果"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("最近升级:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("升级记录:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("升级指标:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("升级锁:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
@@ -990,6 +1019,8 @@ describe("Matrix e2e regression", () => {
     expect(upgradeDiagNotice).toBeDefined();
     expect(upgradeDiagNotice?.text).toContain(`#${runId} status=failed`);
     expect(upgradeDiagNotice?.text).toContain("error=post-check failed: mismatch");
+    expect(upgradeDiagNotice?.text).toContain("lock: idle");
+    expect(upgradeDiagNotice?.text).toContain("stats:");
   });
 
   it("shows current version and update hint for /version command", async () => {

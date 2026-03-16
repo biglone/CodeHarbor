@@ -41,7 +41,8 @@ These must be valid before `codeharbor start`.
 |---|---|---|---|---|---|
 | `MATRIX_COMMAND_PREFIX` | No | `!code` | Yes | Restart | Group explicit trigger prefix |
 | `SESSION_ACTIVE_WINDOW_MINUTES` | No | `20` | Yes | Restart | Active window for group follow-up |
-| `MATRIX_UPGRADE_ALLOWED_USERS` | No | empty | No | Restart | Optional mxid allowlist for in-chat `/upgrade` (comma-separated) |
+| `MATRIX_ADMIN_USERS` | No | empty | No | Restart | Optional Matrix admin mxid list used as `/upgrade` auth fallback |
+| `MATRIX_UPGRADE_ALLOWED_USERS` | No | empty | No | Restart | Optional explicit mxid allowlist for in-chat `/upgrade` (higher priority than `MATRIX_ADMIN_USERS`) |
 | `GROUP_DIRECT_MODE_ENABLED` | No | `false` | Yes | Restart | Process all group messages without trigger matching |
 | `GROUP_TRIGGER_ALLOW_MENTION` | No | `true` | Yes | Restart | Default group policy |
 | `GROUP_TRIGGER_ALLOW_REPLY` | No | `true` | Yes | Restart | Default group policy |

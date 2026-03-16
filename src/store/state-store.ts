@@ -75,6 +75,14 @@ export interface UpgradeExecutionLockRecord {
   expiresAt: number;
 }
 
+export interface UpgradeRunStats {
+  total: number;
+  succeeded: number;
+  failed: number;
+  running: number;
+  avgDurationMs: number;
+}
+
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 
 export class StateStore {
@@ -514,6 +522,44 @@ export class StateStore {
       owner: row.owner,
       acquiredAt: row.acquired_at,
       expiresAt: row.expires_at,
+    };
+  }
+
+  getUpgradeRunStats(): UpgradeRunStats {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
+           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+           SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+           AVG(CASE WHEN finished_at IS NOT NULL THEN finished_at - started_at END) AS avg_duration_ms
+         FROM upgrade_runs`,
+      )
+      .get() as
+      | {
+          total: number;
+          succeeded: number | null;
+          failed: number | null;
+          running: number | null;
+          avg_duration_ms: number | null;
+        }
+      | undefined;
+    if (!row) {
+      return {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        running: 0,
+        avgDurationMs: 0,
+      };
+    }
+    return {
+      total: Number(row.total ?? 0),
+      succeeded: Number(row.succeeded ?? 0),
+      failed: Number(row.failed ?? 0),
+      running: Number(row.running ?? 0),
+      avgDurationMs: Math.round(Number(row.avg_duration_ms ?? 0)),
     };
   }
 

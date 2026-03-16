@@ -26,7 +26,12 @@ import {
   resolvePackageVersion,
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
-import { StateStore, type UpgradeRunRecord } from "./store/state-store";
+import {
+  StateStore,
+  type UpgradeExecutionLockRecord,
+  type UpgradeRunRecord,
+  type UpgradeRunStats,
+} from "./store/state-store";
 import { InboundMessage } from "./types";
 import { extractCommandText } from "./utils/message";
 import {
@@ -158,6 +163,7 @@ type UpgradeStateStore = Pick<
   | "finishUpgradeRun"
   | "getLatestUpgradeRun"
   | "listRecentUpgradeRuns"
+  | "getUpgradeRunStats"
   | "acquireUpgradeExecutionLock"
   | "releaseUpgradeExecutionLock"
   | "getUpgradeExecutionLock"
@@ -850,7 +856,7 @@ export class Orchestrator {
 - /version: 实时检查最新版本
 - /diag version: 查看运行实例诊断信息
 - /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
-- /upgrade [version]: 升级并自动重启服务（仅私聊；可配管理员白名单）
+- /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
 - /backend codex|claude|status: 查看/切换后端工具
 - /reset: 清空当前会话上下文
 - /stop: 停止当前执行任务
@@ -880,6 +886,8 @@ export class Orchestrator {
     const packageUpdate = await this.packageUpdateChecker.getStatus();
     const latestUpgrade = this.getLatestUpgradeRun();
     const recentUpgrades = this.getRecentUpgradeRuns(3);
+    const upgradeStats = this.getUpgradeRunStats();
+    const upgradeLock = this.getUpgradeExecutionLockSnapshot();
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -896,6 +904,8 @@ export class Orchestrator {
 - 更新来源: 缓存结果（TTL=${formatCacheTtl(this.updateCheckTtlMs)}，发送 /version 可实时刷新）
 - 最近升级: ${formatLatestUpgradeSummary(latestUpgrade)}
 - 升级记录: ${formatRecentUpgradeRunsSummary(recentUpgrades)}
+- 升级指标: total=${upgradeStats.total}, succeeded=${upgradeStats.succeeded}, failed=${upgradeStats.failed}, running=${upgradeStats.running}, avg=${upgradeStats.avgDurationMs}ms
+- 升级锁: ${formatUpgradeLockSummary(upgradeLock)}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
@@ -1850,6 +1860,44 @@ export class Orchestrator {
     }
   }
 
+  private getUpgradeRunStats(): UpgradeRunStats {
+    const store = this.getUpgradeStateStore();
+    if (!store || typeof store.getUpgradeRunStats !== "function") {
+      return {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        running: 0,
+        avgDurationMs: 0,
+      };
+    }
+    try {
+      return store.getUpgradeRunStats();
+    } catch (error) {
+      this.logger.warn("Failed to fetch upgrade run stats", { error });
+      return {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        running: 0,
+        avgDurationMs: 0,
+      };
+    }
+  }
+
+  private getUpgradeExecutionLockSnapshot(): UpgradeExecutionLockRecord | null {
+    const store = this.getUpgradeStateStore();
+    if (!store || typeof store.getUpgradeExecutionLock !== "function") {
+      return null;
+    }
+    try {
+      return store.getUpgradeExecutionLock();
+    } catch (error) {
+      this.logger.warn("Failed to fetch distributed upgrade lock state", { error });
+      return null;
+    }
+  }
+
   private acquireUpgradeExecutionLock(): { acquired: boolean; owner: string | null; expiresAt: number | null } {
     const store = this.getUpgradeStateStore();
     if (!store || typeof store.acquireUpgradeExecutionLock !== "function") {
@@ -1980,10 +2028,14 @@ export class Orchestrator {
     }
 
     const runs = this.getRecentUpgradeRuns(target.limit);
+    const lock = this.getUpgradeExecutionLockSnapshot();
+    const stats = this.getUpgradeRunStats();
     await this.channel.sendNotice(
       message.conversationId,
       `${this.botNoticePrefix} 诊断信息（upgrade）
 - recentCount: ${runs.length}
+- lock: ${formatUpgradeLockSummary(lock)}
+- stats: total=${stats.total}, succeeded=${stats.succeeded}, failed=${stats.failed}, running=${stats.running}, avg=${stats.avgDurationMs}ms
 - records:
 ${formatUpgradeDiagRecords(runs)}`,
     );
@@ -2675,6 +2727,13 @@ function formatRecentUpgradeRunsSummary(runs: UpgradeRunRecord[]): string {
       return `#${run.id}:${statusText}@${new Date(time).toISOString()}`;
     })
     .join(" | ");
+}
+
+function formatUpgradeLockSummary(lock: UpgradeExecutionLockRecord | null): string {
+  if (!lock) {
+    return "idle";
+  }
+  return `owner=${lock.owner}, expiresAt=${new Date(lock.expiresAt).toISOString()}`;
 }
 
 function formatUpgradeDiagRecords(runs: UpgradeRunRecord[]): string {

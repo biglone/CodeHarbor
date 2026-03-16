@@ -282,6 +282,41 @@ describe("StateStore", () => {
     expect(store.getUpgradeExecutionLock()).toBeNull();
   });
 
+  it("reports upgrade run metrics for observability", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const success = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.37",
+    });
+    store.finishUpgradeRun(success, {
+      status: "succeeded",
+      installedVersion: "0.1.37",
+      error: null,
+    });
+    const failed = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.38",
+    });
+    store.finishUpgradeRun(failed, {
+      status: "failed",
+      installedVersion: "0.1.37",
+      error: "post-check failed",
+    });
+    store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: null,
+    });
+
+    const stats = store.getUpgradeRunStats();
+    expect(stats.total).toBe(3);
+    expect(stats.succeeded).toBe(1);
+    expect(stats.failed).toBe(1);
+    expect(stats.running).toBe(1);
+    expect(stats.avgDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
   it("stores and loads local conversation history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

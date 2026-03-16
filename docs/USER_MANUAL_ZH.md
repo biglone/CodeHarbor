@@ -161,17 +161,20 @@ codeharbor admin serve
 ### 5.6 版本检查与更新提示
 
 - `/help`：查看机器人可用命令列表
-- `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）和最近一次检查时间（缓存结果，受 TTL 控制）
+- `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）、升级指标/锁状态，以及最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
+- `/diag upgrade [count]`：输出升级诊断信息（分布式升级锁、聚合指标、最近升级记录）
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
+  - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - 在 systemd `NoNewPrivileges=true` 场景下会自动走信号重启回退，无需手工 sudo 重启
 - `/backend codex|claude|status`：会话内切换后端工具；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
 - `PACKAGE_UPDATE_CHECK_TTL_MS`：更新检查结果缓存时长（毫秒，默认 6 小时）
-- `MATRIX_UPGRADE_ALLOWED_USERS`：可选；限制哪些 Matrix 用户可执行 `/upgrade`（逗号分隔 mxid）
+- `MATRIX_ADMIN_USERS`：可选；Matrix 管理员列表（逗号分隔 mxid），当 `MATRIX_UPGRADE_ALLOWED_USERS` 为空时生效
+- `MATRIX_UPGRADE_ALLOWED_USERS`：可选；显式限制哪些 Matrix 用户可执行 `/upgrade`（逗号分隔 mxid，优先级高于 `MATRIX_ADMIN_USERS`）
 
 ---
 
@@ -225,6 +228,7 @@ codeharbor self-update
 
 - `/upgrade`
 - `/upgrade 0.1.33`
+- `/diag upgrade 5`（查看最近升级诊断）
 
 ---
 
