@@ -57,6 +57,7 @@ program.addHelpText(
     "  - /status",
     "  - /version",
     "  - /diag version",
+    "  - /diag upgrade [count]",
     "  - /upgrade [version]",
     "  - /backend codex|claude|status",
     "  - /reset",

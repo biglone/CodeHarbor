@@ -832,6 +832,7 @@ export class Orchestrator {
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
 - /diag version: 查看运行实例诊断信息
+- /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；可配管理员白名单）
 - /backend codex|claude|status: 查看/切换后端工具
 - /reset: 清空当前会话上下文
@@ -1876,24 +1877,21 @@ export class Orchestrator {
 
   private async handleDiagCommand(message: InboundMessage): Promise<void> {
     const target = parseDiagTarget(message.text);
-    if (!target || target === "help") {
+    if (!target || target.kind === "help") {
       await this.channel.sendNotice(
         message.conversationId,
-        "[CodeHarbor] 用法: /diag version",
+        "[CodeHarbor] 用法: /diag version | /diag upgrade [count]",
       );
       return;
     }
-    if (target !== "version") {
-      return;
-    }
+    if (target.kind === "version") {
+      const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
+      const cliScriptPath = process.argv[1] ? path.resolve(process.argv[1]) : "unknown";
+      const uptimeMs = Math.max(0, Math.floor(process.uptime() * 1_000));
 
-    const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
-    const cliScriptPath = process.argv[1] ? path.resolve(process.argv[1]) : "unknown";
-    const uptimeMs = Math.max(0, Math.floor(process.uptime() * 1_000));
-
-    await this.channel.sendNotice(
-      message.conversationId,
-      `${this.botNoticePrefix} 诊断信息（version）
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 诊断信息（version）
 - pid: ${process.pid}
 - startedAt: ${this.processStartedAtIso}
 - uptime: ${formatDurationMs(uptimeMs)}
@@ -1905,6 +1903,17 @@ export class Orchestrator {
 - currentVersion: ${packageUpdate.currentVersion}
 - latestHint: ${formatPackageUpdateHint(packageUpdate)}
 - checkedAt: ${packageUpdate.checkedAt}`,
+      );
+      return;
+    }
+
+    const runs = this.getRecentUpgradeRuns(target.limit);
+    await this.channel.sendNotice(
+      message.conversationId,
+      `${this.botNoticePrefix} 诊断信息（upgrade）
+- recentCount: ${runs.length}
+- records:
+${formatUpgradeDiagRecords(runs)}`,
     );
   }
 }
@@ -2102,14 +2111,24 @@ function isPlainUpgradeCommand(normalized: string): boolean {
   return /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(argument);
 }
 
-function parseDiagTarget(text: string): "version" | "help" | null {
+function parseDiagTarget(text: string): { kind: "version" } | { kind: "upgrade"; limit: number } | { kind: "help" } | null {
   const tokens = text.trim().split(/\s+/);
   if (tokens.length < 2) {
-    return "help";
+    return { kind: "help" };
   }
   const value = tokens[1]?.toLowerCase() ?? "";
   if (value === "version") {
-    return "version";
+    return { kind: "version" };
+  }
+  if (value === "upgrade") {
+    if (tokens.length < 3) {
+      return { kind: "upgrade", limit: 5 };
+    }
+    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 20) {
+      return null;
+    }
+    return { kind: "upgrade", limit: parsed };
   }
   return null;
 }
@@ -2584,6 +2603,22 @@ function formatRecentUpgradeRunsSummary(runs: UpgradeRunRecord[]): string {
       return `#${run.id}:${statusText}@${new Date(time).toISOString()}`;
     })
     .join(" | ");
+}
+
+function formatUpgradeDiagRecords(runs: UpgradeRunRecord[]): string {
+  if (runs.length === 0) {
+    return "- (empty)";
+  }
+  return runs
+    .map((run) => {
+      const finishedAt = run.finishedAt ? new Date(run.finishedAt).toISOString() : "N/A";
+      return [
+        `- #${run.id} status=${run.status} target=${run.targetVersion ?? "latest"} installed=${run.installedVersion ?? "unknown"}`,
+        `  requestedBy=${run.requestedBy ?? "unknown"} startedAt=${new Date(run.startedAt).toISOString()} finishedAt=${finishedAt}`,
+        `  error=${run.error ?? "none"}`,
+      ].join("\n");
+    })
+    .join("\n");
 }
 
 function buildRateLimitNotice(decision: RateLimitDecision): string {

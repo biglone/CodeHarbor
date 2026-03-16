@@ -45,6 +45,17 @@ class InMemoryStateStore {
     }>
   >();
   private messageId = 0;
+  private upgradeRunId = 0;
+  private readonly upgradeRuns: Array<{
+    id: number;
+    requestedBy: string | null;
+    targetVersion: string | null;
+    status: "running" | "succeeded" | "failed";
+    installedVersion: string | null;
+    error: string | null;
+    startedAt: number;
+    finishedAt: number | null;
+  }> = [];
 
   getCodexSessionId(sessionKey: string): string | null {
     return this.ensureSession(sessionKey).codexSessionId;
@@ -137,6 +148,67 @@ class InMemoryStateStore {
   }> {
     const history = this.messages.get(sessionKey) ?? [];
     return history.slice(Math.max(0, history.length - Math.max(1, Math.floor(limit))));
+  }
+
+  createUpgradeRun(input: { requestedBy: string | null; targetVersion: string | null }): number {
+    this.upgradeRunId += 1;
+    this.upgradeRuns.push({
+      id: this.upgradeRunId,
+      requestedBy: input.requestedBy,
+      targetVersion: input.targetVersion,
+      status: "running",
+      installedVersion: null,
+      error: null,
+      startedAt: Date.now(),
+      finishedAt: null,
+    });
+    return this.upgradeRunId;
+  }
+
+  finishUpgradeRun(
+    id: number,
+    input: { status: "succeeded" | "failed"; installedVersion: string | null; error: string | null },
+  ): void {
+    const run = this.upgradeRuns.find((item) => item.id === id);
+    if (!run) {
+      return;
+    }
+    run.status = input.status;
+    run.installedVersion = input.installedVersion;
+    run.error = input.error;
+    run.finishedAt = Date.now();
+  }
+
+  getLatestUpgradeRun():
+    | {
+        id: number;
+        requestedBy: string | null;
+        targetVersion: string | null;
+        status: "running" | "succeeded" | "failed";
+        installedVersion: string | null;
+        error: string | null;
+        startedAt: number;
+        finishedAt: number | null;
+      }
+    | null {
+    if (this.upgradeRuns.length === 0) {
+      return null;
+    }
+    return this.upgradeRuns[this.upgradeRuns.length - 1] ?? null;
+  }
+
+  listRecentUpgradeRuns(limit = 5): Array<{
+    id: number;
+    requestedBy: string | null;
+    targetVersion: string | null;
+    status: "running" | "succeeded" | "failed";
+    installedVersion: string | null;
+    error: string | null;
+    startedAt: number;
+    finishedAt: number | null;
+  }> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.upgradeRuns.slice(Math.max(0, this.upgradeRuns.length - safeLimit)).reverse();
   }
 
   private ensureSession(sessionKey: string): SessionState {
@@ -780,6 +852,35 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("pid:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("backend: codex (gpt-5-codex)"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("latestHint:"))).toBe(true);
+  });
+
+  it("shows recent upgrade records for /diag upgrade command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const runId = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.37",
+    });
+    store.finishUpgradeRun(runId, {
+      status: "failed",
+      installedVersion: "0.1.36",
+      error: "post-check failed: mismatch",
+    });
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag upgrade 3" }));
+
+    expect(executor.calls).toHaveLength(0);
+    const upgradeDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（upgrade）"));
+    expect(upgradeDiagNotice).toBeDefined();
+    expect(upgradeDiagNotice?.text).toContain(`#${runId} status=failed`);
+    expect(upgradeDiagNotice?.text).toContain("error=post-check failed: mismatch");
   });
 
   it("shows current version and update hint for /version command", async () => {
