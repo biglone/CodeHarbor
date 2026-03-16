@@ -275,6 +275,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-active-window" type="number" min="1" />
           </label>
           <label class="checkbox">
+            <input id="global-update-check-enabled" type="checkbox" />
+            <span data-i18n="global.updateCheckEnabled">启用版本更新检查</span>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.updateCheckTimeout">更新检查超时（毫秒）</span>
+            <input id="global-update-check-timeout" type="number" min="1" />
+          </label>
+          <label class="checkbox">
             <input id="global-progress-enabled" type="checkbox" />
             <span data-i18n="global.progressEnabled">启用进度更新</span>
           </label>
@@ -502,6 +510,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.progressInterval": "进度更新间隔（毫秒）",
             "global.typingTimeout": "输入状态超时（毫秒）",
             "global.sessionWindow": "会话活跃窗口（分钟）",
+            "global.updateCheckEnabled": "启用版本更新检查",
+            "global.updateCheckTimeout": "更新检查超时（毫秒）",
             "global.progressEnabled": "启用进度更新",
             "global.rateWindow": "限流窗口（毫秒）",
             "global.rateUser": "单用户窗口最大请求数",
@@ -579,9 +589,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.table.component": "组件",
             "health.table.status": "状态",
             "health.table.details": "详情",
+            "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
             "health.component.matrix": "Matrix",
             "health.component.overall": "整体",
+            "health.app.detail.updateAvailable": "当前 {current}，最新 {latest}（可更新）",
+            "health.app.detail.upToDate": "当前 {current}，已是最新",
+            "health.app.detail.disabled": "当前 {current}，已禁用更新检查",
+            "health.app.detail.unknown": "当前 {current}，更新检查不可用：{error}",
+            "health.app.detail.noVersion": "无法读取版本信息",
             "health.status.ok": "正常",
             "health.status.fail": "失败",
             "notice.healthDone": "健康检查完成。",
@@ -627,6 +643,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.progressInterval": "Progress Interval (ms)",
             "global.typingTimeout": "Typing Timeout (ms)",
             "global.sessionWindow": "Session Active Window (minutes)",
+            "global.updateCheckEnabled": "Enable update check",
+            "global.updateCheckTimeout": "Update check timeout (ms)",
             "global.progressEnabled": "Enable progress updates",
             "global.rateWindow": "Rate Window (ms)",
             "global.rateUser": "Rate Max Requests / User",
@@ -704,9 +722,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.table.component": "Component",
             "health.table.status": "Status",
             "health.table.details": "Details",
+            "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
             "health.component.matrix": "Matrix",
             "health.component.overall": "Overall",
+            "health.app.detail.updateAvailable": "Current {current}, latest {latest} (update available)",
+            "health.app.detail.upToDate": "Current {current}, up to date",
+            "health.app.detail.disabled": "Current {current}, update check disabled",
+            "health.app.detail.unknown": "Current {current}, update check unavailable: {error}",
+            "health.app.detail.noVersion": "Version information unavailable",
             "health.status.ok": "OK",
             "health.status.fail": "FAIL",
             "notice.healthDone": "Health check completed.",
@@ -969,6 +993,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var trigger = data.defaultGroupTriggerPolicy || {};
             var cliCompat = data.cliCompat || {};
             var agentWorkflow = data.agentWorkflow || {};
+            var updateCheck = data.updateCheck || {};
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
             document.getElementById("global-workdir").value = data.codexWorkdir || "";
@@ -976,6 +1001,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-progress-interval").value = String(data.matrixProgressMinIntervalMs || 2500);
             document.getElementById("global-typing-timeout").value = String(data.matrixTypingTimeoutMs || 10000);
             document.getElementById("global-active-window").value = String(data.sessionActiveWindowMinutes || 20);
+            document.getElementById("global-update-check-enabled").checked =
+              updateCheck.enabled === undefined ? true : Boolean(updateCheck.enabled);
+            document.getElementById("global-update-check-timeout").value = String(updateCheck.timeoutMs || 3000);
             document.getElementById("global-rate-window").value = String(rateLimiter.windowMs || 60000);
             document.getElementById("global-rate-user").value = String(rateLimiter.maxRequestsPerUser || 0);
             document.getElementById("global-rate-room").value = String(rateLimiter.maxRequestsPerRoom || 0);
@@ -1026,6 +1054,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
               matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),
               sessionActiveWindowMinutes: asNumber("global-active-window", 20),
+              updateCheck: {
+                enabled: asBool("global-update-check-enabled"),
+                timeoutMs: asNumber("global-update-check-timeout", 3000)
+              },
               groupDirectModeEnabled: asBool("global-direct-mode"),
               rateLimiter: {
                 windowMs: asNumber("global-rate-window", 60000),
@@ -1189,9 +1221,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var response = await apiRequest("/api/admin/health", "GET");
             healthBody.innerHTML = "";
 
+            var app = response.app || {};
             var codex = response.codex || {};
             var matrix = response.matrix || {};
 
+            appendHealthRow(t("health.component.app"), isAppHealthOk(app), formatAppHealthDetail(app));
             appendHealthRow(
               t("health.component.codex"),
               Boolean(codex.ok),
@@ -1218,6 +1252,39 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           appendCell(row, ok ? t("health.status.ok") : t("health.status.fail"));
           appendCell(row, detail);
           healthBody.appendChild(row);
+        }
+
+        function isAppHealthOk(app) {
+          if (!app || typeof app !== "object") {
+            return false;
+          }
+          if (app.state === "up_to_date" || app.state === "update_available") {
+            return true;
+          }
+          return app.state === "unknown" && String(app.error || "").toLowerCase() === "update check disabled";
+        }
+
+        function formatAppHealthDetail(app) {
+          var current = app && app.currentVersion ? String(app.currentVersion) : "";
+          if (!current) {
+            return t("health.app.detail.noVersion");
+          }
+          if (app.state === "update_available" && app.latestVersion) {
+            return t("health.app.detail.updateAvailable", {
+              current: current,
+              latest: String(app.latestVersion)
+            });
+          }
+          if (app.state === "up_to_date") {
+            return t("health.app.detail.upToDate", { current: current });
+          }
+          if (app.state === "unknown" && String(app.error || "").toLowerCase() === "update check disabled") {
+            return t("health.app.detail.disabled", { current: current });
+          }
+          return t("health.app.detail.unknown", {
+            current: current,
+            error: app && app.error ? String(app.error) : "-"
+          });
         }
 
         async function loadAudit() {

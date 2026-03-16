@@ -78,6 +78,10 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
       fetchMedia: false,
       recordPath: null,
     },
+    updateCheck: {
+      enabled: true,
+      timeoutMs: 3000,
+    },
     doctorHttpTimeoutMs: 10_000,
     adminBindHost: "127.0.0.1",
     adminPort: 0,
@@ -113,6 +117,17 @@ test.beforeAll(async () => {
     cwd: paths.dir,
     checkCodex: async () => ({ ok: true, version: "codex 1.0.0", error: null }),
     checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1.10"], error: null }),
+    packageUpdateChecker: {
+      getStatus: async () => ({
+        packageName: "codeharbor",
+        currentVersion: "0.1.27",
+        latestVersion: "0.1.28",
+        state: "update_available",
+        checkedAt: new Date().toISOString(),
+        error: null,
+        upgradeCommand: "npm install -g codeharbor@latest",
+      }),
+    },
   });
 
   await server.start();
@@ -133,6 +148,8 @@ test("loads global settings page and fetches initial config", async ({ page }) =
   await expect(page).toHaveTitle(/CodeHarbor .*Admin Console/);
   await expect(page.locator('[data-view="settings-global"]')).toBeVisible();
   await expect(page.locator("#global-matrix-prefix")).toHaveValue("!code");
+  await expect(page.locator("#global-update-check-enabled")).toBeChecked();
+  await expect(page.locator("#global-update-check-timeout")).toHaveValue("3000");
   await expect(page.locator("#global-agent-enabled")).not.toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("1");
   await expect(page.locator("#notice")).toContainText(/(Global config loaded\.|全局配置已加载。)/);
@@ -141,19 +158,27 @@ test("loads global settings page and fetches initial config", async ({ page }) =
 test("saves global agent workflow settings and persists to env", async ({ page }) => {
   await page.goto(`${baseUrl}/settings/global`);
 
+  await page.uncheck("#global-update-check-enabled");
+  await page.fill("#global-update-check-timeout", "1800");
   await page.check("#global-agent-enabled");
   await page.fill("#global-agent-repair-rounds", "3");
   await page.click("#global-save-btn");
 
+  await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
+  await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
   await page.click("#global-reload-btn");
+  await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
+  await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
 
   const envRaw = fs.readFileSync(path.join(paths.dir, ".env"), "utf8");
   expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");
   expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=3");
+  expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
+  expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=1800");
 });
 
 test("saves room config and shows in room list", async ({ page }) => {
@@ -182,8 +207,11 @@ test("runs health check and displays OK for codex and matrix", async ({ page }) 
   await page.click("#health-refresh-btn");
 
   await expect(page.locator("#notice")).toContainText(/(Health check completed\.|健康检查完成。)/);
+  await expect(page.locator("#health-body")).toContainText("CodeHarbor");
   await expect(page.locator("#health-body")).toContainText("Codex");
   await expect(page.locator("#health-body")).toContainText("Matrix");
+  await expect(page.locator("#health-body")).toContainText("0.1.27");
+  await expect(page.locator("#health-body")).toContainText("0.1.28");
   await expect(page.locator("#health-body")).toContainText(/(OK|正常)/);
 });
 

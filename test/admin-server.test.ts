@@ -82,6 +82,10 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
       audioLocalWhisperTimeoutMs: 180000,
       recordPath: null,
     },
+    updateCheck: {
+      enabled: true,
+      timeoutMs: 3000,
+    },
     doctorHttpTimeoutMs: 10_000,
     adminBindHost: "127.0.0.1",
     adminPort: 0,
@@ -173,6 +177,43 @@ describe("AdminServer", () => {
     expect(audit.status).toBe(200);
     expect(JSON.stringify(audit.body)).toContain("bind room");
     expect(JSON.stringify(audit.body)).toContain("createdAtIso");
+  });
+
+  it("returns app version info in health response", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.27",
+          latestVersion: "0.1.28",
+          state: "update_available",
+          checkedAt: new Date().toISOString(),
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const health = await fetchJson(`${baseUrl}/api/admin/health`);
+    expect(health.status).toBe(200);
+    expect(JSON.stringify(health.body)).toContain('"currentVersion":"0.1.27"');
+    expect(JSON.stringify(health.body)).toContain('"latestVersion":"0.1.28"');
+    expect(JSON.stringify(health.body)).toContain('"state":"update_available"');
   });
 
   it("requires token when ADMIN_TOKEN is configured", async () => {
@@ -402,6 +443,10 @@ describe("AdminServer", () => {
           enabled: true,
           autoRepairMaxRounds: 2,
         },
+        updateCheck: {
+          enabled: false,
+          timeoutMs: 2000,
+        },
       }),
     });
     expect(updated.status).toBe(200);
@@ -413,6 +458,8 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("RATE_LIMIT_MAX_CONCURRENT_GLOBAL=12");
     expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");
     expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=2");
+    expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
+    expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
   });
 
   it("restarts managed services via admin API", async () => {

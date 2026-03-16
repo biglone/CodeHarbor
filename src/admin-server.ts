@@ -9,6 +9,11 @@ import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
 import { AdminTokenConfig, AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
+import {
+  NpmRegistryUpdateChecker,
+  type PackageUpdateChecker,
+  resolvePackageVersion,
+} from "./package-update-checker";
 import { restartSystemdServices } from "./service-manager";
 import { ConfigRevisionRecord, StateStore } from "./store/state-store";
 
@@ -51,6 +56,7 @@ interface AdminServerOptions {
   cwd?: string;
   checkCodex?: (bin: string) => Promise<CodexHealthResult>;
   checkMatrix?: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
+  packageUpdateChecker?: PackageUpdateChecker;
   restartServices?: (restartAdmin: boolean) => Promise<RestartServicesResult>;
 }
 
@@ -82,6 +88,8 @@ export class AdminServer {
   private readonly cwd: string;
   private readonly checkCodex: (bin: string) => Promise<CodexHealthResult>;
   private readonly checkMatrix: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
+  private readonly hasCustomPackageUpdateChecker: boolean;
+  private packageUpdateChecker: PackageUpdateChecker;
   private readonly restartServices: (restartAdmin: boolean) => Promise<RestartServicesResult>;
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
@@ -106,6 +114,8 @@ export class AdminServer {
     this.cwd = options.cwd ?? process.cwd();
     this.checkCodex = options.checkCodex ?? defaultCheckCodex;
     this.checkMatrix = options.checkMatrix ?? defaultCheckMatrix;
+    this.hasCustomPackageUpdateChecker = Boolean(options.packageUpdateChecker);
+    this.packageUpdateChecker = options.packageUpdateChecker ?? this.createPackageUpdateChecker();
     this.restartServices = options.restartServices ?? defaultRestartServices;
   }
 
@@ -302,14 +312,16 @@ export class AdminServer {
       }
 
       if (req.method === "GET" && url.pathname === "/api/admin/health") {
-        const [codex, matrix] = await Promise.all([
+        const [codex, matrix, app] = await Promise.all([
           this.checkCodex(this.config.codexBin),
           this.checkMatrix(this.config.matrixHomeserver, this.config.doctorHttpTimeoutMs),
+          this.packageUpdateChecker.getStatus(),
         ]);
         this.sendJson(res, 200, {
           ok: codex.ok && matrix.ok,
           codex,
           matrix,
+          app,
           timestamp: new Date().toISOString(),
         });
         return;
@@ -504,6 +516,33 @@ export class AdminServer {
       this.config.groupDirectModeEnabled = value;
       envUpdates.GROUP_DIRECT_MODE_ENABLED = String(value);
       updatedKeys.push("groupDirectModeEnabled");
+    }
+
+    if ("updateCheck" in body) {
+      const updateCheck = asObject(body.updateCheck, "updateCheck");
+      let updateCheckChanged = false;
+      if ("enabled" in updateCheck) {
+        const value = normalizeBoolean(updateCheck.enabled, this.config.updateCheck.enabled);
+        this.config.updateCheck.enabled = value;
+        envUpdates.PACKAGE_UPDATE_CHECK_ENABLED = String(value);
+        updatedKeys.push("updateCheck.enabled");
+        updateCheckChanged = true;
+      }
+      if ("timeoutMs" in updateCheck) {
+        const value = normalizePositiveInt(
+          updateCheck.timeoutMs,
+          this.config.updateCheck.timeoutMs,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.updateCheck.timeoutMs = value;
+        envUpdates.PACKAGE_UPDATE_CHECK_TIMEOUT_MS = String(value);
+        updatedKeys.push("updateCheck.timeoutMs");
+        updateCheckChanged = true;
+      }
+      if (updateCheckChanged && !this.hasCustomPackageUpdateChecker) {
+        this.packageUpdateChecker = this.createPackageUpdateChecker();
+      }
     }
 
     if ("cliCompat" in body) {
@@ -810,6 +849,15 @@ export class AdminServer {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify(payload));
   }
+
+  private createPackageUpdateChecker(): PackageUpdateChecker {
+    return new NpmRegistryUpdateChecker({
+      packageName: "codeharbor",
+      currentVersion: resolvePackageVersion(),
+      enabled: this.config.updateCheck.enabled,
+      timeoutMs: this.config.updateCheck.timeoutMs,
+    });
+  }
 }
 
 function buildGlobalConfigSnapshot(config: AppConfig): {
@@ -822,6 +870,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   matrixProgressMinIntervalMs: number;
   matrixTypingTimeoutMs: number;
   sessionActiveWindowMinutes: number;
+  updateCheck: AppConfig["updateCheck"];
   cliCompat: AppConfig["cliCompat"];
   agentWorkflow: AppConfig["agentWorkflow"];
 } {
@@ -835,6 +884,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     matrixProgressMinIntervalMs: config.matrixProgressMinIntervalMs,
     matrixTypingTimeoutMs: config.matrixTypingTimeoutMs,
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
+    updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
     agentWorkflow: { ...ensureAgentWorkflowConfig(config) },
   };
