@@ -75,6 +75,7 @@ interface OrchestratorOptions {
   upgradeAllowedUsers?: string[];
   selfUpdateTimeoutMs?: number;
   selfUpdateRunner?: SelfUpdateRunner;
+  upgradeRestartPlanner?: UpgradeRestartPlanner;
 }
 
 interface SessionLockEntry {
@@ -137,6 +138,11 @@ interface SelfUpdateResult {
 }
 
 type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
+interface UpgradeRestartPlan {
+  summary: string;
+  apply: () => Promise<void>;
+}
+type UpgradeRestartPlanner = () => Promise<UpgradeRestartPlan>;
 type UpgradeStateStore = Pick<
   StateStore,
   "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun" | "listRecentUpgradeRuns"
@@ -267,6 +273,7 @@ export class Orchestrator {
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly upgradeAllowedUsers: Set<string>;
   private readonly selfUpdateRunner: SelfUpdateRunner;
+  private readonly upgradeRestartPlanner: UpgradeRestartPlanner;
   private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
@@ -372,6 +379,12 @@ export class Orchestrator {
         runSelfUpdateCommand({
           version: input.version,
           timeoutMs: selfUpdateTimeoutMs,
+        }));
+    this.upgradeRestartPlanner =
+      options?.upgradeRestartPlanner ??
+      (() =>
+        buildDefaultUpgradeRestartPlan({
+          logger: this.logger,
         }));
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
@@ -1648,6 +1661,7 @@ export class Orchestrator {
         const result = await this.selfUpdateRunner({
           version: parsed.version,
         });
+        const restartPlan = await this.upgradeRestartPlanner();
         const elapsed = formatDurationMs(Date.now() - startedAt);
         const installedVersion = result.installedVersion ?? "unknown";
         await this.channel.sendNotice(
@@ -1655,7 +1669,7 @@ export class Orchestrator {
           `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
 - 目标版本: ${targetLabel}
 - 已安装版本: ${installedVersion}
-- 服务重启: 已触发
+- 服务重启: ${restartPlan.summary}
 - 校验建议: 稍后发送 /diag version 或 /version`,
         );
         this.finishUpgradeRun(upgradeRunId, {
@@ -1663,6 +1677,11 @@ export class Orchestrator {
           installedVersion,
           error: null,
         });
+        try {
+          await restartPlan.apply();
+        } catch (restartError) {
+          this.logger.warn("Failed to apply post-upgrade restart plan", { restartError });
+        }
       } catch (error) {
         const errorText = formatSelfUpdateError(error);
         const elapsed = formatDurationMs(Date.now() - startedAt);
@@ -2125,7 +2144,7 @@ async function runSelfUpdateCommand(input: { version: string | null; timeoutMs: 
   let lastError: unknown = null;
 
   for (const invocation of invocations) {
-    const args = [...invocation.prefixArgs, "self-update", "--with-admin"];
+    const args = [...invocation.prefixArgs, "self-update", "--with-admin", "--skip-restart"];
     if (input.version) {
       args.push("--version", input.version);
     }
@@ -2161,6 +2180,122 @@ async function runSelfUpdateCommand(input: { version: string | null; timeoutMs: 
   throw new Error(`unable to run self-update command: ${formatSelfUpdateError(lastError)}`, {
     cause: lastError ?? undefined,
   });
+}
+
+async function buildDefaultUpgradeRestartPlan(input: { logger: Logger }): Promise<UpgradeRestartPlan> {
+  if (process.platform !== "linux") {
+    return {
+      summary: "已跳过（非 Linux 平台）",
+      apply: async () => {},
+    };
+  }
+  if (!(await isSystemctlCommandAvailable())) {
+    return {
+      summary: "已跳过（未检测到 systemctl）",
+      apply: async () => {},
+    };
+  }
+
+  const hasMainService = await isSystemdUnitInstalled("codeharbor.service");
+  if (!hasMainService) {
+    return {
+      summary: "已跳过（未检测到 codeharbor.service）",
+      apply: async () => {},
+    };
+  }
+  const hasAdminService = await isSystemdUnitInstalled("codeharbor-admin.service");
+
+  if (!isLikelySystemdServiceProcess()) {
+    return {
+      summary: "已跳过（当前非 systemd 服务上下文）",
+      apply: async () => {},
+    };
+  }
+
+  return {
+    summary: `已触发（signal${hasAdminService ? ", main+admin" : ", main"}）`,
+    apply: async () => {
+      if (hasAdminService) {
+        const adminPid = await readSystemdUnitMainPid("codeharbor-admin.service");
+        if (adminPid !== null && adminPid > 1 && adminPid !== process.pid) {
+          try {
+            process.kill(adminPid, "SIGTERM");
+          } catch (error) {
+            input.logger.warn("Failed to signal codeharbor-admin process for restart", {
+              adminPid,
+              error,
+            });
+          }
+        }
+      }
+
+      const timer = setTimeout(() => {
+        try {
+          process.kill(process.pid, "SIGTERM");
+        } catch (error) {
+          input.logger.warn("Failed to signal current process for restart", { error });
+        }
+      }, 1200);
+      timer.unref?.();
+    },
+  };
+}
+
+async function isSystemctlCommandAvailable(): Promise<boolean> {
+  try {
+    await execFileAsync("systemctl", ["--version"], {
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+      env: process.env,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isSystemdUnitInstalled(unitName: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("systemctl", ["list-unit-files", unitName, "--no-legend"], {
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+      env: process.env,
+    });
+    const output = normalizeCommandOutput(stdout);
+    if (!output) {
+      return false;
+    }
+    return output
+      .split(/\r?\n/)
+      .some((line) => line.trim().startsWith(`${unitName} `));
+  } catch {
+    return false;
+  }
+}
+
+async function readSystemdUnitMainPid(unitName: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync("systemctl", ["show", unitName, "--property", "MainPID", "--value"], {
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+      env: process.env,
+    });
+    const text = normalizeCommandOutput(stdout);
+    if (!text) {
+      return null;
+    }
+    const value = Number.parseInt(text, 10);
+    if (!Number.isFinite(value) || value <= 0) {
+      return null;
+    }
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function isLikelySystemdServiceProcess(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.INVOCATION_ID || env.SYSTEMD_EXEC_PID || env.JOURNAL_STREAM);
 }
 
 function resolveSelfUpdateInvocations(): Array<{ file: string; prefixArgs: string[]; label: string }> {

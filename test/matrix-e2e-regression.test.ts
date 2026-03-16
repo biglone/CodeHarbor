@@ -592,6 +592,10 @@ describe("Matrix e2e regression", () => {
       matrixUserId: "@bot:example.com",
       upgradeAllowedUsers: ["@alice:example.com"],
       selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
     });
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade v0.1.34" }));
@@ -619,6 +623,10 @@ describe("Matrix e2e regression", () => {
       matrixUserId: "@bot:example.com",
       upgradeAllowedUsers: ["@ops:example.com"],
       selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
     });
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "升级 0.1.34" }));
@@ -643,6 +651,10 @@ describe("Matrix e2e regression", () => {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
     });
 
     await orchestrator.handleMessage(
