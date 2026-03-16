@@ -137,7 +137,10 @@ interface SelfUpdateResult {
 }
 
 type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
-type UpgradeStateStore = Pick<StateStore, "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun">;
+type UpgradeStateStore = Pick<
+  StateStore,
+  "createUpgradeRun" | "finishUpgradeRun" | "getLatestUpgradeRun" | "listRecentUpgradeRuns"
+>;
 
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const RUN_SNAPSHOT_MAX_ENTRIES = 500;
@@ -836,6 +839,7 @@ export class Orchestrator {
     const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
     const packageUpdate = await this.packageUpdateChecker.getStatus();
     const latestUpgrade = this.getLatestUpgradeRun();
+    const recentUpgrades = this.getRecentUpgradeRuns(3);
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -851,6 +855,7 @@ export class Orchestrator {
 - 更新检查时间: ${packageUpdate.checkedAt}
 - 更新来源: 缓存结果（TTL=${formatCacheTtl(this.updateCheckTtlMs)}，发送 /version 可实时刷新）
 - 最近升级: ${formatLatestUpgradeSummary(latestUpgrade)}
+- 升级记录: ${formatRecentUpgradeRunsSummary(recentUpgrades)}
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
@@ -1742,6 +1747,19 @@ export class Orchestrator {
     }
   }
 
+  private getRecentUpgradeRuns(limit: number): UpgradeRunRecord[] {
+    const store = this.getUpgradeStateStore();
+    if (!store || typeof store.listRecentUpgradeRuns !== "function") {
+      return [];
+    }
+    try {
+      return store.listRecentUpgradeRuns(limit);
+    } catch (error) {
+      this.logger.warn("Failed to fetch recent upgrade run records", { error, limit });
+      return [];
+    }
+  }
+
   private getUpgradeStateStore(): UpgradeStateStore | null {
     const maybeStore = this.stateStore as unknown as Partial<UpgradeStateStore>;
     if (
@@ -2283,16 +2301,29 @@ function formatLatestUpgradeSummary(run: UpgradeRunRecord | null): string {
     return "暂无记录";
   }
   if (run.status === "running") {
-    return `进行中（startedAt=${new Date(run.startedAt).toISOString()}）`;
+    return `#${run.id} 进行中（startedAt=${new Date(run.startedAt).toISOString()}）`;
   }
   if (run.status === "succeeded") {
-    return `成功（target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
+    return `#${run.id} 成功（target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
       run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
     }）`;
   }
-  return `失败（target=${run.targetVersion ?? "latest"}, at=${
+  return `#${run.id} 失败（target=${run.targetVersion ?? "latest"}, at=${
     run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
   }, error=${run.error ?? "unknown"}）`;
+}
+
+function formatRecentUpgradeRunsSummary(runs: UpgradeRunRecord[]): string {
+  if (runs.length === 0) {
+    return "暂无记录";
+  }
+  return runs
+    .map((run) => {
+      const statusText = run.status === "succeeded" ? "ok" : run.status === "failed" ? "failed" : "running";
+      const time = run.finishedAt ?? run.startedAt;
+      return `#${run.id}:${statusText}@${new Date(time).toISOString()}`;
+    })
+    .join(" | ");
 }
 
 function buildRateLimitNotice(decision: RateLimitDecision): string {

@@ -406,6 +406,37 @@ export class StateStore {
     };
   }
 
+  listRecentUpgradeRuns(limit = 5): UpgradeRunRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db
+      .prepare(
+        `SELECT id, requested_by, target_version, status, installed_version, error, started_at, finished_at
+         FROM upgrade_runs
+         ORDER BY id DESC
+         LIMIT ?1`,
+      )
+      .all(safeLimit) as Array<{
+      id: number;
+      requested_by: string | null;
+      target_version: string | null;
+      status: "running" | "succeeded" | "failed";
+      installed_version: string | null;
+      error: string | null;
+      started_at: number;
+      finished_at: number | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      requestedBy: row.requested_by,
+      targetVersion: row.target_version,
+      status: row.status,
+      installedVersion: row.installed_version,
+      error: row.error,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+    }));
+  }
+
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",

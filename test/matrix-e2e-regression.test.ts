@@ -569,6 +569,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("更新检查时间:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新来源: 缓存结果"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("最近升级:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("升级记录:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);

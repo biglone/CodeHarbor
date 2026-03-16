@@ -216,6 +216,43 @@ describe("StateStore", () => {
     expect(latest?.finishedAt).not.toBeNull();
   });
 
+  it("lists recent upgrade runs in reverse chronological order", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const id1 = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.34",
+    });
+    store.finishUpgradeRun(id1, {
+      status: "succeeded",
+      installedVersion: "0.1.34",
+      error: null,
+    });
+
+    const id2 = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: null,
+    });
+    store.finishUpgradeRun(id2, {
+      status: "failed",
+      installedVersion: null,
+      error: "network timeout",
+    });
+
+    const id3 = store.createUpgradeRun({
+      requestedBy: "@alice:example.com",
+      targetVersion: "0.1.35",
+    });
+
+    const recent = store.listRecentUpgradeRuns(2);
+    expect(recent).toHaveLength(2);
+    expect(recent[0]?.id).toBe(id3);
+    expect(recent[0]?.status).toBe("running");
+    expect(recent[1]?.id).toBe(id2);
+    expect(recent[1]?.status).toBe("failed");
+  });
+
   it("stores and loads local conversation history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);
