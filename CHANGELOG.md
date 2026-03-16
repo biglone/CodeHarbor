@@ -6,9 +6,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-03-17
+
 - Enhanced `/status` upgrade observability:
   - latest-upgrade summary now includes upgrade task id
   - added recent upgrade run list (`#id:status@time`) for quick troubleshooting
+- Updated docs for the `/status` upgrade-task-id output in README and Chinese user manual.
 
 ## [0.1.35] - 2026-03-16
 
