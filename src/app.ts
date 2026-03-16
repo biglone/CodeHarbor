@@ -8,6 +8,7 @@ import { AppConfig } from "./config";
 import { CodexExecutor } from "./executor/codex-executor";
 import { Logger } from "./logger";
 import { Orchestrator } from "./orchestrator";
+import { NpmRegistryUpdateChecker, resolvePackageVersion } from "./package-update-checker";
 import { StateStore } from "./store/state-store";
 
 const execFileAsync = promisify(execFile);
@@ -45,6 +46,7 @@ export class CodeHarborApp {
     });
 
     this.channel = new MatrixChannel(config, this.logger);
+    const packageVersion = resolvePackageVersion();
     this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger, {
       progressUpdatesEnabled: config.matrixProgressUpdates,
       progressMinIntervalMs: config.matrixProgressMinIntervalMs,
@@ -58,6 +60,12 @@ export class CodeHarborApp {
       rateLimiterOptions: config.rateLimiter,
       cliCompat: config.cliCompat,
       multiAgentWorkflow: config.agentWorkflow,
+      packageUpdateChecker: new NpmRegistryUpdateChecker({
+        packageName: "codeharbor",
+        currentVersion: packageVersion,
+        enabled: config.updateCheck.enabled,
+        timeoutMs: config.updateCheck.timeoutMs,
+      }),
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
     });

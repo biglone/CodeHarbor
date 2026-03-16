@@ -74,7 +74,7 @@ interface SessionLockEntry {
 type RouteDecision =
   | { kind: "ignore" }
   | { kind: "execute"; prompt: string }
-  | { kind: "command"; command: "status" | "stop" | "reset" };
+  | { kind: "command"; command: "status" | "version" | "stop" | "reset" };
 
 type RequestOutcome =
   | "success"
@@ -696,7 +696,7 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "stop" | "reset",
+    command: "status" | "version" | "stop" | "reset",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -715,6 +715,15 @@ export class Orchestrator {
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
+      );
+      return;
+    }
+
+    if (command === "version") {
+      const packageUpdate = await this.packageUpdateChecker.getStatus();
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}`,
       );
       return;
     }
@@ -1589,10 +1598,13 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
   return null;
 }
 
-function parseControlCommand(text: string): "status" | "stop" | "reset" | null {
+function parseControlCommand(text: string): "status" | "version" | "stop" | "reset" | null {
   const command = text.split(/\s+/, 1)[0].toLowerCase();
   if (command === "/status") {
     return "status";
+  }
+  if (command === "/version") {
+    return "version";
   }
   if (command === "/stop") {
     return "stop";

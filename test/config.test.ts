@@ -156,3 +156,24 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
     expect(config.cliCompat.audioLocalWhisperTimeoutMs).toBe(90000);
   });
 });
+
+describe("loadConfig PACKAGE_UPDATE_CHECK", () => {
+  it("uses default update-check settings", () => {
+    const config = loadConfig(createBaseEnv());
+
+    expect(config.updateCheck.enabled).toBe(true);
+    expect(config.updateCheck.timeoutMs).toBe(3000);
+  });
+
+  it("parses custom update-check settings", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        PACKAGE_UPDATE_CHECK_ENABLED: "false",
+        PACKAGE_UPDATE_CHECK_TIMEOUT_MS: "1500",
+      }),
+    );
+
+    expect(config.updateCheck.enabled).toBe(false);
+    expect(config.updateCheck.timeoutMs).toBe(1500);
+  });
+});

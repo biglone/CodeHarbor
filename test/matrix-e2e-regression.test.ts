@@ -516,6 +516,36 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
+  it("shows current version and update hint for /version command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.27",
+          latestVersion: "0.1.28",
+          state: "update_available",
+          checkedAt: new Date().toISOString(),
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/version" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(channel.notices.some((entry) => entry.text.includes("版本信息"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("当前版本: 0.1.27"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("发现新版本 0.1.28"))).toBe(true);
+  });
+
   it("returns failure message when executor errors", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor(() => ({

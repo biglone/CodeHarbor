@@ -32,6 +32,11 @@ export interface CliCompatConfig {
   recordPath: string | null;
 }
 
+export interface UpdateCheckConfig {
+  enabled: boolean;
+  timeoutMs: number;
+}
+
 export type AdminTokenRole = "admin" | "viewer";
 
 export interface AdminTokenConfig {
@@ -225,6 +230,15 @@ const configSchema = z
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
     CLI_COMPAT_RECORD_PATH: z.string().default(""),
+    PACKAGE_UPDATE_CHECK_ENABLED: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    PACKAGE_UPDATE_CHECK_TIMEOUT_MS: z
+      .string()
+      .default("3000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
     DOCTOR_HTTP_TIMEOUT_MS: z
       .string()
       .default("10000")
@@ -305,6 +319,10 @@ const configSchema = z
         : null,
       audioLocalWhisperTimeoutMs: v.CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS,
       recordPath: v.CLI_COMPAT_RECORD_PATH.trim() ? path.resolve(v.CLI_COMPAT_RECORD_PATH) : null,
+    },
+    updateCheck: {
+      enabled: v.PACKAGE_UPDATE_CHECK_ENABLED,
+      timeoutMs: v.PACKAGE_UPDATE_CHECK_TIMEOUT_MS,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
