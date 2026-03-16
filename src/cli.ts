@@ -46,6 +46,7 @@ program.addHelpText(
     "Common CLI commands:",
     "  - codeharbor init",
     "  - codeharbor doctor",
+    "  - codeharbor self-update",
     "  - codeharbor config export -o backup.json",
     "  - codeharbor config import backup.json --dry-run",
     "  - codeharbor service install --with-admin",
@@ -306,6 +307,62 @@ serviceCommand
     }
   });
 
+program
+  .command("self-update")
+  .description("Install latest npm package and restart installed service(s)")
+  .option("--version <version>", "install a specific version instead of latest")
+  .option("--with-admin", "also restart codeharbor-admin.service when installed")
+  .option("--skip-restart", "skip service restart step after install")
+  .action((options: { version?: string; withAdmin?: boolean; skipRestart?: boolean }) => {
+    try {
+      const version = options.version?.trim();
+      const target = version ? `codeharbor@${version}` : "codeharbor@latest";
+      process.stdout.write(`[self-update] Installing ${target}...\n`);
+      const installResult = spawnSync("npm", ["install", "-g", target], {
+        stdio: "inherit",
+      });
+      if (installResult.error) {
+        throw new Error(`npm install failed: ${installResult.error.message}`);
+      }
+      if ((installResult.status ?? 1) !== 0) {
+        throw new Error(`npm install exited with code ${installResult.status ?? 1}`);
+      }
+
+      const installedVersion = resolveInstalledCodeHarborVersion();
+      process.stdout.write(
+        `[self-update] Installed version: ${installedVersion ?? "(unknown, run codeharbor --version to verify)"}\n`,
+      );
+
+      if (options.skipRestart ?? false) {
+        process.stdout.write("[self-update] Skipping service restart.\n");
+        return;
+      }
+
+      if (process.platform !== "linux") {
+        process.stdout.write("[self-update] Non-Linux platform detected; skipped systemd restart.\n");
+        return;
+      }
+
+      const hasMainService = hasSystemdUnit("codeharbor.service");
+      const hasAdminService = hasSystemdUnit("codeharbor-admin.service");
+      if (!hasMainService) {
+        process.stdout.write("[self-update] No installed codeharbor.service found; skipped restart.\n");
+        return;
+      }
+
+      const restartAdmin = (options.withAdmin ?? false) && hasAdminService;
+      process.stdout.write(
+        `[self-update] Restarting service(s): codeharbor${restartAdmin ? ", codeharbor-admin" : ""}\n`,
+      );
+      restartSystemdServices({
+        restartAdmin,
+      });
+    } catch (error) {
+      process.stderr.write(`Self-update failed: ${formatError(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
+
 if (process.argv.length <= 2) {
   process.argv.push("start");
 }
@@ -427,6 +484,35 @@ function shellQuote(value: string): string {
 
 function buildExplicitSudoCommand(subcommand: string): string {
   return `sudo ${shellQuote(process.execPath)} ${shellQuote(resolveCliScriptPath())} ${subcommand}`;
+}
+
+function hasSystemdUnit(unitName: string): boolean {
+  const unit = unitName.trim();
+  if (!unit || process.platform !== "linux") {
+    return false;
+  }
+  const result = spawnSync("systemctl", ["list-unit-files", unit, "--no-legend"], {
+    encoding: "utf8",
+  });
+  if ((result.status ?? 1) !== 0 || result.error) {
+    return false;
+  }
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  return stdout
+    .split(/\r?\n/)
+    .some((line) => line.trim().startsWith(`${unit} `));
+}
+
+function resolveInstalledCodeHarborVersion(): string | null {
+  const result = spawnSync("codeharbor", ["--version"], {
+    encoding: "utf8",
+  });
+  if ((result.status ?? 1) !== 0 || result.error) {
+    return null;
+  }
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const value = stdout.trim();
+  return value || null;
 }
 
 function formatError(error: unknown): string {
