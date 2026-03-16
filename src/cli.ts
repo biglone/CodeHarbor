@@ -55,6 +55,7 @@ program.addHelpText(
     "Common in-chat commands (send to bot in Matrix):",
     "  - /status",
     "  - /version",
+    "  - /diag version",
     "  - /backend codex|claude|status",
     "  - /reset",
     "  - /stop",
