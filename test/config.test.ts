@@ -113,6 +113,23 @@ describe("loadConfig CODEX_EXTRA_ARGS", () => {
   });
 });
 
+describe("loadConfig AI_CLI_PROVIDER", () => {
+  it("uses codex by default", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.aiCliProvider).toBe("codex");
+  });
+
+  it("supports claude provider", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        AI_CLI_PROVIDER: "claude",
+      }),
+    );
+    expect(config.aiCliProvider).toBe("claude");
+    expect(config.codexBin).toBe("claude");
+  });
+});
+
 describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("uses safe defaults", () => {
     const config = loadConfig(createBaseEnv());

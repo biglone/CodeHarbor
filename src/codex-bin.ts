@@ -6,24 +6,40 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export type CodexBinaryChecker = (bin: string) => Promise<void>;
+export type AiCliProvider = "codex" | "claude";
 
 export interface FindWorkingCodexBinOptions {
   env?: NodeJS.ProcessEnv;
   checkBinary?: CodexBinaryChecker;
 }
 
+export interface FindWorkingCliBinOptions {
+  env?: NodeJS.ProcessEnv;
+  checkBinary?: CodexBinaryChecker;
+  provider?: AiCliProvider;
+}
+
 export function buildCodexBinCandidates(configuredBin: string, env: NodeJS.ProcessEnv = process.env): string[] {
-  const normalized = configuredBin.trim() || "codex";
+  return buildCliBinCandidates(configuredBin, "codex", env);
+}
+
+export function buildCliBinCandidates(
+  configuredBin: string,
+  provider: AiCliProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const command = provider === "claude" ? "claude" : "codex";
+  const normalized = configuredBin.trim() || command;
   const home = env.HOME?.trim() || os.homedir();
-  const npmGlobalBin = home ? path.resolve(home, ".npm-global/bin/codex") : "";
+  const npmGlobalBin = home ? path.resolve(home, `.npm-global/bin/${command}`) : "";
 
   const candidates = [
     normalized,
-    "codex",
+    command,
     npmGlobalBin,
-    "/usr/bin/codex",
-    "/usr/local/bin/codex",
-    "/opt/homebrew/bin/codex",
+    `/usr/bin/${command}`,
+    `/usr/local/bin/${command}`,
+    `/opt/homebrew/bin/${command}`,
   ];
 
   const seen = new Set<string>();
@@ -43,8 +59,19 @@ export async function findWorkingCodexBin(
   configuredBin: string,
   options: FindWorkingCodexBinOptions = {},
 ): Promise<string | null> {
+  return findWorkingCliBin(configuredBin, {
+    ...options,
+    provider: "codex",
+  });
+}
+
+export async function findWorkingCliBin(
+  configuredBin: string,
+  options: FindWorkingCliBinOptions = {},
+): Promise<string | null> {
   const checkBinary = options.checkBinary ?? defaultCheckBinary;
-  const candidates = buildCodexBinCandidates(configuredBin, options.env);
+  const provider = options.provider ?? "codex";
+  const candidates = buildCliBinCandidates(configuredBin, provider, options.env);
 
   for (const candidate of candidates) {
     try {

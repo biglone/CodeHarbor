@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 
 import dotenv from "dotenv";
 
-import { findWorkingCodexBin } from "./codex-bin";
+import { findWorkingCliBin, type AiCliProvider } from "./codex-bin";
 
 interface InitQuestion {
   key: string;
@@ -49,7 +49,11 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 
     output.write("CodeHarbor setup wizard\n");
     output.write(`Target file: ${envPath}\n`);
-    const detectedCodexBin = await findWorkingCodexBin(existingValues.CODEX_BIN ?? "codex");
+    const existingProviderRaw = (existingValues.AI_CLI_PROVIDER ?? "").trim().toLowerCase();
+    const providerFallback: AiCliProvider = existingProviderRaw === "claude" ? "claude" : "codex";
+    const detectedDefaultBin = await findWorkingCliBin(existingValues.CODEX_BIN ?? "", {
+      provider: providerFallback,
+    });
 
     const questions: InitQuestion[] = [
       {
@@ -88,9 +92,21 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
         fallbackValue: "!code",
       },
       {
+        key: "AI_CLI_PROVIDER",
+        label: "AI CLI provider (codex/claude)",
+        fallbackValue: providerFallback,
+        validate: (value) => {
+          const normalized = value.trim().toLowerCase();
+          if (normalized !== "codex" && normalized !== "claude") {
+            return 'Provider must be "codex" or "claude"';
+          }
+          return null;
+        },
+      },
+      {
         key: "CODEX_BIN",
-        label: "Codex binary",
-        fallbackValue: detectedCodexBin ?? "codex",
+        label: "AI CLI binary",
+        fallbackValue: detectedDefaultBin ?? (providerFallback === "claude" ? "claude" : "codex"),
       },
       {
         key: "CODEX_WORKDIR",
@@ -111,6 +127,15 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       const existingValue = (existingValues[question.key] ?? "").trim();
       const value = await askValue(rl, question, existingValue);
       updates[question.key] = value;
+
+      if (question.key === "AI_CLI_PROVIDER") {
+        const provider = value.trim().toLowerCase() === "claude" ? "claude" : "codex";
+        const detectedBin = await findWorkingCliBin(existingValues.CODEX_BIN ?? "", { provider });
+        const binaryQuestion = questions.find((item) => item.key === "CODEX_BIN");
+        if (binaryQuestion) {
+          binaryQuestion.fallbackValue = detectedBin ?? (provider === "claude" ? "claude" : "codex");
+        }
+      }
     }
 
     const mergedContent = applyEnvOverrides(templateContent, updates);
@@ -118,7 +143,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 
     output.write(`Wrote ${envPath}\n`);
     output.write("Next steps:\n");
-    output.write("1. codex login\n");
+    output.write("1. login selected AI CLI (codex login / claude login)\n");
     output.write("2. codeharbor doctor\n");
     output.write("3. codeharbor start\n");
   } finally {

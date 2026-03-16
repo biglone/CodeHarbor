@@ -34,6 +34,7 @@ export class CodeHarborApp {
     );
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
     const executor = new CodexExecutor({
+      provider: config.aiCliProvider,
       bin: config.codexBin,
       model: config.codexModel,
       workdir: config.codexWorkdir,
@@ -69,6 +70,7 @@ export class CodeHarborApp {
       }),
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
+      aiCliProvider: config.aiCliProvider,
     });
   }
 
@@ -76,6 +78,7 @@ export class CodeHarborApp {
     this.logger.info("CodeHarbor starting", {
       matrixHomeserver: this.config.matrixHomeserver,
       workdir: this.config.codexWorkdir,
+      provider: this.config.aiCliProvider,
       prefix: this.config.matrixCommandPrefix || "<none>",
     });
     await this.channel.start(this.orchestrator.handleMessage.bind(this.orchestrator));
@@ -143,12 +146,13 @@ export class CodeHarborAdminApp {
 export async function runDoctor(config: AppConfig): Promise<void> {
   const logger = new Logger(config.logLevel);
   logger.info("Doctor check started");
+  const cliLabel = config.aiCliProvider === "claude" ? "claude code" : "codex";
 
   try {
     const { stdout } = await execFileAsync(config.codexBin, ["--version"]);
-    logger.info("codex available", { version: stdout.trim() });
+    logger.info("ai cli available", { provider: config.aiCliProvider, cli: cliLabel, version: stdout.trim() });
   } catch (error) {
-    logger.error("codex unavailable", error);
+    logger.error("ai cli unavailable", error);
     throw error;
   }
 

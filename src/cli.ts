@@ -28,7 +28,7 @@ const program = new Command();
 
 program
   .name("codeharbor")
-  .description("Instant-messaging bridge for Codex CLI sessions")
+  .description("Instant-messaging bridge for Codex/Claude Code CLI sessions")
   .version(cliVersion);
 
 program.addHelpText(
@@ -36,7 +36,7 @@ program.addHelpText(
   [
     "",
     "Prerequisites:",
-    "  - codex CLI installed and authenticated (run: codex login)",
+    "  - AI CLI installed and authenticated (Codex: codex login; Claude Code: claude login)",
     "  - Matrix bot credentials in .env: MATRIX_HOMESERVER, MATRIX_USER_ID, MATRIX_ACCESS_TOKEN",
     "",
     "Runtime:",
@@ -89,7 +89,7 @@ program
 
 program
   .command("doctor")
-  .description("Check codex and matrix connectivity")
+  .description("Check AI CLI and matrix connectivity")
   .action(async () => {
     const home = ensureRuntimeHomeOrExit();
     const config = await loadConfigWithPreflight("doctor", home);

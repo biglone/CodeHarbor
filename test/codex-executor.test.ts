@@ -220,4 +220,97 @@ describe("CodexExecutor", () => {
       }),
     );
   });
+
+  it("supports claude provider with print JSON output", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      provider: "claude",
+      bin: "claude",
+      model: "sonnet",
+      workdir: process.cwd(),
+      dangerousBypass: true,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("hello", null);
+    child.stdout.write('{"type":"result","subtype":"success","session_id":"session-1","result":"Hi"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "session-1",
+      reply: "Hi",
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining(["-p", "hello", "--output-format", "json", "--model", "sonnet"]),
+      expect.any(Object),
+    );
+    expect(spawnMock).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining(["--permission-mode", "bypassPermissions"]),
+      expect.any(Object),
+    );
+  });
+
+  it("supports claude session resume", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      provider: "claude",
+      bin: "claude",
+      model: null,
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("follow-up", "session-old");
+    child.stdout.write('{"type":"result","subtype":"success","session_id":"session-old","result":"done"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "session-old",
+      reply: "done",
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining(["--resume", "session-old"]),
+      expect.any(Object),
+    );
+  });
+
+  it("throws when claude reports result error", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      provider: "claude",
+      bin: "claude",
+      model: null,
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("hello", null);
+    child.stdout.write('{"type":"result","subtype":"error","is_error":true,"session_id":"s1","error":"denied"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).rejects.toThrow("claude returned error: denied");
+  });
 });

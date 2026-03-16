@@ -38,6 +38,8 @@ export interface UpdateCheckConfig {
   ttlMs: number;
 }
 
+export type AiCliProvider = "codex" | "claude";
+
 export type AdminTokenRole = "admin" | "viewer";
 
 export interface AdminTokenConfig {
@@ -52,7 +54,8 @@ const configSchema = z
     MATRIX_USER_ID: z.string().min(1),
     MATRIX_ACCESS_TOKEN: z.string().min(1),
     MATRIX_COMMAND_PREFIX: z.string().default("!code"),
-    CODEX_BIN: z.string().default("codex"),
+    AI_CLI_PROVIDER: z.enum(["codex", "claude"]).default("codex"),
+    CODEX_BIN: z.string().default(""),
     CODEX_MODEL: z.string().optional(),
     CODEX_WORKDIR: z.string().default("."),
     CODEX_DANGEROUS_BYPASS: z
@@ -267,7 +270,8 @@ const configSchema = z
     matrixUserId: v.MATRIX_USER_ID,
     matrixAccessToken: v.MATRIX_ACCESS_TOKEN,
     matrixCommandPrefix: v.MATRIX_COMMAND_PREFIX,
-    codexBin: v.CODEX_BIN,
+    aiCliProvider: v.AI_CLI_PROVIDER,
+    codexBin: v.CODEX_BIN.trim() || (v.AI_CLI_PROVIDER === "claude" ? "claude" : "codex"),
     codexModel: v.CODEX_MODEL?.trim() || null,
     codexWorkdir: path.resolve(v.CODEX_WORKDIR),
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,

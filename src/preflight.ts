@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { findWorkingCodexBin } from "./codex-bin";
+import { findWorkingCliBin } from "./codex-bin";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,12 +101,19 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
     });
   }
 
-  const codexBin = readEnv(env, "CODEX_BIN") || "codex";
+  const aiCliProvider = readEnv(env, "AI_CLI_PROVIDER").toLowerCase() === "claude" ? "claude" : "codex";
+  const aiCliCommand = aiCliProvider === "claude" ? "claude" : "codex";
+  const aiCliName = aiCliProvider === "claude" ? "Claude Code CLI" : "Codex CLI";
+  const codexBin = readEnv(env, "CODEX_BIN") || aiCliCommand;
   try {
     await checkCodexBinary(codexBin);
     resolvedCodexBin = codexBin;
   } catch (error) {
-    const fallbackBin = await findWorkingCodexBin(codexBin, { env, checkBinary: checkCodexBinary });
+    const fallbackBin = await findWorkingCliBin(codexBin, {
+      env,
+      checkBinary: checkCodexBinary,
+      provider: aiCliProvider,
+    });
     if (fallbackBin && fallbackBin !== codexBin) {
       resolvedCodexBin = fallbackBin;
       usedCodexFallback = true;
@@ -126,7 +133,7 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
         code: "missing_codex_bin",
         check: "CODEX_BIN",
         message: `Unable to execute "${codexBin}"${reason}.`,
-        fix: `Install Codex CLI and ensure "${codexBin}" is in PATH, or set CODEX_BIN=/absolute/path/to/codex.`,
+        fix: `Install ${aiCliName} and ensure "${codexBin}" is in PATH, or set CODEX_BIN=/absolute/path/to/${aiCliCommand}.`,
       });
     }
   }

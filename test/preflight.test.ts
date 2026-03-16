@@ -103,6 +103,33 @@ describe("runStartupPreflight", () => {
       }),
     ]);
   });
+
+  it("supports claude provider binary probing", async () => {
+    const checks: string[] = [];
+    const result = await runStartupPreflight({
+      cwd: "/tmp/work",
+      env: {
+        MATRIX_HOMESERVER: "https://matrix.example.com",
+        MATRIX_USER_ID: "@bot:example.com",
+        MATRIX_ACCESS_TOKEN: "token",
+        AI_CLI_PROVIDER: "claude",
+        CODEX_WORKDIR: "/tmp/work",
+      },
+      checkCodexBinary: async (bin) => {
+        checks.push(bin);
+        if (bin === "claude") {
+          return;
+        }
+        throw new Error("ENOENT");
+      },
+      fileExists: () => true,
+      isDirectory: () => true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.resolvedCodexBin).toBe("claude");
+    expect(checks[0]).toBe("claude");
+  });
 });
 
 describe("formatPreflightReport", () => {

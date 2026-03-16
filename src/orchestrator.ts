@@ -64,6 +64,7 @@ interface OrchestratorOptions {
   audioTranscriber?: AudioTranscriberLike;
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
+  aiCliProvider?: "codex" | "claude";
 }
 
 interface SessionLockEntry {
@@ -225,6 +226,7 @@ export class Orchestrator {
   private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
+  private readonly aiCliProvider: "codex" | "claude";
   private readonly botNoticePrefix: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
@@ -316,6 +318,7 @@ export class Orchestrator {
         packageName: "codeharbor",
         currentVersion,
       });
+    this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
@@ -749,8 +752,9 @@ export class Orchestrator {
 - 会话类型: ${scope}
 - 激活中: ${status.isActive ? "是" : "否"}
 - activeUntil: ${activeUntil}
-- 已绑定 Codex 会话: ${status.hasCodexSession ? "是" : "否"}
+- 已绑定会话: ${status.hasCodexSession ? "是" : "否"}
 - 当前工作目录: ${roomConfig.workdir}
+- AI CLI: ${this.aiCliProvider}
 - 当前版本: ${packageUpdate.currentVersion}
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 更新检查时间: ${packageUpdate.checkedAt}

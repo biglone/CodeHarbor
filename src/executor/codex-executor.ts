@@ -3,7 +3,10 @@ import readline from "node:readline";
 
 import { CodexExecutionResult } from "../types";
 
+type AiCliProvider = "codex" | "claude";
+
 export interface CodexExecutorOptions {
+  provider?: AiCliProvider;
   bin: string;
   model: string | null;
   workdir: string;
@@ -52,6 +55,17 @@ interface CodexJsonEvent {
   [key: string]: unknown;
 }
 
+interface ClaudeJsonEvent {
+  type?: string;
+  subtype?: string;
+  session_id?: string;
+  result?: string;
+  is_error?: boolean;
+  error?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
 export class CodexExecutionCancelledError extends Error {
   constructor(message = "codex execution cancelled") {
     super(message);
@@ -61,9 +75,11 @@ export class CodexExecutionCancelledError extends Error {
 
 export class CodexExecutor {
   private readonly options: CodexExecutorOptions;
+  private readonly provider: AiCliProvider;
 
   constructor(options: CodexExecutorOptions) {
     this.options = options;
+    this.provider = options.provider ?? "codex";
   }
 
   async execute(
@@ -81,7 +97,7 @@ export class CodexExecutor {
     onProgress?: CodexProgressHandler,
     startOptions?: CodexExecutionStartOptions,
   ): CodexExecutionHandle {
-    const args = buildCodexArgs(prompt, sessionId, this.options, startOptions);
+    const args = buildCliArgs(prompt, sessionId, this.options, startOptions, this.provider);
     const child = spawn(this.options.bin, args, {
       cwd: startOptions?.workdir ?? this.options.workdir,
       env: {
@@ -98,58 +114,39 @@ export class CodexExecutor {
     let cancelled = false;
     let killTimer: NodeJS.Timeout | null = null;
     let completed = false;
+    let latestProviderError: string | null = null;
     const passThroughRawEvents = startOptions?.passThroughRawEvents ?? false;
 
     const lineReader = readline.createInterface({ input: child.stdout });
     lineReader.on("line", (line) => {
+      if (this.provider === "claude") {
+        const event = parseClaudeJsonLine(line);
+        if (!event) {
+          return;
+        }
+        latestProviderError = handleClaudeEvent(
+          event,
+          passThroughRawEvents,
+          onProgress,
+          (value) => {
+            resolvedThreadId = value;
+          },
+          (value) => {
+            latestMessage = value;
+          },
+          latestProviderError,
+        );
+        return;
+      }
       const event = parseCodexJsonLine(line);
       if (!event) {
         return;
       }
-
-      if (passThroughRawEvents) {
-        onProgress?.({
-          stage: "raw_event",
-          eventType: typeof event.type === "string" ? event.type : "unknown",
-          raw: event,
-          message: summarizeRawEvent(event),
-        });
-      }
-
-      if (event.type === "thread.started" && event.thread_id) {
-        resolvedThreadId = event.thread_id;
-        onProgress?.({ stage: "thread_started", message: event.thread_id, eventType: event.type, raw: event });
-      }
-      if (event.type === "turn.started") {
-        onProgress?.({ stage: "turn_started", eventType: event.type, raw: event });
-      }
-      if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
-        latestMessage = event.item.text.trim();
-      }
-      if (event.type === "item.completed" && event.item?.type === "reasoning" && event.item.text) {
-        onProgress?.({
-          stage: "reasoning",
-          message: event.item.text.trim(),
-          eventType: event.type,
-          raw: event,
-        });
-      }
-      if (
-        event.type === "item.completed" &&
-        event.item?.type &&
-        event.item?.type !== "agent_message" &&
-        event.item?.type !== "reasoning"
-      ) {
-        onProgress?.({
-          stage: "item_completed",
-          message: event.item.type,
-          eventType: event.type,
-          raw: event,
-        });
-      }
-      if (event.type === "turn.completed") {
-        onProgress?.({ stage: "turn_completed", eventType: event.type, raw: event });
-      }
+      handleCodexEvent(event, passThroughRawEvents, onProgress, (value) => {
+        resolvedThreadId = value;
+      }, (value) => {
+        latestMessage = value;
+      });
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
@@ -197,19 +194,24 @@ export class CodexExecutor {
       });
 
       if (timedOut) {
-        throw new Error(`codex execution timed out after ${this.options.timeoutMs}ms`);
+        throw new Error(`${this.provider} execution timed out after ${this.options.timeoutMs}ms`);
       }
       if (cancelled) {
         throw new CodexExecutionCancelledError();
       }
       if (exitCode !== 0) {
-        throw new Error(`codex exited with code ${exitCode}: ${stderr.trim() || "<no stderr output>"}`);
+        throw new Error(`${this.provider} exited with code ${exitCode}: ${stderr.trim() || "<no stderr output>"}`);
+      }
+      if (latestProviderError) {
+        throw new Error(`${this.provider} returned error: ${latestProviderError}`);
       }
       if (!resolvedThreadId) {
-        throw new Error("codex did not return thread_id.");
+        throw new Error(
+          this.provider === "codex" ? "codex did not return thread_id." : "claude did not return session_id.",
+        );
       }
       if (!latestMessage) {
-        throw new Error("codex did not return a final assistant message.");
+        throw new Error(`${this.provider} did not return a final assistant message.`);
       }
 
       return {
@@ -246,6 +248,44 @@ export function parseCodexJsonLine(line: string): CodexJsonEvent | null {
   } catch {
     return null;
   }
+}
+
+export function parseClaudeJsonLine(line: string): ClaudeJsonEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) {
+      for (let i = parsed.length - 1; i >= 0; i -= 1) {
+        const item = parsed[i];
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          return item as ClaudeJsonEvent;
+        }
+      }
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    return parsed as ClaudeJsonEvent;
+  } catch {
+    return null;
+  }
+}
+
+function buildCliArgs(
+  prompt: string,
+  sessionId: string | null,
+  options: CodexExecutorOptions,
+  startOptions: CodexExecutionStartOptions | undefined,
+  provider: AiCliProvider,
+): string[] {
+  if (provider === "claude") {
+    return buildClaudeArgs(prompt, sessionId, options);
+  }
+  return buildCodexArgs(prompt, sessionId, options, startOptions);
 }
 
 function buildCodexArgs(
@@ -287,8 +327,127 @@ function buildCodexArgs(
   return args;
 }
 
+function buildClaudeArgs(prompt: string, sessionId: string | null, options: CodexExecutorOptions): string[] {
+  const args: string[] = ["-p", prompt, "--output-format", "json"];
+  if (sessionId) {
+    args.push("--resume", sessionId);
+  }
+  if (options.model) {
+    args.push("--model", options.model);
+  }
+  if (options.dangerousBypass) {
+    args.push("--permission-mode", "bypassPermissions");
+  }
+  if (options.extraArgs.length > 0) {
+    args.push(...options.extraArgs);
+  }
+  return args;
+}
+
+function handleCodexEvent(
+  event: CodexJsonEvent,
+  passThroughRawEvents: boolean,
+  onProgress: CodexProgressHandler | undefined,
+  setSessionId: (value: string) => void,
+  setLatestMessage: (value: string) => void,
+): void {
+  if (passThroughRawEvents) {
+    onProgress?.({
+      stage: "raw_event",
+      eventType: typeof event.type === "string" ? event.type : "unknown",
+      raw: event,
+      message: summarizeRawEvent(event),
+    });
+  }
+
+  if (event.type === "thread.started" && event.thread_id) {
+    setSessionId(event.thread_id);
+    onProgress?.({ stage: "thread_started", message: event.thread_id, eventType: event.type, raw: event });
+  }
+  if (event.type === "turn.started") {
+    onProgress?.({ stage: "turn_started", eventType: event.type, raw: event });
+  }
+  if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
+    setLatestMessage(event.item.text.trim());
+  }
+  if (event.type === "item.completed" && event.item?.type === "reasoning" && event.item.text) {
+    onProgress?.({
+      stage: "reasoning",
+      message: event.item.text.trim(),
+      eventType: event.type,
+      raw: event,
+    });
+  }
+  if (
+    event.type === "item.completed" &&
+    event.item?.type &&
+    event.item?.type !== "agent_message" &&
+    event.item?.type !== "reasoning"
+  ) {
+    onProgress?.({
+      stage: "item_completed",
+      message: event.item.type,
+      eventType: event.type,
+      raw: event,
+    });
+  }
+  if (event.type === "turn.completed") {
+    onProgress?.({ stage: "turn_completed", eventType: event.type, raw: event });
+  }
+}
+
+function handleClaudeEvent(
+  event: ClaudeJsonEvent,
+  passThroughRawEvents: boolean,
+  onProgress: CodexProgressHandler | undefined,
+  setSessionId: (value: string) => void,
+  setLatestMessage: (value: string) => void,
+  currentError: string | null,
+): string | null {
+  if (passThroughRawEvents) {
+    onProgress?.({
+      stage: "raw_event",
+      eventType: typeof event.type === "string" ? event.type : "unknown",
+      raw: event,
+      message: summarizeClaudeRawEvent(event),
+    });
+  }
+
+  if (event.type === "result" && typeof event.session_id === "string" && event.session_id.trim()) {
+    setSessionId(event.session_id.trim());
+    onProgress?.({ stage: "thread_started", message: event.session_id.trim(), eventType: event.type, raw: event });
+  }
+  if (event.type === "result" && typeof event.result === "string" && event.result.trim()) {
+    setLatestMessage(event.result.trim());
+    onProgress?.({ stage: "turn_completed", eventType: event.type, raw: event });
+  }
+  if (event.type === "result" && event.is_error === true) {
+    return extractClaudeError(event) ?? currentError;
+  }
+  return currentError;
+}
+
 function summarizeRawEvent(event: CodexJsonEvent): string {
   const type = typeof event.type === "string" ? event.type : "unknown";
   const itemType = event.item?.type ? ` item=${event.item.type}` : "";
   return `event=${type}${itemType}`;
+}
+
+function summarizeClaudeRawEvent(event: ClaudeJsonEvent): string {
+  const type = typeof event.type === "string" ? event.type : "unknown";
+  const subtype = event.subtype ? ` subtype=${event.subtype}` : "";
+  return `event=${type}${subtype}`;
+}
+
+function extractClaudeError(event: ClaudeJsonEvent): string | null {
+  if (typeof event.error === "string" && event.error.trim()) {
+    return event.error.trim();
+  }
+  if (typeof event.message === "string" && event.message.trim()) {
+    return event.message.trim();
+  }
+  if (typeof event.result === "string" && event.result.trim()) {
+    return event.result.trim();
+  }
+  return null;
 }
