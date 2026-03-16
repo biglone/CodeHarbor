@@ -75,6 +75,15 @@ codeharbor doctor
 codeharbor start
 ```
 
+查看完整命令帮助：
+
+```bash
+codeharbor --help
+codeharbor admin --help
+codeharbor config --help
+codeharbor service --help
+```
+
 如果你要长期运行，建议安装系统服务：
 
 ```bash
