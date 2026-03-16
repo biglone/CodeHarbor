@@ -566,7 +566,44 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("当前版本:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查时间:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("更新来源: 缓存结果"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
+  });
+
+  it("shows runtime diagnosis for /diag version command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const getStatus = vi.fn(async () => ({
+      packageName: "codeharbor",
+      currentVersion: "0.1.31",
+      latestVersion: "0.1.31",
+      state: "up_to_date" as const,
+      checkedAt: "2026-03-16T10:11:12.000Z",
+      error: null,
+      upgradeCommand: "npm install -g codeharbor@latest",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      packageUpdateChecker: {
+        getStatus,
+      },
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5-codex",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag version" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(getStatus).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(channel.notices.some((entry) => entry.text.includes("诊断信息（version）"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("pid:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("backend: codex (gpt-5-codex)"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("latestHint:"))).toBe(true);
   });
 
   it("shows current version and update hint for /version command", async () => {

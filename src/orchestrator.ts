@@ -1,5 +1,6 @@
 import { Mutex } from "async-mutex";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { MatrixChannel } from "./channels/matrix-channel";
@@ -61,6 +62,7 @@ interface OrchestratorOptions {
     autoRepairMaxRounds: number;
   };
   packageUpdateChecker?: PackageUpdateChecker;
+  updateCheckTtlMs?: number;
   audioTranscriber?: AudioTranscriberLike;
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
@@ -77,7 +79,7 @@ interface SessionLockEntry {
 type RouteDecision =
   | { kind: "ignore" }
   | { kind: "execute"; prompt: string }
-  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" };
+  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" | "diag" };
 
 type RequestOutcome =
   | "success"
@@ -232,9 +234,11 @@ export class Orchestrator {
   private readonly audioTranscriber: AudioTranscriberLike;
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
+  private readonly updateCheckTtlMs: number;
   private aiCliProvider: "codex" | "claude";
   private readonly aiCliModel: string | null;
   private readonly botNoticePrefix: string;
+  private readonly processStartedAtIso: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly metrics = new RequestMetrics();
@@ -325,9 +329,11 @@ export class Orchestrator {
         packageName: "codeharbor",
         currentVersion,
       });
+    this.updateCheckTtlMs = Math.max(0, options?.updateCheckTtlMs ?? 6 * 60 * 60 * 1000);
     this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.aiCliModel = options?.aiCliModel?.trim() || null;
+    this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
 
@@ -713,7 +719,7 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "version" | "backend" | "stop" | "reset",
+    command: "status" | "version" | "backend" | "stop" | "reset" | "diag",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -751,6 +757,11 @@ export class Orchestrator {
       return;
     }
 
+    if (command === "diag") {
+      await this.handleDiagCommand(message);
+      return;
+    }
+
     const status = this.stateStore.getSessionStatus(sessionKey);
     const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
     const scope = message.isDirectMessage
@@ -774,10 +785,11 @@ export class Orchestrator {
 - activeUntil: ${activeUntil}
 - 已绑定会话: ${status.hasCodexSession ? "是" : "否"}
 - 当前工作目录: ${roomConfig.workdir}
-- AI CLI: ${this.aiCliProvider}
+- AI CLI: ${this.formatBackendToolLabel()}
 - 当前版本: ${packageUpdate.currentVersion}
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 更新检查时间: ${packageUpdate.checkedAt}
+- 更新来源: 缓存结果（TTL=${formatCacheTtl(this.updateCheckTtlMs)}，发送 /version 可实时刷新）
 - 运行中任务: ${metrics.activeExecutions}
 - 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
 - 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
@@ -1584,6 +1596,40 @@ export class Orchestrator {
     }
     return `${this.aiCliProvider} (${this.aiCliModel})`;
   }
+
+  private async handleDiagCommand(message: InboundMessage): Promise<void> {
+    const target = parseDiagTarget(message.text);
+    if (!target || target === "help") {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 用法: /diag version",
+      );
+      return;
+    }
+    if (target !== "version") {
+      return;
+    }
+
+    const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
+    const cliScriptPath = process.argv[1] ? path.resolve(process.argv[1]) : "unknown";
+    const uptimeMs = Math.max(0, Math.floor(process.uptime() * 1_000));
+
+    await this.channel.sendNotice(
+      message.conversationId,
+      `${this.botNoticePrefix} 诊断信息（version）
+- pid: ${process.pid}
+- startedAt: ${this.processStartedAtIso}
+- uptime: ${formatDurationMs(uptimeMs)}
+- node: ${process.version}
+- nodeExecPath: ${process.execPath}
+- cliScriptPath: ${cliScriptPath}
+- cwd: ${process.cwd()}
+- backend: ${this.formatBackendToolLabel()}
+- currentVersion: ${packageUpdate.currentVersion}
+- latestHint: ${formatPackageUpdateHint(packageUpdate)}
+- checkedAt: ${packageUpdate.checkedAt}`,
+    );
+  }
 }
 
 function pruneSnapshotMap<T>(
@@ -1725,7 +1771,7 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
   return null;
 }
 
-function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | null {
+function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | "diag" | null {
   const command = text.split(/\s+/, 1)[0].toLowerCase();
   if (command === "/status") {
     return "status";
@@ -1741,6 +1787,21 @@ function parseControlCommand(text: string): "status" | "version" | "backend" | "
   }
   if (command === "/reset") {
     return "reset";
+  }
+  if (command === "/diag") {
+    return "diag";
+  }
+  return null;
+}
+
+function parseDiagTarget(text: string): "version" | "help" | null {
+  const tokens = text.trim().split(/\s+/);
+  if (tokens.length < 2) {
+    return "help";
+  }
+  const value = tokens[1]?.toLowerCase() ?? "";
+  if (value === "version") {
+    return "version";
   }
   return null;
 }
@@ -1786,6 +1847,19 @@ function formatDurationMs(durationMs: number): string {
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = ((durationMs % 60_000) / 1_000).toFixed(1);
   return `${minutes}m${seconds}s`;
+}
+
+function formatCacheTtl(ttlMs: number): string {
+  if (ttlMs < 1_000) {
+    return `${ttlMs}ms`;
+  }
+  if (ttlMs < 60_000) {
+    return `${Math.round(ttlMs / 1_000)}s`;
+  }
+  if (ttlMs < 60 * 60_000) {
+    return `${Math.round(ttlMs / 60_000)}m`;
+  }
+  return `${(ttlMs / (60 * 60_000)).toFixed(1)}h`;
 }
 
 function buildRateLimitNotice(decision: RateLimitDecision): string {

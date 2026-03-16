@@ -70,6 +70,7 @@ export class CodeHarborApp {
         timeoutMs: config.updateCheck.timeoutMs,
         ttlMs: config.updateCheck.ttlMs,
       }),
+      updateCheckTtlMs: config.updateCheck.ttlMs,
       configService: this.configService,
       defaultCodexWorkdir: config.codexWorkdir,
       aiCliProvider: config.aiCliProvider,
