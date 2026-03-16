@@ -156,6 +156,7 @@ Common in-chat control commands:
 
 - `/status` show session status, version/update hint, and runtime metrics
 - `/version` force-refresh latest version check
+- `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/backend codex|claude|status` switch or inspect active AI backend
 - `/reset` clear current conversation context
 - `/stop` cancel current running request
@@ -449,8 +450,9 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
-  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time
+  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
+  - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/backend codex|claude|status` switch backend AI CLI tool at runtime (next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
@@ -467,6 +469,11 @@ Version update check controls:
   - timeout (ms) for npm registry version lookup
 - `PACKAGE_UPDATE_CHECK_TTL_MS=21600000`
   - cache TTL (ms) for update-check results (`/status` reads cache; `/version` forces refresh)
+
+CLI update helper:
+
+- `codeharbor self-update`
+  - install latest npm package and attempt auto-restart for installed systemd service
 
 AI CLI backend controls:
 

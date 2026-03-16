@@ -160,8 +160,9 @@ codeharbor admin serve
 
 ### 5.6 版本检查与更新提示
 
-- `/status`：包含当前版本、更新提示和最近一次检查时间（缓存结果）
+- `/status`：包含当前版本、更新提示和最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
+- `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
 - `/backend codex|claude|status`：会话内切换后端工具；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
@@ -207,6 +208,14 @@ codeharbor --version
 ```
 
 Linux 全局安装场景下，升级后会尽力自动重启服务以让新版本立即生效。
+
+也可以直接使用：
+
+```bash
+codeharbor self-update
+```
+
+该命令会安装最新版本并尝试重启已安装的 systemd 主服务（可选 admin 服务）。
 
 ---
 
