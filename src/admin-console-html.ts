@@ -596,6 +596,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.table.details": "详情",
             "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
+            "health.component.claude": "Claude Code",
             "health.component.matrix": "Matrix",
             "health.component.overall": "整体",
             "health.app.detail.updateAvailable": "当前 {current}，最新 {latest}（可更新）",
@@ -730,6 +731,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.table.details": "Details",
             "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
+            "health.component.claude": "Claude Code",
             "health.component.matrix": "Matrix",
             "health.component.overall": "Overall",
             "health.app.detail.updateAvailable": "Current {current}, latest {latest} (update available)",
@@ -1232,10 +1234,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var app = response.app || {};
             var codex = response.codex || {};
             var matrix = response.matrix || {};
+            var provider = response.cliProvider === "claude" ? "claude" : "codex";
+            var cliComponentKey = provider === "claude" ? "health.component.claude" : "health.component.codex";
 
             appendHealthRow(t("health.component.app"), isAppHealthOk(app), formatAppHealthDetail(app));
             appendHealthRow(
-              t("health.component.codex"),
+              t(cliComponentKey),
               Boolean(codex.ok),
               codex.ok ? (codex.version || t("health.status.ok")) : (codex.error || t("health.status.fail"))
             );

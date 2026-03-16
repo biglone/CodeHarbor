@@ -319,6 +319,7 @@ export class AdminServer {
         ]);
         this.sendJson(res, 200, {
           ok: codex.ok && matrix.ok,
+          cliProvider: this.config.aiCliProvider,
           codex,
           matrix,
           app,

@@ -31,6 +31,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     matrixUserId: "@bot:example.com",
     matrixAccessToken: "token",
     matrixCommandPrefix: "!code",
+    aiCliProvider: "codex",
     codexBin: "codex",
     codexModel: null,
     codexWorkdir: cwd,
