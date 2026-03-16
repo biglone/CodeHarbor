@@ -102,6 +102,8 @@ codeharbor admin serve
 3. 到“健康检查”确认 Codex/Matrix 都正常。
 4. 到“配置审计”检查变更记录是否准确。
 
+补充：`/health` 页面会显示 CodeHarbor 当前版本、最新版本（如可查询）以及是否可更新。
+
 注意：全局配置保存后通常需要重启主服务才能完全生效（页面已提供重启按钮）。
 
 ---
@@ -144,6 +146,13 @@ codeharbor admin serve
 - `AGENT_WORKFLOW_ENABLED=true`：开启 `/agents`、`/autodev`
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`：自动修复轮次上限
 
+### 5.6 版本检查与更新提示
+
+- `/status`：包含当前版本与更新提示
+- `/version`：单独查看当前版本与更新提示
+- `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
+- `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
+
 ---
 
 ## 6. 安全建议（强烈推荐）
@@ -168,6 +177,7 @@ codeharbor admin serve
 - DM 发消息，机器人能回复
 - 群聊触发策略符合预期
 - 管理后台 `health` 正常
+- `/version` 返回当前版本与更新提示
 - 管理后台 `audit` 能看到配置变更
 - 重启按钮或 `codeharbor service restart --with-admin` 可用
 - 升级后版本正确：`codeharbor --version`

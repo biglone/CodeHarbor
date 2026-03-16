@@ -237,6 +237,12 @@ This section explains all runtime capabilities and the keys that control them.
   - `MATRIX_PROGRESS_UPDATES`
   - `MATRIX_PROGRESS_MIN_INTERVAL_MS`
   - `MATRIX_TYPING_TIMEOUT_MS`
+  - `PACKAGE_UPDATE_CHECK_ENABLED`
+  - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`
+- **Behavior**:
+  - `/status` and `/version` include current version + update hint
+  - Admin `/health` includes CodeHarbor app version/update row
+  - when update check is disabled or lookup fails, health still shows current version with reason
 
 ### E. CLI compatibility and replay
 
@@ -341,7 +347,8 @@ When in doubt, treat config changes as restart-scoped for operational safety.
 - DM message gets response
 - Group trigger behaves as expected
 - `/status` returns session/limiter/worker info
-- Admin `/health` reports Matrix and Codex OK
+- `/version` returns current version and update hint
+- Admin `/health` reports Matrix/Codex and CodeHarbor app version status
 - Admin `/audit` records your config updates
 - restart commands work (`service restart` or Admin restart API/UI)
 - backup snapshot file is generated and restorable

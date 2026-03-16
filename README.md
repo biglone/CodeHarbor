@@ -331,6 +331,8 @@ Open these UI routes in browser:
 - `/health`
 - `/audit`
 
+`/health` now includes a CodeHarbor app row with current version, latest version, and update availability.
+
 Main endpoints:
 
 - `GET /api/admin/auth/status`
@@ -423,12 +425,20 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/status` show session + limiter + metrics + runtime worker status, current version, and update hint
+  - `/version` show current package version and latest-update hint
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
   - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
   - `/autodev status` show AutoDev doc/task summary + run snapshot (when enabled)
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
+
+Version update check controls:
+
+- `PACKAGE_UPDATE_CHECK_ENABLED=true|false`
+  - enable/disable npm latest-version check used by `/status`, `/version`, and Admin health app row
+- `PACKAGE_UPDATE_CHECK_TIMEOUT_MS=3000`
+  - timeout (ms) for npm registry version lookup
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 

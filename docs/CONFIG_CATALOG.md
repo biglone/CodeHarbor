@@ -67,6 +67,8 @@ These must be valid before `codeharbor start`.
 | `MATRIX_PROGRESS_UPDATES` | No | `true` | Yes | Restart | Emit progress updates |
 | `MATRIX_PROGRESS_MIN_INTERVAL_MS` | No | `2500` | Yes | Restart | Progress update interval |
 | `MATRIX_TYPING_TIMEOUT_MS` | No | `10000` | Yes | Restart | Typing indicator timeout |
+| `PACKAGE_UPDATE_CHECK_ENABLED` | No | `true` | Yes | Restart | Enable npm latest-version lookup for `/status`, `/version`, and Admin health app row |
+| `PACKAGE_UPDATE_CHECK_TIMEOUT_MS` | No | `3000` | Yes | Restart | Timeout (ms) for npm latest-version lookup |
 
 ## 6) CLI Compatibility
 
