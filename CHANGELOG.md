@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-03-17
+
 - Fixed in-chat `/upgrade` restart reliability under hardened systemd services:
   - `/upgrade` now installs with `--skip-restart` and performs service-context restart via process signal fallback
   - avoids sudo escalation failures when `NoNewPrivileges=true`
