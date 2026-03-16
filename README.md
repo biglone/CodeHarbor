@@ -428,6 +428,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
 - Control commands
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time
   - `/version` show current package version and latest-update hint (force refresh)
+  - `/backend codex|claude|status` switch backend AI CLI tool at runtime (session context resets on switch)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
