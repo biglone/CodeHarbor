@@ -49,6 +49,17 @@ export interface ConfigRevisionRecord {
   createdAt: number;
 }
 
+export interface SessionMessageRecord {
+  id: number;
+  sessionKey: string;
+  role: "user" | "assistant";
+  provider: "codex" | "claude";
+  content: string;
+  createdAt: number;
+}
+
+const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
+
 export class StateStore {
   private readonly dbPath: string;
   private readonly legacyJsonPath: string | null;
@@ -324,6 +335,74 @@ export class StateStore {
     }));
   }
 
+  appendConversationMessage(
+    sessionKey: string,
+    role: "user" | "assistant",
+    provider: "codex" | "claude",
+    content: string,
+  ): void {
+    const normalized = content.trim();
+    if (!normalized) {
+      return;
+    }
+    const now = Date.now();
+    this.ensureSession(sessionKey);
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO session_messages (session_key, role, provider, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .run(sessionKey, role, provider, normalized, now);
+      this.db.prepare("UPDATE sessions SET updated_at = ?2 WHERE session_key = ?1").run(sessionKey, now);
+      this.db
+        .prepare(
+          `DELETE FROM session_messages
+           WHERE id IN (
+             SELECT id
+             FROM session_messages
+             WHERE session_key = ?1
+             ORDER BY id DESC
+             LIMIT -1 OFFSET ?2
+           )`,
+        )
+        .run(sessionKey, MAX_CONVERSATION_MESSAGES_PER_SESSION);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listRecentConversationMessages(sessionKey: string, limit = 20): SessionMessageRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db
+      .prepare(
+        `SELECT id, session_key, role, provider, content, created_at
+         FROM session_messages
+         WHERE session_key = ?1
+         ORDER BY id DESC
+         LIMIT ?2`,
+      )
+      .all(sessionKey, safeLimit) as Array<{
+      id: number;
+      session_key: string;
+      role: "user" | "assistant";
+      provider: "codex" | "claude";
+      content: string;
+      created_at: number;
+    }>;
+    rows.reverse();
+    return rows.map((row) => ({
+      id: row.id,
+      sessionKey: row.session_key,
+      role: row.role,
+      provider: row.provider,
+      content: row.content,
+      createdAt: row.created_at,
+    }));
+  }
+
   async flush(): Promise<void> {
     this.touchDatabase();
   }
@@ -401,6 +480,18 @@ export class StateStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_config_revisions_created_at ON config_revisions(created_at);
+
+      CREATE TABLE IF NOT EXISTS session_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_key TEXT NOT NULL,
+        role TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_session_messages_session_id ON session_messages(session_key, id);
     `);
   }
 

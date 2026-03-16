@@ -120,6 +120,8 @@ interface AutoDevRunSnapshot {
 
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const RUN_SNAPSHOT_MAX_ENTRIES = 500;
+const CONTEXT_BRIDGE_HISTORY_LIMIT = 16;
+const CONTEXT_BRIDGE_MAX_CHARS = 8_000;
 
 class RequestMetrics {
   private total = 0;
@@ -209,6 +211,7 @@ export class Orchestrator {
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
   private readonly runningExecutions = new Map<string, RunningExecution>();
   private readonly pendingStopRequests = new Set<string>();
+  private readonly skipBridgeForNextPrompt = new Set<string>();
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
   private readonly progressUpdatesEnabled: boolean;
@@ -471,8 +474,11 @@ export class Orchestrator {
 
         this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
         const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
+        const allowBridgeContext =
+          previousCodexSessionId === null && !this.skipBridgeForNextPrompt.delete(sessionKey);
+        const bridgeContext = allowBridgeContext ? this.buildConversationBridgeContext(sessionKey) : null;
         const audioTranscripts = await this.transcribeAudioAttachments(message, requestId, sessionKey);
-        const executionPrompt = this.buildExecutionPrompt(route.prompt, message, audioTranscripts);
+        const executionPrompt = this.buildExecutionPrompt(route.prompt, message, audioTranscripts, bridgeContext);
         const imagePaths = collectImagePaths(message);
         let lastProgressAt = 0;
         let lastProgressText = "";
@@ -501,6 +507,7 @@ export class Orchestrator {
           prompt: executionPrompt,
           imageCount: imagePaths.length,
         });
+        this.stateStore.appendConversationMessage(sessionKey, "user", this.aiCliProvider, route.prompt);
         this.logger.info("Processing message", {
           requestId,
           sessionKey,
@@ -571,6 +578,7 @@ export class Orchestrator {
 
           const sendStartedAt = Date.now();
           await this.channel.sendMessage(message.conversationId, result.reply);
+          this.stateStore.appendConversationMessage(sessionKey, "assistant", this.aiCliProvider, result.reply);
           await this.finishProgress(
             {
               conversationId: message.conversationId,
@@ -716,6 +724,7 @@ export class Orchestrator {
       this.stateStore.clearCodexSessionId(sessionKey);
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
       this.sessionRuntime.clearSession(sessionKey);
+      this.skipBridgeForNextPrompt.add(sessionKey);
       this.workflowSnapshots.delete(sessionKey);
       this.autoDevSnapshots.delete(sessionKey);
       await this.channel.sendNotice(
@@ -1091,6 +1100,7 @@ export class Orchestrator {
     this.stateStore.deactivateSession(sessionKey);
     this.stateStore.clearCodexSessionId(sessionKey);
     this.sessionRuntime.clearSession(sessionKey);
+    this.skipBridgeForNextPrompt.add(sessionKey);
 
     const running = this.runningExecutions.get(sessionKey);
     if (running) {
@@ -1353,35 +1363,87 @@ export class Orchestrator {
     }
   }
 
-  private buildExecutionPrompt(prompt: string, message: InboundMessage, audioTranscripts: AudioTranscript[]): string {
+  private buildExecutionPrompt(
+    prompt: string,
+    message: InboundMessage,
+    audioTranscripts: AudioTranscript[],
+    bridgeContext: string | null,
+  ): string {
+    let composed: string;
     if (message.attachments.length === 0 && audioTranscripts.length === 0) {
-      return prompt;
-    }
-
-    const attachmentSummary = message.attachments
-      .map((attachment) => {
-        const size = attachment.sizeBytes === null ? "unknown" : `${attachment.sizeBytes}`;
-        const mime = attachment.mimeType ?? "unknown";
-        const source = attachment.mxcUrl ?? "none";
-        const local = attachment.localPath ?? "none";
-        return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source} local=${local}`;
-      })
-      .join("\n");
-
-    const promptBody = prompt.trim() ? prompt : "(no text body)";
-    const sections = [promptBody];
-    if (attachmentSummary) {
-      sections.push(`[attachments]\n${attachmentSummary}\n[/attachments]`);
-    }
-
-    if (audioTranscripts.length > 0) {
-      const transcriptSummary = audioTranscripts
-        .map((transcript) => `- name=${transcript.name} text=${transcript.text.replace(/\s+/g, " ").trim()}`)
+      composed = prompt;
+    } else {
+      const attachmentSummary = message.attachments
+        .map((attachment) => {
+          const size = attachment.sizeBytes === null ? "unknown" : `${attachment.sizeBytes}`;
+          const mime = attachment.mimeType ?? "unknown";
+          const source = attachment.mxcUrl ?? "none";
+          const local = attachment.localPath ?? "none";
+          return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source} local=${local}`;
+        })
         .join("\n");
-      sections.push(`[audio_transcripts]\n${transcriptSummary}\n[/audio_transcripts]`);
+
+      const promptBody = prompt.trim() ? prompt : "(no text body)";
+      const sections = [promptBody];
+      if (attachmentSummary) {
+        sections.push(`[attachments]\n${attachmentSummary}\n[/attachments]`);
+      }
+
+      if (audioTranscripts.length > 0) {
+        const transcriptSummary = audioTranscripts
+          .map((transcript) => `- name=${transcript.name} text=${transcript.text.replace(/\s+/g, " ").trim()}`)
+          .join("\n");
+        sections.push(`[audio_transcripts]\n${transcriptSummary}\n[/audio_transcripts]`);
+      }
+      composed = sections.join("\n\n");
     }
 
-    return sections.join("\n\n");
+    if (!bridgeContext) {
+      return composed;
+    }
+    return `${bridgeContext}\n\n[current_request]\n${composed}`;
+  }
+
+  private buildConversationBridgeContext(sessionKey: string): string | null {
+    const messages = this.stateStore.listRecentConversationMessages(sessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT);
+    if (messages.length === 0) {
+      return null;
+    }
+
+    const lines = messages
+      .map((message) => {
+        const role = message.role === "user" ? "user" : "assistant";
+        const compact = message.content.replace(/\s+/g, " ").trim();
+        const truncated = compact.length > 1_000 ? `${compact.slice(0, 1000)}...` : compact;
+        return `- [${message.provider}] ${role}: ${truncated}`;
+      })
+      .filter((line) => line.length > 0);
+    if (lines.length === 0) {
+      return null;
+    }
+
+    const selected: string[] = [];
+    let usedChars = 0;
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i];
+      if (usedChars + line.length + 1 > CONTEXT_BRIDGE_MAX_CHARS) {
+        continue;
+      }
+      selected.push(line);
+      usedChars += line.length + 1;
+    }
+    if (selected.length === 0) {
+      return null;
+    }
+    selected.reverse();
+
+    return [
+      "[conversation_bridge]",
+      "The following local chat history is from the same conversation before backend switch. Use it as context.",
+      "Do not reprint full history unless user asks.",
+      ...selected,
+      "[/conversation_bridge]",
+    ].join("\n");
   }
 
   private async recordCliCompatPrompt(entry: {
@@ -1509,7 +1571,7 @@ export class Orchestrator {
 
     await this.channel.sendNotice(
       message.conversationId,
-      `[CodeHarbor] 已切换后端工具为 ${target}，当前会话上下文已重置。`,
+      `[CodeHarbor] 已切换后端工具为 ${target}。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
     );
   }
 }
