@@ -574,6 +574,88 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
+  it("runs in-chat /upgrade with optional version", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@alice:example.com"],
+      selfUpdateRunner,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade v0.1.34" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).toHaveBeenCalledWith({ version: "0.1.34" });
+    expect(channel.notices.some((entry) => entry.text.includes("已开始升级"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("升级任务完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("已安装版本: 0.1.34"))).toBe(true);
+  });
+
+  it("supports plain-text upgrade alias and rejects unauthorized users", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@ops:example.com"],
+      selfUpdateRunner,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "升级 0.1.34" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).not.toHaveBeenCalled();
+    expect(channel.notices.some((entry) => entry.text.includes("无执行 /upgrade 权限"))).toBe(true);
+  });
+
+  it("rejects /upgrade command in group rooms", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      selfUpdateRunner,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: false,
+        mentionsBot: true,
+        text: "@bot:example.com /upgrade",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).not.toHaveBeenCalled();
+    expect(channel.notices.some((entry) => entry.text.includes("仅支持私聊"))).toBe(true);
+  });
+
   it("shows runtime diagnosis for /diag version command", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor();

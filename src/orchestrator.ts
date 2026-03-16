@@ -1,6 +1,9 @@
 import { Mutex } from "async-mutex";
+import { execFile, type ExecFileException } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { MatrixChannel } from "./channels/matrix-channel";
@@ -69,6 +72,9 @@ interface OrchestratorOptions {
   aiCliProvider?: "codex" | "claude";
   aiCliModel?: string | null;
   executorFactory?: (provider: "codex" | "claude") => CodexExecutor;
+  upgradeAllowedUsers?: string[];
+  selfUpdateTimeoutMs?: number;
+  selfUpdateRunner?: SelfUpdateRunner;
 }
 
 interface SessionLockEntry {
@@ -79,7 +85,10 @@ interface SessionLockEntry {
 type RouteDecision =
   | { kind: "ignore" }
   | { kind: "execute"; prompt: string }
-  | { kind: "command"; command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" };
+  | {
+      kind: "command";
+      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
+    };
 
 type RequestOutcome =
   | "success"
@@ -121,10 +130,21 @@ interface AutoDevRunSnapshot {
   error: string | null;
 }
 
+interface SelfUpdateResult {
+  installedVersion: string | null;
+  stdout: string;
+  stderr: string;
+}
+
+type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
+
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const RUN_SNAPSHOT_MAX_ENTRIES = 500;
 const CONTEXT_BRIDGE_HISTORY_LIMIT = 16;
 const CONTEXT_BRIDGE_MAX_CHARS = 8_000;
+const DEFAULT_SELF_UPDATE_TIMEOUT_MS = 20 * 60 * 1_000;
+
+const execFileAsync = promisify(execFile);
 
 class RequestMetrics {
   private total = 0;
@@ -241,6 +261,9 @@ export class Orchestrator {
   private readonly processStartedAtIso: string;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
+  private readonly upgradeAllowedUsers: Set<string>;
+  private readonly selfUpdateRunner: SelfUpdateRunner;
+  private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
   private lastLockPruneAt = 0;
 
@@ -333,6 +356,19 @@ export class Orchestrator {
     this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.aiCliModel = options?.aiCliModel?.trim() || null;
+    this.upgradeAllowedUsers = new Set(
+      (options?.upgradeAllowedUsers ?? parseCsvValues(process.env.MATRIX_UPGRADE_ALLOWED_USERS ?? ""))
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    );
+    const selfUpdateTimeoutMs = Math.max(1_000, options?.selfUpdateTimeoutMs ?? DEFAULT_SELF_UPDATE_TIMEOUT_MS);
+    this.selfUpdateRunner =
+      options?.selfUpdateRunner ??
+      ((input) =>
+        runSelfUpdateCommand({
+          version: input.version,
+          timeoutMs: selfUpdateTimeoutMs,
+        }));
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
   }
@@ -719,7 +755,7 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help",
+    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -770,10 +806,17 @@ export class Orchestrator {
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
 - /diag version: 查看运行实例诊断信息
+- /upgrade [version]: 升级并自动重启服务（仅私聊；可配管理员白名单）
 - /backend codex|claude|status: 查看/切换后端工具
 - /reset: 清空当前会话上下文
-- /stop: 停止当前执行任务`,
+- /stop: 停止当前执行任务
+- help|帮助|菜单: /help 的文本别名（用于 Matrix 拦截 /help 的客户端）`,
       );
+      return;
+    }
+
+    if (command === "upgrade") {
+      await this.handleUpgradeCommand(message);
       return;
     }
 
@@ -1563,6 +1606,80 @@ export class Orchestrator {
     }
   }
 
+  private async handleUpgradeCommand(message: InboundMessage): Promise<void> {
+    const auth = this.authorizeUpgradeRequest(message);
+    if (!auth.allowed) {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] ${auth.reason}`);
+      return;
+    }
+
+    const parsed = parseUpgradeTarget(message.text);
+    if (!parsed.ok) {
+      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] ${parsed.reason}`);
+      return;
+    }
+
+    if (this.upgradeMutex.isLocked()) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 已有升级任务在执行中，请稍后发送 /diag version 或 /version 查看结果。",
+      );
+      return;
+    }
+
+    const targetLabel = parsed.version ? parsed.version : "latest";
+    const startedAt = Date.now();
+    await this.channel.sendNotice(
+      message.conversationId,
+      `${this.botNoticePrefix} 已开始升级（目标: ${targetLabel}），将安装 npm 最新包并自动重启服务。`,
+    );
+
+    await this.upgradeMutex.runExclusive(async () => {
+      try {
+        const result = await this.selfUpdateRunner({
+          version: parsed.version,
+        });
+        const elapsed = formatDurationMs(Date.now() - startedAt);
+        const installedVersion = result.installedVersion ?? "unknown";
+        await this.channel.sendNotice(
+          message.conversationId,
+          `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
+- 目标版本: ${targetLabel}
+- 已安装版本: ${installedVersion}
+- 服务重启: 已触发
+- 校验建议: 稍后发送 /diag version 或 /version`,
+        );
+      } catch (error) {
+        const elapsed = formatDurationMs(Date.now() - startedAt);
+        await this.channel.sendNotice(
+          message.conversationId,
+          `${this.botNoticePrefix} 升级失败（耗时 ${elapsed}）
+- 错误: ${formatSelfUpdateError(error)}
+- 兜底命令: codeharbor self-update --with-admin`,
+        );
+      }
+    });
+  }
+
+  private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
+    if (!message.isDirectMessage) {
+      return {
+        allowed: false,
+        reason: "为保证安全，/upgrade 仅支持私聊中执行。",
+      };
+    }
+    if (this.upgradeAllowedUsers.size === 0) {
+      return { allowed: true };
+    }
+    if (this.upgradeAllowedUsers.has(message.senderId)) {
+      return { allowed: true };
+    }
+    return {
+      allowed: false,
+      reason: "当前账号无执行 /upgrade 权限，请联系管理员添加 MATRIX_UPGRADE_ALLOWED_USERS 白名单。",
+    };
+  }
+
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
     const target = parseBackendTarget(message.text);
     if (!target || target === "status") {
@@ -1786,10 +1903,15 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
   return null;
 }
 
-function parseControlCommand(text: string): "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | null {
+function parseControlCommand(
+  text: string,
+): "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade" | null {
   const normalized = text.trim().toLowerCase();
   if (normalized === "help" || normalized === "帮助" || normalized === "菜单") {
     return "help";
+  }
+  if (isPlainUpgradeCommand(normalized)) {
+    return "upgrade";
   }
 
   const command = text.split(/\s+/, 1)[0].toLowerCase();
@@ -1814,7 +1936,25 @@ function parseControlCommand(text: string): "status" | "version" | "backend" | "
   if (command === "/help") {
     return "help";
   }
+  if (command === "/upgrade") {
+    return "upgrade";
+  }
   return null;
+}
+
+function isPlainUpgradeCommand(normalized: string): boolean {
+  if (normalized === "upgrade" || normalized === "升级") {
+    return true;
+  }
+  const match = normalized.match(/^(upgrade|升级)\s+(.+)$/);
+  if (!match) {
+    return false;
+  }
+  const argument = match[2]?.trim() ?? "";
+  if (!argument || argument === "latest") {
+    return true;
+  }
+  return /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(argument);
 }
 
 function parseDiagTarget(text: string): "version" | "help" | null {
@@ -1845,6 +1985,185 @@ function parseBackendTarget(text: string): "codex" | "claude" | "status" | null 
     return "status";
   }
   return null;
+}
+
+function parseUpgradeTarget(text: string): { ok: true; version: string | null } | { ok: false; reason: string } {
+  const tokens = text
+    .trim()
+    .split(/\s+/)
+    .filter((item) => item.length > 0);
+  if (tokens.length <= 1) {
+    return { ok: true, version: null };
+  }
+  if (tokens.length > 2) {
+    return {
+      ok: false,
+      reason: "用法: /upgrade [version]（示例: /upgrade 或 /upgrade 0.1.33）",
+    };
+  }
+
+  const raw = tokens[1]?.trim() ?? "";
+  if (!raw || raw.toLowerCase() === "latest") {
+    return { ok: true, version: null };
+  }
+
+  const normalized = raw.startsWith("v") ? raw.slice(1) : raw;
+  const semverPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+  if (!semverPattern.test(normalized)) {
+    return {
+      ok: false,
+      reason: "版本号格式无效。请使用 x.y.z（例如 0.1.33）或留空表示 latest。",
+    };
+  }
+  return {
+    ok: true,
+    version: normalized,
+  };
+}
+
+function parseCsvValues(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+async function runSelfUpdateCommand(input: { version: string | null; timeoutMs: number }): Promise<SelfUpdateResult> {
+  const invocations = resolveSelfUpdateInvocations();
+  let lastError: unknown = null;
+
+  for (const invocation of invocations) {
+    const args = [...invocation.prefixArgs, "self-update", "--with-admin"];
+    if (input.version) {
+      args.push("--version", input.version);
+    }
+
+    try {
+      const { stdout, stderr } = await execFileAsync(invocation.file, args, {
+        timeout: input.timeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          CODEHARBOR_SKIP_POSTINSTALL_RESTART: "1",
+        },
+      });
+
+      const stdoutText = normalizeCommandOutput(stdout);
+      const stderrText = normalizeCommandOutput(stderr);
+      return {
+        installedVersion: parseInstalledVersionFromSelfUpdateOutput(stdoutText + "\n" + stderrText),
+        stdout: stdoutText,
+        stderr: stderrText,
+      };
+    } catch (error) {
+      if (isCommandNotFound(error)) {
+        lastError = error;
+        continue;
+      }
+      throw new Error(`self-update command failed (${invocation.label}): ${formatSelfUpdateError(error)}`, {
+        cause: error,
+      });
+    }
+  }
+
+  throw new Error(`unable to run self-update command: ${formatSelfUpdateError(lastError)}`, {
+    cause: lastError ?? undefined,
+  });
+}
+
+function resolveSelfUpdateInvocations(): Array<{ file: string; prefixArgs: string[]; label: string }> {
+  const candidates: Array<{ file: string; prefixArgs: string[]; label: string }> = [];
+
+  const cliArgvPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+  if (cliArgvPath && existsSync(cliArgvPath)) {
+    candidates.push({
+      file: process.execPath,
+      prefixArgs: [cliArgvPath],
+      label: `node ${cliArgvPath}`,
+    });
+  }
+
+  const bundledCliPath = path.resolve(__dirname, "cli.js");
+  if (existsSync(bundledCliPath)) {
+    candidates.push({
+      file: process.execPath,
+      prefixArgs: [bundledCliPath],
+      label: `node ${bundledCliPath}`,
+    });
+  }
+
+  const uniqueCandidates: Array<{ file: string; prefixArgs: string[]; label: string }> = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.file}::${candidate.prefixArgs.join(" ")}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueCandidates.push(candidate);
+  }
+
+  uniqueCandidates.push({
+    file: "codeharbor",
+    prefixArgs: [],
+    label: "codeharbor",
+  });
+  return uniqueCandidates;
+}
+
+function parseInstalledVersionFromSelfUpdateOutput(output: string): string | null {
+  const match = output.match(/Installed version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/i);
+  return match?.[1] ?? null;
+}
+
+function normalizeCommandOutput(value: string | Buffer): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  return value.toString("utf8").trim();
+}
+
+function isCommandNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const maybeError = error as NodeJS.ErrnoException;
+  return maybeError.code === "ENOENT";
+}
+
+function formatSelfUpdateError(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return formatError(error);
+  }
+  const maybeError = error as ExecFileException & {
+    stderr?: string | Buffer;
+    stdout?: string | Buffer;
+    message?: string;
+  };
+  const stderr = normalizeOptionalCommandOutput(maybeError.stderr);
+  if (stderr) {
+    return summarizeCommandOutput(stderr);
+  }
+  const stdout = normalizeOptionalCommandOutput(maybeError.stdout);
+  if (stdout) {
+    return summarizeCommandOutput(stdout);
+  }
+  return maybeError.message?.trim() || formatError(error);
+}
+
+function normalizeOptionalCommandOutput(value: string | Buffer | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return normalizeCommandOutput(value);
+}
+
+function summarizeCommandOutput(text: string, maxLen = 400): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLen)}...`;
 }
 
 function stripLeadingBotMention(text: string, matrixUserId: string): string {

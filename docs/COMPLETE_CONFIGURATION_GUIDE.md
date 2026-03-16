@@ -209,6 +209,7 @@ This section explains all runtime capabilities and the keys that control them.
 - **Keys**:
   - `MATRIX_COMMAND_PREFIX`
   - `SESSION_ACTIVE_WINDOW_MINUTES`
+  - `MATRIX_UPGRADE_ALLOWED_USERS` (optional `/upgrade` allowlist)
   - `GROUP_DIRECT_MODE_ENABLED`
   - `GROUP_TRIGGER_ALLOW_MENTION`
   - `GROUP_TRIGGER_ALLOW_REPLY`
@@ -353,6 +354,7 @@ When in doubt, treat config changes as restart-scoped for operational safety.
 - Group trigger behaves as expected
 - `/status` returns session/limiter/worker info
 - `/version` returns current version and update hint
+- `/upgrade` can trigger in-chat self-update (if enabled/authorized)
 - Admin `/health` reports Matrix/Codex and CodeHarbor app version status
 - Admin `/audit` records your config updates
 - restart commands work (`service restart` or Admin restart API/UI)

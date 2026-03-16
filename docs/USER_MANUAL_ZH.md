@@ -164,11 +164,13 @@ codeharbor admin serve
 - `/status`：包含当前版本、更新提示和最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
+- `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
 - `/backend codex|claude|status`：会话内切换后端工具；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
 - `PACKAGE_UPDATE_CHECK_TTL_MS`：更新检查结果缓存时长（毫秒，默认 6 小时）
+- `MATRIX_UPGRADE_ALLOWED_USERS`：可选；限制哪些 Matrix 用户可执行 `/upgrade`（逗号分隔 mxid）
 
 ---
 
@@ -217,6 +219,11 @@ codeharbor self-update
 ```
 
 该命令会安装最新版本并尝试重启已安装的 systemd 主服务（可选 admin 服务）。
+
+如果你希望直接在 Matrix 私聊里执行升级，可发送：
+
+- `/upgrade`
+- `/upgrade 0.1.33`
 
 ---
 
