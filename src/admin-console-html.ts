@@ -282,6 +282,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label" data-i18n="global.updateCheckTimeout">更新检查超时（毫秒）</span>
             <input id="global-update-check-timeout" type="number" min="1" />
           </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.updateCheckTtl">更新检查缓存时间（毫秒）</span>
+            <input id="global-update-check-ttl" type="number" min="1" />
+          </label>
           <label class="checkbox">
             <input id="global-progress-enabled" type="checkbox" />
             <span data-i18n="global.progressEnabled">启用进度更新</span>
@@ -512,6 +516,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.sessionWindow": "会话活跃窗口（分钟）",
             "global.updateCheckEnabled": "启用版本更新检查",
             "global.updateCheckTimeout": "更新检查超时（毫秒）",
+            "global.updateCheckTtl": "更新检查缓存时间（毫秒）",
             "global.progressEnabled": "启用进度更新",
             "global.rateWindow": "限流窗口（毫秒）",
             "global.rateUser": "单用户窗口最大请求数",
@@ -645,6 +650,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.sessionWindow": "Session Active Window (minutes)",
             "global.updateCheckEnabled": "Enable update check",
             "global.updateCheckTimeout": "Update check timeout (ms)",
+            "global.updateCheckTtl": "Update check cache TTL (ms)",
             "global.progressEnabled": "Enable progress updates",
             "global.rateWindow": "Rate Window (ms)",
             "global.rateUser": "Rate Max Requests / User",
@@ -1004,6 +1010,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-update-check-enabled").checked =
               updateCheck.enabled === undefined ? true : Boolean(updateCheck.enabled);
             document.getElementById("global-update-check-timeout").value = String(updateCheck.timeoutMs || 3000);
+            document.getElementById("global-update-check-ttl").value = String(updateCheck.ttlMs || 21600000);
             document.getElementById("global-rate-window").value = String(rateLimiter.windowMs || 60000);
             document.getElementById("global-rate-user").value = String(rateLimiter.maxRequestsPerUser || 0);
             document.getElementById("global-rate-room").value = String(rateLimiter.maxRequestsPerRoom || 0);
@@ -1056,7 +1063,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               sessionActiveWindowMinutes: asNumber("global-active-window", 20),
               updateCheck: {
                 enabled: asBool("global-update-check-enabled"),
-                timeoutMs: asNumber("global-update-check-timeout", 3000)
+                timeoutMs: asNumber("global-update-check-timeout", 3000),
+                ttlMs: asNumber("global-update-check-ttl", 21600000)
               },
               groupDirectModeEnabled: asBool("global-direct-mode"),
               rateLimiter: {

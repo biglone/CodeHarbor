@@ -540,6 +540,13 @@ export class AdminServer {
         updatedKeys.push("updateCheck.timeoutMs");
         updateCheckChanged = true;
       }
+      if ("ttlMs" in updateCheck) {
+        const value = normalizePositiveInt(updateCheck.ttlMs, this.config.updateCheck.ttlMs, 1, Number.MAX_SAFE_INTEGER);
+        this.config.updateCheck.ttlMs = value;
+        envUpdates.PACKAGE_UPDATE_CHECK_TTL_MS = String(value);
+        updatedKeys.push("updateCheck.ttlMs");
+        updateCheckChanged = true;
+      }
       if (updateCheckChanged && !this.hasCustomPackageUpdateChecker) {
         this.packageUpdateChecker = this.createPackageUpdateChecker();
       }
@@ -856,6 +863,7 @@ export class AdminServer {
       currentVersion: resolvePackageVersion(),
       enabled: this.config.updateCheck.enabled,
       timeoutMs: this.config.updateCheck.timeoutMs,
+      ttlMs: this.config.updateCheck.ttlMs,
     });
   }
 }

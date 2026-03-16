@@ -85,6 +85,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     updateCheck: {
       enabled: true,
       timeoutMs: 3000,
+      ttlMs: 21600000,
     },
     doctorHttpTimeoutMs: 10_000,
     adminBindHost: "127.0.0.1",
@@ -446,6 +447,7 @@ describe("AdminServer", () => {
         updateCheck: {
           enabled: false,
           timeoutMs: 2000,
+          ttlMs: 600000,
         },
       }),
     });
@@ -460,6 +462,7 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=2");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
+    expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
   });
 
   it("restarts managed services via admin API", async () => {

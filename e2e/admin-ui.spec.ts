@@ -81,6 +81,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     updateCheck: {
       enabled: true,
       timeoutMs: 3000,
+      ttlMs: 21600000,
     },
     doctorHttpTimeoutMs: 10_000,
     adminBindHost: "127.0.0.1",
@@ -150,6 +151,7 @@ test("loads global settings page and fetches initial config", async ({ page }) =
   await expect(page.locator("#global-matrix-prefix")).toHaveValue("!code");
   await expect(page.locator("#global-update-check-enabled")).toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("3000");
+  await expect(page.locator("#global-update-check-ttl")).toHaveValue("21600000");
   await expect(page.locator("#global-agent-enabled")).not.toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("1");
   await expect(page.locator("#notice")).toContainText(/(Global config loaded\.|全局配置已加载。)/);
@@ -160,17 +162,20 @@ test("saves global agent workflow settings and persists to env", async ({ page }
 
   await page.uncheck("#global-update-check-enabled");
   await page.fill("#global-update-check-timeout", "1800");
+  await page.fill("#global-update-check-ttl", "600000");
   await page.check("#global-agent-enabled");
   await page.fill("#global-agent-repair-rounds", "3");
   await page.click("#global-save-btn");
 
   await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
+  await expect(page.locator("#global-update-check-ttl")).toHaveValue("600000");
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
   await page.click("#global-reload-btn");
   await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
+  await expect(page.locator("#global-update-check-ttl")).toHaveValue("600000");
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
 
@@ -179,6 +184,7 @@ test("saves global agent workflow settings and persists to env", async ({ page }
   expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=3");
   expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
   expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=1800");
+  expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
 });
 
 test("saves room config and shows in room list", async ({ page }) => {
