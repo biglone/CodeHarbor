@@ -19,7 +19,9 @@
 在安装前，请先确认以下条件：
 
 - 已安装并可执行 `codex` CLI
-- 已完成 `codex login`（确保本机可调用 Codex）
+- 已完成 AI CLI 登录（任选其一）：
+  - `codex login`
+  - `claude login`
 - 有可用的 Matrix 账号（建议单独机器人账号）
 - 已获取 Matrix 机器人的 access token（用于 `MATRIX_ACCESS_TOKEN`）
 
@@ -60,6 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/ins
 
 建议一起确认：
 
+- `AI_CLI_PROVIDER`：`codex` 或 `claude`（默认 `codex`）
 - `CODEX_BIN`：一般保持 `codex`
 - `MATRIX_COMMAND_PREFIX`：群聊触发前缀，默认 `!code`
 

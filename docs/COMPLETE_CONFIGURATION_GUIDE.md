@@ -17,7 +17,9 @@ For the exhaustive key catalog (required/default/Admin UI/effect timing), see:
 Prepare these before installation:
 
 - Node.js 22+
-- `codex` CLI installed and authenticated (`codex login`)
+- AI CLI installed and authenticated:
+  - Codex (`codex login`) or
+  - Claude Code (`claude login`)
 - a Matrix bot account (or dedicated Matrix user) and valid access token
 
 Optional:
@@ -187,6 +189,7 @@ This section explains all runtime capabilities and the keys that control them.
 
 - **Purpose**: make requests executable end-to-end.
 - **Keys**:
+  - `AI_CLI_PROVIDER`
   - `MATRIX_HOMESERVER`
   - `MATRIX_USER_ID`
   - `MATRIX_ACCESS_TOKEN`

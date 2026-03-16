@@ -38,7 +38,9 @@ Matrix Room -> MatrixChannel -> Orchestrator -> CodexExecutor (codex exec/resume
 ## Prerequisites
 
 - Node.js 22+
-- `codex` CLI installed and authenticated (`codex login`)
+- AI CLI installed and authenticated:
+  - Codex: `codex login`
+  - Claude Code: `claude login`
 - A Matrix bot user + access token
 
 ## Install
@@ -265,7 +267,7 @@ It documents:
 
 - `codeharbor init`: guided setup for `.env` (supports `--force` to overwrite directly)
 - `codeharbor start`: start service
-- `codeharbor doctor`: check `codex` and Matrix connectivity
+- `codeharbor doctor`: check AI CLI and Matrix connectivity
 - `codeharbor admin serve`: start admin UI + config API server
 - `codeharbor service install`: install/enable systemd unit(s) after npm install (supports `--with-admin`)
 - `codeharbor service restart`: restart installed systemd unit(s) (supports `--with-admin`)
@@ -399,7 +401,7 @@ See:
 Before `codeharbor start` and `codeharbor doctor`, CodeHarbor runs a preflight check for:
 
 - required Matrix env vars
-- `CODEX_BIN` availability
+- selected AI CLI binary availability (`AI_CLI_PROVIDER` + `CODEX_BIN`)
 - `CODEX_WORKDIR` validity
 - `.env` presence warning
 
@@ -441,6 +443,15 @@ Version update check controls:
   - timeout (ms) for npm registry version lookup
 - `PACKAGE_UPDATE_CHECK_TTL_MS=21600000`
   - cache TTL (ms) for update-check results (`/status` reads cache; `/version` forces refresh)
+
+AI CLI backend controls:
+
+- `AI_CLI_PROVIDER=codex|claude`
+  - select runtime backend (`codex` by default)
+- `CODEX_BIN=<path-or-command>`
+  - executable for selected provider (for example `codex` or `claude`)
+- `CODEX_MODEL=<model>`
+  - optional model override for selected provider
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 

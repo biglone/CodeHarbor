@@ -12,7 +12,8 @@ These must be valid before `codeharbor start`.
 | `MATRIX_HOMESERVER` | Yes | - | No | Restart | Matrix server base URL |
 | `MATRIX_USER_ID` | Yes | - | No | Restart | Bot user id |
 | `MATRIX_ACCESS_TOKEN` | Yes | - | No | Restart | Bot access token |
-| `CODEX_BIN` | No | `codex` | No | Restart | Codex executable path |
+| `AI_CLI_PROVIDER` | No | `codex` | No | Restart | AI CLI provider (`codex` or `claude`) |
+| `CODEX_BIN` | No | `codex` | No | Restart | Executable path for selected AI CLI provider |
 | `CODEX_MODEL` | No | empty | No | Restart | Optional model override |
 | `CODEX_WORKDIR` | No | current cwd | Yes | Restart | Default workdir fallback |
 | `CODEX_DANGEROUS_BYPASS` | No | `false` | No | Restart | Codex bypass flag |
