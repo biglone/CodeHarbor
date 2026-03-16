@@ -239,8 +239,10 @@ This section explains all runtime capabilities and the keys that control them.
   - `MATRIX_TYPING_TIMEOUT_MS`
   - `PACKAGE_UPDATE_CHECK_ENABLED`
   - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`
+  - `PACKAGE_UPDATE_CHECK_TTL_MS`
 - **Behavior**:
   - `/status` and `/version` include current version + update hint
+  - `/status` shows the latest cached check time; `/version` triggers a forced refresh
   - Admin `/health` includes CodeHarbor app version/update row
   - when update check is disabled or lookup fails, health still shows current version with reason
 

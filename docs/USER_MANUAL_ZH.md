@@ -148,10 +148,11 @@ codeharbor admin serve
 
 ### 5.6 版本检查与更新提示
 
-- `/status`：包含当前版本与更新提示
-- `/version`：单独查看当前版本与更新提示
+- `/status`：包含当前版本、更新提示和最近一次检查时间（缓存结果）
+- `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
+- `PACKAGE_UPDATE_CHECK_TTL_MS`：更新检查结果缓存时长（毫秒，默认 6 小时）
 
 ---
 

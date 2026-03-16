@@ -424,8 +424,8 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - each accepted request activates the sender's conversation in that room
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
-  - `/status` show session + limiter + metrics + runtime worker status, current version, and update hint
-  - `/version` show current package version and latest-update hint
+  - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time
+  - `/version` show current package version and latest-update hint (force refresh)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
@@ -439,6 +439,8 @@ Version update check controls:
   - enable/disable npm latest-version check used by `/status`, `/version`, and Admin health app row
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS=3000`
   - timeout (ms) for npm registry version lookup
+- `PACKAGE_UPDATE_CHECK_TTL_MS=21600000`
+  - cache TTL (ms) for update-check results (`/status` reads cache; `/version` forces refresh)
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 
