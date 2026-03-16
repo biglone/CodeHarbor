@@ -428,7 +428,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
 - Control commands
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, and update checked time
   - `/version` show current package version and latest-update hint (force refresh)
-  - `/backend codex|claude|status` switch backend AI CLI tool at runtime (session context resets on switch)
+  - `/backend codex|claude|status` switch backend AI CLI tool at runtime (next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
@@ -453,6 +453,12 @@ AI CLI backend controls:
   - executable for selected provider (for example `codex` or `claude`)
 - `CODEX_MODEL=<model>`
   - optional model override for selected provider
+
+Cross-backend context bridge behavior:
+
+- CodeHarbor stores recent local `user/assistant` turns per Matrix session.
+- After `/backend codex|claude`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
+- `/reset` and `/stop` explicitly suppress this one-shot bridge on the immediate next request so users can start fresh.
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 
