@@ -14,6 +14,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - added social preview asset (`docs/assets/social-preview-1200x630.png`) and upload guide (`docs/SOCIAL_PREVIEW_UPLOAD_ZH.md`)
   - published v0.1.40 announcement discussion and added quick feedback links near README header
   - added English announcement + roadmap poll discussions, and linked CN/EN posts in README
+  - consolidated CN/EN announcements and roadmap polls into bilingual threads; closed duplicate CN threads
 
 ## [0.1.40] - 2026-03-17
 
