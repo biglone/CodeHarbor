@@ -134,6 +134,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("uses safe defaults", () => {
     const config = loadConfig(createBaseEnv());
 
+    expect(config.cliCompat.imageMaxBytes).toBe(10485760);
+    expect(config.cliCompat.imageMaxCount).toBe(4);
+    expect(config.cliCompat.imageAllowedMimeTypes).toEqual(["image/png", "image/jpeg", "image/webp", "image/gif"]);
     expect(config.cliCompat.transcribeAudio).toBe(false);
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-mini-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(120000);
@@ -148,6 +151,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("parses custom transcription settings", () => {
     const config = loadConfig(
       createBaseEnv({
+        CLI_COMPAT_IMAGE_MAX_BYTES: "7340032",
+        CLI_COMPAT_IMAGE_MAX_COUNT: "2",
+        CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES: "image/png, image/jpeg,image/png, image/webp",
         CLI_COMPAT_TRANSCRIBE_AUDIO: "true",
         CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL: "gpt-4o-transcribe",
         CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS: "45000",
@@ -160,6 +166,9 @@ describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
       }),
     );
 
+    expect(config.cliCompat.imageMaxBytes).toBe(7340032);
+    expect(config.cliCompat.imageMaxCount).toBe(2);
+    expect(config.cliCompat.imageAllowedMimeTypes).toEqual(["image/png", "image/jpeg", "image/webp"]);
     expect(config.cliCompat.transcribeAudio).toBe(true);
     expect(config.cliCompat.audioTranscribeModel).toBe("gpt-4o-transcribe");
     expect(config.cliCompat.audioTranscribeTimeoutMs).toBe(45000);

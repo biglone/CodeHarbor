@@ -88,6 +88,9 @@ describe("config snapshot commands", () => {
     expect(parsed.schemaVersion).toBe(1);
     expect(parsed.exportedAt).toBe("2026-03-03T10:00:00.000Z");
     expect(parsed.env.MATRIX_USER_ID).toBe("@bot:example.com");
+    expect(parsed.env.CLI_COMPAT_IMAGE_MAX_BYTES).toBe("10485760");
+    expect(parsed.env.CLI_COMPAT_IMAGE_MAX_COUNT).toBe("4");
+    expect(parsed.env.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES).toBe("image/png,image/jpeg,image/webp,image/gif");
     expect(parsed.rooms).toHaveLength(1);
     expect(parsed.rooms[0]?.roomId).toBe("!room:example.com");
   });

@@ -20,6 +20,9 @@ export interface CliCompatConfig {
   disableReplyChunkSplit: boolean;
   progressThrottleMs: number;
   fetchMedia: boolean;
+  imageMaxBytes: number;
+  imageMaxCount: number;
+  imageAllowedMimeTypes: string[];
   transcribeAudio: boolean;
   audioTranscribeModel: string;
   audioTranscribeTimeoutMs: number;
@@ -199,6 +202,17 @@ const configSchema = z
       .string()
       .default("true")
       .transform((v) => v.toLowerCase() === "true"),
+    CLI_COMPAT_IMAGE_MAX_BYTES: z
+      .string()
+      .default("10485760")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    CLI_COMPAT_IMAGE_MAX_COUNT: z
+      .string()
+      .default("4")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES: z.string().default("image/png,image/jpeg,image/webp,image/gif"),
     CLI_COMPAT_TRANSCRIBE_AUDIO: z
       .string()
       .default("false")
@@ -321,6 +335,12 @@ const configSchema = z
       disableReplyChunkSplit: v.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT,
       progressThrottleMs: v.CLI_COMPAT_PROGRESS_THROTTLE_MS,
       fetchMedia: v.CLI_COMPAT_FETCH_MEDIA,
+      imageMaxBytes: v.CLI_COMPAT_IMAGE_MAX_BYTES,
+      imageMaxCount: v.CLI_COMPAT_IMAGE_MAX_COUNT,
+      imageAllowedMimeTypes: parseMimeTypeCsvList(
+        v.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES,
+        ["image/png", "image/jpeg", "image/webp", "image/gif"],
+      ),
       transcribeAudio: v.CLI_COMPAT_TRANSCRIBE_AUDIO,
       audioTranscribeModel: v.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL.trim() || "gpt-4o-mini-transcribe",
       audioTranscribeTimeoutMs: v.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS,
@@ -509,6 +529,20 @@ function parseCsvList(raw: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+function parseMimeTypeCsvList(raw: string, fallback: string[]): string[] {
+  const parsed = raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0)
+    .filter((entry) => /^[-\w.+]+\/[-\w.+]+$/.test(entry));
+
+  if (parsed.length === 0) {
+    return [...fallback];
+  }
+
+  return [...new Set(parsed)];
 }
 
 function parseAdminTokens(raw: string): AdminTokenConfig[] {
