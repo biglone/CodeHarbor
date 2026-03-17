@@ -316,8 +316,8 @@ It documents:
 
 ## Community and Feedback
 
-- Questions and usage help: GitHub Discussions (`Q&A`)
-- Feature ideas: GitHub Discussions (`Ideas`) or `Feature request` issue template
+- Questions and usage help: [GitHub Discussions](https://github.com/biglone/CodeHarbor/discussions) (`Q&A`)
+- Feature ideas: [GitHub Discussions](https://github.com/biglone/CodeHarbor/discussions) (`Ideas`) or `Feature request` issue template
 - Bug reports: use `Bug report` issue template for reproducible diagnostics
 - Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Growth and community playbook: [`docs/GROWTH_PLAYBOOK_ZH.md`](docs/GROWTH_PLAYBOOK_ZH.md)

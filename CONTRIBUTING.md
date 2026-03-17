@@ -38,6 +38,6 @@ If behavior or commands changed, update:
 
 ## Community Feedback
 
-- Questions: GitHub Discussions Q&A
-- Feature ideas: GitHub Discussions Ideas or Feature request issue
+- Questions: https://github.com/biglone/CodeHarbor/discussions
+- Feature ideas: https://github.com/biglone/CodeHarbor/discussions
 - Security reports: email `jjoyceu@gmail.com`
