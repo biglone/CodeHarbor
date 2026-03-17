@@ -730,6 +730,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("多模态状态:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
 
@@ -999,6 +1000,50 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("pid:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("backend: codex (gpt-5-codex)"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("latestHint:"))).toBe(true);
+  });
+
+  it("shows media diagnosis for /diag media command", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-diag-media-"));
+    const imagePath = path.join(tempRoot, "diag.png");
+    await fs.writeFile(imagePath, "payload", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ScriptedExecutor();
+      const store = new InMemoryStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        progressUpdatesEnabled: false,
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "分析图片",
+          attachments: [
+            {
+              kind: "image",
+              name: "diag.png",
+              mxcUrl: "mxc://example.com/diag",
+              mimeType: "image/png",
+              sizeBytes: 8,
+              localPath: imagePath,
+            },
+          ],
+        }),
+      );
+      await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag media 5" }));
+
+      const mediaDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（media）"));
+      expect(mediaDiagNotice).toBeDefined();
+      expect(mediaDiagNotice?.text).toContain("image.accepted=1");
+      expect(mediaDiagNotice?.text).toContain("records:");
+      expect(mediaDiagNotice?.text).toContain("type=image.accepted");
+      await expect(fs.access(imagePath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("shows recent upgrade records for /diag upgrade command", async () => {

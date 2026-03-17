@@ -266,6 +266,137 @@ class RequestMetrics {
   }
 }
 
+interface MediaMetricCounters {
+  imageAccepted: number;
+  imageSkippedMissingPath: number;
+  imageSkippedUnsupportedMime: number;
+  imageSkippedTooLarge: number;
+  imageSkippedOverLimit: number;
+  audioTranscribed: number;
+  audioFailed: number;
+  audioSkippedTooLarge: number;
+  claudeImageFallbackTriggered: number;
+  claudeImageFallbackSucceeded: number;
+  claudeImageFallbackFailed: number;
+}
+
+interface MediaMetricEvent {
+  at: string;
+  type: string;
+  requestId: string;
+  sessionKey: string;
+  detail: string;
+}
+
+class MediaMetrics {
+  private readonly counters: MediaMetricCounters = {
+    imageAccepted: 0,
+    imageSkippedMissingPath: 0,
+    imageSkippedUnsupportedMime: 0,
+    imageSkippedTooLarge: 0,
+    imageSkippedOverLimit: 0,
+    audioTranscribed: 0,
+    audioFailed: 0,
+    audioSkippedTooLarge: 0,
+    claudeImageFallbackTriggered: 0,
+    claudeImageFallbackSucceeded: 0,
+    claudeImageFallbackFailed: 0,
+  };
+
+  private readonly events: MediaMetricEvent[] = [];
+  private readonly maxEvents: number;
+
+  constructor(maxEvents = 300) {
+    this.maxEvents = Math.max(20, maxEvents);
+  }
+
+  recordImageSelection(input: { requestId: string; sessionKey: string; result: ImageSelectionResult }): void {
+    const { requestId, sessionKey, result } = input;
+    if (result.imagePaths.length > 0) {
+      this.counters.imageAccepted += result.imagePaths.length;
+      this.pushEvent(requestId, sessionKey, "image.accepted", `count=${result.imagePaths.length}`);
+    }
+    if (result.skippedMissingPath > 0) {
+      this.counters.imageSkippedMissingPath += result.skippedMissingPath;
+      this.pushEvent(requestId, sessionKey, "image.skipped_missing_path", `count=${result.skippedMissingPath}`);
+    }
+    if (result.skippedUnsupportedMime > 0) {
+      this.counters.imageSkippedUnsupportedMime += result.skippedUnsupportedMime;
+      this.pushEvent(requestId, sessionKey, "image.skipped_mime", `count=${result.skippedUnsupportedMime}`);
+    }
+    if (result.skippedTooLarge > 0) {
+      this.counters.imageSkippedTooLarge += result.skippedTooLarge;
+      this.pushEvent(requestId, sessionKey, "image.skipped_size", `count=${result.skippedTooLarge}`);
+    }
+    if (result.skippedOverLimit > 0) {
+      this.counters.imageSkippedOverLimit += result.skippedOverLimit;
+      this.pushEvent(requestId, sessionKey, "image.skipped_limit", `count=${result.skippedOverLimit}`);
+    }
+  }
+
+  recordAudioTranscription(input: {
+    requestId: string;
+    sessionKey: string;
+    transcribedCount: number;
+    failedCount: number;
+    skippedTooLarge: number;
+  }): void {
+    const { requestId, sessionKey, transcribedCount, failedCount, skippedTooLarge } = input;
+    if (transcribedCount > 0) {
+      this.counters.audioTranscribed += transcribedCount;
+      this.pushEvent(requestId, sessionKey, "audio.transcribed", `count=${transcribedCount}`);
+    }
+    if (failedCount > 0) {
+      this.counters.audioFailed += failedCount;
+      this.pushEvent(requestId, sessionKey, "audio.failed", `count=${failedCount}`);
+    }
+    if (skippedTooLarge > 0) {
+      this.counters.audioSkippedTooLarge += skippedTooLarge;
+      this.pushEvent(requestId, sessionKey, "audio.skipped_size", `count=${skippedTooLarge}`);
+    }
+  }
+
+  recordClaudeImageFallback(
+    status: "triggered" | "succeeded" | "failed",
+    input: { requestId: string; sessionKey: string; detail: string },
+  ): void {
+    if (status === "triggered") {
+      this.counters.claudeImageFallbackTriggered += 1;
+      this.pushEvent(input.requestId, input.sessionKey, "claude.image_fallback_triggered", input.detail);
+      return;
+    }
+    if (status === "succeeded") {
+      this.counters.claudeImageFallbackSucceeded += 1;
+      this.pushEvent(input.requestId, input.sessionKey, "claude.image_fallback_succeeded", input.detail);
+      return;
+    }
+    this.counters.claudeImageFallbackFailed += 1;
+    this.pushEvent(input.requestId, input.sessionKey, "claude.image_fallback_failed", input.detail);
+  }
+
+  snapshot(limit = 10): { counters: MediaMetricCounters; recentEvents: MediaMetricEvent[] } {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return {
+      counters: { ...this.counters },
+      recentEvents: this.events.slice(Math.max(0, this.events.length - safeLimit)).reverse(),
+    };
+  }
+
+  private pushEvent(requestId: string, sessionKey: string, type: string, detail: string): void {
+    this.events.push({
+      at: new Date().toISOString(),
+      type,
+      requestId,
+      sessionKey,
+      detail,
+    });
+    if (this.events.length <= this.maxEvents) {
+      return;
+    }
+    this.events.splice(0, this.events.length - this.maxEvents);
+  }
+}
+
 export class Orchestrator {
   private readonly channel: MatrixChannel;
   private executor: CodexExecutor;
@@ -311,6 +442,7 @@ export class Orchestrator {
   private readonly upgradeVersionProbe: UpgradeVersionProbe;
   private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
+  private readonly mediaMetrics = new MediaMetrics();
   private lastLockPruneAt = 0;
 
   constructor(
@@ -586,6 +718,11 @@ export class Orchestrator {
         const bridgeContext = allowBridgeContext ? this.buildConversationBridgeContext(sessionKey) : null;
         const audioTranscripts = await this.transcribeAudioAttachments(message, requestId, sessionKey);
         const imageSelection = await this.prepareImageAttachments(message, requestId, sessionKey);
+        this.mediaMetrics.recordImageSelection({
+          requestId,
+          sessionKey,
+          result: imageSelection,
+        });
         if (imageSelection.notice) {
           await this.channel.sendNotice(message.conversationId, imageSelection.notice);
         }
@@ -694,6 +831,11 @@ export class Orchestrator {
               throw error;
             }
             const reason = summarizeSingleLine(formatError(error), 220);
+            this.mediaMetrics.recordClaudeImageFallback("triggered", {
+              requestId,
+              sessionKey,
+              detail: reason,
+            });
             await this.channel.sendNotice(
               message.conversationId,
               `[CodeHarbor] 检测到 Claude 图片处理失败，已自动降级为纯文本重试。原因: ${reason}`,
@@ -704,7 +846,21 @@ export class Orchestrator {
               imageCount: imagePaths.length,
               reason: formatError(error),
             });
-            result = await executeOnce([]);
+            try {
+              result = await executeOnce([]);
+              this.mediaMetrics.recordClaudeImageFallback("succeeded", {
+                requestId,
+                sessionKey,
+                detail: "retry_without_images_ok",
+              });
+            } catch (retryError) {
+              this.mediaMetrics.recordClaudeImageFallback("failed", {
+                requestId,
+                sessionKey,
+                detail: summarizeSingleLine(formatError(retryError), 220),
+              });
+              throw retryError;
+            }
           }
 
           executionDurationMs = Date.now() - executionStartedAt;
@@ -894,7 +1050,9 @@ export class Orchestrator {
 - /help: 查看命令帮助
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
+- 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
+- /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
 - /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
 - /backend codex|claude|status: 查看/切换后端工具
@@ -1596,12 +1754,28 @@ export class Orchestrator {
     }
 
     if (audioAttachments.length === 0) {
+      if (skippedTooLarge > 0) {
+        this.mediaMetrics.recordAudioTranscription({
+          requestId,
+          sessionKey,
+          transcribedCount: 0,
+          failedCount: 0,
+          skippedTooLarge,
+        });
+      }
       return [];
     }
 
     const startedAt = Date.now();
     try {
       const transcripts = await this.audioTranscriber.transcribeMany(audioAttachments);
+      this.mediaMetrics.recordAudioTranscription({
+        requestId,
+        sessionKey,
+        transcribedCount: transcripts.length,
+        failedCount: 0,
+        skippedTooLarge,
+      });
       this.logger.info("Audio transcription completed", {
         requestId,
         sessionKey,
@@ -1612,6 +1786,13 @@ export class Orchestrator {
       });
       return transcripts;
     } catch (error) {
+      this.mediaMetrics.recordAudioTranscription({
+        requestId,
+        sessionKey,
+        transcribedCount: 0,
+        failedCount: audioAttachments.length,
+        skippedTooLarge,
+      });
       this.logger.warn("Audio transcription failed, continuing without transcripts", {
         requestId,
         sessionKey,
@@ -2137,12 +2318,20 @@ export class Orchestrator {
     return `${this.aiCliProvider} (${this.aiCliModel})`;
   }
 
+  private formatMultimodalHelpStatus(): string {
+    const imageEnabled = this.cliCompat.fetchMedia ? "on" : "off";
+    const audioEnabled = this.audioTranscriber.isEnabled() ? "on" : "off";
+    const mimeText = formatMimeAllowlist(this.cliCompat.imageAllowedMimeTypes);
+    const backendImageSupport = this.aiCliProvider === "codex" || this.aiCliProvider === "claude" ? "yes" : "unknown";
+    return `图片=${imageEnabled}(max=${this.cliCompat.imageMaxCount},<=${formatByteSize(this.cliCompat.imageMaxBytes)},mime=${mimeText})；语音=${audioEnabled}；后端图片支持=${backendImageSupport}`;
+  }
+
   private async handleDiagCommand(message: InboundMessage): Promise<void> {
     const target = parseDiagTarget(message.text);
     if (!target || target.kind === "help") {
       await this.channel.sendNotice(
         message.conversationId,
-        "[CodeHarbor] 用法: /diag version | /diag upgrade [count]",
+        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count]",
       );
       return;
     }
@@ -2165,6 +2354,22 @@ export class Orchestrator {
 - currentVersion: ${packageUpdate.currentVersion}
 - latestHint: ${formatPackageUpdateHint(packageUpdate)}
 - checkedAt: ${packageUpdate.checkedAt}`,
+      );
+      return;
+    }
+    if (target.kind === "media") {
+      const snapshot = this.mediaMetrics.snapshot(target.limit);
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 诊断信息（media）
+- backend: ${this.formatBackendToolLabel()}
+- imagePolicy: enabled=${this.cliCompat.fetchMedia ? "on" : "off"}, maxCount=${this.cliCompat.imageMaxCount}, maxBytes=${formatByteSize(this.cliCompat.imageMaxBytes)}, allow=${this.cliCompat.imageAllowedMimeTypes.join(",")}
+- audioPolicy: enabled=${this.audioTranscriber.isEnabled() ? "on" : "off"}, maxBytes=${formatByteSize(this.cliCompat.audioTranscribeMaxBytes)}, model=${this.cliCompat.audioTranscribeModel}
+- counters: image.accepted=${snapshot.counters.imageAccepted}, image.skipped_missing=${snapshot.counters.imageSkippedMissingPath}, image.skipped_mime=${snapshot.counters.imageSkippedUnsupportedMime}, image.skipped_size=${snapshot.counters.imageSkippedTooLarge}, image.skipped_limit=${snapshot.counters.imageSkippedOverLimit}
+- counters: audio.transcribed=${snapshot.counters.audioTranscribed}, audio.failed=${snapshot.counters.audioFailed}, audio.skipped_size=${snapshot.counters.audioSkippedTooLarge}
+- counters: claude.fallback_triggered=${snapshot.counters.claudeImageFallbackTriggered}, claude.fallback_ok=${snapshot.counters.claudeImageFallbackSucceeded}, claude.fallback_failed=${snapshot.counters.claudeImageFallbackFailed}
+- records:
+${formatMediaDiagEvents(snapshot.recentEvents)}`,
       );
       return;
     }
@@ -2333,6 +2538,34 @@ function inferImageMimeTypeFromPath(localPath: string): string | null {
   return null;
 }
 
+function formatMimeAllowlist(mimeTypes: string[]): string {
+  if (mimeTypes.length === 0) {
+    return "none";
+  }
+  return mimeTypes
+    .map((value) => {
+      const normalized = value.trim().toLowerCase();
+      const slashIndex = normalized.indexOf("/");
+      if (slashIndex <= 0 || slashIndex === normalized.length - 1) {
+        return normalized || value;
+      }
+      return normalized.slice(slashIndex + 1);
+    })
+    .join("/");
+}
+
+function formatMediaDiagEvents(events: MediaMetricEvent[]): string {
+  if (events.length === 0) {
+    return "- (no media records yet)";
+  }
+  return events
+    .map(
+      (event, index) =>
+        `- #${index + 1} ${event.at} type=${event.type} requestId=${event.requestId} session=${event.sessionKey} detail=${event.detail}`,
+    )
+    .join("\n");
+}
+
 function collectLocalAttachmentPaths(message: InboundMessage): string[] {
   const seen = new Set<string>();
   for (const attachment of message.attachments) {
@@ -2438,7 +2671,9 @@ function isPlainUpgradeCommand(normalized: string): boolean {
   return /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(argument);
 }
 
-function parseDiagTarget(text: string): { kind: "version" } | { kind: "upgrade"; limit: number } | { kind: "help" } | null {
+function parseDiagTarget(
+  text: string,
+): { kind: "version" } | { kind: "media"; limit: number } | { kind: "upgrade"; limit: number } | { kind: "help" } | null {
   const tokens = text.trim().split(/\s+/);
   if (tokens.length < 2) {
     return { kind: "help" };
@@ -2446,6 +2681,16 @@ function parseDiagTarget(text: string): { kind: "version" } | { kind: "upgrade";
   const value = tokens[1]?.toLowerCase() ?? "";
   if (value === "version") {
     return { kind: "version" };
+  }
+  if (value === "media") {
+    if (tokens.length < 3) {
+      return { kind: "media", limit: 10 };
+    }
+    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
+      return null;
+    }
+    return { kind: "media", limit: parsed };
   }
   if (value === "upgrade") {
     if (tokens.length < 3) {
