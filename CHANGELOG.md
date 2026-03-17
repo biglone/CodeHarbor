@@ -16,6 +16,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - added English announcement + roadmap poll discussions, and linked CN/EN posts in README
   - consolidated CN/EN announcements and roadmap polls into bilingual threads; closed duplicate CN threads
   - added maintainer + CI verification block and bilingual discussion template
+  - added `scripts/render-release-notes.sh` to keep bilingual discussion links consistent in Release Notes
 
 ## [0.1.40] - 2026-03-17
 

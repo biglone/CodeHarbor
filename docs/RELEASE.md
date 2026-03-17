@@ -76,7 +76,10 @@ The workflow will automatically prefer token mode when this secret exists.
 9. Verify:
    - `npm view codeharbor version`
    - `npm install -g codeharbor@<version>`
-10. Publish community notes:
+10. Generate release notes from the bilingual template:
+   - `ANNOUNCEMENT_URL=<link> POLL_URL=<link> ./scripts/render-release-notes.sh`
+   - replace highlight bullets with the release summary
+11. Publish community notes:
    - create GitHub Release notes (auto-generated + hand edits)
    - open/update a Discussions `Announcements` post and link feedback channels
 
