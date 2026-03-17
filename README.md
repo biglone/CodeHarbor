@@ -237,6 +237,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
 - `docs/MULTIMODAL_VERIFICATION_ZH.md`: multimodal verification playbook (Codex/Claude image + audio transcription)
+- `docs/GROWTH_PLAYBOOK_ZH.md`: growth and community feedback playbook
 - `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
 - `docs/BACKUP_AUTOMATION.md`: scheduled config backup and restore operations
 - `docs/RELEASE.md`: release process and CI/publish policy
@@ -312,6 +313,14 @@ It documents:
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
 - `scripts/install-backup-timer.sh`: install/update user-level systemd timer for automatic backups
 - `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
+
+## Community and Feedback
+
+- Questions and usage help: GitHub Discussions (`Q&A`)
+- Feature ideas: GitHub Discussions (`Ideas`) or `Feature request` issue template
+- Bug reports: use `Bug report` issue template for reproducible diagnostics
+- Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Growth and community playbook: [`docs/GROWTH_PLAYBOOK_ZH.md`](docs/GROWTH_PLAYBOOK_ZH.md)
 
 ### Config Backup Script
 

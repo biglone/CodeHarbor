@@ -76,6 +76,9 @@ The workflow will automatically prefer token mode when this secret exists.
 9. Verify:
    - `npm view codeharbor version`
    - `npm install -g codeharbor@<version>`
+10. Publish community notes:
+   - create GitHub Release notes (auto-generated + hand edits)
+   - open/update a Discussions `Announcements` post and link feedback channels
 
 ## Rollback Playbook
 

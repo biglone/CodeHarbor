@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- Community and growth infrastructure:
+  - added GitHub issue forms (bug/feature), issue template config, and pull request template
+  - added release note category config via `.github/release.yml`
+  - added contributor guide (`CONTRIBUTING.md`) and growth playbook (`docs/GROWTH_PLAYBOOK_ZH.md`)
+  - updated README and release guide with feedback/community operation entry points
+
 ## [0.1.40] - 2026-03-17
 
 - Multimodal runtime diagnostics and UX:
