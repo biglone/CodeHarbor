@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-03-17
+
 - Upgrade workflow hardening:
   - added post-upgrade verification (target/installed version check) and explicit pass/fail notices with recovery hints
   - filtered noisy SQLite ExperimentalWarning text from in-chat upgrade failure output
