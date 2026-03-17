@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-03-17
+
 - Multimodal runtime diagnostics and UX:
   - `/help` now includes live multimodal status summary (image policy/audio status/backend image support)
   - new `/diag media [count]` for image/audio counters and recent media handling records
