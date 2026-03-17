@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { writeFile, unlink } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ vi.mock("node:child_process", () => ({
 import { CodexExecutionCancelledError, CodexExecutor } from "../src/executor/codex-executor";
 
 interface FakeChildProcess extends EventEmitter {
+  stdin: PassThrough;
   stdout: PassThrough;
   stderr: PassThrough;
   kill: (signal?: NodeJS.Signals) => boolean;
@@ -19,6 +21,7 @@ interface FakeChildProcess extends EventEmitter {
 
 function createFakeChildProcess(): FakeChildProcess {
   const child = new EventEmitter() as FakeChildProcess;
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = vi.fn(() => true) as unknown as (signal?: NodeJS.Signals) => boolean;
@@ -288,6 +291,56 @@ describe("CodexExecutor", () => {
       expect.arrayContaining(["--resume", "session-old"]),
       expect.any(Object),
     );
+  });
+
+  it("sends stream-json image payload for claude image inputs", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+    const imagePath = `/tmp/claude-image-${Date.now()}.png`;
+    const redDotPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+
+    await writeFile(imagePath, Buffer.from(redDotPngBase64, "base64"));
+    let stdinPayload = "";
+    child.stdin.on("data", (chunk: Buffer) => {
+      stdinPayload += chunk.toString("utf8");
+    });
+
+    const executor = new CodexExecutor({
+      provider: "claude",
+      bin: "claude",
+      model: "sonnet",
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("describe image", null, undefined, {
+      imagePaths: [imagePath],
+    });
+    child.stdout.write('{"type":"result","subtype":"success","session_id":"session-img","result":"ok"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "session-img",
+      reply: "ok",
+    });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining(["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]),
+      expect.any(Object),
+    );
+    const payload = JSON.parse(stdinPayload.trim()) as {
+      message?: { content?: Array<{ type?: string; source?: { media_type?: string } }> };
+    };
+    const content = payload.message?.content ?? [];
+    expect(content[0]?.type).toBe("image");
+    expect(content[0]?.source?.media_type).toBe("image/png");
+    await unlink(imagePath);
   });
 
   it("throws when claude reports result error", async () => {

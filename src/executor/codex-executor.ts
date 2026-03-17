@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 
 import { CodexExecutionResult } from "../types";
@@ -97,15 +99,36 @@ export class CodexExecutor {
     onProgress?: CodexProgressHandler,
     startOptions?: CodexExecutionStartOptions,
   ): CodexExecutionHandle {
-    const args = buildCliArgs(prompt, sessionId, this.options, startOptions, this.provider);
+    let claudeStreamInput: string | null = null;
+    try {
+      claudeStreamInput = buildClaudeStreamInput(prompt, startOptions);
+    } catch (error) {
+      return {
+        result: Promise.reject(error),
+        cancel: () => {},
+      };
+    }
+    const args = buildCliArgs(
+      prompt,
+      sessionId,
+      this.options,
+      startOptions,
+      this.provider,
+      Boolean(claudeStreamInput),
+    );
     const child = spawn(this.options.bin, args, {
       cwd: startOptions?.workdir ?? this.options.workdir,
       env: {
         ...process.env,
         ...this.options.extraEnv,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+
+    if (claudeStreamInput) {
+      child.stdin.write(`${claudeStreamInput}\n`);
+    }
+    child.stdin.end();
 
     let stderr = "";
     let resolvedThreadId: string | null = sessionId;
@@ -281,9 +304,10 @@ function buildCliArgs(
   options: CodexExecutorOptions,
   startOptions: CodexExecutionStartOptions | undefined,
   provider: AiCliProvider,
+  hasClaudeStreamInput: boolean,
 ): string[] {
   if (provider === "claude") {
-    return buildClaudeArgs(prompt, sessionId, options);
+    return buildClaudeArgs(prompt, sessionId, options, hasClaudeStreamInput);
   }
   return buildCodexArgs(prompt, sessionId, options, startOptions);
 }
@@ -327,8 +351,15 @@ function buildCodexArgs(
   return args;
 }
 
-function buildClaudeArgs(prompt: string, sessionId: string | null, options: CodexExecutorOptions): string[] {
-  const args: string[] = ["-p", prompt, "--output-format", "json"];
+function buildClaudeArgs(
+  prompt: string,
+  sessionId: string | null,
+  options: CodexExecutorOptions,
+  hasStreamInput: boolean,
+): string[] {
+  const args: string[] = hasStreamInput
+    ? ["-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
+    : ["-p", prompt, "--output-format", "json"];
   if (sessionId) {
     args.push("--resume", sessionId);
   }
@@ -450,4 +481,66 @@ function extractClaudeError(event: ClaudeJsonEvent): string | null {
     return event.result.trim();
   }
   return null;
+}
+
+function buildClaudeStreamInput(prompt: string, startOptions?: CodexExecutionStartOptions): string | null {
+  const imagePaths = startOptions?.imagePaths ?? [];
+  if (imagePaths.length === 0) {
+    return null;
+  }
+
+  const content: Array<
+    | {
+        type: "image";
+        source: {
+          type: "base64";
+          media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+          data: string;
+        };
+      }
+    | {
+        type: "text";
+        text: string;
+      }
+  > = imagePaths.map((imagePath) => {
+    const mimeType = resolveImageMimeType(imagePath);
+    const base64Data = readFileSync(imagePath).toString("base64");
+    return {
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: mimeType,
+        data: base64Data,
+      },
+    };
+  });
+  content.push({
+    type: "text" as const,
+    text: prompt,
+  });
+
+  return JSON.stringify({
+    type: "user",
+    message: {
+      role: "user",
+      content,
+    },
+  });
+}
+
+function resolveImageMimeType(imagePath: string): "image/png" | "image/jpeg" | "image/gif" | "image/webp" {
+  const ext = path.extname(imagePath).toLowerCase();
+  if (ext === ".png") {
+    return "image/png";
+  }
+  if (ext === ".jpg" || ext === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (ext === ".gif") {
+    return "image/gif";
+  }
+  if (ext === ".webp") {
+    return "image/webp";
+  }
+  throw new Error(`unsupported image extension for claude stream input: ${imagePath}`);
 }
