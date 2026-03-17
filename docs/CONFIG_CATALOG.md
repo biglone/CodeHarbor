@@ -84,6 +84,9 @@ These must be valid before `codeharbor start`.
 | `CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT` | No | `false` | Yes | Restart | Disable chunk splitting |
 | `CLI_COMPAT_PROGRESS_THROTTLE_MS` | No | `300` | Yes | Restart | Compatibility progress throttle |
 | `CLI_COMPAT_FETCH_MEDIA` | No | `true` | Yes | Restart | Download media for prompts |
+| `CLI_COMPAT_IMAGE_MAX_BYTES` | No | `10485760` | No | Restart | Skip oversized image attachments before backend execution |
+| `CLI_COMPAT_IMAGE_MAX_COUNT` | No | `4` | No | Restart | Max image count passed to backend per request |
+| `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES` | No | `image/png,image/jpeg,image/webp,image/gif` | No | Restart | Comma-separated image MIME allowlist |
 | `CLI_COMPAT_TRANSCRIBE_AUDIO` | No | `false` | Yes | Restart | Enable transcription for Matrix `m.audio` attachments |
 | `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL` | No | `gpt-4o-mini-transcribe` | Yes | Restart | OpenAI transcription model |
 | `CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS` | No | `120000` | Yes | Restart | Timeout per transcription request |

@@ -730,6 +730,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/diag media [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("多模态状态:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });

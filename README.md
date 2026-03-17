@@ -158,6 +158,7 @@ Common in-chat control commands:
 - `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids + upgrade metrics/lock, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
+- `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
 - `/diag upgrade [count]` show upgrade diagnostics (distributed lock, aggregate stats, recent upgrade records)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
@@ -235,6 +236,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 - `docs/COMPLETE_CONFIGURATION_GUIDE.md`: end-to-end setup flow + full feature-to-config mapping
 - `docs/CONFIG_UI_DESIGN.md`: configuration UI MVP design
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
+- `docs/MULTIMODAL_VERIFICATION_ZH.md`: multimodal verification playbook (Codex/Claude image + audio transcription)
 - `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
 - `docs/BACKUP_AUTOMATION.md`: scheduled config backup and restore operations
 - `docs/RELEASE.md`: release process and CI/publish policy
@@ -283,6 +285,7 @@ Use this layered reference to avoid mixing boot-only and runtime tuning items:
 
 - [`docs/CONFIG_CATALOG.md`](docs/CONFIG_CATALOG.md)
 - [`docs/COMPLETE_CONFIGURATION_GUIDE.md`](docs/COMPLETE_CONFIGURATION_GUIDE.md)
+- [`docs/MULTIMODAL_VERIFICATION_ZH.md`](docs/MULTIMODAL_VERIFICATION_ZH.md)
 
 It documents:
 
@@ -459,6 +462,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
+  - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
   - `/diag upgrade [count]` show distributed lock + aggregate stats + recent upgrade run diagnostics
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
@@ -538,6 +542,12 @@ To make IM behavior closer to local `codex` CLI interaction, enable:
   - lower update throttle for near-real-time progress
 - `CLI_COMPAT_FETCH_MEDIA=true|false`
   - download Matrix `mxc://` media (image) to temp file and pass image context to backend
+- `CLI_COMPAT_IMAGE_MAX_BYTES`
+  - per-image max size guard (bytes), oversized images are skipped with user notice
+- `CLI_COMPAT_IMAGE_MAX_COUNT`
+  - max number of images passed to backend in one request
+- `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES`
+  - comma-separated image MIME allowlist (`image/png,image/jpeg,...`)
 - `CLI_COMPAT_TRANSCRIBE_AUDIO=true|false`
   - download Matrix `m.audio` attachments and transcribe them into prompt context
 - `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL`
@@ -596,10 +606,12 @@ Use these to align runtime with your terminal CLI profile:
 When image attachments are present and `CLI_COMPAT_FETCH_MEDIA=true`, CodeHarbor will:
 
 1. download `mxc://` media to a temp file
-2. for Codex backend, pass local file paths as `--image`
-3. for Claude backend, use stream-json input with base64 image blocks
-4. best-effort cleanup temp files after the request
-5. optional prompt record append (`CLI_COMPAT_RECORD_PATH`) for deterministic replay input
+2. apply image policy guardrails (`CLI_COMPAT_IMAGE_MAX_BYTES`, `CLI_COMPAT_IMAGE_MAX_COUNT`, `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES`)
+3. for Codex backend, pass local file paths as `--image`
+4. for Claude backend, use stream-json input with base64 image blocks
+5. if Claude image input fails, auto-retry once without image blocks and notify user
+6. best-effort cleanup temp files after the request
+7. optional prompt record append (`CLI_COMPAT_RECORD_PATH`) for deterministic replay input
 
 When audio attachments are present and both `CLI_COMPAT_FETCH_MEDIA=true` and `CLI_COMPAT_TRANSCRIBE_AUDIO=true`, CodeHarbor will:
 

@@ -149,6 +149,10 @@ codeharbor admin serve
 
 - `CLI_COMPAT_FETCH_MEDIA=true`：下载并处理附件
   - 图片会在 Codex 后端走 `--image`，在 Claude 后端走 stream-json base64 图像块
+- `CLI_COMPAT_IMAGE_MAX_BYTES`：单张图片大小上限（超限自动跳过并提示）
+- `CLI_COMPAT_IMAGE_MAX_COUNT`：单次请求最多携带图片数（超出的会跳过并提示）
+- `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES`：允许的图片 MIME 白名单（逗号分隔）
+- Claude 图片输入失败时会自动降级为“纯文本重试一次”，并在会话中提示
 - `CLI_COMPAT_TRANSCRIBE_AUDIO=true`：开启音频转写
 - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`：本地 Whisper 命令（优先）
 - `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL`：OpenAI 转写模型（本地失败时可回退）
@@ -161,10 +165,11 @@ codeharbor admin serve
 
 ### 5.6 版本检查与更新提示
 
-- `/help`：查看机器人可用命令列表
+- `/help`：查看机器人可用命令列表（包含当前多模态状态摘要）
 - `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）、升级指标/锁状态，以及最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
+- `/diag media [count]`：输出多模态诊断（图片/语音计数器 + 最近处理记录）
 - `/diag upgrade [count]`：输出升级诊断信息（分布式升级锁、聚合指标、最近升级记录）
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
@@ -247,6 +252,16 @@ codeharbor self-update
 - `CLI_COMPAT_TRANSCRIBE_AUDIO=true`
 - 本地 Whisper 命令是否可执行（或 OpenAI key 是否可用）
 
-### Q3：为什么管理后台显示无权限？
+### Q3：为什么图片没有进入模型分析？
+
+先检查：
+
+- `CLI_COMPAT_FETCH_MEDIA=true`
+- 图片 MIME 是否在 `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES` 白名单
+- 图片体积是否超过 `CLI_COMPAT_IMAGE_MAX_BYTES`
+- 单次图片数量是否超过 `CLI_COMPAT_IMAGE_MAX_COUNT`
+- 发送 `/diag media 10` 查看最近被跳过的原因
+
+### Q4：为什么管理后台显示无权限？
 
 先在页面填写 `Admin Token` 并点击“保存认证”，再看权限状态是否变为 `ADMIN` 或 `VIEWER`。

@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- Multimodal runtime diagnostics and UX:
+  - `/help` now includes live multimodal status summary (image policy/audio status/backend image support)
+  - new `/diag media [count]` for image/audio counters and recent media handling records
+- Image guardrails for Matrix `m.image`:
+  - added `CLI_COMPAT_IMAGE_MAX_BYTES`, `CLI_COMPAT_IMAGE_MAX_COUNT`, and `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES`
+  - enforce size/MIME/count policy before backend execution, with explicit in-chat skip notices
+- Claude image resilience:
+  - when Claude image input fails, CodeHarbor auto-retries once without image blocks and informs user
+- Docs updates:
+  - added `docs/MULTIMODAL_VERIFICATION_ZH.md` verification playbook
+  - synced README + Chinese manuals/config guides/help references for new multimodal diagnostics and config keys
+
 ## [0.1.39] - 2026-03-17
 
 - Image understanding parity:

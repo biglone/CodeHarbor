@@ -267,6 +267,9 @@ This section explains all runtime capabilities and the keys that control them.
 - **Purpose**: support attachment-aware prompts (images and voice).
 - **Keys**:
   - `CLI_COMPAT_FETCH_MEDIA` (download Matrix media)
+  - `CLI_COMPAT_IMAGE_MAX_BYTES`
+  - `CLI_COMPAT_IMAGE_MAX_COUNT`
+  - `CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES`
   - `CLI_COMPAT_TRANSCRIBE_AUDIO`
   - `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL`
   - `CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS`
@@ -277,6 +280,9 @@ This section explains all runtime capabilities and the keys that control them.
   - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`
   - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS`
 - **Behavior**:
+  - image MIME/size/count guardrails with in-chat skip notices
+  - `/diag media [count]` for multimodal runtime diagnostics
+  - Claude image failure auto-degrades to one retry without image blocks
   - local whisper first (if configured)
   - OpenAI fallback when local fails and `OPENAI_API_KEY` is present
   - oversized audio skip protection
