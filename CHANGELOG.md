@@ -15,6 +15,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - published v0.1.40 announcement discussion and added quick feedback links near README header
   - added English announcement + roadmap poll discussions, and linked CN/EN posts in README
   - consolidated CN/EN announcements and roadmap polls into bilingual threads; closed duplicate CN threads
+  - added maintainer + CI verification block and bilingual discussion template
 
 ## [0.1.40] - 2026-03-17
 
