@@ -12,6 +12,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
   - added contributor guide (`CONTRIBUTING.md`) and growth playbook (`docs/GROWTH_PLAYBOOK_ZH.md`)
   - updated README and release guide with feedback/community operation entry points
   - added social preview asset (`docs/assets/social-preview-1200x630.png`) and upload guide (`docs/SOCIAL_PREVIEW_UPLOAD_ZH.md`)
+  - published v0.1.40 announcement discussion and added quick feedback links near README header
 
 ## [0.1.40] - 2026-03-17
 

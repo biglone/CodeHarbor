@@ -4,6 +4,11 @@ CodeHarbor is a self-hosted Matrix bot and AI chat bridge for `codex` and `claud
 Users send messages in Matrix rooms, CodeHarbor routes each request to the selected backend,
 keeps room/session state in SQLite, and sends the final result back to the same room.
 
+Quick feedback:
+- Questions/usage: <https://github.com/biglone/CodeHarbor/discussions>
+- Bug report: <https://github.com/biglone/CodeHarbor/issues/new?template=bug_report.yml>
+- Feature request: <https://github.com/biglone/CodeHarbor/issues/new?template=feature_request.yml>
+
 ## What It Does
 
 - Matrix channel adapter (receive + reply)
