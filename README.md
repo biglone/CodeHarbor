@@ -238,6 +238,7 @@ PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
 - `docs/CONFIG_CATALOG.md`: consolidated configuration matrix (required/runtime/UI/effective timing)
 - `docs/MULTIMODAL_VERIFICATION_ZH.md`: multimodal verification playbook (Codex/Claude image + audio transcription)
 - `docs/GROWTH_PLAYBOOK_ZH.md`: growth and community feedback playbook
+- `docs/SOCIAL_PREVIEW_UPLOAD_ZH.md`: GitHub social preview image upload guide
 - `docs/ADMIN_STANDALONE_DEPLOY.md`: standalone admin deployment and Cloudflare Tunnel exposure guide
 - `docs/BACKUP_AUTOMATION.md`: scheduled config backup and restore operations
 - `docs/RELEASE.md`: release process and CI/publish policy
