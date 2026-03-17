@@ -148,6 +148,7 @@ codeharbor admin serve
 ### 5.4 图片与语音（附件）能力
 
 - `CLI_COMPAT_FETCH_MEDIA=true`：下载并处理附件
+  - 图片会在 Codex 后端走 `--image`，在 Claude 后端走 stream-json base64 图像块
 - `CLI_COMPAT_TRANSCRIBE_AUDIO=true`：开启音频转写
 - `CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND`：本地 Whisper 命令（优先）
 - `CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL`：OpenAI 转写模型（本地失败时可回退）
