@@ -8,6 +8,8 @@ Quick feedback:
 - Questions/usage: <https://github.com/biglone/CodeHarbor/discussions>
 - Bug report: <https://github.com/biglone/CodeHarbor/issues/new?template=bug_report.yml>
 - Feature request: <https://github.com/biglone/CodeHarbor/issues/new?template=feature_request.yml>
+- Release announcements (CN/EN): <https://github.com/biglone/CodeHarbor/discussions/1> · <https://github.com/biglone/CodeHarbor/discussions/3>
+- Roadmap polls (CN/EN): <https://github.com/biglone/CodeHarbor/discussions/2> · <https://github.com/biglone/CodeHarbor/discussions/4>
 
 ## What It Does
 
