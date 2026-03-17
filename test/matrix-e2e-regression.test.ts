@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
@@ -304,7 +308,7 @@ type ScenarioInput = {
   prompt: string;
   sessionId: string | null;
   onProgress?: (event: { stage: string; message?: string }) => void;
-  startOptions?: { workdir?: string };
+  startOptions?: { workdir?: string; imagePaths?: string[] };
 };
 
 type ScenarioOutput = {
@@ -313,7 +317,7 @@ type ScenarioOutput = {
 };
 
 class ScriptedExecutor {
-  calls: Array<{ prompt: string; sessionId: string | null; workdir: string | null }> = [];
+  calls: Array<{ prompt: string; sessionId: string | null; workdir: string | null; imagePaths: string[] }> = [];
   private scenario: (input: ScenarioInput) => ScenarioOutput;
 
   constructor(scenario?: (input: ScenarioInput) => ScenarioOutput) {
@@ -333,9 +337,14 @@ class ScriptedExecutor {
     prompt: string,
     sessionId: string | null,
     onProgress?: (event: { stage: string; message?: string }) => void,
-    startOptions?: { workdir?: string },
+    startOptions?: { workdir?: string; imagePaths?: string[] },
   ): ScenarioOutput {
-    this.calls.push({ prompt, sessionId, workdir: startOptions?.workdir ?? null });
+    this.calls.push({
+      prompt,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+      imagePaths: startOptions?.imagePaths ? [...startOptions.imagePaths] : [],
+    });
     return this.scenario({ prompt, sessionId, onProgress, startOptions });
   }
 }
@@ -1094,6 +1103,63 @@ describe("Matrix e2e regression", () => {
     expect(claudeExecutor.calls[0]?.prompt).toContain("[conversation_bridge]");
     expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] user: first");
     expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] assistant: from-codex");
+  });
+
+  it("auto-retries without images when claude image execution fails", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-claude-image-fallback-"));
+    const imagePath = path.join(tempRoot, "diagram.png");
+    await fs.writeFile(imagePath, "payload", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      let attempt = 0;
+      const executor = new ScriptedExecutor(() => {
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            result: Promise.reject(new Error("claude returned error: invalid image media_type")),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({ sessionId: "session-fallback", reply: "fallback-ok" }),
+          cancel: () => {},
+        };
+      });
+      const store = new InMemoryStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        progressUpdatesEnabled: false,
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        aiCliProvider: "claude",
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请分析这张图",
+          attachments: [
+            {
+              kind: "image",
+              name: "diagram.png",
+              mxcUrl: "mxc://example.com/diagram",
+              mimeType: "image/png",
+              sizeBytes: 1024,
+              localPath: imagePath,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(2);
+      expect(executor.calls[0]?.imagePaths).toEqual([imagePath]);
+      expect(executor.calls[1]?.imagePaths).toEqual([]);
+      expect(channel.notices.some((entry) => entry.text.includes("自动降级为纯文本重试"))).toBe(true);
+      expect(channel.sent.some((entry) => entry.text === "fallback-ok")).toBe(true);
+      await expect(fs.access(imagePath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("returns failure message when executor errors", async () => {

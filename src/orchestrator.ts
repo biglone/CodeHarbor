@@ -636,54 +636,77 @@ export class Orchestrator {
 
         try {
           const executionStartedAt = Date.now();
-          executionHandle = this.sessionRuntime.startExecution(
-            sessionKey,
-            executionPrompt,
-            previousCodexSessionId,
-            (progress) => {
-              progressChain = progressChain
-                .then(() =>
-                  this.handleProgress(
-                    message.conversationId,
-                    message.isDirectMessage,
-                    progress,
-                    () => lastProgressAt,
-                    (next) => {
-                      lastProgressAt = next;
-                    },
-                    () => lastProgressText,
-                    (next) => {
-                      lastProgressText = next;
-                    },
-                    () => progressNoticeEventId,
-                    (next) => {
-                      progressNoticeEventId = next;
-                    },
-                  ),
-                )
-                .catch((progressError) => {
-                  this.logger.debug("Failed to process progress callback", { progressError });
-                });
-            },
-            {
-              passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
-              imagePaths,
-              workdir: roomConfig.workdir,
-            },
-          );
-          const running = this.runningExecutions.get(sessionKey);
-          if (running?.requestId === requestId) {
-            running.startedAt = executionStartedAt;
-            running.cancel = () => {
-              cancelRequested = true;
-              executionHandle?.cancel();
-            };
-          }
-          if (cancelRequested) {
-            executionHandle.cancel();
+          const executeOnce = async (attemptImagePaths: string[]): Promise<{ sessionId: string; reply: string }> => {
+            executionHandle = this.sessionRuntime.startExecution(
+              sessionKey,
+              executionPrompt,
+              previousCodexSessionId,
+              (progress) => {
+                progressChain = progressChain
+                  .then(() =>
+                    this.handleProgress(
+                      message.conversationId,
+                      message.isDirectMessage,
+                      progress,
+                      () => lastProgressAt,
+                      (next) => {
+                        lastProgressAt = next;
+                      },
+                      () => lastProgressText,
+                      (next) => {
+                        lastProgressText = next;
+                      },
+                      () => progressNoticeEventId,
+                      (next) => {
+                        progressNoticeEventId = next;
+                      },
+                    ),
+                  )
+                  .catch((progressError) => {
+                    this.logger.debug("Failed to process progress callback", { progressError });
+                  });
+              },
+              {
+                passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
+                imagePaths: attemptImagePaths,
+                workdir: roomConfig.workdir,
+              },
+            );
+            const running = this.runningExecutions.get(sessionKey);
+            if (running?.requestId === requestId) {
+              running.startedAt = executionStartedAt;
+              running.cancel = () => {
+                cancelRequested = true;
+                executionHandle?.cancel();
+              };
+            }
+            if (cancelRequested) {
+              executionHandle.cancel();
+            }
+            return executionHandle.result;
+          };
+
+          let result: { sessionId: string; reply: string };
+          try {
+            result = await executeOnce(imagePaths);
+          } catch (error) {
+            if (!shouldRetryClaudeImageFailure(this.aiCliProvider, imagePaths, error)) {
+              throw error;
+            }
+            const reason = summarizeSingleLine(formatError(error), 220);
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] 检测到 Claude 图片处理失败，已自动降级为纯文本重试。原因: ${reason}`,
+            );
+            this.logger.warn("Claude image execution failed, retrying without image inputs", {
+              requestId,
+              sessionKey,
+              imageCount: imagePaths.length,
+              reason: formatError(error),
+            });
+            result = await executeOnce([]);
           }
 
-          const result = await executionHandle.result;
           executionDurationMs = Date.now() - executionStartedAt;
           await progressChain;
 
@@ -2236,6 +2259,53 @@ function formatError(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function summarizeSingleLine(text: string, maxLen: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "unknown";
+  }
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLen)}...`;
+}
+
+function shouldRetryClaudeImageFailure(provider: "codex" | "claude", imagePaths: string[], error: unknown): boolean {
+  if (provider !== "claude" || imagePaths.length === 0) {
+    return false;
+  }
+  if (error instanceof CodexExecutionCancelledError) {
+    return false;
+  }
+
+  const message = formatError(error).toLowerCase();
+  if (!message) {
+    return false;
+  }
+  if (message.includes("timed out") || message.includes("timeout") || message.includes("cancelled")) {
+    return false;
+  }
+  if (message.includes("unsupported image extension")) {
+    return true;
+  }
+
+  const imageSignal =
+    message.includes("image") ||
+    message.includes("media_type") ||
+    message.includes("base64") ||
+    message.includes("stream-json") ||
+    message.includes("input-format");
+  const failureSignal =
+    message.includes("invalid") ||
+    message.includes("unsupported") ||
+    message.includes("failed") ||
+    message.includes("error") ||
+    message.includes("too large") ||
+    message.includes("too many");
+
+  return imageSignal && failureSignal;
 }
 
 function normalizeImageMimeType(mimeType: string | null, localPath: string): string | null {
