@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-03-17
+
 - Image understanding parity:
   - Claude backend now supports Matrix `m.image` analysis via stream-json base64 image blocks
   - keeps existing Codex `--image` path and aligns multimodal behavior across both backends
