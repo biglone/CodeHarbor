@@ -128,6 +128,16 @@ interface RoomRuntimeConfig {
   workdir: string;
 }
 
+interface ImageSelectionResult {
+  imagePaths: string[];
+  acceptedCount: number;
+  skippedMissingPath: number;
+  skippedUnsupportedMime: number;
+  skippedTooLarge: number;
+  skippedOverLimit: number;
+  notice: string | null;
+}
+
 interface AutoDevRunSnapshot {
   state: "idle" | "running" | "succeeded" | "failed";
   startedAt: string | null;
@@ -575,8 +585,12 @@ export class Orchestrator {
           previousCodexSessionId === null && !this.skipBridgeForNextPrompt.delete(sessionKey);
         const bridgeContext = allowBridgeContext ? this.buildConversationBridgeContext(sessionKey) : null;
         const audioTranscripts = await this.transcribeAudioAttachments(message, requestId, sessionKey);
+        const imageSelection = await this.prepareImageAttachments(message, requestId, sessionKey);
+        if (imageSelection.notice) {
+          await this.channel.sendNotice(message.conversationId, imageSelection.notice);
+        }
         const executionPrompt = this.buildExecutionPrompt(route.prompt, message, audioTranscripts, bridgeContext);
-        const imagePaths = collectImagePaths(message);
+        const imagePaths = imageSelection.imagePaths;
         let lastProgressAt = 0;
         let lastProgressText = "";
         let progressNoticeEventId: string | null = null;
@@ -1416,6 +1430,108 @@ export class Orchestrator {
     return this.configService.resolveRoomConfig(conversationId, fallbackPolicy);
   }
 
+  private async prepareImageAttachments(
+    message: InboundMessage,
+    requestId: string,
+    sessionKey: string,
+  ): Promise<ImageSelectionResult> {
+    const result: ImageSelectionResult = {
+      imagePaths: [],
+      acceptedCount: 0,
+      skippedMissingPath: 0,
+      skippedUnsupportedMime: 0,
+      skippedTooLarge: 0,
+      skippedOverLimit: 0,
+      notice: null,
+    };
+
+    const rawImageAttachments = message.attachments.filter((attachment) => attachment.kind === "image");
+    if (rawImageAttachments.length === 0) {
+      return result;
+    }
+
+    const maxBytes = this.cliCompat.imageMaxBytes;
+    const maxCount = this.cliCompat.imageMaxCount;
+    const allowlist = new Set(this.cliCompat.imageAllowedMimeTypes.map((item) => item.toLowerCase()));
+    const dedup = new Set<string>();
+
+    const acceptedCandidates: string[] = [];
+    for (const attachment of rawImageAttachments) {
+      const localPath = attachment.localPath;
+      if (!localPath) {
+        if (this.cliCompat.fetchMedia) {
+          result.skippedMissingPath += 1;
+        }
+        continue;
+      }
+      if (dedup.has(localPath)) {
+        continue;
+      }
+      dedup.add(localPath);
+
+      const normalizedMimeType = normalizeImageMimeType(attachment.mimeType, localPath);
+      if (!normalizedMimeType || !allowlist.has(normalizedMimeType)) {
+        result.skippedUnsupportedMime += 1;
+        this.logger.warn("Skip image attachment due to unsupported mime type", {
+          requestId,
+          sessionKey,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          normalizedMimeType,
+          allowlist: [...allowlist],
+        });
+        continue;
+      }
+
+      const sizeBytes = await this.resolveAttachmentSizeBytes(attachment.sizeBytes, localPath);
+      if (sizeBytes !== null && sizeBytes > maxBytes) {
+        result.skippedTooLarge += 1;
+        this.logger.warn("Skip image attachment due to oversize", {
+          requestId,
+          sessionKey,
+          name: attachment.name,
+          sizeBytes,
+          maxBytes,
+        });
+        continue;
+      }
+      acceptedCandidates.push(localPath);
+    }
+
+    result.acceptedCount = acceptedCandidates.length;
+    if (acceptedCandidates.length > maxCount) {
+      result.imagePaths = acceptedCandidates.slice(0, maxCount);
+      result.skippedOverLimit = acceptedCandidates.length - maxCount;
+    } else {
+      result.imagePaths = acceptedCandidates;
+    }
+
+    if (
+      result.skippedMissingPath > 0 ||
+      result.skippedUnsupportedMime > 0 ||
+      result.skippedTooLarge > 0 ||
+      result.skippedOverLimit > 0
+    ) {
+      const parts: string[] = [];
+      if (result.skippedMissingPath > 0) {
+        parts.push(`未下载到本地 ${result.skippedMissingPath} 张`);
+      }
+      if (result.skippedUnsupportedMime > 0) {
+        parts.push(`格式不支持 ${result.skippedUnsupportedMime} 张（允许: ${this.cliCompat.imageAllowedMimeTypes.join(", ")}）`);
+      }
+      if (result.skippedTooLarge > 0) {
+        parts.push(`超过大小限制 ${result.skippedTooLarge} 张（上限 ${formatByteSize(maxBytes)}）`);
+      }
+      if (result.skippedOverLimit > 0) {
+        parts.push(`超过数量上限 ${result.skippedOverLimit} 张（最多 ${maxCount} 张）`);
+      }
+      const acceptedText = result.imagePaths.length > 0 ? `已附带 ${result.imagePaths.length} 张图片` : "本次未附带图片";
+      result.notice = `[CodeHarbor] 图片处理提示：${acceptedText}；${parts.join("；")}。`;
+    }
+
+    return result;
+  }
+
   private async transcribeAudioAttachments(
     message: InboundMessage,
     requestId: string,
@@ -1437,7 +1553,7 @@ export class Orchestrator {
     let skippedTooLarge = 0;
     for (const attachment of rawAudioAttachments) {
       const localPath = attachment.localPath as string;
-      const sizeBytes = await this.resolveAudioAttachmentSizeBytes(attachment.sizeBytes, localPath);
+      const sizeBytes = await this.resolveAttachmentSizeBytes(attachment.sizeBytes, localPath);
       if (sizeBytes !== null && sizeBytes > maxBytes) {
         skippedTooLarge += 1;
         this.logger.warn("Skip audio transcription for oversized attachment", {
@@ -1485,7 +1601,7 @@ export class Orchestrator {
     }
   }
 
-  private async resolveAudioAttachmentSizeBytes(sizeBytes: number | null, localPath: string): Promise<number | null> {
+  private async resolveAttachmentSizeBytes(sizeBytes: number | null, localPath: string): Promise<number | null> {
     if (sizeBytes !== null) {
       return sizeBytes;
     }
@@ -2122,15 +2238,29 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-function collectImagePaths(message: InboundMessage): string[] {
-  const seen = new Set<string>();
-  for (const attachment of message.attachments) {
-    if (attachment.kind !== "image" || !attachment.localPath) {
-      continue;
-    }
-    seen.add(attachment.localPath);
+function normalizeImageMimeType(mimeType: string | null, localPath: string): string | null {
+  const normalized = mimeType?.trim().toLowerCase() ?? "";
+  if (normalized) {
+    return normalized;
   }
-  return [...seen];
+  return inferImageMimeTypeFromPath(localPath);
+}
+
+function inferImageMimeTypeFromPath(localPath: string): string | null {
+  const extension = path.extname(localPath).trim().toLowerCase();
+  if (extension === ".png") {
+    return "image/png";
+  }
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  if (extension === ".gif") {
+    return "image/gif";
+  }
+  return null;
 }
 
 function collectLocalAttachmentPaths(message: InboundMessage): string[] {
@@ -2675,6 +2805,16 @@ function stripLeadingBotMention(text: string, matrixUserId: string): string {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatByteSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes}B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)}KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 function formatDurationMs(durationMs: number): string {

@@ -166,19 +166,20 @@ class FakeStateStore {
 
 class ImmediateExecutor {
   callCount = 0;
-  calls: Array<{ text: string; sessionId: string | null; workdir: string | null }> = [];
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null; imagePaths: string[] }> = [];
 
   startExecution(
     text: string,
     sessionId: string | null,
     _onProgress?: (event: unknown) => void,
-    startOptions?: { workdir?: string },
+    startOptions?: { workdir?: string; imagePaths?: string[] },
   ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
     this.callCount += 1;
     this.calls.push({
       text,
       sessionId,
       workdir: startOptions?.workdir ?? null,
+      imagePaths: startOptions?.imagePaths ? [...startOptions.imagePaths] : [],
     });
     return {
       result: Promise.resolve({ sessionId: sessionId ?? "thread-1", reply: `ok:${text}` }),
@@ -631,6 +632,117 @@ describe("Orchestrator", () => {
       expect(executor.calls).toHaveLength(1);
       expect(executor.calls[0]?.text).not.toContain("[audio_transcripts]");
       await expect(fs.access(audioPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies image mime/size/count policy and reports skipped items", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-image-policy-"));
+    const keepPng = path.join(tempRoot, "keep-1.png");
+    const keepJpg = path.join(tempRoot, "keep-2.jpg");
+    const extraWebp = path.join(tempRoot, "extra.webp");
+    const largePng = path.join(tempRoot, "large.png");
+    const unsupportedSvg = path.join(tempRoot, "icon.svg");
+    await fs.writeFile(keepPng, "a", "utf8");
+    await fs.writeFile(keepJpg, "b", "utf8");
+    await fs.writeFile(extraWebp, "c", "utf8");
+    await fs.writeFile(largePng, "d", "utf8");
+    await fs.writeFile(unsupportedSvg, "e", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        cliCompat: {
+          enabled: false,
+          passThroughEvents: false,
+          preserveWhitespace: false,
+          disableReplyChunkSplit: false,
+          progressThrottleMs: 300,
+          fetchMedia: true,
+          imageMaxBytes: 10,
+          imageMaxCount: 2,
+          imageAllowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+          transcribeAudio: false,
+          audioTranscribeModel: "gpt-4o-mini-transcribe",
+          audioTranscribeTimeoutMs: 120000,
+          audioTranscribeMaxChars: 6000,
+          audioTranscribeMaxRetries: 1,
+          audioTranscribeRetryDelayMs: 800,
+          audioTranscribeMaxBytes: 26214400,
+          audioLocalWhisperCommand: null,
+          audioLocalWhisperTimeoutMs: 180000,
+          recordPath: null,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "分析图片",
+          eventId: "$image-policy",
+          attachments: [
+            {
+              kind: "image",
+              name: "keep-1.png",
+              mxcUrl: "mxc://example.com/keep1",
+              mimeType: "image/png",
+              sizeBytes: 4,
+              localPath: keepPng,
+            },
+            {
+              kind: "image",
+              name: "keep-2.jpg",
+              mxcUrl: "mxc://example.com/keep2",
+              mimeType: "image/jpeg",
+              sizeBytes: 5,
+              localPath: keepJpg,
+            },
+            {
+              kind: "image",
+              name: "large.png",
+              mxcUrl: "mxc://example.com/large",
+              mimeType: "image/png",
+              sizeBytes: 128,
+              localPath: largePng,
+            },
+            {
+              kind: "image",
+              name: "icon.svg",
+              mxcUrl: "mxc://example.com/icon",
+              mimeType: "image/svg+xml",
+              sizeBytes: 3,
+              localPath: unsupportedSvg,
+            },
+            {
+              kind: "image",
+              name: "extra.webp",
+              mxcUrl: "mxc://example.com/extra",
+              mimeType: "image/webp",
+              sizeBytes: 6,
+              localPath: extraWebp,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.imagePaths).toEqual([keepPng, keepJpg]);
+      expect(channel.notices.some((entry) => entry.text.includes("图片处理提示"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("格式不支持 1 张"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("超过大小限制 1 张"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("超过数量上限 1 张"))).toBe(true);
+
+      await expect(fs.access(keepPng)).rejects.toBeDefined();
+      await expect(fs.access(keepJpg)).rejects.toBeDefined();
+      await expect(fs.access(extraWebp)).rejects.toBeDefined();
+      await expect(fs.access(largePng)).rejects.toBeDefined();
+      await expect(fs.access(unsupportedSvg)).rejects.toBeDefined();
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
