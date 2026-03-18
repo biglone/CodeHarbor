@@ -549,4 +549,80 @@ describe("StateStore", () => {
     expect(messages[0]?.content).toBe("msg-5");
     expect(messages[199]?.content).toBe("msg-204");
   });
+
+  it("lists session history with room/user/time filters", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const sessionA = "matrix:!room-a:example.com:@alice:example.com";
+    const sessionB = "matrix:!room-a:example.com:@bob:example.com";
+    const sessionC = "matrix:!room-b:example.com:@alice:example.com";
+
+    store.enqueueTask({
+      sessionKey: sessionA,
+      eventId: "$a1",
+      requestId: "req-a1",
+      payloadJson: JSON.stringify({
+        message: {
+          channel: "matrix",
+          conversationId: "!room-a:example.com",
+          senderId: "@alice:example.com",
+        },
+      }),
+    });
+    store.enqueueTask({
+      sessionKey: sessionB,
+      eventId: "$b1",
+      requestId: "req-b1",
+      payloadJson: JSON.stringify({
+        message: {
+          channel: "matrix",
+          conversationId: "!room-a:example.com",
+          senderId: "@bob:example.com",
+        },
+      }),
+    });
+
+    store.appendConversationMessage(sessionA, "user", "codex", "hello from alice");
+    store.appendConversationMessage(sessionC, "assistant", "codex", "hello from room-b");
+
+    const all = store.listSessionHistory({ limit: 10, offset: 0 });
+    expect(all.total).toBe(3);
+    expect(all.items).toHaveLength(3);
+
+    const byRoom = store.listSessionHistory({
+      roomId: "!room-a:example.com",
+      limit: 10,
+    });
+    expect(byRoom.total).toBe(2);
+    expect(byRoom.items.every((item) => item.roomId === "!room-a:example.com")).toBe(true);
+
+    const byUser = store.listSessionHistory({
+      userId: "@alice:example.com",
+      limit: 10,
+    });
+    expect(byUser.total).toBe(2);
+    expect(byUser.items.every((item) => item.userId === "@alice:example.com")).toBe(true);
+
+    const sessionAEntry = all.items.find((item) => item.sessionKey === sessionA);
+    expect(sessionAEntry).toEqual(
+      expect.objectContaining({
+        roomId: "!room-a:example.com",
+        userId: "@alice:example.com",
+        messageCount: 1,
+      }),
+    );
+
+    const paged = store.listSessionHistory({ limit: 1, offset: 1 });
+    expect(paged.total).toBe(3);
+    expect(paged.items).toHaveLength(1);
+
+    const from = all.items[1]?.updatedAt ?? 0;
+    const filteredByTime = store.listSessionHistory({
+      from,
+      to: Number.MAX_SAFE_INTEGER,
+      limit: 10,
+    });
+    expect(filteredByTime.items.every((item) => item.updatedAt >= from)).toBe(true);
+  });
 });

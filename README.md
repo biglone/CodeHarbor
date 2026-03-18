@@ -406,6 +406,8 @@ Main endpoints:
 - `DELETE /api/admin/config/rooms/:roomId`
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50`
+- `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`
+- `GET /api/admin/sessions/:sessionKey/messages?limit=100`
 
 When `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON` is set, requests must include:
 

@@ -29,10 +29,19 @@ import {
   isHotGlobalConfigKey,
 } from "./runtime-hot-config";
 import { restartSystemdServices } from "./service-manager";
-import { ConfigRevisionRecord, StateStore } from "./store/state-store";
+import {
+  ConfigRevisionRecord,
+  SessionHistoryRecord,
+  SessionMessageRecord,
+  StateStore,
+} from "./store/state-store";
 
 const execFileAsync = promisify(execFile);
 const ADMIN_MAX_JSON_BODY_BYTES = 1_048_576;
+const ADMIN_DEFAULT_SESSION_QUERY_LIMIT = 50;
+const ADMIN_MAX_SESSION_QUERY_LIMIT = 200;
+const ADMIN_DEFAULT_SESSION_MESSAGES_LIMIT = 100;
+const ADMIN_MAX_SESSION_MESSAGES_LIMIT = 500;
 
 interface CodexHealthResult {
   ok: boolean;
@@ -332,6 +341,66 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: true,
           data: this.stateStore.listConfigRevisions(limit).map((entry) => formatAuditEntry(entry)),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/sessions") {
+        const roomId = normalizeOptionalString(url.searchParams.get("roomId"));
+        const userId = normalizeOptionalString(url.searchParams.get("userId"));
+        const from = parseOptionalTimestampQuery(url.searchParams.get("from"), "from");
+        const to = parseOptionalTimestampQuery(url.searchParams.get("to"), "to");
+        if (from !== null && to !== null && from > to) {
+          throw new HttpError(400, "from must be less than or equal to to.");
+        }
+        const limit = normalizePositiveInt(
+          url.searchParams.get("limit"),
+          ADMIN_DEFAULT_SESSION_QUERY_LIMIT,
+          1,
+          ADMIN_MAX_SESSION_QUERY_LIMIT,
+        );
+        const offset = normalizeNonNegativeInt(url.searchParams.get("offset"), 0);
+        const result = this.stateStore.listSessionHistory({
+          roomId,
+          userId,
+          from,
+          to,
+          limit,
+          offset,
+        });
+        this.sendJson(res, 200, {
+          ok: true,
+          data: result.items.map((entry) => formatSessionHistoryEntry(entry)),
+          paging: {
+            total: result.total,
+            limit,
+            offset,
+            hasMore: offset + result.items.length < result.total,
+          },
+        });
+        return;
+      }
+
+      const sessionMessageMatch = /^\/api\/admin\/sessions\/(.+)\/messages$/.exec(url.pathname);
+      if (sessionMessageMatch) {
+        if (req.method !== "GET") {
+          res.setHeader("Allow", "GET, OPTIONS");
+          this.sendJson(res, 405, {
+            ok: false,
+            error: `Method not allowed: ${req.method ?? "GET"}.`,
+          });
+          return;
+        }
+        const sessionKey = decodePathParam(sessionMessageMatch[1], "sessionKey");
+        const limit = normalizePositiveInt(
+          url.searchParams.get("limit"),
+          ADMIN_DEFAULT_SESSION_MESSAGES_LIMIT,
+          1,
+          ADMIN_MAX_SESSION_MESSAGES_LIMIT,
+        );
+        this.sendJson(res, 200, {
+          ok: true,
+          data: this.stateStore.listRecentConversationMessages(sessionKey, limit).map((entry) => formatSessionMessageEntry(entry)),
         });
         return;
       }
@@ -1015,6 +1084,56 @@ function formatAuditEntry(entry: ConfigRevisionRecord): {
   };
 }
 
+function formatSessionHistoryEntry(entry: SessionHistoryRecord): {
+  sessionKey: string;
+  channel: string | null;
+  roomId: string | null;
+  userId: string | null;
+  codexSessionId: string | null;
+  activeUntil: number | null;
+  activeUntilIso: string | null;
+  updatedAt: number;
+  updatedAtIso: string;
+  messageCount: number;
+  lastMessageAt: number | null;
+  lastMessageAtIso: string | null;
+} {
+  return {
+    sessionKey: entry.sessionKey,
+    channel: entry.channel,
+    roomId: entry.roomId,
+    userId: entry.userId,
+    codexSessionId: entry.codexSessionId,
+    activeUntil: entry.activeUntil,
+    activeUntilIso: entry.activeUntil === null ? null : new Date(entry.activeUntil).toISOString(),
+    updatedAt: entry.updatedAt,
+    updatedAtIso: new Date(entry.updatedAt).toISOString(),
+    messageCount: entry.messageCount,
+    lastMessageAt: entry.lastMessageAt,
+    lastMessageAtIso: entry.lastMessageAt === null ? null : new Date(entry.lastMessageAt).toISOString(),
+  };
+}
+
+function formatSessionMessageEntry(entry: SessionMessageRecord): {
+  id: number;
+  sessionKey: string;
+  role: "user" | "assistant";
+  provider: "codex" | "claude";
+  content: string;
+  createdAt: number;
+  createdAtIso: string;
+} {
+  return {
+    id: entry.id,
+    sessionKey: entry.sessionKey,
+    role: entry.role,
+    provider: entry.provider,
+    content: entry.content,
+    createdAt: entry.createdAt,
+    createdAtIso: new Date(entry.createdAt).toISOString(),
+  };
+}
+
 function parseJsonLoose(raw: string): unknown {
   try {
     return JSON.parse(raw) as unknown;
@@ -1210,6 +1329,45 @@ function normalizeOptionalString(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function decodePathParam(value: string, fieldName: string): string {
+  try {
+    const decoded = decodeURIComponent(value).trim();
+    if (!decoded) {
+      throw new HttpError(400, `${fieldName} is required.`);
+    }
+    return decoded;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    throw new HttpError(400, `Invalid URI encoding for ${fieldName}.`);
+  }
+}
+
+function parseOptionalTimestampQuery(value: string | null, fieldName: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed)) {
+      throw new HttpError(400, `${fieldName} must be a valid unix timestamp in milliseconds.`);
+    }
+    return Math.max(0, parsed);
+  }
+
+  const parsedIso = Date.parse(trimmed);
+  if (!Number.isFinite(parsedIso)) {
+    throw new HttpError(400, `${fieldName} must be an ISO timestamp or unix milliseconds.`);
+  }
+  return parsedIso;
 }
 
 function normalizePositiveInt(value: unknown, fallback: number, min: number, max: number): number {

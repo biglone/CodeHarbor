@@ -230,6 +230,61 @@ describe("AdminServer", () => {
     expect(JSON.stringify(health.body)).toContain('"state":"update_available"');
   });
 
+  it("serves session history index and filtered message history", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+
+    const sessionKey = "matrix:!room-history:example.com:@alice:example.com";
+    stateStore.enqueueTask({
+      sessionKey,
+      eventId: "$history-1",
+      requestId: "req-history-1",
+      payloadJson: JSON.stringify({
+        message: {
+          channel: "matrix",
+          conversationId: "!room-history:example.com",
+          senderId: "@alice:example.com",
+        },
+      }),
+    });
+    stateStore.appendConversationMessage(sessionKey, "user", "codex", "hello history");
+    stateStore.appendConversationMessage(sessionKey, "assistant", "codex", "history reply");
+
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const sessions = await fetchJson(
+      `${baseUrl}/api/admin/sessions?roomId=${encodeURIComponent("!room-history:example.com")}&userId=${encodeURIComponent("@alice:example.com")}&limit=10&offset=0`,
+    );
+    expect(sessions.status).toBe(200);
+    expect(JSON.stringify(sessions.body)).toContain(sessionKey);
+    expect(JSON.stringify(sessions.body)).toContain('"messageCount":2');
+    expect(JSON.stringify(sessions.body)).toContain("updatedAtIso");
+
+    const messages = await fetchJson(`${baseUrl}/api/admin/sessions/${encodeURIComponent(sessionKey)}/messages?limit=2`);
+    expect(messages.status).toBe(200);
+    expect(JSON.stringify(messages.body)).toContain("hello history");
+    expect(JSON.stringify(messages.body)).toContain("history reply");
+    expect(JSON.stringify(messages.body)).toContain("createdAtIso");
+
+    const invalidWindow = await fetchJson(`${baseUrl}/api/admin/sessions?from=200&to=100`);
+    expect(invalidWindow.status).toBe(400);
+    expect(JSON.stringify(invalidWindow.body)).toContain("from must be less than or equal to to");
+  });
+
   it("serves Prometheus metrics on /metrics", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
@@ -444,6 +499,13 @@ describe("AdminServer", () => {
       },
     });
     expect(viewerRead.status).toBe(200);
+
+    const viewerSessionsRead = await fetchJson(`${baseUrl}/api/admin/sessions`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerSessionsRead.status).toBe(200);
 
     const viewerStatus = await fetchJson(`${baseUrl}/api/admin/auth/status`, {
       headers: {

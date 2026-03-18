@@ -58,6 +58,32 @@ export interface SessionMessageRecord {
   createdAt: number;
 }
 
+export interface SessionHistoryQueryInput {
+  roomId?: string | null;
+  userId?: string | null;
+  from?: number | null;
+  to?: number | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SessionHistoryRecord {
+  sessionKey: string;
+  channel: string | null;
+  roomId: string | null;
+  userId: string | null;
+  codexSessionId: string | null;
+  activeUntil: number | null;
+  updatedAt: number;
+  messageCount: number;
+  lastMessageAt: number | null;
+}
+
+export interface SessionHistoryQueryResult {
+  total: number;
+  items: SessionHistoryRecord[];
+}
+
 export interface UpgradeRunRecord {
   id: number;
   requestedBy: string | null;
@@ -186,6 +212,7 @@ export interface TaskQueueCancelResult {
 
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 const MAX_TASK_FAILURE_ARCHIVE_ROWS = 1_000;
+const MAX_SESSION_HISTORY_QUERY_LIMIT = 200;
 
 export class StateStore {
   private readonly dbPath: string;
@@ -318,6 +345,10 @@ export class StateStore {
     this.maybePruneExpiredSessions();
     const now = Date.now();
     this.ensureSession(sessionKey);
+    const sessionMetadata = parseSessionMetadataFromSessionKey(sessionKey);
+    if (sessionMetadata) {
+      this.upsertSessionIndex(sessionKey, sessionMetadata, now);
+    }
     this.db.exec("BEGIN");
     try {
       this.db
@@ -771,7 +802,13 @@ export class StateStore {
   }
 
   enqueueTask(input: TaskQueueEnqueueInput): TaskQueueEnqueueResult {
+    const now = Date.now();
     this.ensureSession(input.sessionKey);
+    const sessionMetadata =
+      parseSessionMetadataFromQueuedPayload(input.payloadJson) ?? parseSessionMetadataFromSessionKey(input.sessionKey);
+    if (sessionMetadata) {
+      this.upsertSessionIndex(input.sessionKey, sessionMetadata, now);
+    }
     const result = this.db
       .prepare(
         `INSERT INTO task_queue
@@ -779,7 +816,7 @@ export class StateStore {
          VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT(session_key, event_id) DO NOTHING`,
       )
-      .run(input.sessionKey, input.eventId, input.requestId, input.payloadJson, Date.now()) as { changes?: number };
+      .run(input.sessionKey, input.eventId, input.requestId, input.payloadJson, now) as { changes?: number };
     const task = this.getTaskBySessionEvent(input.sessionKey, input.eventId);
     if (!task) {
       throw new Error("Failed to load queued task after enqueue.");
@@ -1235,6 +1272,138 @@ export class StateStore {
     }));
   }
 
+  listSessionHistory(input: SessionHistoryQueryInput = {}): SessionHistoryQueryResult {
+    this.ensureSessionIndexBackfill();
+
+    const safeLimit = clampInt(input.limit, 20, 1, MAX_SESSION_HISTORY_QUERY_LIMIT);
+    const safeOffset = Math.max(0, Math.floor(input.offset ?? 0));
+    const roomId = normalizeOptionalFilterValue(input.roomId);
+    const userId = normalizeOptionalFilterValue(input.userId);
+    const from = normalizeOptionalTimestampNumber(input.from);
+    const to = normalizeOptionalTimestampNumber(input.to);
+    if (from !== null && to !== null && from > to) {
+      throw new Error("Invalid session history filter: from must be <= to.");
+    }
+
+    const whereClauses: string[] = [];
+    const whereArgs: Array<string | number> = [];
+    if (roomId) {
+      whereClauses.push("idx.room_id = ?");
+      whereArgs.push(roomId);
+    }
+    if (userId) {
+      whereClauses.push("idx.user_id = ?");
+      whereArgs.push(userId);
+    }
+    if (from !== null) {
+      whereClauses.push("s.updated_at >= ?");
+      whereArgs.push(from);
+    }
+    if (to !== null) {
+      whereClauses.push("s.updated_at <= ?");
+      whereArgs.push(to);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const baseFromSql = `
+      FROM sessions AS s
+      LEFT JOIN session_index AS idx ON idx.session_key = s.session_key
+    `;
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS count ${baseFromSql} ${whereSql}`)
+      .get(...whereArgs) as { count: number } | undefined;
+
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            s.session_key,
+            s.codex_session_id,
+            s.active_until,
+            s.updated_at,
+            idx.channel,
+            idx.room_id,
+            idx.user_id,
+            COALESCE(msg.message_count, 0) AS message_count,
+            msg.last_message_at
+          ${baseFromSql}
+          LEFT JOIN (
+            SELECT session_key, COUNT(*) AS message_count, MAX(created_at) AS last_message_at
+            FROM session_messages
+            GROUP BY session_key
+          ) AS msg ON msg.session_key = s.session_key
+          ${whereSql}
+          ORDER BY s.updated_at DESC, s.session_key ASC
+          LIMIT ? OFFSET ?
+        `,
+      )
+      .all(...whereArgs, safeLimit, safeOffset) as Array<{
+      session_key: string;
+      codex_session_id: string | null;
+      active_until: number | null;
+      updated_at: number;
+      channel: string | null;
+      room_id: string | null;
+      user_id: string | null;
+      message_count: number;
+      last_message_at: number | null;
+    }>;
+
+    return {
+      total: countRow?.count ?? 0,
+      items: rows.map((row) => ({
+        sessionKey: row.session_key,
+        channel: row.channel,
+        roomId: row.room_id,
+        userId: row.user_id,
+        codexSessionId: row.codex_session_id,
+        activeUntil: row.active_until,
+        updatedAt: row.updated_at,
+        messageCount: Number(row.message_count ?? 0),
+        lastMessageAt: row.last_message_at,
+      })),
+    };
+  }
+
+  private ensureSessionIndexBackfill(limit = 500): void {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db
+      .prepare(
+        `SELECT s.session_key, s.updated_at
+         FROM sessions AS s
+         LEFT JOIN session_index AS idx ON idx.session_key = s.session_key
+         WHERE idx.session_key IS NULL
+         ORDER BY s.updated_at DESC
+         LIMIT ?1`,
+      )
+      .all(safeLimit) as Array<{ session_key: string; updated_at: number }>;
+
+    for (const row of rows) {
+      const metadata = parseSessionMetadataFromSessionKey(row.session_key);
+      if (!metadata) {
+        continue;
+      }
+      this.upsertSessionIndex(row.session_key, metadata, row.updated_at);
+    }
+  }
+
+  private upsertSessionIndex(sessionKey: string, metadata: SessionIndexMetadata, updatedAt: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO session_index (session_key, channel, room_id, user_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(session_key) DO UPDATE SET
+           channel = excluded.channel,
+           room_id = excluded.room_id,
+           user_id = excluded.user_id,
+           updated_at = CASE
+             WHEN excluded.updated_at > session_index.updated_at THEN excluded.updated_at
+             ELSE session_index.updated_at
+           END`,
+      )
+      .run(sessionKey, metadata.channel, metadata.roomId, metadata.userId, updatedAt);
+  }
+
   async flush(): Promise<void> {
     this.touchDatabase();
   }
@@ -1419,6 +1588,19 @@ export class StateStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_session_messages_session_id ON session_messages(session_key, id);
+
+      CREATE TABLE IF NOT EXISTS session_index (
+        session_key TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        room_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_session_index_room_updated ON session_index(room_id, updated_at DESC, session_key);
+      CREATE INDEX IF NOT EXISTS idx_session_index_user_updated ON session_index(user_id, updated_at DESC, session_key);
+      CREATE INDEX IF NOT EXISTS idx_session_index_updated ON session_index(updated_at DESC, session_key);
 
       CREATE TABLE IF NOT EXISTS runtime_metrics_snapshots (
         key TEXT PRIMARY KEY,
@@ -1697,6 +1879,100 @@ function normalizeTaskFailureArchiveInput(input: TaskFailureArchiveInput | strin
     archiveReason,
     retryAfterMs,
   };
+}
+
+interface SessionIndexMetadata {
+  channel: string;
+  roomId: string;
+  userId: string;
+}
+
+function parseSessionMetadataFromQueuedPayload(payloadJson: string): SessionIndexMetadata | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as {
+      message?: {
+        channel?: unknown;
+        conversationId?: unknown;
+        senderId?: unknown;
+      };
+    };
+    const message = parsed.message;
+    if (!message) {
+      return null;
+    }
+    const channel = normalizeOptionalFilterValue(message.channel);
+    const roomId = normalizeOptionalFilterValue(message.conversationId);
+    const userId = normalizeOptionalFilterValue(message.senderId);
+    if (!channel || !roomId || !userId) {
+      return null;
+    }
+    return {
+      channel,
+      roomId,
+      userId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseSessionMetadataFromSessionKey(sessionKey: string): SessionIndexMetadata | null {
+  const firstColon = sessionKey.indexOf(":");
+  if (firstColon <= 0 || firstColon >= sessionKey.length - 1) {
+    return null;
+  }
+
+  const channel = sessionKey.slice(0, firstColon).trim();
+  const payload = sessionKey.slice(firstColon + 1);
+  if (!channel || !payload) {
+    return null;
+  }
+  if (channel !== "matrix") {
+    return null;
+  }
+
+  const senderMarkerIndex = payload.lastIndexOf(":@");
+  if (senderMarkerIndex <= 0) {
+    return null;
+  }
+  const roomId = payload.slice(0, senderMarkerIndex).trim();
+  const userId = payload.slice(senderMarkerIndex + 1).trim();
+  if (!roomId || !userId) {
+    return null;
+  }
+
+  return {
+    channel,
+    roomId,
+    userId,
+  };
+}
+
+function normalizeOptionalFilterValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeOptionalTimestampNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const normalized =
+    typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : Number.NaN;
+  if (!Number.isFinite(normalized)) {
+    throw new Error("Invalid timestamp filter.");
+  }
+  return Math.max(0, Math.floor(normalized));
+}
+
+function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
 type TaskQueueRow = {
