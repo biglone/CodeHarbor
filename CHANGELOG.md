@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.46] - 2026-03-18
+
+- AutoDev Git artifact hardening:
+  - prevent shell-style stage artifacts (`autodev#*`, `workflow#*`, `planner#*`, `executor#*`, `reviewer#*`) from being included in auto-commit results
+  - auto-clean untracked zero-byte stage artifact files before `git add -A` in AutoDev commit flow
+  - added regression coverage to ensure artifact files are removed before commit, and synced `.gitignore`
+
 ## [0.1.45] - 2026-03-18
 
 - Platform API (T6.2):
