@@ -9,6 +9,7 @@ import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
 import { AdminTokenConfig, AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
+import { parseRuntimeMetricsSnapshot, renderPrometheusMetrics, type RuntimeMetricsSnapshot } from "./metrics";
 import {
   NpmRegistryUpdateChecker,
   type PackageUpdateChecker,
@@ -91,6 +92,7 @@ export class AdminServer {
   private readonly hasCustomPackageUpdateChecker: boolean;
   private packageUpdateChecker: PackageUpdateChecker;
   private readonly restartServices: (restartAdmin: boolean) => Promise<RestartServicesResult>;
+  private readonly appVersion: string;
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
 
@@ -117,6 +119,7 @@ export class AdminServer {
     this.hasCustomPackageUpdateChecker = Boolean(options.packageUpdateChecker);
     this.packageUpdateChecker = options.packageUpdateChecker ?? this.createPackageUpdateChecker();
     this.restartServices = options.restartServices ?? defaultRestartServices;
+    this.appVersion = resolvePackageVersion();
   }
 
   getAddress(): AddressInfo | null {
@@ -228,6 +231,12 @@ export class AdminServer {
           ok: false,
           error: "Forbidden. This endpoint requires admin write permission.",
         });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/metrics") {
+        const metricsText = this.buildMetricsText();
+        this.sendMetrics(res, metricsText);
         return;
       }
 
@@ -852,10 +861,32 @@ export class AdminServer {
     res.end(html);
   }
 
+  private sendMetrics(res: http.ServerResponse, text: string): void {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.end(text);
+  }
+
   private sendJson(res: http.ServerResponse, statusCode: number, payload: unknown): void {
     res.statusCode = statusCode;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify(payload));
+  }
+
+  private buildMetricsText(): string {
+    let snapshot: RuntimeMetricsSnapshot | null = null;
+    const record = this.stateStore.getRuntimeMetricsSnapshot("orchestrator");
+    if (record) {
+      snapshot = parseRuntimeMetricsSnapshot(record.payloadJson);
+    }
+    const upgradeStats = this.stateStore.getUpgradeRunStats();
+    const latestUpgradeRun = this.stateStore.getLatestUpgradeRun();
+    return renderPrometheusMetrics({
+      snapshot,
+      upgradeStats,
+      latestUpgradeRun,
+      appVersion: this.appVersion,
+    });
   }
 
   private createPackageUpdateChecker(): PackageUpdateChecker {
@@ -1197,6 +1228,9 @@ function resolveAuditActor(req: http.IncomingMessage, identity: AdminAuthIdentit
 }
 
 function requiredAdminRoleForRequest(method: string | undefined, pathname: string): AdminAccessRole | null {
+  if (pathname === "/metrics") {
+    return "viewer";
+  }
   if (!pathname.startsWith("/api/admin/")) {
     return null;
   }

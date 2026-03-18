@@ -24,6 +24,7 @@ export interface CodexExecutionStartOptions {
   passThroughRawEvents?: boolean;
   imagePaths?: string[];
   workdir?: string;
+  timeoutMs?: number | null;
 }
 
 export interface CodexProgressEvent {
@@ -202,11 +203,12 @@ export class CodexExecutor {
       }
     };
 
+    const executionTimeoutMs = resolveExecutionTimeoutMs(startOptions?.timeoutMs, this.options.timeoutMs);
     const timeoutTimer =
-      this.options.timeoutMs > 0
+      executionTimeoutMs > 0
         ? setTimeout(() => {
             terminateProcess("timeout");
-          }, this.options.timeoutMs)
+          }, executionTimeoutMs)
         : null;
     timeoutTimer?.unref?.();
 
@@ -217,7 +219,7 @@ export class CodexExecutor {
       });
 
       if (timedOut) {
-        throw new Error(`${this.provider} execution timed out after ${this.options.timeoutMs}ms`);
+        throw new Error(`${this.provider} execution timed out after ${executionTimeoutMs}ms`);
       }
       if (cancelled) {
         throw new CodexExecutionCancelledError();
@@ -259,6 +261,16 @@ export class CodexExecutor {
       },
     };
   }
+}
+
+function resolveExecutionTimeoutMs(overrideTimeoutMs: number | null | undefined, fallbackTimeoutMs: number): number {
+  if (typeof overrideTimeoutMs === "number" && Number.isFinite(overrideTimeoutMs)) {
+    const normalized = Math.floor(overrideTimeoutMs);
+    if (normalized > 0) {
+      return normalized;
+    }
+  }
+  return Math.max(0, Math.floor(fallbackTimeoutMs));
 }
 
 export function parseCodexJsonLine(line: string): CodexJsonEvent | null {

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { AdminServer } from "./admin-server";
+import { type Channel } from "./channels/channel";
 import { MatrixChannel } from "./channels/matrix-channel";
 import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
@@ -12,12 +13,13 @@ import { NpmRegistryUpdateChecker, resolvePackageVersion } from "./package-updat
 import { StateStore } from "./store/state-store";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_WORKFLOW_EXEC_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export class CodeHarborApp {
   private readonly config: AppConfig;
   private readonly logger: Logger;
   private readonly stateStore: StateStore;
-  private readonly channel: MatrixChannel;
+  private readonly channel: Channel;
   private readonly orchestrator: Orchestrator;
   private readonly configService: ConfigService;
 
@@ -47,6 +49,7 @@ export class CodeHarborApp {
         extraEnv: config.codexExtraEnv,
       });
     const executor = buildExecutor(config.aiCliProvider);
+    const workflowExecTimeoutMs = Math.max(config.codexExecTimeoutMs, DEFAULT_WORKFLOW_EXEC_TIMEOUT_MS);
 
     this.channel = new MatrixChannel(config, this.logger);
     const packageVersion = resolvePackageVersion();
@@ -62,7 +65,10 @@ export class CodeHarborApp {
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,
       cliCompat: config.cliCompat,
-      multiAgentWorkflow: config.agentWorkflow,
+      multiAgentWorkflow: {
+        ...config.agentWorkflow,
+        executionTimeoutMs: workflowExecTimeoutMs,
+      },
       packageUpdateChecker: new NpmRegistryUpdateChecker({
         packageName: "codeharbor",
         currentVersion: packageVersion,
@@ -89,6 +95,7 @@ export class CodeHarborApp {
       prefix: this.config.matrixCommandPrefix || "<none>",
     });
     await this.channel.start(this.orchestrator.handleMessage.bind(this.orchestrator));
+    await this.orchestrator.bootstrapTaskQueueRecovery();
     this.logger.info("CodeHarbor is running.");
   }
 

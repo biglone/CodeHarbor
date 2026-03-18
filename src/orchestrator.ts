@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
-import { MatrixChannel } from "./channels/matrix-channel";
+import { type Channel } from "./channels/channel";
 import { CliCompatRecorder } from "./compat/cli-compat-recorder";
 import { ConfigService } from "./config-service";
 import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
@@ -20,6 +20,12 @@ import {
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
 import { Logger } from "./logger";
 import {
+  DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS,
+  MutableHistogram,
+  type RequestOutcomeMetric,
+  type RuntimeMetricsSnapshot,
+} from "./metrics";
+import {
   formatPackageUpdateHint,
   NpmRegistryUpdateChecker,
   type PackageUpdateChecker,
@@ -27,7 +33,19 @@ import {
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import {
+  ARCHIVE_REASON_MAX_ATTEMPTS,
+  ARCHIVE_REASON_NON_RETRYABLE,
+  classifyRetryDecision,
+  createRetryPolicy,
+  type RetryDecision,
+  type RetryPolicy,
+  type RetryPolicyInput,
+} from "./reliability/retry-policy";
+import {
   StateStore,
+  type TaskFailureArchiveRecord,
+  type TaskQueueEnqueueInput,
+  type TaskQueuePendingSessionRecord,
   type UpgradeExecutionLockRecord,
   type UpgradeRunRecord,
   type UpgradeRunStats,
@@ -69,6 +87,7 @@ interface OrchestratorOptions {
   multiAgentWorkflow?: {
     enabled: boolean;
     autoRepairMaxRounds: number;
+    executionTimeoutMs?: number;
   };
   packageUpdateChecker?: PackageUpdateChecker;
   updateCheckTtlMs?: number;
@@ -84,6 +103,9 @@ interface OrchestratorOptions {
   selfUpdateRunner?: SelfUpdateRunner;
   upgradeRestartPlanner?: UpgradeRestartPlanner;
   upgradeVersionProbe?: UpgradeVersionProbe;
+  taskQueueRecoveryEnabled?: boolean;
+  taskQueueRecoveryBatchLimit?: number;
+  taskQueueRetryPolicy?: RetryPolicyInput;
 }
 
 interface SessionLockEntry {
@@ -99,14 +121,7 @@ type RouteDecision =
       command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
     };
 
-type RequestOutcome =
-  | "success"
-  | "failed"
-  | "timeout"
-  | "cancelled"
-  | "rate_limited"
-  | "ignored"
-  | "duplicate";
+type RequestOutcome = RequestOutcomeMetric;
 
 interface RunningExecution {
   requestId: string;
@@ -179,12 +194,87 @@ type UpgradeStateStore = Pick<
   | "getUpgradeExecutionLock"
 >;
 
+interface QueuedInboundPayload {
+  message: InboundMessage;
+  receivedAt: number;
+  prompt: string | null;
+}
+
+type TaskQueueStateStore = Pick<
+  StateStore,
+  | "enqueueTask"
+  | "claimNextTask"
+  | "getTaskById"
+  | "hasPendingTask"
+  | "clearPendingTasks"
+  | "listPendingTaskSessions"
+  | "finishTask"
+  | "failTask"
+  | "scheduleRetry"
+  | "failAndArchive"
+  | "recoverTasks"
+  | "hasReadyTask"
+  | "getNextPendingRetryAt"
+  | "getTaskQueueStatusCounts"
+>;
+
+type WorkflowDiagRunKind = "workflow" | "autodev";
+type WorkflowDiagRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+interface WorkflowDiagRunRecord {
+  runId: string;
+  kind: WorkflowDiagRunKind;
+  sessionKey: string;
+  conversationId: string;
+  requestId: string;
+  objective: string;
+  taskId: string | null;
+  taskDescription: string | null;
+  status: WorkflowDiagRunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  approved: boolean | null;
+  repairRounds: number;
+  error: string | null;
+  lastStage: string | null;
+  lastMessage: string | null;
+  updatedAt: string;
+}
+
+interface WorkflowDiagEventRecord {
+  runId: string;
+  kind: WorkflowDiagRunKind;
+  stage: string;
+  round: number;
+  message: string;
+  at: string;
+}
+
+interface WorkflowDiagStorePayload {
+  version: 1;
+  updatedAt: string;
+  runs: WorkflowDiagRunRecord[];
+  events: WorkflowDiagEventRecord[];
+}
+
 const RUN_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 const RUN_SNAPSHOT_MAX_ENTRIES = 500;
 const CONTEXT_BRIDGE_HISTORY_LIMIT = 16;
 const CONTEXT_BRIDGE_MAX_CHARS = 8_000;
 const DEFAULT_SELF_UPDATE_TIMEOUT_MS = 20 * 60 * 1_000;
 const DEFAULT_UPGRADE_LOCK_TTL_MS = 30 * 60 * 1_000;
+const DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT = 200;
+const WORKFLOW_DIAG_SNAPSHOT_KEY = "workflow_diag";
+const WORKFLOW_DIAG_MAX_RUNS = 120;
+const WORKFLOW_DIAG_MAX_EVENTS = 2_000;
+const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
+  maxAttempts: 4,
+  initialDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  multiplier: 2,
+  jitterRatio: 0.2,
+};
 
 const execFileAsync = promisify(execFile);
 
@@ -200,12 +290,21 @@ class RequestMetrics {
   private totalQueueMs = 0;
   private totalExecMs = 0;
   private totalSendMs = 0;
+  private readonly queueDurationMs = new MutableHistogram(DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS);
+  private readonly executionDurationMs = new MutableHistogram(DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS);
+  private readonly sendDurationMs = new MutableHistogram(DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS);
 
   record(outcome: RequestOutcome, queueMs: number, execMs: number, sendMs: number): void {
+    const safeQueueMs = Math.max(0, queueMs);
+    const safeExecMs = Math.max(0, execMs);
+    const safeSendMs = Math.max(0, sendMs);
     this.total += 1;
-    this.totalQueueMs += Math.max(0, queueMs);
-    this.totalExecMs += Math.max(0, execMs);
-    this.totalSendMs += Math.max(0, sendMs);
+    this.totalQueueMs += safeQueueMs;
+    this.totalExecMs += safeExecMs;
+    this.totalSendMs += safeSendMs;
+    this.queueDurationMs.observe(safeQueueMs);
+    this.executionDurationMs.observe(safeExecMs);
+    this.sendDurationMs.observe(safeSendMs);
 
     if (outcome === "success") {
       this.success += 1;
@@ -232,6 +331,24 @@ class RequestMetrics {
       return;
     }
     this.duplicate += 1;
+  }
+
+  runtimeSnapshot(): RuntimeMetricsSnapshot["request"] {
+    return {
+      total: this.total,
+      outcomes: {
+        success: this.success,
+        failed: this.failed,
+        timeout: this.timeout,
+        cancelled: this.cancelled,
+        rate_limited: this.rateLimited,
+        ignored: this.ignored,
+        duplicate: this.duplicate,
+      },
+      queueDurationMs: this.queueDurationMs.snapshot(),
+      executionDurationMs: this.executionDurationMs.snapshot(),
+      sendDurationMs: this.sendDurationMs.snapshot(),
+    };
   }
 
   snapshot(activeExecutions: number): {
@@ -398,7 +515,7 @@ class MediaMetrics {
 }
 
 export class Orchestrator {
-  private readonly channel: MatrixChannel;
+  private readonly channel: Channel;
   private executor: CodexExecutor;
   private sessionRuntime: CodexSessionRuntime;
   private readonly executorFactory: ((provider: "codex" | "claude") => CodexExecutor) | null;
@@ -428,6 +545,11 @@ export class Orchestrator {
   private readonly workflowRunner: MultiAgentWorkflowRunner;
   private readonly packageUpdateChecker: PackageUpdateChecker;
   private readonly updateCheckTtlMs: number;
+  private readonly taskQueueRecoveryEnabled: boolean;
+  private readonly taskQueueRecoveryBatchLimit: number;
+  private readonly taskQueueRetryPolicy: RetryPolicy;
+  private readonly sessionQueueDrains = new Map<string, Promise<void>>();
+  private readonly sessionQueueRetryTimers = new Map<string, NodeJS.Timeout>();
   private aiCliProvider: "codex" | "claude";
   private readonly aiCliModel: string | null;
   private readonly botNoticePrefix: string;
@@ -443,10 +565,11 @@ export class Orchestrator {
   private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
   private readonly mediaMetrics = new MediaMetrics();
+  private workflowDiagStore: WorkflowDiagStorePayload = createEmptyWorkflowDiagStorePayload();
   private lastLockPruneAt = 0;
 
   constructor(
-    channel: MatrixChannel,
+    channel: Channel,
     executor: CodexExecutor,
     stateStore: StateStore,
     logger: Logger,
@@ -524,6 +647,7 @@ export class Orchestrator {
     this.workflowRunner = new MultiAgentWorkflowRunner(this.executor, this.logger, {
       enabled: options?.multiAgentWorkflow?.enabled ?? false,
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
+      executionTimeoutMs: options?.multiAgentWorkflow?.executionTimeoutMs,
     });
     const currentVersion = resolvePackageVersion();
     this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
@@ -534,6 +658,15 @@ export class Orchestrator {
         currentVersion,
       });
     this.updateCheckTtlMs = Math.max(0, options?.updateCheckTtlMs ?? 6 * 60 * 60 * 1000);
+    this.taskQueueRecoveryEnabled = options?.taskQueueRecoveryEnabled ?? true;
+    this.taskQueueRecoveryBatchLimit = Math.max(
+      1,
+      options?.taskQueueRecoveryBatchLimit ?? DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT,
+    );
+    this.taskQueueRetryPolicy = createRetryPolicy({
+      ...DEFAULT_TASK_QUEUE_RETRY_POLICY,
+      ...options?.taskQueueRetryPolicy,
+    });
     this.executorFactory = options?.executorFactory ?? null;
     this.aiCliProvider = options?.aiCliProvider ?? "codex";
     this.aiCliModel = options?.aiCliModel?.trim() || null;
@@ -565,19 +698,79 @@ export class Orchestrator {
     this.upgradeVersionProbe = options?.upgradeVersionProbe ?? (() => probeInstalledVersion(selfUpdateTimeoutMs));
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.sessionRuntime = new CodexSessionRuntime(this.executor);
+    this.workflowDiagStore = this.restoreWorkflowDiagStore();
+    this.persistRuntimeMetricsSnapshot();
   }
 
   async handleMessage(message: InboundMessage): Promise<void> {
-    const attachmentPaths = collectLocalAttachmentPaths(message);
+    await this.handleMessageInternal(message, Date.now(), {
+      bypassQueue: false,
+      forcedPrompt: null,
+      deferFailureHandlingToQueue: false,
+    });
+  }
+
+  async bootstrapTaskQueueRecovery(): Promise<void> {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      return;
+    }
+    if (!this.taskQueueRecoveryEnabled) {
+      this.logger.info("Task queue recovery disabled by configuration.");
+      return;
+    }
+
     try {
-      const receivedAt = Date.now();
+      const recovery = queueStore.recoverTasks(this.taskQueueRecoveryBatchLimit);
+      const sessions = new Set<string>(recovery.tasks.map((task) => task.sessionKey));
+      let afterTaskId = 0;
+      while (true) {
+        const batch = queueStore.listPendingTaskSessions(this.taskQueueRecoveryBatchLimit, afterTaskId);
+        if (batch.length === 0) {
+          break;
+        }
+        for (const item of batch) {
+          sessions.add(item.sessionKey);
+          afterTaskId = item.firstTaskId;
+        }
+      }
+      for (const sessionKey of sessions) {
+        this.startSessionQueueDrain(sessionKey);
+      }
+      this.logger.info("Task queue recovery completed", {
+        requeuedRunning: recovery.requeuedRunning,
+        pendingTotal: recovery.pendingTotal,
+        recoveredSessions: sessions.size,
+        hasMorePending: recovery.hasMorePending,
+      });
+    } catch (error) {
+      this.logger.error("Failed to recover task queue", {
+        error: formatError(error),
+      });
+    }
+  }
+
+  private async handleMessageInternal(
+    message: InboundMessage,
+    receivedAt: number,
+    options: {
+      bypassQueue: boolean;
+      forcedPrompt: string | null;
+      deferFailureHandlingToQueue: boolean;
+    },
+  ): Promise<void> {
+    const attachmentPaths = collectLocalAttachmentPaths(message);
+    let deferAttachmentCleanup = false;
+    let queueDrainSessionKey: string | null = null;
+
+    try {
       const requestId = message.requestId || message.eventId;
       const sessionKey = buildSessionKey(message);
 
       const directCommand = parseControlCommand(message.text.trim());
       if (directCommand === "stop") {
         if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-          this.metrics.record("duplicate", 0, 0, 0);
+          this.recordRequestMetrics("duplicate", 0, 0, 0);
           this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
           return;
         }
@@ -591,15 +784,18 @@ export class Orchestrator {
         const queueWaitMs = Date.now() - receivedAt;
 
         if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-          this.metrics.record("duplicate", queueWaitMs, 0, 0);
+          this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
           this.logger.debug("Duplicate event ignored", { requestId, eventId: message.eventId, sessionKey, queueWaitMs });
           return;
         }
 
         const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-        const route = this.routeMessage(message, sessionKey, roomConfig);
+        const route: RouteDecision =
+          options.forcedPrompt === null
+            ? this.routeMessage(message, sessionKey, roomConfig)
+            : { kind: "execute", prompt: options.forcedPrompt };
         if (route.kind === "ignore") {
-          this.metrics.record("ignored", queueWaitMs, 0, 0);
+          this.recordRequestMetrics("ignored", queueWaitMs, 0, 0);
           this.logger.debug("Message ignored by routing policy", {
             requestId,
             sessionKey,
@@ -629,12 +825,50 @@ export class Orchestrator {
           return;
         }
 
+        if (!options.bypassQueue) {
+          const queueStore = this.getTaskQueueStateStore();
+          if (queueStore) {
+            const payload: QueuedInboundPayload = {
+              message,
+              receivedAt,
+              prompt: route.prompt,
+            };
+            const enqueueResult = queueStore.enqueueTask({
+              sessionKey,
+              eventId: message.eventId,
+              requestId,
+              payloadJson: JSON.stringify(payload),
+            } satisfies TaskQueueEnqueueInput);
+
+            if (!enqueueResult.created) {
+              this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
+              this.logger.debug("Duplicate event ignored by task queue dedupe", {
+                requestId,
+                eventId: message.eventId,
+                sessionKey,
+                queueWaitMs,
+              });
+              return;
+            }
+
+            deferAttachmentCleanup = true;
+            queueDrainSessionKey = sessionKey;
+            this.logger.debug("Inbound request queued", {
+              requestId,
+              eventId: message.eventId,
+              sessionKey,
+              taskId: enqueueResult.task.id,
+            });
+            return;
+          }
+        }
+
         const rateDecision = this.rateLimiter.tryAcquire({
           userId: message.senderId,
           roomId: message.conversationId,
         });
         if (!rateDecision.allowed) {
-          this.metrics.record("rate_limited", queueWaitMs, 0, 0);
+          this.recordRequestMetrics("rate_limited", queueWaitMs, 0, 0);
           await this.channel.sendNotice(message.conversationId, buildRateLimitNotice(rateDecision));
           this.stateStore.markEventProcessed(sessionKey, message.eventId);
           this.logger.warn("Request rejected by rate limiter", {
@@ -662,19 +896,25 @@ export class Orchestrator {
             );
             sendDurationMs += Date.now() - sendStartedAt;
             this.stateStore.markEventProcessed(sessionKey, message.eventId);
-            this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.recordRequestMetrics("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
           } catch (error) {
-            sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
-            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            if (!options.deferFailureHandlingToQueue) {
+              sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
+              this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            }
             const status = classifyExecutionOutcome(error);
-            this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.recordRequestMetrics(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
             this.logger.error("Workflow request failed", {
               requestId,
               sessionKey,
               error: formatError(error),
             });
+            if (options.deferFailureHandlingToQueue) {
+              throw error;
+            }
           } finally {
             rateDecision.release?.();
+            this.persistRuntimeMetricsSnapshot();
           }
           return;
         }
@@ -694,19 +934,25 @@ export class Orchestrator {
             );
             sendDurationMs += Date.now() - sendStartedAt;
             this.stateStore.markEventProcessed(sessionKey, message.eventId);
-            this.metrics.record("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.recordRequestMetrics("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
           } catch (error) {
-            sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
-            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            if (!options.deferFailureHandlingToQueue) {
+              sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
+              this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+            }
             const status = classifyExecutionOutcome(error);
-            this.metrics.record(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+            this.recordRequestMetrics(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
             this.logger.error("AutoDev request failed", {
               requestId,
               sessionKey,
               error: formatError(error),
             });
+            if (options.deferFailureHandlingToQueue) {
+              throw error;
+            }
           } finally {
             rateDecision.release?.();
+            this.persistRuntimeMetricsSnapshot();
           }
           return;
         }
@@ -746,6 +992,7 @@ export class Orchestrator {
             executionHandle?.cancel();
           },
         });
+        this.persistRuntimeMetricsSnapshot();
 
         await this.recordCliCompatPrompt({
           requestId,
@@ -883,7 +1130,7 @@ export class Orchestrator {
           sendDurationMs = Date.now() - sendStartedAt;
 
           this.stateStore.commitExecutionSuccess(sessionKey, message.eventId, result.sessionId);
-          this.metrics.record("success", queueWaitMs, executionDurationMs, sendDurationMs);
+          this.recordRequestMetrics("success", queueWaitMs, executionDurationMs, sendDurationMs);
           this.logger.info("Request completed", {
             requestId,
             sessionKey,
@@ -910,7 +1157,7 @@ export class Orchestrator {
             buildFailureProgressSummary(status, requestStartedAt, error),
           );
 
-          if (status !== "cancelled") {
+          if (status !== "cancelled" && !options.deferFailureHandlingToQueue) {
             try {
               await this.channel.sendMessage(
                 message.conversationId,
@@ -921,8 +1168,10 @@ export class Orchestrator {
             }
           }
 
-          this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-          this.metrics.record(status, queueWaitMs, executionDurationMs, sendDurationMs);
+          if (!options.deferFailureHandlingToQueue) {
+            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
+          }
+          this.recordRequestMetrics(status, queueWaitMs, executionDurationMs, sendDurationMs);
           this.logger.error("Request failed", {
             requestId,
             sessionKey,
@@ -932,17 +1181,246 @@ export class Orchestrator {
             totalDurationMs: Date.now() - receivedAt,
             error: formatError(error),
           });
+          if (options.deferFailureHandlingToQueue) {
+            throw error;
+          }
         } finally {
           const running = this.runningExecutions.get(sessionKey);
           if (running?.requestId === requestId) {
             this.runningExecutions.delete(sessionKey);
           }
           rateDecision.release?.();
+          this.persistRuntimeMetricsSnapshot();
           await stopTyping();
         }
       });
     } finally {
-      await cleanupAttachmentFiles(attachmentPaths);
+      if (!deferAttachmentCleanup) {
+        await cleanupAttachmentFiles(attachmentPaths);
+      }
+    }
+
+    if (queueDrainSessionKey) {
+      this.startSessionQueueDrain(queueDrainSessionKey);
+    }
+  }
+
+  private startSessionQueueDrain(sessionKey: string): void {
+    if (this.sessionQueueDrains.has(sessionKey)) {
+      return;
+    }
+    this.clearSessionQueueRetryTimer(sessionKey);
+
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      return;
+    }
+    try {
+      if (!queueStore.hasReadyTask(sessionKey)) {
+        this.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
+        return;
+      }
+    } catch (error) {
+      this.logger.warn("Failed to inspect ready queued task before drain", {
+        sessionKey,
+        error: formatError(error),
+      });
+      return;
+    }
+
+    const drainPromise = this.drainSessionQueue(sessionKey)
+      .catch((error) => {
+        this.logger.error("Session task queue drain failed", {
+          sessionKey,
+          error: formatError(error),
+        });
+      })
+      .finally(() => {
+        const current = this.sessionQueueDrains.get(sessionKey);
+        if (current === drainPromise) {
+          this.sessionQueueDrains.delete(sessionKey);
+        }
+        this.reconcileSessionQueueDrain(sessionKey);
+      });
+
+    this.sessionQueueDrains.set(sessionKey, drainPromise);
+  }
+
+  private async drainSessionQueue(sessionKey: string): Promise<void> {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      return;
+    }
+
+    while (true) {
+      const task = queueStore.claimNextTask(sessionKey);
+      if (!task) {
+        return;
+      }
+
+      let payload: QueuedInboundPayload | null = null;
+      try {
+        payload = parseQueuedInboundPayload(task.payloadJson);
+        await this.handleMessageInternal(payload.message, payload.receivedAt, {
+          bypassQueue: true,
+          forcedPrompt: payload.prompt,
+          deferFailureHandlingToQueue: true,
+        });
+        queueStore.finishTask(task.id);
+        this.logger.debug("Queued task completed", {
+          taskId: task.id,
+          sessionKey: task.sessionKey,
+          eventId: task.eventId,
+          attempt: task.attempt,
+        });
+      } catch (error) {
+        const detail = summarizeSingleLine(formatError(error), 400);
+        const retryDecision = classifyQueueTaskRetry(this.taskQueueRetryPolicy, task.attempt, error);
+
+        if (retryDecision.shouldRetry) {
+          const delayMs = retryDecision.retryDelayMs ?? 0;
+          const nextRetryAt = Date.now() + delayMs;
+          queueStore.scheduleRetry(task.id, {
+            nextRetryAt,
+            error: detail,
+          });
+          this.logger.warn("Queued task scheduled for retry", {
+            taskId: task.id,
+            sessionKey: task.sessionKey,
+            eventId: task.eventId,
+            attempt: task.attempt,
+            retryable: retryDecision.retryable,
+            nextRetryAt,
+            nextRetryAtIso: new Date(nextRetryAt).toISOString(),
+            retryDelayMs: delayMs,
+            retryReason: retryDecision.retryReason,
+            retryAfterMs: retryDecision.retryAfterMs,
+            error: formatError(error),
+          });
+          continue;
+        }
+
+        const archiveReason = retryDecision.archiveReason ?? ARCHIVE_REASON_NON_RETRYABLE;
+        queueStore.failAndArchive(task.id, {
+          error: detail,
+          retryReason: retryDecision.retryReason,
+          archiveReason,
+          retryAfterMs: retryDecision.retryAfterMs,
+        });
+        this.stateStore.commitExecutionHandled(task.sessionKey, task.eventId);
+
+        if (payload && archiveReason !== "cancelled") {
+          await this.sendQueuedTaskFailureNotice(payload.message.conversationId, {
+            attempt: task.attempt,
+            retryReason: retryDecision.retryReason,
+            archiveReason,
+            retryAfterMs: retryDecision.retryAfterMs,
+            detail,
+          });
+        }
+
+        this.logger.error("Queued task archived after failure", {
+          taskId: task.id,
+          sessionKey: task.sessionKey,
+          eventId: task.eventId,
+          attempt: task.attempt,
+          retryable: retryDecision.retryable,
+          retryReason: retryDecision.retryReason,
+          retryAfterMs: retryDecision.retryAfterMs,
+          archiveReason,
+          error: formatError(error),
+        });
+      }
+    }
+  }
+
+  private reconcileSessionQueueDrain(sessionKey: string): void {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      return;
+    }
+    try {
+      if (queueStore.hasReadyTask(sessionKey)) {
+        this.startSessionQueueDrain(sessionKey);
+        return;
+      }
+      this.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
+    } catch (error) {
+      this.logger.warn("Failed to reconcile session queue drain state", {
+        sessionKey,
+        error: formatError(error),
+      });
+    }
+  }
+
+  private scheduleSessionQueueDrainAtNextRetry(sessionKey: string, queueStore: TaskQueueStateStore): void {
+    const nextRetryAt = queueStore.getNextPendingRetryAt(sessionKey);
+    if (nextRetryAt === null) {
+      return;
+    }
+    this.scheduleSessionQueueDrain(sessionKey, nextRetryAt);
+  }
+
+  private scheduleSessionQueueDrain(sessionKey: string, nextRetryAt: number): void {
+    this.clearSessionQueueRetryTimer(sessionKey);
+    const safeNextRetryAt = Math.max(Date.now(), Math.floor(nextRetryAt));
+    const delayMs = Math.max(0, safeNextRetryAt - Date.now());
+    if (delayMs <= 0) {
+      this.startSessionQueueDrain(sessionKey);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const current = this.sessionQueueRetryTimers.get(sessionKey);
+      if (current === timer) {
+        this.sessionQueueRetryTimers.delete(sessionKey);
+      }
+      this.startSessionQueueDrain(sessionKey);
+    }, delayMs);
+    timer.unref?.();
+    this.sessionQueueRetryTimers.set(sessionKey, timer);
+    this.logger.debug("Session queue drain scheduled for next retry", {
+      sessionKey,
+      nextRetryAt: safeNextRetryAt,
+      nextRetryAtIso: new Date(safeNextRetryAt).toISOString(),
+      delayMs,
+    });
+  }
+
+  private clearSessionQueueRetryTimer(sessionKey: string): void {
+    const timer = this.sessionQueueRetryTimers.get(sessionKey);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.sessionQueueRetryTimers.delete(sessionKey);
+  }
+
+  private async sendQueuedTaskFailureNotice(
+    conversationId: string,
+    input: {
+      attempt: number;
+      retryReason: string;
+      archiveReason: string;
+      retryAfterMs: number | null;
+      detail: string;
+    },
+  ): Promise<void> {
+    const reasonText =
+      input.archiveReason === ARCHIVE_REASON_MAX_ATTEMPTS
+        ? `达到最大重试次数(${this.taskQueueRetryPolicy.maxAttempts})`
+        : `不可重试错误(${input.archiveReason})`;
+    const retryAfterText = input.retryAfterMs === null ? "n/a" : `${input.retryAfterMs}ms`;
+    try {
+      await this.channel.sendMessage(
+        conversationId,
+        `[CodeHarbor] 请求处理失败并已归档（attempt=${input.attempt}，retryReason=${input.retryReason}，archiveReason=${input.archiveReason}，retryAfterMs=${retryAfterText}，原因: ${reasonText}）：${input.detail}`,
+      );
+    } catch (error) {
+      this.logger.error("Failed to send queued task failure notice", {
+        conversationId,
+        error: formatError(error),
+      });
     }
   }
 
@@ -1054,6 +1532,8 @@ export class Orchestrator {
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
 - /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
+- /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
+- /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
 - /backend codex|claude|status: 查看/切换后端工具
 - /reset: 清空当前会话上下文
@@ -1227,6 +1707,22 @@ export class Orchestrator {
       repairRounds: 0,
       error: null,
     });
+    const workflowDiagRunId = this.beginWorkflowDiagRun({
+      kind: "autodev",
+      sessionKey,
+      conversationId: message.conversationId,
+      requestId,
+      objective: buildAutoDevObjective(activeTask),
+      taskId: activeTask.id,
+      taskDescription: activeTask.description,
+    });
+    this.appendWorkflowDiagEvent(
+      workflowDiagRunId,
+      "autodev",
+      "autodev",
+      0,
+      `AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+    );
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -1240,6 +1736,8 @@ export class Orchestrator {
         message,
         requestId,
         workdir,
+        workflowDiagRunId,
+        "autodev",
       );
       if (!result) {
         return;
@@ -1271,6 +1769,13 @@ export class Orchestrator {
 - task status: ${statusToSymbol(finalTask.status)}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
       );
+      this.appendWorkflowDiagEvent(
+        workflowDiagRunId,
+        "autodev",
+        "autodev",
+        0,
+        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}`,
+      );
     } catch (error) {
       if (promotedToInProgress) {
         try {
@@ -1295,6 +1800,13 @@ export class Orchestrator {
         repairRounds: 0,
         error: formatError(error),
       });
+      this.appendWorkflowDiagEvent(
+        workflowDiagRunId,
+        "autodev",
+        "autodev",
+        0,
+        `AutoDev 失败: ${formatError(error)}`,
+      );
       throw error;
     }
   }
@@ -1305,6 +1817,8 @@ export class Orchestrator {
     message: InboundMessage,
     requestId: string,
     workdir: string,
+    diagRunId: string | null = null,
+    diagRunKind: WorkflowDiagRunKind = "workflow",
   ): Promise<MultiAgentWorkflowRunResult | null> {
     const normalizedObjective = objective.trim();
     if (!normalizedObjective) {
@@ -1333,6 +1847,15 @@ export class Orchestrator {
       repairRounds: 0,
       error: null,
     });
+    const workflowDiagRunId =
+      diagRunId ??
+      this.beginWorkflowDiagRun({
+        kind: diagRunKind,
+        sessionKey,
+        conversationId: message.conversationId,
+        requestId,
+        objective: normalizedObjective,
+      });
 
     const stopTyping = this.startTypingHeartbeat(message.conversationId);
     let cancelWorkflow = (): void => {};
@@ -1345,8 +1868,16 @@ export class Orchestrator {
         cancelWorkflow();
       },
     });
+    this.persistRuntimeMetricsSnapshot();
 
     await this.sendProgressUpdate(progressCtx, "[CodeHarbor] Multi-Agent workflow 启动：Planner -> Executor -> Reviewer");
+    this.appendWorkflowDiagEvent(
+      workflowDiagRunId,
+      diagRunKind,
+      "workflow",
+      0,
+      "Multi-Agent workflow 启动：Planner -> Executor -> Reviewer",
+    );
 
     try {
       const result = await this.workflowRunner.run({
@@ -1360,6 +1891,7 @@ export class Orchestrator {
         },
         onProgress: async (event) => {
           const stepLabel = event.stage.toUpperCase();
+          this.appendWorkflowDiagEvent(workflowDiagRunId, diagRunKind, event.stage, event.round, event.message);
           await this.sendProgressUpdate(progressCtx, `[CodeHarbor] [${stepLabel}] ${event.message}`);
         },
       });
@@ -1377,6 +1909,12 @@ export class Orchestrator {
 
       await this.channel.sendMessage(message.conversationId, buildWorkflowResultReply(result));
       await this.finishProgress(progressCtx, `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`);
+      this.finishWorkflowDiagRun(workflowDiagRunId, {
+        status: "succeeded",
+        approved: result.approved,
+        repairRounds: result.repairRounds,
+        error: null,
+      });
       return result;
     } catch (error) {
       const status = classifyExecutionOutcome(error);
@@ -1391,12 +1929,19 @@ export class Orchestrator {
         error: formatError(error),
       });
       await this.finishProgress(progressCtx, buildFailureProgressSummary(status, requestStartedAt, error));
+      this.finishWorkflowDiagRun(workflowDiagRunId, {
+        status: status === "cancelled" ? "cancelled" : "failed",
+        approved: null,
+        repairRounds: 0,
+        error: formatError(error),
+      });
       throw error;
     } finally {
       const running = this.runningExecutions.get(sessionKey);
       if (running?.requestId === requestId) {
         this.runningExecutions.delete(sessionKey);
       }
+      this.persistRuntimeMetricsSnapshot();
       await stopTyping();
     }
   }
@@ -1430,6 +1975,16 @@ export class Orchestrator {
     this.stateStore.clearCodexSessionId(sessionKey);
     this.sessionRuntime.clearSession(sessionKey);
     this.skipBridgeForNextPrompt.add(sessionKey);
+
+    const queueStore = this.getTaskQueueStateStore();
+    const cancelledPending = queueStore ? queueStore.clearPendingTasks(sessionKey).cancelledPending : 0;
+    if (cancelledPending > 0) {
+      this.logger.info("Stop command cleared pending queued tasks", {
+        requestId,
+        sessionKey,
+        cancelledPending,
+      });
+    }
 
     const running = this.runningExecutions.get(sessionKey);
     if (running) {
@@ -2257,6 +2812,43 @@ export class Orchestrator {
     }
   }
 
+  private getTaskQueueStateStore(): TaskQueueStateStore | null {
+    const maybeStore = this.stateStore as unknown as Partial<TaskQueueStateStore>;
+    if (
+      typeof maybeStore.enqueueTask !== "function" ||
+      typeof maybeStore.claimNextTask !== "function" ||
+      typeof maybeStore.getTaskById !== "function" ||
+      typeof maybeStore.hasPendingTask !== "function" ||
+      typeof maybeStore.clearPendingTasks !== "function" ||
+      typeof maybeStore.listPendingTaskSessions !== "function" ||
+      typeof maybeStore.finishTask !== "function" ||
+      typeof maybeStore.failTask !== "function" ||
+      typeof maybeStore.recoverTasks !== "function" ||
+      typeof maybeStore.getTaskQueueStatusCounts !== "function"
+    ) {
+      return null;
+    }
+    return maybeStore as TaskQueueStateStore;
+  }
+
+  private listTaskQueueFailureArchive(limit: number): TaskFailureArchiveRecord[] {
+    const stateStore = this.stateStore as StateStore & {
+      listTaskFailureArchive?: (limit?: number) => TaskFailureArchiveRecord[];
+    };
+    if (typeof stateStore.listTaskFailureArchive !== "function") {
+      return [];
+    }
+    try {
+      return stateStore.listTaskFailureArchive(limit);
+    } catch (error) {
+      this.logger.warn("Failed to load task queue failure archive", {
+        error: formatError(error),
+        limit,
+      });
+      return [];
+    }
+  }
+
   private getUpgradeStateStore(): UpgradeStateStore | null {
     const maybeStore = this.stateStore as unknown as Partial<UpgradeStateStore>;
     if (
@@ -2331,7 +2923,7 @@ export class Orchestrator {
     if (!target || target.kind === "help") {
       await this.channel.sendNotice(
         message.conversationId,
-        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count]",
+        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag autodev [count] | /diag queue [count]",
       );
       return;
     }
@@ -2373,6 +2965,71 @@ ${formatMediaDiagEvents(snapshot.recentEvents)}`,
       );
       return;
     }
+    if (target.kind === "autodev") {
+      const runs = this.listWorkflowDiagRuns("autodev", target.limit);
+      const counts = runs.reduce(
+        (acc, run) => {
+          if (run.status === "running") {
+            acc.running += 1;
+          } else if (run.status === "succeeded") {
+            acc.succeeded += 1;
+          } else if (run.status === "cancelled") {
+            acc.cancelled += 1;
+          } else {
+            acc.failed += 1;
+          }
+          return acc;
+        },
+        { running: 0, succeeded: 0, failed: 0, cancelled: 0 },
+      );
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 诊断信息（autodev）
+- recentCount: ${runs.length}
+- status: running=${counts.running}, succeeded=${counts.succeeded}, failed=${counts.failed}, cancelled=${counts.cancelled}
+- records:
+${formatAutoDevDiagRuns(runs, (runId) => this.listWorkflowDiagEvents(runId, 5))}`,
+      );
+      return;
+    }
+    if (target.kind === "queue") {
+      const queueStore = this.getTaskQueueStateStore();
+      if (!queueStore) {
+        await this.channel.sendNotice(
+          message.conversationId,
+          `${this.botNoticePrefix} 诊断信息（queue）
+- status: unavailable
+- reason: 当前实例未启用可恢复任务队列能力`,
+        );
+        return;
+      }
+      const counts = queueStore.getTaskQueueStatusCounts();
+      const sessions = queueStore.listPendingTaskSessions(target.limit, 0);
+      let earliestRetryAt: number | null = null;
+      for (const session of sessions) {
+        const nextRetryAt = queueStore.getNextPendingRetryAt(session.sessionKey);
+        if (nextRetryAt === null) {
+          continue;
+        }
+        if (earliestRetryAt === null || nextRetryAt < earliestRetryAt) {
+          earliestRetryAt = nextRetryAt;
+        }
+      }
+      const archive = this.listTaskQueueFailureArchive(target.limit);
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 诊断信息（queue）
+- activeExecutions: ${this.runningExecutions.size}
+- counts: pending=${counts.pending}, running=${counts.running}, succeeded=${counts.succeeded}, failed=${counts.failed}
+- pendingSessions: ${sessions.length}
+- earliestRetryAt: ${earliestRetryAt === null ? "N/A" : new Date(earliestRetryAt).toISOString()}
+- sessions:
+${formatQueuePendingSessions(sessions)}
+- archive:
+${formatQueueFailureArchive(archive)}`,
+      );
+      return;
+    }
 
     const runs = this.getRecentUpgradeRuns(target.limit);
     const lock = this.getUpgradeExecutionLockSnapshot();
@@ -2386,6 +3043,195 @@ ${formatMediaDiagEvents(snapshot.recentEvents)}`,
 - records:
 ${formatUpgradeDiagRecords(runs)}`,
     );
+  }
+
+  getRuntimeMetricsSnapshot(now = Date.now()): RuntimeMetricsSnapshot {
+    return {
+      generatedAt: new Date(now).toISOString(),
+      startedAt: this.processStartedAtIso,
+      activeExecutions: this.runningExecutions.size,
+      request: this.metrics.runtimeSnapshot(),
+      limiter: this.rateLimiter.snapshot(),
+    };
+  }
+
+  private recordRequestMetrics(outcome: RequestOutcome, queueMs: number, execMs: number, sendMs: number): void {
+    this.metrics.record(outcome, queueMs, execMs, sendMs);
+    this.persistRuntimeMetricsSnapshot();
+  }
+
+  private persistRuntimeMetricsSnapshot(): void {
+    const stateStore = this.stateStore as StateStore & {
+      upsertRuntimeMetricsSnapshot?: (key: string, payloadJson: string) => void;
+    };
+    if (typeof stateStore.upsertRuntimeMetricsSnapshot !== "function") {
+      return;
+    }
+    try {
+      stateStore.upsertRuntimeMetricsSnapshot(
+        "orchestrator",
+        JSON.stringify(this.getRuntimeMetricsSnapshot()),
+      );
+    } catch (error) {
+      this.logger.debug("Failed to persist runtime metrics snapshot", {
+        error: formatError(error),
+      });
+    }
+  }
+
+  private restoreWorkflowDiagStore(): WorkflowDiagStorePayload {
+    const stateStore = this.stateStore as StateStore & {
+      getRuntimeMetricsSnapshot?: (key: string) => { payloadJson: string } | null;
+    };
+    if (typeof stateStore.getRuntimeMetricsSnapshot !== "function") {
+      return createEmptyWorkflowDiagStorePayload();
+    }
+    try {
+      const record = stateStore.getRuntimeMetricsSnapshot(WORKFLOW_DIAG_SNAPSHOT_KEY);
+      return parseWorkflowDiagStorePayload(record?.payloadJson ?? null);
+    } catch (error) {
+      this.logger.debug("Failed to restore workflow diag store", {
+        error: formatError(error),
+      });
+      return createEmptyWorkflowDiagStorePayload();
+    }
+  }
+
+  private persistWorkflowDiagStore(): void {
+    const stateStore = this.stateStore as StateStore & {
+      upsertRuntimeMetricsSnapshot?: (key: string, payloadJson: string) => void;
+    };
+    if (typeof stateStore.upsertRuntimeMetricsSnapshot !== "function") {
+      return;
+    }
+    try {
+      stateStore.upsertRuntimeMetricsSnapshot(WORKFLOW_DIAG_SNAPSHOT_KEY, JSON.stringify(this.workflowDiagStore));
+    } catch (error) {
+      this.logger.debug("Failed to persist workflow diag store", {
+        error: formatError(error),
+      });
+    }
+  }
+
+  private beginWorkflowDiagRun(input: {
+    kind: WorkflowDiagRunKind;
+    sessionKey: string;
+    conversationId: string;
+    requestId: string;
+    objective: string;
+    taskId?: string | null;
+    taskDescription?: string | null;
+  }): string {
+    const nowIso = new Date().toISOString();
+    const runId = `${nowIso}-${Math.random().toString(36).slice(2, 8)}`;
+    this.workflowDiagStore.runs.push({
+      runId,
+      kind: input.kind,
+      sessionKey: input.sessionKey,
+      conversationId: input.conversationId,
+      requestId: input.requestId,
+      objective: summarizeSingleLine(input.objective, 800),
+      taskId: input.taskId?.trim() || null,
+      taskDescription: input.taskDescription?.trim() || null,
+      status: "running",
+      startedAt: nowIso,
+      endedAt: null,
+      durationMs: null,
+      approved: null,
+      repairRounds: 0,
+      error: null,
+      lastStage: null,
+      lastMessage: null,
+      updatedAt: nowIso,
+    });
+    if (this.workflowDiagStore.runs.length > WORKFLOW_DIAG_MAX_RUNS) {
+      const overflow = this.workflowDiagStore.runs.length - WORKFLOW_DIAG_MAX_RUNS;
+      const removedIds = new Set(this.workflowDiagStore.runs.slice(0, overflow).map((run) => run.runId));
+      this.workflowDiagStore.runs.splice(0, overflow);
+      if (removedIds.size > 0) {
+        this.workflowDiagStore.events = this.workflowDiagStore.events.filter((event) => !removedIds.has(event.runId));
+      }
+    }
+    this.workflowDiagStore.updatedAt = nowIso;
+    this.persistWorkflowDiagStore();
+    return runId;
+  }
+
+  private appendWorkflowDiagEvent(
+    runId: string,
+    kind: WorkflowDiagRunKind,
+    stage: string,
+    round: number,
+    message: string,
+  ): void {
+    const run = this.workflowDiagStore.runs.find((item) => item.runId === runId);
+    if (!run) {
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const normalizedStage = stage.trim() || "unknown";
+    const normalizedMessage = summarizeSingleLine(message || "n/a", 600);
+    this.workflowDiagStore.events.push({
+      runId,
+      kind,
+      stage: normalizedStage,
+      round: Math.max(0, Math.floor(round)),
+      message: normalizedMessage,
+      at: nowIso,
+    });
+    if (this.workflowDiagStore.events.length > WORKFLOW_DIAG_MAX_EVENTS) {
+      this.workflowDiagStore.events.splice(0, this.workflowDiagStore.events.length - WORKFLOW_DIAG_MAX_EVENTS);
+    }
+    run.lastStage = normalizedStage;
+    run.lastMessage = normalizedMessage;
+    run.updatedAt = nowIso;
+    this.workflowDiagStore.updatedAt = nowIso;
+    this.persistWorkflowDiagStore();
+  }
+
+  private finishWorkflowDiagRun(
+    runId: string,
+    input: {
+      status: WorkflowDiagRunStatus;
+      approved: boolean | null;
+      repairRounds: number;
+      error: string | null;
+    },
+  ): void {
+    const run = this.workflowDiagStore.runs.find((item) => item.runId === runId);
+    if (!run) {
+      return;
+    }
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const startedAtMs = Date.parse(run.startedAt);
+    run.status = input.status;
+    run.endedAt = nowIso;
+    run.durationMs = Number.isFinite(startedAtMs) ? Math.max(0, now - startedAtMs) : null;
+    run.approved = input.approved;
+    run.repairRounds = Math.max(0, Math.floor(input.repairRounds));
+    run.error = input.error ? summarizeSingleLine(input.error, 1_000) : null;
+    run.updatedAt = nowIso;
+    this.workflowDiagStore.updatedAt = nowIso;
+    this.persistWorkflowDiagStore();
+  }
+
+  private listWorkflowDiagRuns(kind: WorkflowDiagRunKind, limit: number): WorkflowDiagRunRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.workflowDiagStore.runs
+      .filter((run) => run.kind === kind)
+      .slice()
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+      .slice(0, safeLimit);
+  }
+
+  private listWorkflowDiagEvents(runId: string, limit = 8): WorkflowDiagEventRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.workflowDiagStore.events
+      .filter((event) => event.runId === runId)
+      .slice()
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+      .slice(-safeLimit);
   }
 }
 
@@ -2475,6 +3321,151 @@ function summarizeSingleLine(text: string, maxLen: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLen)}...`;
+}
+
+function parseQueuedInboundPayload(payloadJson: string): QueuedInboundPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payloadJson);
+  } catch {
+    throw new Error("Invalid queued payload JSON.");
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("Invalid queued payload shape.");
+  }
+
+  const message = parseQueuedInboundMessage(parsed.message);
+  const receivedAt = parseQueuedReceivedAt(parsed.receivedAt);
+  const prompt = parseQueuedPrompt(parsed.prompt, message.text);
+  return {
+    message,
+    receivedAt,
+    prompt,
+  };
+}
+
+function parseQueuedInboundMessage(value: unknown): InboundMessage {
+  if (!isRecord(value)) {
+    throw new Error("Invalid queued payload message.");
+  }
+  const eventId = parseRequiredString(value.eventId, "message.eventId");
+  const requestId = parseOptionalString(value.requestId, eventId);
+  const channelRaw = parseOptionalString(value.channel, "matrix");
+  if (channelRaw !== "matrix") {
+    throw new Error(`Unsupported queued payload channel: ${channelRaw}`);
+  }
+  const attachments = parseQueuedAttachments(value.attachments);
+  return {
+    requestId,
+    channel: "matrix",
+    conversationId: parseRequiredString(value.conversationId, "message.conversationId"),
+    senderId: parseRequiredString(value.senderId, "message.senderId"),
+    eventId,
+    text: parseOptionalString(value.text, ""),
+    attachments,
+    isDirectMessage: parseOptionalBoolean(value.isDirectMessage),
+    mentionsBot: parseOptionalBoolean(value.mentionsBot),
+    repliesToBot: parseOptionalBoolean(value.repliesToBot),
+  };
+}
+
+function parseQueuedAttachments(value: unknown): InboundMessage["attachments"] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid queued payload attachments.");
+  }
+  return value.map((attachment, index) => parseQueuedAttachment(attachment, index));
+}
+
+function parseQueuedAttachment(value: unknown, index: number): InboundMessage["attachments"][number] {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid queued attachment #${index + 1}.`);
+  }
+  const kind = parseRequiredString(value.kind, `attachments[${index}].kind`);
+  if (kind !== "image" && kind !== "file" && kind !== "audio" && kind !== "video") {
+    throw new Error(`Invalid queued attachment kind: ${kind}`);
+  }
+  return {
+    kind,
+    name: parseRequiredString(value.name, `attachments[${index}].name`),
+    mxcUrl: parseNullableString(value.mxcUrl, `attachments[${index}].mxcUrl`),
+    mimeType: parseNullableString(value.mimeType, `attachments[${index}].mimeType`),
+    sizeBytes: parseNullableNumber(value.sizeBytes, `attachments[${index}].sizeBytes`),
+    localPath: parseNullableString(value.localPath, `attachments[${index}].localPath`),
+  };
+}
+
+function parseQueuedReceivedAt(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error("Invalid queued payload receivedAt.");
+  }
+  return value;
+}
+
+function parseQueuedPrompt(value: unknown, fallbackText: string): string | null {
+  if (value === undefined) {
+    return fallbackText;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error("Invalid queued payload prompt.");
+  }
+  return value;
+}
+
+function parseRequiredString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid queued payload ${fieldName}.`);
+  }
+  return value;
+}
+
+function parseOptionalString(value: unknown, fallback: string): string {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  if (typeof value !== "string") {
+    throw new Error("Invalid queued payload string value.");
+  }
+  return value;
+}
+
+function parseOptionalBoolean(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("Invalid queued payload boolean value.");
+  }
+  return value;
+}
+
+function parseNullableString(value: unknown, fieldName: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid queued payload ${fieldName}.`);
+  }
+  return value;
+}
+
+function parseNullableNumber(value: unknown, fieldName: string): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid queued payload ${fieldName}.`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function shouldRetryClaudeImageFailure(provider: "codex" | "claude", imagePaths: string[], error: unknown): boolean {
@@ -2673,7 +3664,14 @@ function isPlainUpgradeCommand(normalized: string): boolean {
 
 function parseDiagTarget(
   text: string,
-): { kind: "version" } | { kind: "media"; limit: number } | { kind: "upgrade"; limit: number } | { kind: "help" } | null {
+):
+  | { kind: "version" }
+  | { kind: "media"; limit: number }
+  | { kind: "upgrade"; limit: number }
+  | { kind: "autodev"; limit: number }
+  | { kind: "queue"; limit: number }
+  | { kind: "help" }
+  | null {
   const tokens = text.trim().split(/\s+/);
   if (tokens.length < 2) {
     return { kind: "help" };
@@ -2701,6 +3699,26 @@ function parseDiagTarget(
       return null;
     }
     return { kind: "upgrade", limit: parsed };
+  }
+  if (value === "autodev") {
+    if (tokens.length < 3) {
+      return { kind: "autodev", limit: 10 };
+    }
+    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
+      return null;
+    }
+    return { kind: "autodev", limit: parsed };
+  }
+  if (value === "queue") {
+    if (tokens.length < 3) {
+      return { kind: "queue", limit: 10 };
+    }
+    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
+      return null;
+    }
+    return { kind: "queue", limit: parsed };
   }
   return null;
 }
@@ -3210,12 +4228,172 @@ function formatUpgradeDiagRecords(runs: UpgradeRunRecord[]): string {
     .join("\n");
 }
 
+function createEmptyWorkflowDiagStorePayload(): WorkflowDiagStorePayload {
+  return {
+    version: 1,
+    updatedAt: new Date(0).toISOString(),
+    runs: [],
+    events: [],
+  };
+}
+
+function parseWorkflowDiagStorePayload(payloadJson: string | null): WorkflowDiagStorePayload {
+  if (!payloadJson || !payloadJson.trim()) {
+    return createEmptyWorkflowDiagStorePayload();
+  }
+  try {
+    const parsed = JSON.parse(payloadJson) as Partial<WorkflowDiagStorePayload> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return createEmptyWorkflowDiagStorePayload();
+    }
+    const runs = Array.isArray(parsed.runs) ? parsed.runs.filter(isWorkflowDiagRunRecord) : [];
+    const events = Array.isArray(parsed.events) ? parsed.events.filter(isWorkflowDiagEventRecord) : [];
+    const updatedAt = typeof parsed.updatedAt === "string" && parsed.updatedAt.trim() ? parsed.updatedAt : new Date(0).toISOString();
+    return {
+      version: 1,
+      updatedAt,
+      runs: runs.slice(-WORKFLOW_DIAG_MAX_RUNS),
+      events: events.slice(-WORKFLOW_DIAG_MAX_EVENTS),
+    };
+  } catch {
+    return createEmptyWorkflowDiagStorePayload();
+  }
+}
+
+function isWorkflowDiagRunRecord(value: unknown): value is WorkflowDiagRunRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const row = value as Partial<WorkflowDiagRunRecord>;
+  if (typeof row.runId !== "string" || !row.runId.trim()) {
+    return false;
+  }
+  if (row.kind !== "workflow" && row.kind !== "autodev") {
+    return false;
+  }
+  if (typeof row.sessionKey !== "string" || typeof row.conversationId !== "string" || typeof row.requestId !== "string") {
+    return false;
+  }
+  if (typeof row.objective !== "string" || typeof row.startedAt !== "string") {
+    return false;
+  }
+  if (!(typeof row.taskId === "string" || row.taskId === null)) {
+    return false;
+  }
+  if (!(typeof row.taskDescription === "string" || row.taskDescription === null)) {
+    return false;
+  }
+  if (!["running", "succeeded", "failed", "cancelled"].includes(String(row.status ?? ""))) {
+    return false;
+  }
+  if (!(typeof row.endedAt === "string" || row.endedAt === null)) {
+    return false;
+  }
+  if (!(row.durationMs === null || (typeof row.durationMs === "number" && Number.isFinite(row.durationMs)))) {
+    return false;
+  }
+  if (!(typeof row.approved === "boolean" || row.approved === null)) {
+    return false;
+  }
+  if (typeof row.repairRounds !== "number" || !Number.isFinite(row.repairRounds)) {
+    return false;
+  }
+  if (!(typeof row.error === "string" || row.error === null)) {
+    return false;
+  }
+  if (!(typeof row.lastStage === "string" || row.lastStage === null)) {
+    return false;
+  }
+  if (!(typeof row.lastMessage === "string" || row.lastMessage === null)) {
+    return false;
+  }
+  if (typeof row.updatedAt !== "string") {
+    return false;
+  }
+  return true;
+}
+
+function isWorkflowDiagEventRecord(value: unknown): value is WorkflowDiagEventRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const row = value as Partial<WorkflowDiagEventRecord>;
+  if (typeof row.runId !== "string" || !row.runId.trim()) {
+    return false;
+  }
+  if (row.kind !== "workflow" && row.kind !== "autodev") {
+    return false;
+  }
+  if (typeof row.stage !== "string" || typeof row.message !== "string" || typeof row.at !== "string") {
+    return false;
+  }
+  if (typeof row.round !== "number" || !Number.isFinite(row.round)) {
+    return false;
+  }
+  return true;
+}
+
+function formatAutoDevDiagRuns(
+  runs: WorkflowDiagRunRecord[],
+  resolveEvents: (runId: string) => WorkflowDiagEventRecord[],
+): string {
+  if (runs.length === 0) {
+    return "- (empty)";
+  }
+  return runs
+    .map((run) => {
+      const stageText = run.lastStage ? `${run.lastStage}${run.lastMessage ? `(${run.lastMessage})` : ""}` : "N/A";
+      const durationText = run.durationMs === null ? "running" : formatDurationMs(run.durationMs);
+      const errorText = run.error ?? "none";
+      const events = resolveEvents(run.runId);
+      const eventSummary =
+        events.length === 0
+          ? "events=n/a"
+          : `events=${events.map((event) => `${event.stage}#${event.round}`).join(" -> ")}`;
+      return [
+        `- run=${run.runId} status=${run.status} task=${run.taskId ?? "N/A"} approved=${
+          run.approved === null ? "N/A" : run.approved ? "yes" : "no"
+        } repairRounds=${run.repairRounds} duration=${durationText}`,
+        `  lastStage=${stageText}`,
+        `  ${eventSummary}`,
+        `  error=${errorText}`,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+function formatQueuePendingSessions(sessions: TaskQueuePendingSessionRecord[]): string {
+  if (sessions.length === 0) {
+    return "- (empty)";
+  }
+  return sessions.map((session) => `- firstTaskId=${session.firstTaskId} session=${session.sessionKey}`).join("\n");
+}
+
+function formatQueueFailureArchive(records: TaskFailureArchiveRecord[]): string {
+  if (records.length === 0) {
+    return "- (empty)";
+  }
+  return records
+    .map((record) => {
+      return `- #${record.id} task=${record.taskId} attempt=${record.attempt} retryReason=${record.retryReason} archiveReason=${record.archiveReason} failedAt=${new Date(record.failedAt).toISOString()} error=${record.error}`;
+    })
+    .join("\n");
+}
+
 function buildRateLimitNotice(decision: RateLimitDecision): string {
   if (decision.reason === "user_requests_per_window" || decision.reason === "room_requests_per_window") {
     const retrySec = Math.max(1, Math.ceil((decision.retryAfterMs ?? 1_000) / 1_000));
     return `[CodeHarbor] 请求过于频繁，请在 ${retrySec} 秒后重试。`;
   }
   return "[CodeHarbor] 当前任务并发较高，请稍后再试。";
+}
+
+function classifyQueueTaskRetry(policy: RetryPolicy, attempt: number, error: unknown): RetryDecision {
+  return classifyRetryDecision({
+    policy,
+    attempt,
+    error,
+  });
 }
 
 function classifyExecutionOutcome(error: unknown): Extract<RequestOutcome, "failed" | "timeout" | "cancelled"> {

@@ -16,17 +16,31 @@ import {
 
 import { AppConfig } from "../config";
 import { Logger } from "../logger";
+import {
+  classifyRetryDecision,
+  createRetryPolicy,
+  DEFAULT_RETRYABLE_HTTP_STATUSES,
+  sleep,
+  type RetryPolicy,
+} from "../reliability/retry-policy";
 import { InboundAttachment, InboundMessage } from "../types";
 import { splitText } from "../utils/message";
+import { Channel, type InboundHandler } from "./channel";
 
-export type InboundHandler = (message: InboundMessage) => Promise<void>;
+export type { InboundHandler } from "./channel";
 const LOCAL_TXN_PREFIX = "codeharbor-";
 const MATRIX_HTTP_TIMEOUT_MS = 15_000;
 const MATRIX_HTTP_MAX_RETRIES = 2;
-const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MATRIX_HTTP_RETRY_POLICY = createRetryPolicy({
+  maxAttempts: MATRIX_HTTP_MAX_RETRIES + 1,
+  initialDelayMs: 250,
+  maxDelayMs: 2_000,
+  multiplier: 2,
+  jitterRatio: 0.2,
+});
 const ACCEPTED_MSG_TYPES = new Set(["m.text", "m.image", "m.file", "m.audio", "m.video"]);
 
-export class MatrixChannel {
+export class MatrixChannel implements Channel {
   private readonly config: AppConfig;
   private readonly logger: Logger;
   private readonly chunkSize: number;
@@ -321,7 +335,8 @@ export class MatrixChannel {
       },
       {
         timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
-        maxRetries: MATRIX_HTTP_MAX_RETRIES,
+        policy: MATRIX_HTTP_RETRY_POLICY,
+        retryableStatuses: DEFAULT_RETRYABLE_HTTP_STATUSES,
       },
     );
 
@@ -406,7 +421,8 @@ export class MatrixChannel {
         { headers },
         {
           timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
-          maxRetries: MATRIX_HTTP_MAX_RETRIES,
+          policy: MATRIX_HTTP_RETRY_POLICY,
+          retryableStatuses: DEFAULT_RETRYABLE_HTTP_STATUSES,
         },
       );
       if (candidate.ok) {
@@ -433,28 +449,45 @@ export class MatrixChannel {
 
 interface FetchRetryOptions {
   timeoutMs: number;
-  maxRetries: number;
+  policy: RetryPolicy;
+  retryableStatuses: ReadonlySet<number>;
 }
 
 async function fetchWithRetry(url: string, init: RequestInit, options: FetchRetryOptions): Promise<Response> {
-  let attempt = 0;
+  let attempt = 1;
   let lastError: unknown = null;
 
-  while (attempt <= options.maxRetries) {
+  while (attempt <= options.policy.maxAttempts) {
     try {
       const response = await fetchWithTimeout(url, init, options.timeoutMs);
-      if (response.ok || !RETRYABLE_HTTP_STATUS.has(response.status) || attempt === options.maxRetries) {
+      const retryDecision = classifyRetryDecision({
+        policy: options.policy,
+        attempt,
+        error: {
+          status: response.status,
+          retryAfter: readRetryAfterHeader(response),
+          message: `HTTP ${response.status} ${response.statusText}`,
+        },
+        options: {
+          retryableHttpStatuses: options.retryableStatuses,
+        },
+      });
+      if (!retryDecision.shouldRetry) {
         return response;
       }
+      await sleep(retryDecision.retryDelayMs ?? 0);
     } catch (error) {
       lastError = error;
-      if (attempt === options.maxRetries) {
+      const retryDecision = classifyRetryDecision({
+        policy: options.policy,
+        attempt,
+        error,
+      });
+      if (!retryDecision.shouldRetry) {
         throw error;
       }
+      await sleep(retryDecision.retryDelayMs ?? 0);
     }
-
-    const delayMs = computeRetryDelayMs(attempt);
-    await sleep(delayMs);
     attempt += 1;
   }
 
@@ -475,16 +508,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-function computeRetryDelayMs(attempt: number): number {
-  const base = 250;
-  return Math.min(2_000, base * 2 ** attempt);
-}
-
-async function sleep(delayMs: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    timer.unref?.();
-  });
+function readRetryAfterHeader(response: Response): string | null {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+  const headers = response.headers as { get?: ((name: string) => string | null) | undefined } | undefined;
+  if (!headers || typeof headers.get !== "function") {
+    return null;
+  }
+  return headers.get("retry-after");
 }
 
 async function readResponseSnippet(response: Response): Promise<string> {

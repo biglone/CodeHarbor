@@ -8,6 +8,7 @@ import { Logger } from "../logger";
 export interface MultiAgentWorkflowConfig {
   enabled: boolean;
   autoRepairMaxRounds: number;
+  executionTimeoutMs?: number;
 }
 
 export interface MultiAgentWorkflowProgressEvent {
@@ -37,6 +38,8 @@ interface ExecuteRoleResult {
   sessionId: string;
   reply: string;
 }
+
+const DEFAULT_WORKFLOW_EXECUTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export class MultiAgentWorkflowRunner {
   private readonly executor: CodexExecutor;
@@ -77,11 +80,13 @@ export class MultiAgentWorkflowRunner {
       round: 0,
       message: "Planner 正在生成执行计划",
     });
+    const roleTimeoutMs = this.resolveRoleTimeoutMs();
     const planResult = await this.executeRole(
       "planner",
       buildPlannerPrompt(objective),
       plannerSessionId,
       input.workdir,
+      roleTimeoutMs,
       () => cancelled,
       (handle) => {
         activeHandle = handle;
@@ -100,6 +105,7 @@ export class MultiAgentWorkflowRunner {
       buildExecutorPrompt(objective, plan),
       executorSessionId,
       input.workdir,
+      roleTimeoutMs,
       () => cancelled,
       (handle) => {
         activeHandle = handle;
@@ -122,6 +128,7 @@ export class MultiAgentWorkflowRunner {
         buildReviewerPrompt(objective, plan, outputResult.reply),
         reviewerSessionId,
         input.workdir,
+        roleTimeoutMs,
         () => cancelled,
         (handle) => {
           activeHandle = handle;
@@ -152,6 +159,7 @@ export class MultiAgentWorkflowRunner {
         buildRepairPrompt(objective, plan, outputResult.reply, verdict.feedback, repairRounds),
         executorSessionId,
         input.workdir,
+        roleTimeoutMs,
         () => cancelled,
         (handle) => {
           activeHandle = handle;
@@ -184,6 +192,7 @@ export class MultiAgentWorkflowRunner {
     prompt: string,
     sessionId: string | null,
     workdir: string,
+    timeoutMs: number,
     getCancelled: () => boolean,
     setActiveHandle: (handle: CodexExecutionHandle | null) => void,
   ): Promise<ExecuteRoleResult> {
@@ -191,7 +200,7 @@ export class MultiAgentWorkflowRunner {
       throw new CodexExecutionCancelledError("workflow cancelled");
     }
 
-    const handle = this.executor.startExecution(prompt, sessionId, undefined, { workdir });
+    const handle = this.executor.startExecution(prompt, sessionId, undefined, { workdir, timeoutMs });
     setActiveHandle(handle);
     try {
       const result = await handle.result;
@@ -202,6 +211,14 @@ export class MultiAgentWorkflowRunner {
     } finally {
       setActiveHandle(null);
     }
+  }
+
+  private resolveRoleTimeoutMs(): number {
+    const configured = this.config.executionTimeoutMs;
+    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+      return Math.floor(configured);
+    }
+    return DEFAULT_WORKFLOW_EXECUTION_TIMEOUT_MS;
   }
 }
 

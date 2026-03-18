@@ -3,8 +3,27 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  classifyRetryDecision,
+  classifyRetryableError,
+  createRetryPolicy,
+  DEFAULT_RETRYABLE_HTTP_STATUSES,
+  DEFAULT_RETRYABLE_MESSAGE_PATTERNS,
+  parseRetryAfterMs,
+  sleep,
+  type RetryClassification,
+  type RetryPolicy,
+} from "./reliability/retry-policy";
+
 const execAsync = promisify(execCallback);
-const RETRYABLE_OPENAI_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const LOCAL_WHISPER_RETRYABLE_MESSAGE_PATTERNS = [
+  ...DEFAULT_RETRYABLE_MESSAGE_PATTERNS,
+  "command failed",
+  "resource temporarily unavailable",
+  "killed",
+  "terminated",
+  "signal",
+];
 
 export interface AudioAttachmentForTranscription {
   name: string;
@@ -40,8 +59,7 @@ export class AudioTranscriber implements AudioTranscriberLike {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly maxChars: number;
-  private readonly maxRetries: number;
-  private readonly retryDelayMs: number;
+  private readonly retryPolicy: RetryPolicy;
   private readonly localWhisperCommand: string | null;
   private readonly localWhisperTimeoutMs: number;
 
@@ -51,8 +69,14 @@ export class AudioTranscriber implements AudioTranscriberLike {
     this.model = options.model;
     this.timeoutMs = options.timeoutMs;
     this.maxChars = options.maxChars;
-    this.maxRetries = options.maxRetries;
-    this.retryDelayMs = options.retryDelayMs;
+    const initialDelayMs = Math.max(0, options.retryDelayMs);
+    this.retryPolicy = createRetryPolicy({
+      maxAttempts: Math.max(1, options.maxRetries + 1),
+      initialDelayMs,
+      maxDelayMs: Math.max(initialDelayMs, initialDelayMs * 8),
+      multiplier: 2,
+      jitterRatio: 0.2,
+    });
     this.localWhisperCommand = options.localWhisperCommand;
     this.localWhisperTimeoutMs = options.localWhisperTimeoutMs;
   }
@@ -134,31 +158,33 @@ export class AudioTranscriber implements AudioTranscriberLike {
   }
 
   private async transcribeOneWithOpenAiWithRetry(attachment: AudioAttachmentForTranscription): Promise<string> {
-    let attempt = 0;
+    let attempt = 1;
     while (true) {
       try {
         return await this.transcribeOneWithOpenAi(attachment);
       } catch (error) {
-        if (!isRetryableOpenAiError(error) || attempt >= this.maxRetries) {
+        const retryDecision = classifyOpenAiTranscriptionRetry(this.retryPolicy, attempt, error);
+        if (!retryDecision.shouldRetry) {
           throw error;
         }
+        await sleep(retryDecision.retryDelayMs ?? 0);
         attempt += 1;
-        await sleep(this.retryDelayMs * attempt);
       }
     }
   }
 
   private async transcribeOneWithLocalWhisperWithRetry(attachment: AudioAttachmentForTranscription): Promise<string> {
-    let attempt = 0;
+    let attempt = 1;
     while (true) {
       try {
         return await this.transcribeOneWithLocalWhisper(attachment);
       } catch (error) {
-        if (attempt >= this.maxRetries) {
+        const retryDecision = classifyLocalWhisperRetry(this.retryPolicy, attempt, error);
+        if (!retryDecision.shouldRetry) {
           throw error;
         }
+        await sleep(retryDecision.retryDelayMs ?? 0);
         attempt += 1;
-        await sleep(this.retryDelayMs * attempt);
       }
     }
   }
@@ -208,7 +234,11 @@ export class AudioTranscriber implements AudioTranscriberLike {
         typeof payload?.error?.message === "string"
           ? payload.error.message
           : `HTTP ${response.status} ${response.statusText}`;
-      throw new OpenAiTranscriptionHttpError(response.status, `Audio transcription failed for ${attachment.name}: ${message}`);
+      throw new OpenAiTranscriptionHttpError(
+        response.status,
+        `Audio transcription failed for ${attachment.name}: ${message}`,
+        parseRetryAfterMs(readRetryAfterHeader(response)),
+      );
     }
 
     const text = typeof payload.text === "string" ? payload.text.trim() : "";
@@ -263,23 +293,43 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
-function isRetryableOpenAiError(error: unknown): boolean {
-  if (error instanceof OpenAiTranscriptionHttpError) {
-    return RETRYABLE_OPENAI_STATUS.has(error.status);
-  }
-  if (error instanceof Error && error.name === "AbortError") {
-    return true;
-  }
-  return true;
+function classifyOpenAiTranscriptionError(error: unknown): RetryClassification {
+  return classifyRetryableError(error, {
+    retryableHttpStatuses: DEFAULT_RETRYABLE_HTTP_STATUSES,
+  });
 }
 
-async function sleep(delayMs: number): Promise<void> {
-  if (delayMs <= 0) {
-    return;
+function classifyOpenAiTranscriptionRetry(policy: RetryPolicy, attempt: number, error: unknown) {
+  return classifyRetryDecision({
+    policy,
+    attempt,
+    error,
+    classify: classifyOpenAiTranscriptionError,
+  });
+}
+
+function classifyLocalWhisperError(error: unknown): RetryClassification {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("produced empty output")) {
+      return {
+        retryable: false,
+        reason: "empty_output",
+        retryAfterMs: null,
+      };
+    }
   }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    timer.unref?.();
+  return classifyRetryableError(error, {
+    retryableMessagePatterns: LOCAL_WHISPER_RETRYABLE_MESSAGE_PATTERNS,
+  });
+}
+
+function classifyLocalWhisperRetry(policy: RetryPolicy, attempt: number, error: unknown) {
+  return classifyRetryDecision({
+    policy,
+    attempt,
+    error,
+    classify: classifyLocalWhisperError,
   });
 }
 
@@ -290,12 +340,25 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+function readRetryAfterHeader(response: Response): string | null {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+  const headers = response.headers as { get?: ((name: string) => string | null) | undefined } | undefined;
+  if (!headers || typeof headers.get !== "function") {
+    return null;
+  }
+  return headers.get("retry-after");
+}
+
 class OpenAiTranscriptionHttpError extends Error {
   readonly status: number;
+  readonly retryAfterMs: number | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, retryAfterMs: number | null) {
     super(message);
     this.name = "OpenAiTranscriptionHttpError";
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
