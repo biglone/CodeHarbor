@@ -8,6 +8,21 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.42] - 2026-03-18
+
+- Platform API (T6.1):
+  - added authenticated task submission endpoint `POST /api/tasks` with `Authorization: Bearer <API_TOKEN>`
+  - added `Idempotency-Key` handling for dedupe and conflict protection (`409 IDEMPOTENCY_CONFLICT`)
+  - wired API task submission into recoverable queue execution path
+- Runtime UX and control flow:
+  - `/diag` and `/autodev status` now return without waiting for active execution lock in the same session
+  - fixed pending-stop handoff for workflow runs so `/stop` can cancel in-flight `/agents run` more reliably
+- Config and tests:
+  - added API server config keys (`API_ENABLED`, `API_BIND_HOST`, `API_PORT`, `API_TOKEN`)
+  - expanded regression coverage for API submission/auth/idempotency and runtime non-blocking status behavior
+- Task roadmap:
+  - split T6/T7 into smaller executable steps and marked `T6.1` as completed
+
 ## [0.1.41] - 2026-03-18
 
 - Reliability and recoverability:
