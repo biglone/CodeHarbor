@@ -478,6 +478,76 @@ describe("Orchestrator", () => {
     expect(channel.sent.some((entry) => entry.text.includes("Failed to process request"))).toBe(false);
   });
 
+  it("handles /diag and /autodev status without waiting for the active execution lock", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-status-unlocked-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      ["| 任务ID | 任务描述 | 状态 |", "|--------|----------|------|", "| T9.1 | status command check | ⬜ |"].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new CancellableExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      const runningPromise = orchestrator.handleMessage(
+        makeInbound({
+          requestId: "req-running",
+          isDirectMessage: true,
+          text: "请持续执行",
+          eventId: "$running",
+        }),
+      );
+      await waitForCondition(() => executor.callCount === 1);
+
+      const diagPromise = orchestrator.handleMessage(
+        makeInbound({
+          requestId: "req-diag",
+          isDirectMessage: true,
+          text: "/diag queue 3",
+          eventId: "$diag-queue",
+        }),
+      );
+      await waitForCondition(() => channel.notices.some((entry) => entry.text.includes("诊断信息（queue）")), 800);
+      await diagPromise;
+
+      const autoDevStatusPromise = orchestrator.handleMessage(
+        makeInbound({
+          requestId: "req-autodev-status",
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status",
+        }),
+      );
+      await waitForCondition(() => channel.notices.some((entry) => entry.text.includes("AutoDev 状态")), 800);
+      await autoDevStatusPromise;
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          requestId: "req-stop-running",
+          isDirectMessage: true,
+          text: "/stop",
+          eventId: "$stop-running",
+        }),
+      );
+      await expect(runningPromise).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("recovers queued tasks after restart and drains them in order", async () => {
     const { dir, store } = await createSqliteStateStore();
     try {

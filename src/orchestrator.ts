@@ -865,6 +865,23 @@ export class Orchestrator {
         return;
       }
 
+      if (!options.bypassQueue && options.forcedPrompt === null) {
+        const queueWaitMs = Date.now() - receivedAt;
+        const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
+        const route = this.routeMessage(message, sessionKey, roomConfig);
+        const handledWithoutLock = await this.tryHandleNonBlockingStatusRoute({
+          route,
+          sessionKey,
+          message,
+          requestId,
+          roomConfig,
+          queueWaitMs,
+        });
+        if (handledWithoutLock) {
+          return;
+        }
+      }
+
       const lock = this.getLock(sessionKey);
       await lock.runExclusive(async () => {
         const queueWaitMs = Date.now() - receivedAt;
@@ -1289,6 +1306,56 @@ export class Orchestrator {
     if (queueDrainSessionKey) {
       this.startSessionQueueDrain(queueDrainSessionKey);
     }
+  }
+
+  private async tryHandleNonBlockingStatusRoute(input: {
+    route: RouteDecision;
+    sessionKey: string;
+    message: InboundMessage;
+    requestId: string;
+    roomConfig: RoomRuntimeConfig;
+    queueWaitMs: number;
+  }): Promise<boolean> {
+    const { route, sessionKey, message, requestId, roomConfig, queueWaitMs } = input;
+    const isReadOnlyControlCommand =
+      route.kind === "command" &&
+      (route.command === "status" || route.command === "version" || route.command === "help" || route.command === "diag");
+    const workflowCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
+    const autoDevCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
+    const isWorkflowStatus = workflowCommand?.kind === "status";
+    const isAutoDevStatus = autoDevCommand?.kind === "status";
+
+    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus) {
+      return false;
+    }
+
+    if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
+      this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
+      this.logger.debug("Duplicate non-blocking status command ignored", {
+        requestId,
+        eventId: message.eventId,
+        sessionKey,
+        queueWaitMs,
+      });
+      return true;
+    }
+
+    if (isReadOnlyControlCommand) {
+      await this.handleControlCommand(route.command, sessionKey, message, requestId);
+    } else if (isWorkflowStatus) {
+      await this.handleWorkflowStatusCommand(sessionKey, message);
+    } else {
+      await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
+    }
+    this.stateStore.markEventProcessed(sessionKey, message.eventId);
+    this.logger.debug("Handled non-blocking status command without waiting for session lock", {
+      requestId,
+      eventId: message.eventId,
+      sessionKey,
+      route: route.kind === "command" ? route.command : isWorkflowStatus ? "workflow.status" : "autodev.status",
+      queueWaitMs,
+    });
+    return true;
   }
 
   private startSessionQueueDrain(sessionKey: string): void {
@@ -1945,7 +2012,7 @@ export class Orchestrator {
 
     const stopTyping = this.startTypingHeartbeat(message.conversationId);
     let cancelWorkflow = (): void => {};
-    let cancelRequested = false;
+    let cancelRequested = this.consumePendingStopRequest(sessionKey);
     this.runningExecutions.set(sessionKey, {
       requestId,
       startedAt: requestStartedAt,
