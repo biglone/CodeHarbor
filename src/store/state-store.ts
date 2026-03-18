@@ -89,6 +89,13 @@ export interface RuntimeMetricsSnapshotRecord {
   updatedAt: number;
 }
 
+export interface RuntimeConfigSnapshotRecord {
+  key: string;
+  version: number;
+  payloadJson: string;
+  updatedAt: number;
+}
+
 export type TaskQueueStatus = "pending" | "running" | "succeeded" | "failed";
 
 export interface TaskQueueRecord {
@@ -697,6 +704,67 @@ export class StateStore {
     }
     return {
       key: row.key,
+      payloadJson: row.payload_json,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  upsertRuntimeConfigSnapshot(key: string, payloadJson: string): RuntimeConfigSnapshotRecord {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      throw new Error("runtime config key is required.");
+    }
+    const now = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db
+        .prepare("SELECT version FROM runtime_config_snapshots WHERE key = ?1")
+        .get(normalizedKey) as { version: number } | undefined;
+      const version = (existing?.version ?? 0) + 1;
+      this.db
+        .prepare(
+          `INSERT INTO runtime_config_snapshots (key, version, payload_json, updated_at)
+           VALUES (?1, ?2, ?3, ?4)
+           ON CONFLICT(key) DO UPDATE SET
+             version = excluded.version,
+             payload_json = excluded.payload_json,
+             updated_at = excluded.updated_at`,
+        )
+        .run(normalizedKey, version, payloadJson, now);
+      this.db.exec("COMMIT");
+      return {
+        key: normalizedKey,
+        version,
+        payloadJson,
+        updatedAt: now,
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getRuntimeConfigSnapshot(key: string): RuntimeConfigSnapshotRecord | null {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      return null;
+    }
+    const row = this.db
+      .prepare("SELECT key, version, payload_json, updated_at FROM runtime_config_snapshots WHERE key = ?1")
+      .get(normalizedKey) as
+      | {
+          key: string;
+          version: number;
+          payload_json: string;
+          updated_at: number;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      key: row.key,
+      version: row.version,
       payloadJson: row.payload_json,
       updatedAt: row.updated_at,
     };
@@ -1354,6 +1422,13 @@ export class StateStore {
 
       CREATE TABLE IF NOT EXISTS runtime_metrics_snapshots (
         key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS runtime_config_snapshots (
+        key TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
         payload_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );

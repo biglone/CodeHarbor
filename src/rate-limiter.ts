@@ -33,7 +33,7 @@ interface AcquireParams {
 }
 
 export class RateLimiter {
-  private readonly options: RateLimiterOptions;
+  private options: RateLimiterOptions;
   private readonly userRequests = new Map<string, number[]>();
   private readonly roomRequests = new Map<string, number[]>();
   private readonly userConcurrent = new Map<string, number>();
@@ -41,7 +41,15 @@ export class RateLimiter {
   private globalConcurrent = 0;
 
   constructor(options: RateLimiterOptions) {
-    this.options = options;
+    this.options = normalizeRateLimiterOptions(options);
+  }
+
+  updateOptions(next: RateLimiterOptions): void {
+    this.options = normalizeRateLimiterOptions(next);
+  }
+
+  getOptions(): RateLimiterOptions {
+    return { ...this.options };
   }
 
   tryAcquire(params: AcquireParams, now = Date.now()): RateLimitDecision {
@@ -163,4 +171,22 @@ function computeRetryAfter(timestamps: number[], windowMs: number, now: number):
     return windowMs;
   }
   return Math.max(0, oldest + windowMs - now);
+}
+
+function normalizeRateLimiterOptions(options: RateLimiterOptions): RateLimiterOptions {
+  return {
+    windowMs: normalizeInteger(options.windowMs, 1, "windowMs"),
+    maxRequestsPerUser: normalizeInteger(options.maxRequestsPerUser, 0, "maxRequestsPerUser"),
+    maxRequestsPerRoom: normalizeInteger(options.maxRequestsPerRoom, 0, "maxRequestsPerRoom"),
+    maxConcurrentGlobal: normalizeInteger(options.maxConcurrentGlobal, 0, "maxConcurrentGlobal"),
+    maxConcurrentPerUser: normalizeInteger(options.maxConcurrentPerUser, 0, "maxConcurrentPerUser"),
+    maxConcurrentPerRoom: normalizeInteger(options.maxConcurrentPerRoom, 0, "maxConcurrentPerRoom"),
+  };
+}
+
+function normalizeInteger(value: number, min: number, field: keyof RateLimiterOptions): number {
+  if (!Number.isInteger(value) || value < min) {
+    throw new Error(`Invalid rate limiter option "${field}": expected integer >= ${min}.`);
+  }
+  return value;
 }

@@ -180,6 +180,27 @@ describe("StateStore", () => {
     );
   });
 
+  it("stores runtime config snapshots with monotonic version", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const first = store.upsertRuntimeConfigSnapshot("global_hot_config", '{"matrixTypingTimeoutMs":10000}');
+    expect(first.version).toBe(1);
+
+    const second = store.upsertRuntimeConfigSnapshot("global_hot_config", '{"matrixTypingTimeoutMs":15000}');
+    expect(second.version).toBe(2);
+    expect(second.updatedAt).toBeGreaterThanOrEqual(first.updatedAt);
+
+    const loaded = store.getRuntimeConfigSnapshot("global_hot_config");
+    expect(loaded).toEqual(
+      expect.objectContaining({
+        key: "global_hot_config",
+        version: 2,
+        payloadJson: '{"matrixTypingTimeoutMs":15000}',
+      }),
+    );
+  });
+
   it("stores latest upgrade run status", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

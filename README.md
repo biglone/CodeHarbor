@@ -455,7 +455,7 @@ Rotate tokens quickly (repository script):
 ./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
 ```
 
-Note: `PUT /api/admin/config/global` writes to `.env` and marks changes as restart-required.
+Note: `PUT /api/admin/config/global` always writes `.env`; high-frequency whitelist keys hot-apply for new requests, while non-whitelist keys still require restart.
 
 ### Admin UI Quick Walkthrough
 

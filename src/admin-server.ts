@@ -15,6 +15,11 @@ import {
   type PackageUpdateChecker,
   resolvePackageVersion,
 } from "./package-update-checker";
+import {
+  buildRuntimeHotConfigPayload,
+  GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+  isHotGlobalConfigKey,
+} from "./runtime-hot-config";
 import { restartSystemdServices } from "./service-manager";
 import { ConfigRevisionRecord, StateStore } from "./store/state-store";
 
@@ -258,7 +263,7 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: true,
           data: buildGlobalConfigSnapshot(this.config),
-          effective: "next_start_for_env_changes",
+          effective: "hot_for_whitelist_else_restart",
         });
         return;
       }
@@ -389,17 +394,30 @@ export class AdminServer {
   private updateGlobalConfig(rawBody: unknown, actor: string | null): {
     data: ReturnType<typeof buildGlobalConfigSnapshot>;
     updatedKeys: string[];
+    hotAppliedKeys: string[];
+    restartRequiredKeys: string[];
     restartRequired: boolean;
+    runtimeConfigVersion: number | null;
   } {
     const body = asObject(rawBody, "global config payload");
     const envUpdates: Record<string, string> = {};
     const updatedKeys: string[] = [];
+    const hotAppliedKeys: string[] = [];
+    const restartRequiredKeys: string[] = [];
+    const markUpdatedKey = (key: string): void => {
+      updatedKeys.push(key);
+      if (isHotGlobalConfigKey(key)) {
+        hotAppliedKeys.push(key);
+        return;
+      }
+      restartRequiredKeys.push(key);
+    };
 
     if ("matrixCommandPrefix" in body) {
       const value = String(body.matrixCommandPrefix ?? "");
       this.config.matrixCommandPrefix = value;
       envUpdates.MATRIX_COMMAND_PREFIX = value;
-      updatedKeys.push("matrixCommandPrefix");
+      markUpdatedKey("matrixCommandPrefix");
     }
 
     if ("codexWorkdir" in body) {
@@ -407,7 +425,7 @@ export class AdminServer {
       ensureDirectory(workdir, "codexWorkdir");
       this.config.codexWorkdir = workdir;
       envUpdates.CODEX_WORKDIR = workdir;
-      updatedKeys.push("codexWorkdir");
+      markUpdatedKey("codexWorkdir");
     }
 
     if ("rateLimiter" in body) {
@@ -416,37 +434,37 @@ export class AdminServer {
         const value = normalizePositiveInt(limiter.windowMs, this.config.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER);
         this.config.rateLimiter.windowMs = value;
         envUpdates.RATE_LIMIT_WINDOW_SECONDS = String(Math.max(1, Math.round(value / 1000)));
-        updatedKeys.push("rateLimiter.windowMs");
+        markUpdatedKey("rateLimiter.windowMs");
       }
       if ("maxRequestsPerUser" in limiter) {
         const value = normalizeNonNegativeInt(limiter.maxRequestsPerUser, this.config.rateLimiter.maxRequestsPerUser);
         this.config.rateLimiter.maxRequestsPerUser = value;
         envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_USER = String(value);
-        updatedKeys.push("rateLimiter.maxRequestsPerUser");
+        markUpdatedKey("rateLimiter.maxRequestsPerUser");
       }
       if ("maxRequestsPerRoom" in limiter) {
         const value = normalizeNonNegativeInt(limiter.maxRequestsPerRoom, this.config.rateLimiter.maxRequestsPerRoom);
         this.config.rateLimiter.maxRequestsPerRoom = value;
         envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_ROOM = String(value);
-        updatedKeys.push("rateLimiter.maxRequestsPerRoom");
+        markUpdatedKey("rateLimiter.maxRequestsPerRoom");
       }
       if ("maxConcurrentGlobal" in limiter) {
         const value = normalizeNonNegativeInt(limiter.maxConcurrentGlobal, this.config.rateLimiter.maxConcurrentGlobal);
         this.config.rateLimiter.maxConcurrentGlobal = value;
         envUpdates.RATE_LIMIT_MAX_CONCURRENT_GLOBAL = String(value);
-        updatedKeys.push("rateLimiter.maxConcurrentGlobal");
+        markUpdatedKey("rateLimiter.maxConcurrentGlobal");
       }
       if ("maxConcurrentPerUser" in limiter) {
         const value = normalizeNonNegativeInt(limiter.maxConcurrentPerUser, this.config.rateLimiter.maxConcurrentPerUser);
         this.config.rateLimiter.maxConcurrentPerUser = value;
         envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_USER = String(value);
-        updatedKeys.push("rateLimiter.maxConcurrentPerUser");
+        markUpdatedKey("rateLimiter.maxConcurrentPerUser");
       }
       if ("maxConcurrentPerRoom" in limiter) {
         const value = normalizeNonNegativeInt(limiter.maxConcurrentPerRoom, this.config.rateLimiter.maxConcurrentPerRoom);
         this.config.rateLimiter.maxConcurrentPerRoom = value;
         envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM = String(value);
-        updatedKeys.push("rateLimiter.maxConcurrentPerRoom");
+        markUpdatedKey("rateLimiter.maxConcurrentPerRoom");
       }
     }
 
@@ -456,25 +474,25 @@ export class AdminServer {
         const value = normalizeBoolean(policy.allowMention, this.config.defaultGroupTriggerPolicy.allowMention);
         this.config.defaultGroupTriggerPolicy.allowMention = value;
         envUpdates.GROUP_TRIGGER_ALLOW_MENTION = String(value);
-        updatedKeys.push("defaultGroupTriggerPolicy.allowMention");
+        markUpdatedKey("defaultGroupTriggerPolicy.allowMention");
       }
       if ("allowReply" in policy) {
         const value = normalizeBoolean(policy.allowReply, this.config.defaultGroupTriggerPolicy.allowReply);
         this.config.defaultGroupTriggerPolicy.allowReply = value;
         envUpdates.GROUP_TRIGGER_ALLOW_REPLY = String(value);
-        updatedKeys.push("defaultGroupTriggerPolicy.allowReply");
+        markUpdatedKey("defaultGroupTriggerPolicy.allowReply");
       }
       if ("allowActiveWindow" in policy) {
         const value = normalizeBoolean(policy.allowActiveWindow, this.config.defaultGroupTriggerPolicy.allowActiveWindow);
         this.config.defaultGroupTriggerPolicy.allowActiveWindow = value;
         envUpdates.GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW = String(value);
-        updatedKeys.push("defaultGroupTriggerPolicy.allowActiveWindow");
+        markUpdatedKey("defaultGroupTriggerPolicy.allowActiveWindow");
       }
       if ("allowPrefix" in policy) {
         const value = normalizeBoolean(policy.allowPrefix, this.config.defaultGroupTriggerPolicy.allowPrefix);
         this.config.defaultGroupTriggerPolicy.allowPrefix = value;
         envUpdates.GROUP_TRIGGER_ALLOW_PREFIX = String(value);
-        updatedKeys.push("defaultGroupTriggerPolicy.allowPrefix");
+        markUpdatedKey("defaultGroupTriggerPolicy.allowPrefix");
       }
     }
 
@@ -482,7 +500,7 @@ export class AdminServer {
       const value = normalizeBoolean(body.matrixProgressUpdates, this.config.matrixProgressUpdates);
       this.config.matrixProgressUpdates = value;
       envUpdates.MATRIX_PROGRESS_UPDATES = String(value);
-      updatedKeys.push("matrixProgressUpdates");
+      markUpdatedKey("matrixProgressUpdates");
     }
 
     if ("matrixProgressMinIntervalMs" in body) {
@@ -494,7 +512,7 @@ export class AdminServer {
       );
       this.config.matrixProgressMinIntervalMs = value;
       envUpdates.MATRIX_PROGRESS_MIN_INTERVAL_MS = String(value);
-      updatedKeys.push("matrixProgressMinIntervalMs");
+      markUpdatedKey("matrixProgressMinIntervalMs");
     }
 
     if ("matrixTypingTimeoutMs" in body) {
@@ -506,7 +524,7 @@ export class AdminServer {
       );
       this.config.matrixTypingTimeoutMs = value;
       envUpdates.MATRIX_TYPING_TIMEOUT_MS = String(value);
-      updatedKeys.push("matrixTypingTimeoutMs");
+      markUpdatedKey("matrixTypingTimeoutMs");
     }
 
     if ("sessionActiveWindowMinutes" in body) {
@@ -518,14 +536,14 @@ export class AdminServer {
       );
       this.config.sessionActiveWindowMinutes = value;
       envUpdates.SESSION_ACTIVE_WINDOW_MINUTES = String(value);
-      updatedKeys.push("sessionActiveWindowMinutes");
+      markUpdatedKey("sessionActiveWindowMinutes");
     }
 
     if ("groupDirectModeEnabled" in body) {
       const value = normalizeBoolean(body.groupDirectModeEnabled, this.config.groupDirectModeEnabled);
       this.config.groupDirectModeEnabled = value;
       envUpdates.GROUP_DIRECT_MODE_ENABLED = String(value);
-      updatedKeys.push("groupDirectModeEnabled");
+      markUpdatedKey("groupDirectModeEnabled");
     }
 
     if ("updateCheck" in body) {
@@ -535,7 +553,7 @@ export class AdminServer {
         const value = normalizeBoolean(updateCheck.enabled, this.config.updateCheck.enabled);
         this.config.updateCheck.enabled = value;
         envUpdates.PACKAGE_UPDATE_CHECK_ENABLED = String(value);
-        updatedKeys.push("updateCheck.enabled");
+        markUpdatedKey("updateCheck.enabled");
         updateCheckChanged = true;
       }
       if ("timeoutMs" in updateCheck) {
@@ -547,14 +565,14 @@ export class AdminServer {
         );
         this.config.updateCheck.timeoutMs = value;
         envUpdates.PACKAGE_UPDATE_CHECK_TIMEOUT_MS = String(value);
-        updatedKeys.push("updateCheck.timeoutMs");
+        markUpdatedKey("updateCheck.timeoutMs");
         updateCheckChanged = true;
       }
       if ("ttlMs" in updateCheck) {
         const value = normalizePositiveInt(updateCheck.ttlMs, this.config.updateCheck.ttlMs, 1, Number.MAX_SAFE_INTEGER);
         this.config.updateCheck.ttlMs = value;
         envUpdates.PACKAGE_UPDATE_CHECK_TTL_MS = String(value);
-        updatedKeys.push("updateCheck.ttlMs");
+        markUpdatedKey("updateCheck.ttlMs");
         updateCheckChanged = true;
       }
       if (updateCheckChanged && !this.hasCustomPackageUpdateChecker) {
@@ -568,43 +586,43 @@ export class AdminServer {
         const value = normalizeBoolean(compat.enabled, this.config.cliCompat.enabled);
         this.config.cliCompat.enabled = value;
         envUpdates.CLI_COMPAT_MODE = String(value);
-        updatedKeys.push("cliCompat.enabled");
+        markUpdatedKey("cliCompat.enabled");
       }
       if ("passThroughEvents" in compat) {
         const value = normalizeBoolean(compat.passThroughEvents, this.config.cliCompat.passThroughEvents);
         this.config.cliCompat.passThroughEvents = value;
         envUpdates.CLI_COMPAT_PASSTHROUGH_EVENTS = String(value);
-        updatedKeys.push("cliCompat.passThroughEvents");
+        markUpdatedKey("cliCompat.passThroughEvents");
       }
       if ("preserveWhitespace" in compat) {
         const value = normalizeBoolean(compat.preserveWhitespace, this.config.cliCompat.preserveWhitespace);
         this.config.cliCompat.preserveWhitespace = value;
         envUpdates.CLI_COMPAT_PRESERVE_WHITESPACE = String(value);
-        updatedKeys.push("cliCompat.preserveWhitespace");
+        markUpdatedKey("cliCompat.preserveWhitespace");
       }
       if ("disableReplyChunkSplit" in compat) {
         const value = normalizeBoolean(compat.disableReplyChunkSplit, this.config.cliCompat.disableReplyChunkSplit);
         this.config.cliCompat.disableReplyChunkSplit = value;
         envUpdates.CLI_COMPAT_DISABLE_REPLY_CHUNK_SPLIT = String(value);
-        updatedKeys.push("cliCompat.disableReplyChunkSplit");
+        markUpdatedKey("cliCompat.disableReplyChunkSplit");
       }
       if ("progressThrottleMs" in compat) {
         const value = normalizeNonNegativeInt(compat.progressThrottleMs, this.config.cliCompat.progressThrottleMs);
         this.config.cliCompat.progressThrottleMs = value;
         envUpdates.CLI_COMPAT_PROGRESS_THROTTLE_MS = String(value);
-        updatedKeys.push("cliCompat.progressThrottleMs");
+        markUpdatedKey("cliCompat.progressThrottleMs");
       }
       if ("fetchMedia" in compat) {
         const value = normalizeBoolean(compat.fetchMedia, this.config.cliCompat.fetchMedia);
         this.config.cliCompat.fetchMedia = value;
         envUpdates.CLI_COMPAT_FETCH_MEDIA = String(value);
-        updatedKeys.push("cliCompat.fetchMedia");
+        markUpdatedKey("cliCompat.fetchMedia");
       }
       if ("transcribeAudio" in compat) {
         const value = normalizeBoolean(compat.transcribeAudio, this.config.cliCompat.transcribeAudio);
         this.config.cliCompat.transcribeAudio = value;
         envUpdates.CLI_COMPAT_TRANSCRIBE_AUDIO = String(value);
-        updatedKeys.push("cliCompat.transcribeAudio");
+        markUpdatedKey("cliCompat.transcribeAudio");
       }
       if ("audioTranscribeModel" in compat) {
         const value = normalizeString(
@@ -614,7 +632,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeModel = value || "gpt-4o-mini-transcribe";
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MODEL = this.config.cliCompat.audioTranscribeModel;
-        updatedKeys.push("cliCompat.audioTranscribeModel");
+        markUpdatedKey("cliCompat.audioTranscribeModel");
       }
       if ("audioTranscribeTimeoutMs" in compat) {
         const value = normalizePositiveInt(
@@ -625,7 +643,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeTimeoutMs = value;
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_TIMEOUT_MS = String(value);
-        updatedKeys.push("cliCompat.audioTranscribeTimeoutMs");
+        markUpdatedKey("cliCompat.audioTranscribeTimeoutMs");
       }
       if ("audioTranscribeMaxChars" in compat) {
         const value = normalizePositiveInt(
@@ -636,7 +654,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeMaxChars = value;
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_CHARS = String(value);
-        updatedKeys.push("cliCompat.audioTranscribeMaxChars");
+        markUpdatedKey("cliCompat.audioTranscribeMaxChars");
       }
       if ("audioTranscribeMaxRetries" in compat) {
         const value = normalizePositiveInt(
@@ -647,7 +665,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeMaxRetries = value;
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_RETRIES = String(value);
-        updatedKeys.push("cliCompat.audioTranscribeMaxRetries");
+        markUpdatedKey("cliCompat.audioTranscribeMaxRetries");
       }
       if ("audioTranscribeRetryDelayMs" in compat) {
         const value = normalizeNonNegativeInt(
@@ -656,7 +674,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeRetryDelayMs = value;
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_RETRY_DELAY_MS = String(value);
-        updatedKeys.push("cliCompat.audioTranscribeRetryDelayMs");
+        markUpdatedKey("cliCompat.audioTranscribeRetryDelayMs");
       }
       if ("audioTranscribeMaxBytes" in compat) {
         const value = normalizePositiveInt(
@@ -667,7 +685,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioTranscribeMaxBytes = value;
         envUpdates.CLI_COMPAT_AUDIO_TRANSCRIBE_MAX_BYTES = String(value);
-        updatedKeys.push("cliCompat.audioTranscribeMaxBytes");
+        markUpdatedKey("cliCompat.audioTranscribeMaxBytes");
       }
       if ("audioLocalWhisperCommand" in compat) {
         const value = normalizeString(
@@ -677,7 +695,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioLocalWhisperCommand = value || null;
         envUpdates.CLI_COMPAT_AUDIO_LOCAL_WHISPER_COMMAND = this.config.cliCompat.audioLocalWhisperCommand ?? "";
-        updatedKeys.push("cliCompat.audioLocalWhisperCommand");
+        markUpdatedKey("cliCompat.audioLocalWhisperCommand");
       }
       if ("audioLocalWhisperTimeoutMs" in compat) {
         const value = normalizePositiveInt(
@@ -688,7 +706,7 @@ export class AdminServer {
         );
         this.config.cliCompat.audioLocalWhisperTimeoutMs = value;
         envUpdates.CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS = String(value);
-        updatedKeys.push("cliCompat.audioLocalWhisperTimeoutMs");
+        markUpdatedKey("cliCompat.audioLocalWhisperTimeoutMs");
       }
     }
 
@@ -699,7 +717,7 @@ export class AdminServer {
         const value = normalizeBoolean(workflow.enabled, currentAgentWorkflow.enabled);
         currentAgentWorkflow.enabled = value;
         envUpdates.AGENT_WORKFLOW_ENABLED = String(value);
-        updatedKeys.push("agentWorkflow.enabled");
+        markUpdatedKey("agentWorkflow.enabled");
       }
       if ("autoRepairMaxRounds" in workflow) {
         const value = normalizePositiveInt(
@@ -710,7 +728,7 @@ export class AdminServer {
         );
         currentAgentWorkflow.autoRepairMaxRounds = value;
         envUpdates.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS = String(value);
-        updatedKeys.push("agentWorkflow.autoRepairMaxRounds");
+        markUpdatedKey("agentWorkflow.autoRepairMaxRounds");
       }
     }
 
@@ -719,11 +737,26 @@ export class AdminServer {
     }
 
     this.persistEnvUpdates(envUpdates);
+    let runtimeConfigVersion: number | null = null;
+    if (hotAppliedKeys.length > 0) {
+      const runtimeSnapshot = this.stateStore.upsertRuntimeConfigSnapshot(
+        GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+        JSON.stringify(buildRuntimeHotConfigPayload(this.config)),
+      );
+      runtimeConfigVersion = runtimeSnapshot.version;
+    }
+    const mode = restartRequiredKeys.length > 0 ? "restart" : "hot";
     this.stateStore.appendConfigRevision(
       actor,
       `update global config: ${updatedKeys.join(", ")}`,
       JSON.stringify({
         type: "global_config_update",
+        actor,
+        mode,
+        updatedKeys,
+        hotAppliedKeys,
+        restartRequiredKeys,
+        runtimeConfigVersion,
         updates: envUpdates,
       }),
     );
@@ -731,7 +764,10 @@ export class AdminServer {
     return {
       data: buildGlobalConfigSnapshot(this.config),
       updatedKeys,
-      restartRequired: true,
+      hotAppliedKeys,
+      restartRequiredKeys,
+      restartRequired: restartRequiredKeys.length > 0,
+      runtimeConfigVersion,
     };
   }
 

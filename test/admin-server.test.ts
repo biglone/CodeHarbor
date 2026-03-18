@@ -8,6 +8,7 @@ import { AdminServer } from "../src/admin-server";
 import { ConfigService } from "../src/config-service";
 import { AppConfig } from "../src/config";
 import { Logger } from "../src/logger";
+import { GLOBAL_RUNTIME_HOT_CONFIG_KEY } from "../src/runtime-hot-config";
 import { StateStore } from "../src/store/state-store";
 
 function createPaths(prefix = "codeharbor-admin-"): { dir: string; db: string; legacy: string } {
@@ -624,6 +625,60 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
+  });
+
+  it("splits hot-applied keys and restart-required keys with audit metadata", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const updated = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "ops-hot",
+      },
+      body: JSON.stringify({
+        matrixTypingTimeoutMs: 15000,
+        matrixCommandPrefix: "!new",
+      }),
+    });
+    expect(updated.status).toBe(200);
+    const updatedJson = JSON.stringify(updated.body);
+    expect(updatedJson).toContain("hotAppliedKeys");
+    expect(updatedJson).toContain("restartRequiredKeys");
+    expect(updatedJson).toContain('"matrixTypingTimeoutMs"');
+    expect(updatedJson).toContain('"matrixCommandPrefix"');
+    expect(updatedJson).toContain('"restartRequired":true');
+
+    const runtimeSnapshot = stateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
+    expect(runtimeSnapshot).not.toBeNull();
+    expect(runtimeSnapshot?.version).toBe(1);
+    expect(runtimeSnapshot?.payloadJson ?? "").toContain('"matrixTypingTimeoutMs":15000');
+
+    const audit = await fetchJson(`${baseUrl}/api/admin/audit?limit=5`);
+    expect(audit.status).toBe(200);
+    const auditJson = JSON.stringify(audit.body);
+    expect(auditJson).toContain('"mode":"restart"');
+    expect(auditJson).toContain('"hotAppliedKeys":["matrixTypingTimeoutMs"]');
+    expect(auditJson).toContain('"restartRequiredKeys":["matrixCommandPrefix"]');
+    expect(auditJson).toContain('"actor":"ops-hot"');
   });
 
   it("restarts managed services via admin API", async () => {

@@ -11,6 +11,7 @@ import { type Channel, type InboundHandler } from "../src/channels/channel";
 import { DEFAULT_DOCUMENT_MAX_BYTES } from "../src/document-extractor";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { ApiTaskIdempotencyConflictError, Orchestrator, buildSessionKey } from "../src/orchestrator";
+import { GLOBAL_RUNTIME_HOT_CONFIG_KEY } from "../src/runtime-hot-config";
 import { StateStore } from "../src/store/state-store";
 import { InboundMessage } from "../src/types";
 
@@ -60,6 +61,10 @@ class FakeStateStore {
       content: string;
       createdAt: number;
     }>
+  >();
+  private readonly runtimeConfigSnapshots = new Map<
+    string,
+    { key: string; version: number; payloadJson: string; updatedAt: number }
   >();
   private messageId = 0;
 
@@ -157,6 +162,25 @@ class FakeStateStore {
   }> {
     const history = this.messages.get(sessionKey) ?? [];
     return history.slice(Math.max(0, history.length - Math.max(1, Math.floor(limit))));
+  }
+
+  upsertRuntimeConfigSnapshot(
+    key: string,
+    payloadJson: string,
+  ): { key: string; version: number; payloadJson: string; updatedAt: number } {
+    const existing = this.runtimeConfigSnapshots.get(key);
+    const next = {
+      key,
+      version: (existing?.version ?? 0) + 1,
+      payloadJson,
+      updatedAt: Date.now(),
+    };
+    this.runtimeConfigSnapshots.set(key, next);
+    return next;
+  }
+
+  getRuntimeConfigSnapshot(key: string): { key: string; version: number; payloadJson: string; updatedAt: number } | null {
+    return this.runtimeConfigSnapshots.get(key) ?? null;
   }
 
   private ensureSession(sessionKey: string): FakeSessionState {
@@ -479,6 +503,109 @@ describe("Orchestrator", () => {
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first", eventId: "$r1" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second", eventId: "$r2" }));
+
+    expect(executor.callCount).toBe(1);
+    expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(true);
+  });
+
+  it("applies hot runtime config snapshot for new requests", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 1,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 10,
+        maxConcurrentPerRoom: 10,
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first", eventId: "$hr1" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second", eventId: "$hr2" }));
+
+    store.upsertRuntimeConfigSnapshot(
+      GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+      JSON.stringify({
+        rateLimiter: {
+          windowMs: 60_000,
+          maxRequestsPerUser: 2,
+          maxRequestsPerRoom: 100,
+          maxConcurrentGlobal: 10,
+          maxConcurrentPerUser: 10,
+          maxConcurrentPerRoom: 10,
+        },
+        matrixProgressUpdates: false,
+        matrixProgressMinIntervalMs: 2_500,
+        matrixTypingTimeoutMs: 10_000,
+        sessionActiveWindowMinutes: 20,
+        groupDirectModeEnabled: false,
+        defaultGroupTriggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+      }),
+    );
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "third", eventId: "$hr3" }));
+
+    expect(executor.callCount).toBe(2);
+    expect(channel.notices.filter((entry) => entry.text.includes("请求过于频繁"))).toHaveLength(1);
+  });
+
+  it("keeps runtime state unchanged when hot config snapshot is invalid", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 1,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 10,
+        maxConcurrentPerRoom: 10,
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first", eventId: "$hi1" }));
+
+    store.upsertRuntimeConfigSnapshot(
+      GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+      JSON.stringify({
+        rateLimiter: {
+          windowMs: 60_000,
+          maxRequestsPerUser: -1,
+          maxRequestsPerRoom: 100,
+          maxConcurrentGlobal: 10,
+          maxConcurrentPerUser: 10,
+          maxConcurrentPerRoom: 10,
+        },
+        matrixProgressUpdates: false,
+        matrixProgressMinIntervalMs: 2_500,
+        matrixTypingTimeoutMs: 10_000,
+        sessionActiveWindowMinutes: 20,
+        groupDirectModeEnabled: false,
+        defaultGroupTriggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+      }),
+    );
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second", eventId: "$hi2" }));
 
     expect(executor.callCount).toBe(1);
     expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(true);

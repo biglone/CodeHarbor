@@ -41,6 +41,11 @@ import {
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import {
+  GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+  parseRuntimeHotConfigPayload,
+  type RuntimeHotConfigPayload,
+} from "./runtime-hot-config";
+import {
   ARCHIVE_REASON_MAX_ATTEMPTS,
   ARCHIVE_REASON_NON_RETRYABLE,
   classifyRetryDecision,
@@ -700,13 +705,13 @@ export class Orchestrator {
   private readonly skipBridgeForNextPrompt = new Set<string>();
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
-  private readonly progressUpdatesEnabled: boolean;
-  private readonly progressMinIntervalMs: number;
-  private readonly typingTimeoutMs: number;
+  private progressUpdatesEnabled: boolean;
+  private progressMinIntervalMs: number;
+  private typingTimeoutMs: number;
   private readonly commandPrefix: string;
   private readonly matrixUserId: string;
-  private readonly sessionActiveWindowMs: number;
-  private readonly groupDirectModeEnabled: boolean;
+  private sessionActiveWindowMs: number;
+  private groupDirectModeEnabled: boolean;
   private readonly defaultGroupTriggerPolicy: TriggerPolicy;
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
   private readonly configService: ConfigService | null;
@@ -747,6 +752,8 @@ export class Orchestrator {
   private readonly mediaMetrics = new MediaMetrics();
   private workflowDiagStore: WorkflowDiagStorePayload = createEmptyWorkflowDiagStorePayload();
   private lastLockPruneAt = 0;
+  private hotConfigVersion = 0;
+  private hotConfigRejectedVersion = 0;
 
   constructor(
     channel: Channel,
@@ -1033,6 +1040,7 @@ export class Orchestrator {
 
     try {
       const requestId = message.requestId || message.eventId;
+      this.syncRuntimeHotConfig();
       const sessionKey = buildSessionKey(message);
 
       const directCommand = parseControlCommand(message.text.trim());
@@ -2981,6 +2989,86 @@ export class Orchestrator {
         error,
       });
     }
+  }
+
+  private syncRuntimeHotConfig(): void {
+    const runtimeStateStore = this.stateStore as StateStore & {
+      getRuntimeConfigSnapshot?: (key: string) => {
+        version: number;
+        payloadJson: string;
+        updatedAt: number;
+      } | null;
+    };
+    if (typeof runtimeStateStore.getRuntimeConfigSnapshot !== "function") {
+      return;
+    }
+
+    let record:
+      | {
+          version: number;
+          payloadJson: string;
+          updatedAt: number;
+        }
+      | null = null;
+    try {
+      record = runtimeStateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
+    } catch (error) {
+      this.logger.debug("Failed to read runtime hot config snapshot", {
+        error: formatError(error),
+      });
+      return;
+    }
+    if (!record) {
+      return;
+    }
+
+    const latestKnownVersion = Math.max(this.hotConfigVersion, this.hotConfigRejectedVersion);
+    if (record.version <= latestKnownVersion) {
+      return;
+    }
+
+    const hotConfig = parseRuntimeHotConfigPayload(record.payloadJson);
+    if (!hotConfig) {
+      this.hotConfigRejectedVersion = record.version;
+      this.logger.warn("Ignore invalid runtime hot config snapshot payload", {
+        version: record.version,
+      });
+      return;
+    }
+
+    try {
+      this.applyRuntimeHotConfig(hotConfig);
+      this.hotConfigVersion = record.version;
+      this.logger.info("Runtime hot config applied", {
+        version: record.version,
+        updatedAt: new Date(record.updatedAt).toISOString(),
+      });
+    } catch (error) {
+      this.hotConfigRejectedVersion = record.version;
+      this.logger.warn("Failed to apply runtime hot config snapshot", {
+        version: record.version,
+        error: formatError(error),
+      });
+    }
+  }
+
+  private applyRuntimeHotConfig(config: RuntimeHotConfigPayload): void {
+    const nextProgressInterval = this.cliCompat.enabled
+      ? this.cliCompat.progressThrottleMs
+      : Math.max(1, config.matrixProgressMinIntervalMs);
+    const nextTypingTimeoutMs = Math.max(1, config.matrixTypingTimeoutMs);
+    const nextSessionActiveWindowMs = Math.max(1, config.sessionActiveWindowMinutes) * 60_000;
+
+    this.rateLimiter.updateOptions(config.rateLimiter);
+    this.progressUpdatesEnabled = config.matrixProgressUpdates;
+    this.progressMinIntervalMs = nextProgressInterval;
+    this.typingTimeoutMs = nextTypingTimeoutMs;
+    this.sessionActiveWindowMs = nextSessionActiveWindowMs;
+    this.groupDirectModeEnabled = config.groupDirectModeEnabled;
+    this.defaultGroupTriggerPolicy.allowMention = config.defaultGroupTriggerPolicy.allowMention;
+    this.defaultGroupTriggerPolicy.allowReply = config.defaultGroupTriggerPolicy.allowReply;
+    this.defaultGroupTriggerPolicy.allowActiveWindow = config.defaultGroupTriggerPolicy.allowActiveWindow;
+    this.defaultGroupTriggerPolicy.allowPrefix = config.defaultGroupTriggerPolicy.allowPrefix;
   }
 
   private resolveGroupPolicy(conversationId: string): TriggerPolicy {
