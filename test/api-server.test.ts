@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ApiServer, type TaskSubmissionService } from "../src/api-server";
@@ -84,6 +85,11 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{ status: num
   };
 }
 
+function signWebhookPayload(secret: string, timestamp: string, rawBody: string): string {
+  const digest = createHmac("sha256", secret).update(timestamp).update(".").update(rawBody).digest("hex");
+  return `sha256=${digest}`;
+}
+
 describe("ApiServer", () => {
   const startedServers: ApiServer[] = [];
 
@@ -97,11 +103,19 @@ describe("ApiServer", () => {
     }
   });
 
-  async function createApiServer(service: FakeTaskSubmissionService): Promise<string> {
+  async function createApiServer(
+    service: FakeTaskSubmissionService,
+    options?: {
+      webhookSecret?: string | null;
+      webhookTimestampToleranceSeconds?: number;
+    },
+  ): Promise<string> {
     const server = new ApiServer(new Logger("error"), service, {
       host: "127.0.0.1",
       port: 0,
       apiToken: "secret-token",
+      webhookSecret: options?.webhookSecret ?? null,
+      webhookTimestampToleranceSeconds: options?.webhookTimestampToleranceSeconds ?? 300,
     });
     startedServers.push(server);
     await server.start();
@@ -340,5 +354,204 @@ describe("ApiServer", () => {
     expect(responseText).toContain('"status":"failed"');
     expect(responseText).toContain('"stage":"failed"');
     expect(responseText).toContain('"errorSummary":"HTTP 429 Too Many Requests"');
+  });
+
+  it("rejects webhook request when signature is invalid", async () => {
+    const service = new FakeTaskSubmissionService();
+    const webhookSecret = "whsec_test";
+    const baseUrl = await createApiServer(service, { webhookSecret });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({
+      conversationId: "!room:example.com",
+      repository: "acme/service",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(401);
+    expect(service.calls).toHaveLength(0);
+  });
+
+  it("rejects webhook request when timestamp is outside tolerance", async () => {
+    const service = new FakeTaskSubmissionService();
+    const webhookSecret = "whsec_test";
+    const baseUrl = await createApiServer(service, {
+      webhookSecret,
+      webhookTimestampToleranceSeconds: 30,
+    });
+    const timestamp = String(Math.floor(Date.now() / 1000) - 3_600);
+    const rawBody = JSON.stringify({
+      conversationId: "!room:example.com",
+      repository: "acme/service",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": signWebhookPayload(webhookSecret, timestamp, rawBody),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(401);
+    expect(service.calls).toHaveLength(0);
+  });
+
+  it("maps CI webhook payload into task submission", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextResult = buildSubmitResult({ created: true, taskId: 77 });
+    const webhookSecret = "whsec_ci";
+    const baseUrl = await createApiServer(service, { webhookSecret });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({
+      conversationId: "!ci-room:example.com",
+      repository: "acme/backend",
+      pipeline: "build-and-test",
+      status: "failed",
+      branch: "main",
+      commit: "abcdef12",
+      url: "https://ci.example.com/runs/77",
+      summary: "integration tests failed",
+      requestId: "ci-request-77",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": signWebhookPayload(webhookSecret, timestamp, rawBody),
+        "x-codeharbor-event-id": "ci-run-77",
+      },
+      body: rawBody,
+    });
+
+    const responseText = JSON.stringify(response.body);
+    expect(response.status).toBe(202);
+    expect(responseText).toContain('"source":"ci"');
+    expect(responseText).toContain('"taskId":77');
+    expect(service.calls).toHaveLength(1);
+    expect(service.calls[0]).toEqual(
+      expect.objectContaining({
+        conversationId: "!ci-room:example.com",
+        senderId: "@ci:webhook.codeharbor",
+        idempotencyKey: "webhook:ci:ci-run-77",
+        requestId: "ci-request-77",
+        isDirectMessage: false,
+      }),
+    );
+    expect(service.calls[0]?.text).toContain("[CI Webhook]");
+    expect(service.calls[0]?.text).toContain("Repository: acme/backend");
+    expect(service.calls[0]?.text).toContain("Status: failed");
+  });
+
+  it("maps ticket webhook payload into task submission", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextResult = buildSubmitResult({ created: true, taskId: 88 });
+    const webhookSecret = "whsec_ticket";
+    const baseUrl = await createApiServer(service, { webhookSecret });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({
+      roomId: "!ops-room:example.com",
+      issueKey: "OPS-88",
+      summary: "Release blocked by migration error",
+      status: "open",
+      priority: "P1",
+      reporter: "@oncall:example.com",
+      description: "Need triage before release window closes.",
+      eventId: "ticket-event-88",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ticket`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": signWebhookPayload(webhookSecret, timestamp, rawBody),
+      },
+      body: rawBody,
+    });
+
+    const responseText = JSON.stringify(response.body);
+    expect(response.status).toBe(202);
+    expect(responseText).toContain('"source":"ticket"');
+    expect(responseText).toContain('"taskId":88');
+    expect(service.calls).toHaveLength(1);
+    expect(service.calls[0]).toEqual(
+      expect.objectContaining({
+        conversationId: "!ops-room:example.com",
+        senderId: "@oncall:example.com",
+        idempotencyKey: "webhook:ticket:ticket-event-88",
+        requestId: "ticket-event-88",
+        isDirectMessage: false,
+      }),
+    );
+    expect(service.calls[0]?.text).toContain("[Ticket Webhook]");
+    expect(service.calls[0]?.text).toContain("Ticket: OPS-88");
+  });
+
+  it("returns 422 when webhook payload misses required mapping fields", async () => {
+    const service = new FakeTaskSubmissionService();
+    const webhookSecret = "whsec_ci";
+    const baseUrl = await createApiServer(service, { webhookSecret });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({
+      conversationId: "!ci-room:example.com",
+      status: "failed",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": signWebhookPayload(webhookSecret, timestamp, rawBody),
+      },
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(422);
+    expect(service.calls).toHaveLength(0);
+  });
+
+  it("returns 409 for webhook idempotency conflict", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextError = new ApiTaskIdempotencyConflictError(
+      "matrix:!room:example.com:@ci:example.com",
+      "$api-event",
+    );
+    const webhookSecret = "whsec_conflict";
+    const baseUrl = await createApiServer(service, { webhookSecret });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({
+      conversationId: "!ci-room:example.com",
+      repository: "acme/backend",
+      status: "failed",
+      eventId: "ci-event-conflict",
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codeharbor-timestamp": timestamp,
+        "x-codeharbor-signature": signWebhookPayload(webhookSecret, timestamp, rawBody),
+      },
+      body: rawBody,
+    });
+
+    const responseText = JSON.stringify(response.body);
+    expect(response.status).toBe(409);
+    expect(responseText).toContain('"code":"IDEMPOTENCY_CONFLICT"');
   });
 });

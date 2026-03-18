@@ -98,6 +98,8 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     apiBindHost: "127.0.0.1",
     apiPort: 8788,
     apiToken: null,
+    apiWebhookSecret: null,
+    apiWebhookTimestampToleranceSeconds: 300,
     adminBindHost: "127.0.0.1",
     adminPort: 0,
     adminToken: null,

@@ -93,6 +93,8 @@ export class CodeHarborApp {
             host: config.apiBindHost,
             port: config.apiPort,
             apiToken: config.apiToken,
+            webhookSecret: config.apiWebhookSecret,
+            webhookTimestampToleranceSeconds: config.apiWebhookTimestampToleranceSeconds,
           })
         : null;
   }

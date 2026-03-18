@@ -280,6 +280,12 @@ const configSchema = z
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(1).max(65535)),
     API_TOKEN: z.string().default(""),
+    API_WEBHOOK_SECRET: z.string().default(""),
+    API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z
+      .string()
+      .default("300")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(0).max(86_400)),
     ADMIN_BIND_HOST: z.string().default("127.0.0.1"),
     ADMIN_PORT: z
       .string()
@@ -375,6 +381,8 @@ const configSchema = z
     apiBindHost: v.API_BIND_HOST.trim() || "127.0.0.1",
     apiPort: v.API_PORT,
     apiToken: v.API_TOKEN.trim() || null,
+    apiWebhookSecret: v.API_WEBHOOK_SECRET.trim() || null,
+    apiWebhookTimestampToleranceSeconds: v.API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,

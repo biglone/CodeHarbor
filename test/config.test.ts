@@ -228,6 +228,8 @@ describe("loadConfig API task server", () => {
     expect(config.apiBindHost).toBe("127.0.0.1");
     expect(config.apiPort).toBe(8788);
     expect(config.apiToken).toBeNull();
+    expect(config.apiWebhookSecret).toBeNull();
+    expect(config.apiWebhookTimestampToleranceSeconds).toBe(300);
   });
 
   it("requires API_TOKEN when API_ENABLED=true", () => {
@@ -238,5 +240,29 @@ describe("loadConfig API task server", () => {
         }),
       ),
     ).toThrow(/API_TOKEN is required/i);
+  });
+
+  it("parses webhook settings when provided", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        API_ENABLED: "true",
+        API_TOKEN: "secret-token",
+        API_WEBHOOK_SECRET: "whsec_test_123",
+        API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: "900",
+      }),
+    );
+
+    expect(config.apiWebhookSecret).toBe("whsec_test_123");
+    expect(config.apiWebhookTimestampToleranceSeconds).toBe(900);
+  });
+
+  it("rejects invalid webhook tolerance", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: "-10",
+        }),
+      ),
+    ).toThrow(/API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS/i);
   });
 });
