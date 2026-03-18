@@ -1,5 +1,6 @@
 import { Mutex } from "async-mutex";
 import { execFile, type ExecFileException } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -46,6 +47,7 @@ import {
   type TaskFailureArchiveRecord,
   type TaskQueueEnqueueInput,
   type TaskQueuePendingSessionRecord,
+  type TaskQueueRecord,
   type UpgradeExecutionLockRecord,
   type UpgradeRunRecord,
   type UpgradeRunStats,
@@ -162,6 +164,36 @@ interface AutoDevRunSnapshot {
   approved: boolean | null;
   repairRounds: number;
   error: string | null;
+}
+
+export interface ApiTaskSubmitInput {
+  conversationId: string;
+  senderId: string;
+  text: string;
+  idempotencyKey: string;
+  requestId?: string;
+  isDirectMessage?: boolean;
+  mentionsBot?: boolean;
+  repliesToBot?: boolean;
+}
+
+export interface ApiTaskSubmitResult {
+  created: boolean;
+  task: TaskQueueRecord;
+  sessionKey: string;
+  eventId: string;
+  requestId: string;
+}
+
+export class ApiTaskIdempotencyConflictError extends Error {
+  readonly sessionKey: string;
+  readonly eventId: string;
+
+  constructor(sessionKey: string, eventId: string) {
+    super(`Idempotency-Key conflict for session ${sessionKey}: payload differs from existing request.`);
+    this.sessionKey = sessionKey;
+    this.eventId = eventId;
+  }
 }
 
 interface SelfUpdateResult {
@@ -708,6 +740,60 @@ export class Orchestrator {
       forcedPrompt: null,
       deferFailureHandlingToQueue: false,
     });
+  }
+
+  submitApiTask(input: ApiTaskSubmitInput): ApiTaskSubmitResult {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      throw new Error("Task queue is unavailable.");
+    }
+
+    const normalizedConversationId = input.conversationId.trim();
+    const normalizedSenderId = input.senderId.trim();
+    const normalizedText = input.text.trim();
+    const eventId = buildApiTaskEventId(input.idempotencyKey);
+    const requestId = normalizeApiTaskRequestId(input.requestId, eventId);
+    const message: InboundMessage = {
+      requestId,
+      channel: "matrix",
+      conversationId: normalizedConversationId,
+      senderId: normalizedSenderId,
+      eventId,
+      text: normalizedText,
+      attachments: [],
+      isDirectMessage: input.isDirectMessage ?? true,
+      mentionsBot: input.mentionsBot ?? false,
+      repliesToBot: input.repliesToBot ?? false,
+    };
+    const sessionKey = buildSessionKey(message);
+    const payload: QueuedInboundPayload = {
+      message,
+      receivedAt: Date.now(),
+      prompt: message.text,
+    };
+
+    const result = queueStore.enqueueTask({
+      sessionKey,
+      eventId: message.eventId,
+      requestId: message.requestId,
+      payloadJson: JSON.stringify(payload),
+    } satisfies TaskQueueEnqueueInput);
+
+    if (!result.created) {
+      const existing = parseQueuedInboundPayload(result.task.payloadJson);
+      if (!isApiTaskPayloadEquivalent(existing.message, message)) {
+        throw new ApiTaskIdempotencyConflictError(sessionKey, eventId);
+      }
+    }
+
+    this.startSessionQueueDrain(sessionKey);
+    return {
+      created: result.created,
+      task: result.task,
+      sessionKey,
+      eventId: result.task.eventId,
+      requestId: result.task.requestId,
+    };
   }
 
   async bootstrapTaskQueueRecovery(): Promise<void> {
@@ -3301,8 +3387,49 @@ function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
   };
 }
 
+export function buildApiTaskEventId(idempotencyKey: string): string {
+  const normalized = idempotencyKey.trim();
+  if (!normalized) {
+    throw new Error("Idempotency-Key is required.");
+  }
+  const digest = createHash("sha256").update(normalized).digest("hex");
+  return `$api-${digest}`;
+}
+
 export function buildSessionKey(message: InboundMessage): string {
   return `${message.channel}:${message.conversationId}:${message.senderId}`;
+}
+
+function normalizeApiTaskRequestId(requestId: string | undefined, eventId: string): string {
+  const normalized = requestId?.trim();
+  if (normalized) {
+    return normalized;
+  }
+  return `api-${eventId.slice(1)}`;
+}
+
+function isApiTaskPayloadEquivalent(left: InboundMessage, right: InboundMessage): boolean {
+  return buildApiTaskPayloadFingerprint(left) === buildApiTaskPayloadFingerprint(right);
+}
+
+function buildApiTaskPayloadFingerprint(message: InboundMessage): string {
+  return JSON.stringify({
+    channel: message.channel,
+    conversationId: message.conversationId.trim(),
+    senderId: message.senderId.trim(),
+    text: message.text.trim(),
+    isDirectMessage: message.isDirectMessage,
+    mentionsBot: message.mentionsBot,
+    repliesToBot: message.repliesToBot,
+    attachments: message.attachments.map((attachment) => ({
+      kind: attachment.kind,
+      name: attachment.name,
+      mxcUrl: attachment.mxcUrl,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      localPath: attachment.localPath,
+    })),
+  });
 }
 
 function formatError(error: unknown): string {

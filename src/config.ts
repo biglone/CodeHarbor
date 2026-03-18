@@ -269,6 +269,17 @@ const configSchema = z
       .default("10000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    API_ENABLED: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    API_BIND_HOST: z.string().default("127.0.0.1"),
+    API_PORT: z
+      .string()
+      .default("8788")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(1).max(65535)),
+    API_TOKEN: z.string().default(""),
     ADMIN_BIND_HOST: z.string().default("127.0.0.1"),
     ADMIN_PORT: z
       .string()
@@ -360,6 +371,10 @@ const configSchema = z
       ttlMs: v.PACKAGE_UPDATE_CHECK_TTL_MS,
     },
     doctorHttpTimeoutMs: v.DOCTOR_HTTP_TIMEOUT_MS,
+    apiEnabled: v.API_ENABLED,
+    apiBindHost: v.API_BIND_HOST.trim() || "127.0.0.1",
+    apiPort: v.API_PORT,
+    apiToken: v.API_TOKEN.trim() || null,
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,
@@ -391,6 +406,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   fs.mkdirSync(path.dirname(parsed.data.stateDbPath), { recursive: true });
   if (parsed.data.legacyStateJsonPath) {
     fs.mkdirSync(path.dirname(parsed.data.legacyStateJsonPath), { recursive: true });
+  }
+  if (parsed.data.apiEnabled && !parsed.data.apiToken) {
+    throw new Error("Invalid configuration: API_TOKEN is required when API_ENABLED=true.");
   }
 
   return parsed.data;

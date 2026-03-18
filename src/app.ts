@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { AdminServer } from "./admin-server";
+import { ApiServer } from "./api-server";
 import { type Channel } from "./channels/channel";
 import { MatrixChannel } from "./channels/matrix-channel";
 import { ConfigService } from "./config-service";
@@ -22,6 +23,7 @@ export class CodeHarborApp {
   private readonly channel: Channel;
   private readonly orchestrator: Orchestrator;
   private readonly configService: ConfigService;
+  private readonly apiServer: ApiServer | null;
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -85,6 +87,14 @@ export class CodeHarborApp {
       upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,
     });
+    this.apiServer =
+      config.apiEnabled && config.apiToken
+        ? new ApiServer(this.logger, this.orchestrator, {
+            host: config.apiBindHost,
+            port: config.apiPort,
+            apiToken: config.apiToken,
+          })
+        : null;
   }
 
   async start(): Promise<void> {
@@ -96,15 +106,39 @@ export class CodeHarborApp {
     });
     await this.channel.start(this.orchestrator.handleMessage.bind(this.orchestrator));
     await this.orchestrator.bootstrapTaskQueueRecovery();
+    if (this.apiServer) {
+      await this.apiServer.start();
+      const address = this.apiServer.getAddress();
+      this.logger.info("CodeHarbor task API server started", {
+        host: address?.host ?? this.config.apiBindHost,
+        port: address?.port ?? this.config.apiPort,
+      });
+    }
     this.logger.info("CodeHarbor is running.");
   }
 
   async stop(): Promise<void> {
     this.logger.info("CodeHarbor stopping.");
+    let firstError: unknown = null;
+    try {
+      await this.apiServer?.stop();
+    } catch (error) {
+      firstError = error;
+      this.logger.error("Failed to stop task API server", error);
+    }
     try {
       await this.channel.stop();
+    } catch (error) {
+      if (!firstError) {
+        firstError = error;
+      } else {
+        this.logger.error("Failed to stop channel", error);
+      }
     } finally {
       await this.stateStore.flush();
+    }
+    if (firstError) {
+      throw firstError;
     }
   }
 }
