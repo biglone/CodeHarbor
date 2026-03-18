@@ -48,3 +48,24 @@ groups:
         annotations:
           summary: "CodeHarbor upgrade failed"
           description: "At least one upgrade run failed in the last 30 minutes."
+
+      - alert: CodeHarborAutoDevBlockedSpike
+        expr: increase(codeharbor_autodev_tasks_blocked_total[30m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CodeHarbor AutoDev blocked tasks increased"
+          description: "AutoDev marked at least one task as blocked in the last 30 minutes."
+
+      - alert: CodeHarborAutoDevLoopGuardrailHit
+        expr: |
+          increase(codeharbor_autodev_loop_stops_total{reason="max_runs"}[30m]) > 0
+          or
+          increase(codeharbor_autodev_loop_stops_total{reason="deadline"}[30m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CodeHarbor AutoDev loop guardrail reached"
+          description: "AutoDev loop stopped due to max-runs/deadline guardrails in the last 30 minutes."

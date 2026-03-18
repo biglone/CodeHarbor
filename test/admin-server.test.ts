@@ -285,6 +285,22 @@ describe("AdminServer", () => {
           activeUsers: 1,
           activeRooms: 1,
         },
+        autodev: {
+          runs: {
+            succeeded: 4,
+            failed: 2,
+            cancelled: 1,
+          },
+          loopStops: {
+            no_task: 1,
+            drained: 2,
+            max_runs: 3,
+            deadline: 1,
+            stop_requested: 1,
+            task_incomplete: 2,
+          },
+          tasksBlocked: 2,
+        },
       }),
     );
     const configService = new ConfigService(stateStore, dir);
@@ -314,6 +330,9 @@ describe("AdminServer", () => {
     expect(text).toContain('codeharbor_upgrade_runs_total{status="succeeded"} 1');
     expect(text).toContain('codeharbor_upgrade_runs_total{status="failed"} 1');
     expect(text).toContain('codeharbor_upgrade_last_run_status{status="failed"} 1');
+    expect(text).toContain('codeharbor_autodev_runs_total{outcome="succeeded"} 4');
+    expect(text).toContain('codeharbor_autodev_loop_stops_total{reason="max_runs"} 3');
+    expect(text).toContain("codeharbor_autodev_tasks_blocked_total 2");
   });
 
   it("requires viewer auth for /metrics when token is configured", async () => {

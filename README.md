@@ -432,6 +432,12 @@ curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
   http://127.0.0.1:8787/metrics
 ```
 
+AutoDev metrics exported:
+
+- `codeharbor_autodev_runs_total{outcome="succeeded|failed|cancelled"}`
+- `codeharbor_autodev_loop_stops_total{reason="no_task|drained|max_runs|deadline|stop_requested|task_incomplete"}`
+- `codeharbor_autodev_tasks_blocked_total`
+
 Alerting baseline:
 
 - Example Prometheus alert rules: [`docs/PROMETHEUS_ALERT_RULES_EXAMPLE.yml`](docs/PROMETHEUS_ALERT_RULES_EXAMPLE.yml)
@@ -439,6 +445,7 @@ Alerting baseline:
   - high request failure ratio
   - high queue wait p95
   - recent upgrade failure detection
+  - AutoDev loop stop/block anomaly signals
 
 Rotate tokens quickly (repository script):
 

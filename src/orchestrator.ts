@@ -23,6 +23,8 @@ import { Logger } from "./logger";
 import {
   DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS,
   MutableHistogram,
+  type AutoDevLoopStopReasonMetric,
+  type AutoDevRunOutcomeMetric,
   type RequestOutcomeMetric,
   type RuntimeMetricsSnapshot,
 } from "./metrics";
@@ -471,6 +473,78 @@ class RequestMetrics {
   }
 }
 
+class AutoDevRuntimeMetrics {
+  private succeeded = 0;
+  private failed = 0;
+  private cancelled = 0;
+  private loopNoTask = 0;
+  private loopDrained = 0;
+  private loopMaxRuns = 0;
+  private loopDeadline = 0;
+  private loopStopRequested = 0;
+  private loopTaskIncomplete = 0;
+  private tasksBlocked = 0;
+
+  recordRunOutcome(outcome: AutoDevRunOutcomeMetric): void {
+    if (outcome === "succeeded") {
+      this.succeeded += 1;
+      return;
+    }
+    if (outcome === "failed") {
+      this.failed += 1;
+      return;
+    }
+    this.cancelled += 1;
+  }
+
+  recordLoopStop(reason: AutoDevLoopStopReasonMetric): void {
+    if (reason === "no_task") {
+      this.loopNoTask += 1;
+      return;
+    }
+    if (reason === "drained") {
+      this.loopDrained += 1;
+      return;
+    }
+    if (reason === "max_runs") {
+      this.loopMaxRuns += 1;
+      return;
+    }
+    if (reason === "deadline") {
+      this.loopDeadline += 1;
+      return;
+    }
+    if (reason === "stop_requested") {
+      this.loopStopRequested += 1;
+      return;
+    }
+    this.loopTaskIncomplete += 1;
+  }
+
+  recordTaskBlocked(): void {
+    this.tasksBlocked += 1;
+  }
+
+  runtimeSnapshot(): RuntimeMetricsSnapshot["autodev"] {
+    return {
+      runs: {
+        succeeded: this.succeeded,
+        failed: this.failed,
+        cancelled: this.cancelled,
+      },
+      loopStops: {
+        no_task: this.loopNoTask,
+        drained: this.loopDrained,
+        max_runs: this.loopMaxRuns,
+        deadline: this.loopDeadline,
+        stop_requested: this.loopStopRequested,
+        task_incomplete: this.loopTaskIncomplete,
+      },
+      tasksBlocked: this.tasksBlocked,
+    };
+  }
+}
+
 interface MediaMetricCounters {
   imageAccepted: number;
   imageSkippedMissingPath: number;
@@ -658,6 +732,7 @@ export class Orchestrator {
   private readonly upgradeVersionProbe: UpgradeVersionProbe;
   private readonly upgradeMutex = new Mutex();
   private readonly metrics = new RequestMetrics();
+  private readonly autoDevMetrics = new AutoDevRuntimeMetrics();
   private readonly mediaMetrics = new MediaMetrics();
   private workflowDiagStore: WorkflowDiagStorePayload = createEmptyWorkflowDiagStorePayload();
   private lastLockPruneAt = 0;
@@ -1963,6 +2038,7 @@ export class Orchestrator {
       });
       while (true) {
         if (this.consumePendingStopRequest(sessionKey)) {
+          this.autoDevMetrics.recordLoopStop("stop_requested");
           const endedAtIso = new Date().toISOString();
           this.setAutoDevSnapshot(sessionKey, {
             state: "idle",
@@ -1989,6 +2065,7 @@ export class Orchestrator {
           return;
         }
         if (attemptedRuns >= activeContext.loopMaxRuns) {
+          this.autoDevMetrics.recordLoopStop("max_runs");
           const endedAtIso = new Date().toISOString();
           this.setAutoDevSnapshot(sessionKey, {
             state: "succeeded",
@@ -2017,6 +2094,7 @@ export class Orchestrator {
           return;
         }
         if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
+          this.autoDevMetrics.recordLoopStop("deadline");
           const endedAtIso = new Date().toISOString();
           this.setAutoDevSnapshot(sessionKey, {
             state: "succeeded",
@@ -2048,6 +2126,7 @@ export class Orchestrator {
         const loopContext = await loadAutoDevContext(workdir);
         const loopTask = selectAutoDevTask(loopContext.tasks);
         if (!loopTask) {
+          this.autoDevMetrics.recordLoopStop(completedRuns === 0 ? "no_task" : "drained");
           const endedAtIso = new Date().toISOString();
           this.setAutoDevSnapshot(sessionKey, {
             state: "succeeded",
@@ -2095,6 +2174,7 @@ export class Orchestrator {
           completedRuns += 1;
         }
         if (refreshedTask && refreshedTask.status !== "completed") {
+          this.autoDevMetrics.recordLoopStop("task_incomplete");
           await this.channel.sendNotice(
             message.conversationId,
             `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
@@ -2227,6 +2307,7 @@ export class Orchestrator {
         lastGitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
         lastGitCommitAt: new Date().toISOString(),
       });
+      this.autoDevMetrics.recordRunOutcome("succeeded");
 
       const refreshed = await loadAutoDevContext(workdir);
       const nextTask = selectAutoDevTask(refreshed.tasks);
@@ -2294,11 +2375,13 @@ export class Orchestrator {
         }`,
       );
       if (failurePolicy.blocked) {
+        this.autoDevMetrics.recordTaskBlocked();
         await this.channel.sendNotice(
           message.conversationId,
           `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
         );
       }
+      this.autoDevMetrics.recordRunOutcome(status === "cancelled" ? "cancelled" : "failed");
       if (failurePolicy.blocked && effectiveContext.mode === "loop") {
         return;
       }
@@ -3748,6 +3831,7 @@ ${formatUpgradeDiagRecords(runs)}`,
       activeExecutions: this.runningExecutions.size,
       request: this.metrics.runtimeSnapshot(),
       limiter: this.rateLimiter.snapshot(),
+      autodev: this.autoDevMetrics.runtimeSnapshot(),
     };
   }
 

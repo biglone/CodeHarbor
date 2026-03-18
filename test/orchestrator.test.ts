@@ -1643,6 +1643,10 @@ describe("Orchestrator", () => {
       expect(updated).toContain("| T12.3 | third | ⬜ |");
       expect(channel.notices.some((entry) => entry.text.includes("循环执行已达到上限"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("loopMaxRuns: 2"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.runs.succeeded).toBe(2);
+      expect(runtime.autodev.loopStops.max_runs).toBe(1);
+      expect(runtime.autodev.tasksBlocked).toBe(0);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -1808,6 +1812,9 @@ describe("Orchestrator", () => {
       const updated = await fs.readFile(taskListPath, "utf8");
       expect(updated).toContain("| T14.1 | flaky task | 🚫 |");
       expect(channel.notices.some((entry) => entry.text.includes("连续失败 2 次"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.runs.failed).toBe(2);
+      expect(runtime.autodev.tasksBlocked).toBe(1);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

@@ -14,6 +14,19 @@ export type RequestOutcomeMetric = (typeof REQUEST_OUTCOME_VALUES)[number];
 
 export const FAILURE_OUTCOME_VALUES = ["failed", "timeout", "cancelled", "rate_limited"] as const;
 
+export const AUTODEV_RUN_OUTCOME_VALUES = ["succeeded", "failed", "cancelled"] as const;
+export type AutoDevRunOutcomeMetric = (typeof AUTODEV_RUN_OUTCOME_VALUES)[number];
+
+export const AUTODEV_LOOP_STOP_REASON_VALUES = [
+  "no_task",
+  "drained",
+  "max_runs",
+  "deadline",
+  "stop_requested",
+  "task_incomplete",
+] as const;
+export type AutoDevLoopStopReasonMetric = (typeof AUTODEV_LOOP_STOP_REASON_VALUES)[number];
+
 export const DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS = [
   10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 120_000, 300_000,
 ];
@@ -39,12 +52,19 @@ export interface RuntimeLimiterMetricsSnapshot {
   activeRooms: number;
 }
 
+export interface RuntimeAutoDevMetricsSnapshot {
+  runs: Record<AutoDevRunOutcomeMetric, number>;
+  loopStops: Record<AutoDevLoopStopReasonMetric, number>;
+  tasksBlocked: number;
+}
+
 export interface RuntimeMetricsSnapshot {
   generatedAt: string;
   startedAt: string;
   activeExecutions: number;
   request: RuntimeRequestMetricsSnapshot;
   limiter: RuntimeLimiterMetricsSnapshot;
+  autodev: RuntimeAutoDevMetricsSnapshot;
 }
 
 export class MutableHistogram {
@@ -134,6 +154,7 @@ export function renderPrometheusMetrics(input: RenderPrometheusInput): string {
     lines.push("codeharbor_metrics_snapshot_updated_at_seconds 0");
     lines.push("codeharbor_process_started_at_seconds 0");
     appendEmptyRequestMetrics(lines);
+    appendAutoDevMetrics(lines, createEmptyAutoDevMetrics());
     appendUpgradeMetrics(lines, input.upgradeStats ?? null, input.latestUpgradeRun ?? null);
     lines.push("");
     return lines.join("\n");
@@ -147,6 +168,7 @@ export function renderPrometheusMetrics(input: RenderPrometheusInput): string {
   lines.push(`codeharbor_process_started_at_seconds ${formatMetricValue(startedAtMs / 1_000)}`);
 
   appendRequestMetrics(lines, input.snapshot);
+  appendAutoDevMetrics(lines, input.snapshot.autodev ?? createEmptyAutoDevMetrics());
   appendUpgradeMetrics(lines, input.upgradeStats ?? null, input.latestUpgradeRun ?? null);
   lines.push("");
   return lines.join("\n");
@@ -210,8 +232,27 @@ function appendEmptyRequestMetrics(lines: string[]): void {
       activeUsers: 0,
       activeRooms: 0,
     },
+    autodev: createEmptyAutoDevMetrics(),
   };
   appendRequestMetrics(lines, empty);
+}
+
+function appendAutoDevMetrics(lines: string[], snapshot: RuntimeAutoDevMetricsSnapshot): void {
+  appendMetricMeta(lines, "codeharbor_autodev_runs_total", "counter", "AutoDev run outcomes.");
+  appendMetricMeta(lines, "codeharbor_autodev_loop_stops_total", "counter", "AutoDev loop stop reasons.");
+  appendMetricMeta(lines, "codeharbor_autodev_tasks_blocked_total", "counter", "AutoDev tasks marked as blocked.");
+
+  for (const outcome of AUTODEV_RUN_OUTCOME_VALUES) {
+    lines.push(`codeharbor_autodev_runs_total{outcome="${outcome}"} ${formatMetricValue(snapshot.runs[outcome] ?? 0)}`);
+  }
+
+  for (const reason of AUTODEV_LOOP_STOP_REASON_VALUES) {
+    lines.push(
+      `codeharbor_autodev_loop_stops_total{reason="${reason}"} ${formatMetricValue(snapshot.loopStops[reason] ?? 0)}`,
+    );
+  }
+
+  lines.push(`codeharbor_autodev_tasks_blocked_total ${formatMetricValue(snapshot.tasksBlocked)}`);
 }
 
 function appendUpgradeMetrics(
@@ -363,6 +404,25 @@ function buildEmptyOutcomes(): Record<RequestOutcomeMetric, number> {
   };
 }
 
+function createEmptyAutoDevMetrics(): RuntimeAutoDevMetricsSnapshot {
+  return {
+    runs: {
+      succeeded: 0,
+      failed: 0,
+      cancelled: 0,
+    },
+    loopStops: {
+      no_task: 0,
+      drained: 0,
+      max_runs: 0,
+      deadline: 0,
+      stop_requested: 0,
+      task_incomplete: 0,
+    },
+    tasksBlocked: 0,
+  };
+}
+
 export function parseRuntimeMetricsSnapshot(raw: string): RuntimeMetricsSnapshot | null {
   let parsed: unknown;
   try {
@@ -377,5 +437,42 @@ export function parseRuntimeMetricsSnapshot(raw: string): RuntimeMetricsSnapshot
   if (!candidate.request || !candidate.limiter) {
     return null;
   }
-  return candidate as RuntimeMetricsSnapshot;
+  return {
+    ...(candidate as RuntimeMetricsSnapshot),
+    autodev: parseRuntimeAutoDevMetrics((candidate as { autodev?: unknown }).autodev),
+  };
+}
+
+function parseRuntimeAutoDevMetrics(value: unknown): RuntimeAutoDevMetricsSnapshot {
+  const fallback = createEmptyAutoDevMetrics();
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback;
+  }
+  const candidate = value as Partial<RuntimeAutoDevMetricsSnapshot> & {
+    runs?: Partial<Record<AutoDevRunOutcomeMetric, unknown>>;
+    loopStops?: Partial<Record<AutoDevLoopStopReasonMetric, unknown>>;
+  };
+  return {
+    runs: {
+      succeeded: parseNonNegativeInt(candidate.runs?.succeeded),
+      failed: parseNonNegativeInt(candidate.runs?.failed),
+      cancelled: parseNonNegativeInt(candidate.runs?.cancelled),
+    },
+    loopStops: {
+      no_task: parseNonNegativeInt(candidate.loopStops?.no_task),
+      drained: parseNonNegativeInt(candidate.loopStops?.drained),
+      max_runs: parseNonNegativeInt(candidate.loopStops?.max_runs),
+      deadline: parseNonNegativeInt(candidate.loopStops?.deadline),
+      stop_requested: parseNonNegativeInt(candidate.loopStops?.stop_requested),
+      task_incomplete: parseNonNegativeInt(candidate.loopStops?.task_incomplete),
+    },
+    tasksBlocked: parseNonNegativeInt(candidate.tasksBlocked),
+  };
+}
+
+function parseNonNegativeInt(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return Math.floor(value);
 }
