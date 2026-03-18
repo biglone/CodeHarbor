@@ -172,6 +172,8 @@ Common in-chat control commands:
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
 - `/diag upgrade [count]` show upgrade diagnostics (distributed lock, aggregate stats, recent upgrade records)
+- `/diag autodev [count]` show AutoDev workflow diagnostics (stage trace, status, last error)
+- `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports hardened systemd (`NoNewPrivileges=true`) by using signal-based restart fallback
@@ -392,6 +394,7 @@ Open these UI routes in browser:
 
 Main endpoints:
 
+- `GET /metrics` (Prometheus exposition format)
 - `GET /api/admin/auth/status`
 - `GET /api/admin/config/global`
 - `PUT /api/admin/config/global`
@@ -410,17 +413,32 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 Access control options:
 
-- `ADMIN_TOKEN`: require bearer token for `/api/admin/*`
+- `ADMIN_TOKEN`: require bearer token for `/api/admin/*` and `/metrics`
 - `ADMIN_TOKENS_JSON`: optional multi-token RBAC list (supports `admin` and `viewer` roles)
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
 - `ADMIN_ALLOWED_ORIGINS`: optional CORS origin allowlist for browser-based cross-origin admin access
 
 RBAC behavior:
 
-- `viewer` tokens can call read endpoints (`GET /api/admin/*`)
+- `viewer` tokens can call read endpoints (`GET /api/admin/*` and `GET /metrics`)
 - `admin` tokens can call read + write endpoints (`PUT/POST/DELETE /api/admin/*`)
 - for `ADMIN_TOKENS_JSON`, audit actor is derived from token identity (`actor` field), not `x-admin-actor`
 - Admin UI shows current permission status (role/source) after saving auth
+
+Metrics quick check:
+
+```bash
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  http://127.0.0.1:8787/metrics
+```
+
+Alerting baseline:
+
+- Example Prometheus alert rules: [`docs/PROMETHEUS_ALERT_RULES_EXAMPLE.yml`](docs/PROMETHEUS_ALERT_RULES_EXAMPLE.yml)
+- Includes:
+  - high request failure ratio
+  - high queue wait p95
+  - recent upgrade failure detection
 
 Rotate tokens quickly (repository script):
 
@@ -487,6 +505,8 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
   - `/diag upgrade [count]` show distributed lock + aggregate stats + recent upgrade run diagnostics
+  - `/diag autodev [count]` show AutoDev diagnostics (stage trace + status + error summary)
+  - `/diag queue [count]` show queue diagnostics (counts + pending sessions + failure archive)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
@@ -524,6 +544,9 @@ AI CLI backend controls:
   - executable for selected provider (for example `codex` or `claude`)
 - `CODEX_MODEL=<model>`
   - optional model override for selected provider
+- `CODEX_EXEC_TIMEOUT_MS`
+  - base timeout for one backend execution (default `600000`)
+  - `/agents` and `/autodev` use `max(CODEX_EXEC_TIMEOUT_MS, 1800000)` per role to reduce long-task timeout loops
 
 Cross-backend context bridge behavior:
 
@@ -544,6 +567,7 @@ AutoDev (`/autodev`) conventions:
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
 - `/autodev run` selects `🔄` task first, then `⬜` task.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
+- When using `scripts/autodev-loop-runner.sh`, a new trigger is skipped while any task is already `🔄` in progress.
 
 Default is disabled to keep legacy behavior unchanged.
 

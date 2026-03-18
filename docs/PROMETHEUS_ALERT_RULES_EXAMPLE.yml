@@ -1,0 +1,50 @@
+groups:
+  - name: codeharbor-runtime
+    interval: 30s
+    rules:
+      - alert: CodeHarborDown
+        expr: codeharbor_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CodeHarbor metrics endpoint is down"
+          description: "codeharbor_up is 0 for more than 2 minutes."
+
+      - alert: CodeHarborHighFailureRate
+        expr: |
+          (
+            sum(rate(codeharbor_request_failures_total[10m]))
+            /
+            sum(rate(codeharbor_requests_total[10m]))
+          ) > 0.10
+          and
+          sum(rate(codeharbor_requests_total[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CodeHarbor failure rate is high"
+          description: "Failure ratio is above 10% in the last 10 minutes."
+
+      - alert: CodeHarborQueueP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(codeharbor_request_queue_duration_ms_bucket[10m])) by (le)
+          ) > 5000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CodeHarbor queue wait p95 is high"
+          description: "P95 queue wait exceeds 5s for at least 15 minutes."
+
+      - alert: CodeHarborUpgradeFailedRecently
+        expr: increase(codeharbor_upgrade_runs_total{status="failed"}[30m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CodeHarbor upgrade failed"
+          description: "At least one upgrade run failed in the last 30 minutes."
