@@ -317,6 +317,178 @@ describe("StateStore", () => {
     expect(stats.avgDurationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it("deduplicates task queue entries by session and event", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const sessionKey = "matrix:!room:example.com:@alice:example.com";
+
+    const first = store.enqueueTask({
+      sessionKey,
+      eventId: "$evt-1",
+      requestId: "req-1",
+      payloadJson: '{"message":"first"}',
+    });
+    const second = store.enqueueTask({
+      sessionKey,
+      eventId: "$evt-1",
+      requestId: "req-2",
+      payloadJson: '{"message":"second"}',
+    });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.task.id).toBe(first.task.id);
+    expect(store.listTasks(10)).toHaveLength(1);
+    expect(store.getTaskQueueStatusCounts()).toEqual({
+      pending: 1,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+    });
+  });
+
+  it("recovers running tasks and keeps pending order by session", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const sessionA = "matrix:!room-a:example.com:@alice:example.com";
+    const sessionB = "matrix:!room-b:example.com:@bob:example.com";
+
+    const taskA1 = store.enqueueTask({
+      sessionKey: sessionA,
+      eventId: "$a1",
+      requestId: "req-a1",
+      payloadJson: '{"message":"a1"}',
+    });
+    const taskA2 = store.enqueueTask({
+      sessionKey: sessionA,
+      eventId: "$a2",
+      requestId: "req-a2",
+      payloadJson: '{"message":"a2"}',
+    });
+    const taskB1 = store.enqueueTask({
+      sessionKey: sessionB,
+      eventId: "$b1",
+      requestId: "req-b1",
+      payloadJson: '{"message":"b1"}',
+    });
+
+    expect(store.claimNextTask(sessionA)?.id).toBe(taskA1.task.id);
+    expect(store.claimNextTask(sessionB)?.id).toBe(taskB1.task.id);
+
+    const recovery = store.recoverTasks(10);
+    expect(recovery.requeuedRunning).toBe(2);
+    expect(recovery.pendingTotal).toBe(3);
+    expect(recovery.tasks.map((task) => task.id)).toEqual([taskA1.task.id, taskA2.task.id, taskB1.task.id]);
+    expect(store.listPendingTaskSessions(10)).toEqual([
+      {
+        sessionKey: sessionA,
+        firstTaskId: taskA1.task.id,
+      },
+      {
+        sessionKey: sessionB,
+        firstTaskId: taskB1.task.id,
+      },
+    ]);
+
+    expect(store.claimNextTask(sessionA)?.id).toBe(taskA1.task.id);
+    expect(store.claimNextTask(sessionA)?.id).toBe(taskA2.task.id);
+    expect(store.claimNextTask(sessionA)).toBeNull();
+  });
+
+  it("schedules retry and archives failure records with last error context", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const sessionKey = "matrix:!room-retry:example.com:@alice:example.com";
+
+    const queued = store.enqueueTask({
+      sessionKey,
+      eventId: "$retry-1",
+      requestId: "req-retry-1",
+      payloadJson: '{"message":"retry"}',
+    });
+
+    const runningAttempt1 = store.claimNextTask(sessionKey);
+    expect(runningAttempt1?.attempt).toBe(1);
+
+    const requestedRetryAt = Date.now();
+    store.scheduleRetry(queued.task.id, {
+      nextRetryAt: requestedRetryAt,
+      error: "transient network timeout",
+    });
+
+    const pending = store.getTaskById(queued.task.id);
+    expect(pending?.status).toBe("pending");
+    expect((pending?.nextRetryAt ?? 0) >= requestedRetryAt).toBe(true);
+    expect(pending?.lastError).toBe("transient network timeout");
+
+    const runningAttempt2 = store.claimNextTask(sessionKey);
+    expect(runningAttempt2?.attempt).toBe(2);
+
+    store.failAndArchive(queued.task.id, {
+      error: "permanent auth failure",
+      retryReason: "http_403",
+      archiveReason: "non_retryable_error",
+      retryAfterMs: null,
+    });
+
+    const failed = store.getTaskById(queued.task.id);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toBe("permanent auth failure");
+    expect(failed?.lastError).toBe("permanent auth failure");
+
+    const archive = store.listTaskFailureArchive(5);
+    expect(archive).toHaveLength(1);
+    expect(archive[0]).toEqual(
+      expect.objectContaining({
+        taskId: queued.task.id,
+        attempt: 2,
+        error: "permanent auth failure",
+        lastError: "transient network timeout",
+        retryReason: "http_403",
+        archiveReason: "non_retryable_error",
+        retryAfterMs: null,
+      }),
+    );
+  });
+
+  it("stores and reads runtime metrics snapshots", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const payload = JSON.stringify({
+      generatedAt: "2026-03-18T00:00:00.000Z",
+      startedAt: "2026-03-18T00:00:00.000Z",
+      activeExecutions: 1,
+      request: {
+        total: 10,
+        outcomes: {
+          success: 8,
+          failed: 1,
+          timeout: 1,
+          cancelled: 0,
+          rate_limited: 0,
+          ignored: 0,
+          duplicate: 0,
+        },
+      },
+    });
+
+    expect(store.getRuntimeMetricsSnapshot("orchestrator")).toBeNull();
+
+    store.upsertRuntimeMetricsSnapshot("orchestrator", payload);
+    const first = store.getRuntimeMetricsSnapshot("orchestrator");
+    expect(first).toEqual(
+      expect.objectContaining({
+        key: "orchestrator",
+        payloadJson: payload,
+      }),
+    );
+
+    store.upsertRuntimeMetricsSnapshot("orchestrator", payload.replace('"activeExecutions":1', '"activeExecutions":0'));
+    const second = store.getRuntimeMetricsSnapshot("orchestrator");
+    expect(second?.payloadJson).toContain('"activeExecutions":0');
+    expect(second?.updatedAt ?? 0).toBeGreaterThan(0);
+  });
+
   it("stores and loads local conversation history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

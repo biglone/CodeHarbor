@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { type Channel, type InboundHandler } from "../src/channels/channel";
 import { Orchestrator } from "../src/orchestrator";
 import { InboundAttachment, InboundMessage } from "../src/types";
 
-class FakeChannel {
+class FakeChannel implements Channel {
   sent: Array<{ conversationId: string; text: string }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
+
+  async start(_handler: InboundHandler): Promise<void> {}
 
   async sendMessage(conversationId: string, text: string): Promise<void> {
     this.sent.push({ conversationId, text });
@@ -20,6 +23,8 @@ class FakeChannel {
   }
 
   async setTyping(_conversationId: string, _isTyping: boolean, _timeoutMs: number): Promise<void> {}
+
+  async stop(): Promise<void> {}
 }
 
 interface SessionState {
@@ -191,7 +196,7 @@ describe("CLI compat replay", () => {
     const channel = new FakeChannel();
     const executor = new CaptureExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       cliCompat: {
         enabled: true,
@@ -227,7 +232,7 @@ describe("CLI compat replay", () => {
     const channel = new FakeChannel();
     const executor = new CaptureExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       cliCompat: {
         enabled: true,
@@ -269,7 +274,7 @@ describe("CLI compat replay", () => {
     const channel = new FakeChannel();
     const executor = new CaptureExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       cliCompat: {
         enabled: true,

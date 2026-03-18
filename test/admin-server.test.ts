@@ -223,6 +223,136 @@ describe("AdminServer", () => {
     expect(JSON.stringify(health.body)).toContain('"state":"update_available"');
   });
 
+  it("serves Prometheus metrics on /metrics", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    stateStore.createUpgradeRun({ requestedBy: "ops", targetVersion: "0.1.41" });
+    const succeededRunId = stateStore.createUpgradeRun({ requestedBy: "ops", targetVersion: "0.1.42" });
+    stateStore.finishUpgradeRun(succeededRunId, {
+      status: "succeeded",
+      installedVersion: "0.1.42",
+      error: null,
+    });
+    const failedRunId = stateStore.createUpgradeRun({ requestedBy: "ops", targetVersion: "0.1.43" });
+    stateStore.finishUpgradeRun(failedRunId, {
+      status: "failed",
+      installedVersion: null,
+      error: "network error",
+    });
+    stateStore.upsertRuntimeMetricsSnapshot(
+      "orchestrator",
+      JSON.stringify({
+        generatedAt: "2026-03-18T00:00:10.000Z",
+        startedAt: "2026-03-18T00:00:00.000Z",
+        activeExecutions: 1,
+        request: {
+          total: 3,
+          outcomes: {
+            success: 2,
+            failed: 1,
+            timeout: 0,
+            cancelled: 0,
+            rate_limited: 0,
+            ignored: 0,
+            duplicate: 0,
+          },
+          queueDurationMs: {
+            buckets: [10, 50],
+            counts: [1, 1, 1],
+            count: 3,
+            sum: 61,
+          },
+          executionDurationMs: {
+            buckets: [100, 500],
+            counts: [1, 1, 1],
+            count: 3,
+            sum: 820,
+          },
+          sendDurationMs: {
+            buckets: [10, 100],
+            counts: [2, 0, 1],
+            count: 3,
+            sum: 35,
+          },
+        },
+        limiter: {
+          activeGlobal: 1,
+          activeUsers: 1,
+          activeRooms: 1,
+        },
+      }),
+    );
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const metrics = await fetch(`${baseUrl}/metrics`);
+    const text = await metrics.text();
+    expect(metrics.status).toBe(200);
+    expect(metrics.headers.get("content-type")).toContain("text/plain");
+    expect(text).toContain("codeharbor_up 1");
+    expect(text).toContain('codeharbor_requests_total{outcome="success"} 2');
+    expect(text).toContain('codeharbor_rate_limiter_active{scope="global"} 1');
+    expect(text).toContain("codeharbor_request_execution_duration_ms_bucket");
+    expect(text).toContain('codeharbor_upgrade_runs_total{status="running"} 1');
+    expect(text).toContain('codeharbor_upgrade_runs_total{status="succeeded"} 1');
+    expect(text).toContain('codeharbor_upgrade_runs_total{status="failed"} 1');
+    expect(text).toContain('codeharbor_upgrade_last_run_status{status="failed"} 1');
+  });
+
+  it("requires viewer auth for /metrics when token is configured", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        { token: "viewer-token", role: "viewer", actor: "ops-viewer" },
+        { token: "admin-token", role: "admin", actor: "ops-admin" },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const unauthorized = await fetch(`${baseUrl}/metrics`);
+    expect(unauthorized.status).toBe(401);
+
+    const viewerAuthorized = await fetch(`${baseUrl}/metrics`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerAuthorized.status).toBe(200);
+
+    const adminAuthorized = await fetch(`${baseUrl}/metrics`, {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(adminAuthorized.status).toBe(200);
+  });
+
   it("requires token when ADMIN_TOKEN is configured", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);

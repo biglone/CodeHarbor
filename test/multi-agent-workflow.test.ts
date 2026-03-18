@@ -7,6 +7,7 @@ type ScenarioInput = {
   prompt: string;
   sessionId: string | null;
   workdir: string | null;
+  timeoutMs: number | null;
 };
 
 type ScenarioOutput = {
@@ -26,12 +27,13 @@ class ScenarioExecutor {
     prompt: string,
     sessionId: string | null,
     _onProgress?: (event: unknown) => void,
-    startOptions?: { workdir?: string },
+    startOptions?: { workdir?: string; timeoutMs?: number | null },
   ): ScenarioOutput {
     const input = {
       prompt,
       sessionId,
       workdir: startOptions?.workdir ?? null,
+      timeoutMs: startOptions?.timeoutMs ?? null,
     };
     this.calls.push(input);
     return this.scenario(input);
@@ -194,5 +196,48 @@ describe("MultiAgentWorkflowRunner", () => {
 
     await expect(running).rejects.toBeInstanceOf(CodexExecutionCancelledError);
     expect(cancelCount).toBe(1);
+  });
+
+  it("uses a higher default timeout per workflow role and allows override", async () => {
+    const executor = new ScenarioExecutor((input) => {
+      let reply = "ok";
+      if (input.prompt.includes("[role:planner]")) {
+        reply = "plan";
+      } else if (input.prompt.includes("[role:executor]")) {
+        reply = "output";
+      } else if (input.prompt.includes("[role:reviewer]")) {
+        reply = "VERDICT: APPROVED\nSUMMARY: done";
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "s",
+          reply,
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const defaultRunner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+    });
+    await defaultRunner.run({
+      objective: "default timeout",
+      workdir: "/tmp/workflow-unit",
+    });
+    expect(executor.calls[0]?.timeoutMs).toBe(30 * 60 * 1000);
+
+    executor.calls.length = 0;
+
+    const customRunner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+      executionTimeoutMs: 42_000,
+    });
+    await customRunner.run({
+      objective: "custom timeout",
+      workdir: "/tmp/workflow-unit",
+    });
+    expect(executor.calls[0]?.timeoutMs).toBe(42_000);
   });
 });

@@ -4,14 +4,17 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { type Channel, type InboundHandler } from "../src/channels/channel";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { Orchestrator } from "../src/orchestrator";
 import { InboundMessage } from "../src/types";
 
-class FakeChannel {
+class FakeChannel implements Channel {
   sent: Array<{ conversationId: string; text: string }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
   upserts: Array<{ conversationId: string; text: string; replaceEventId: string | null }> = [];
+
+  async start(_handler: InboundHandler): Promise<void> {}
 
   async sendMessage(conversationId: string, text: string): Promise<void> {
     this.sent.push({ conversationId, text });
@@ -27,6 +30,8 @@ class FakeChannel {
     this.upserts.push({ conversationId, text, replaceEventId });
     return replaceEventId ?? `$progress-${this.upserts.length}`;
   }
+
+  async stop(): Promise<void> {}
 }
 
 interface SessionState {
@@ -380,7 +385,7 @@ describe("Matrix e2e regression", () => {
     const executor = new ScriptedExecutor();
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -397,7 +402,7 @@ describe("Matrix e2e regression", () => {
     const executor = new ScriptedExecutor();
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -433,7 +438,7 @@ describe("Matrix e2e regression", () => {
     });
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: true,
       progressMinIntervalMs: 0,
       commandPrefix: "!code",
@@ -467,7 +472,7 @@ describe("Matrix e2e regression", () => {
       };
     });
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -524,7 +529,7 @@ describe("Matrix e2e regression", () => {
       };
     });
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -570,7 +575,7 @@ describe("Matrix e2e regression", () => {
       };
     });
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -595,7 +600,7 @@ describe("Matrix e2e regression", () => {
     const executor = new ScriptedExecutor();
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -648,7 +653,7 @@ describe("Matrix e2e regression", () => {
       })),
     };
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -702,7 +707,7 @@ describe("Matrix e2e regression", () => {
     const executor = new ScriptedExecutor();
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -731,6 +736,8 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag media [count]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/diag autodev [count]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/diag queue [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("多模态状态:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
@@ -745,7 +752,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -782,7 +789,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -817,7 +824,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -846,7 +853,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -879,7 +886,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -908,7 +915,7 @@ describe("Matrix e2e regression", () => {
       stderr: "",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -942,7 +949,7 @@ describe("Matrix e2e regression", () => {
       );
     });
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -982,7 +989,7 @@ describe("Matrix e2e regression", () => {
       upgradeCommand: "npm install -g codeharbor@latest",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -1012,7 +1019,7 @@ describe("Matrix e2e regression", () => {
       const channel = new FakeChannel();
       const executor = new ScriptedExecutor();
       const store = new InMemoryStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         progressUpdatesEnabled: false,
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
@@ -1061,7 +1068,7 @@ describe("Matrix e2e regression", () => {
       error: "post-check failed: mismatch",
     });
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -1092,7 +1099,7 @@ describe("Matrix e2e regression", () => {
       upgradeCommand: "npm install -g codeharbor@latest",
     }));
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -1126,7 +1133,7 @@ describe("Matrix e2e regression", () => {
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
 
-    const orchestrator = new Orchestrator(channel as never, codexExecutor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
@@ -1173,7 +1180,7 @@ describe("Matrix e2e regression", () => {
         };
       });
       const store = new InMemoryStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         progressUpdatesEnabled: false,
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
@@ -1216,7 +1223,7 @@ describe("Matrix e2e regression", () => {
     }));
     const store = new InMemoryStateStore();
 
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       progressUpdatesEnabled: false,
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",

@@ -4,15 +4,19 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { type Channel, type InboundHandler } from "../src/channels/channel";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
-import { Orchestrator } from "../src/orchestrator";
+import { Orchestrator, buildSessionKey } from "../src/orchestrator";
+import { StateStore } from "../src/store/state-store";
 import { InboundMessage } from "../src/types";
 
-class FakeChannel {
+class FakeChannel implements Channel {
   sent: Array<{ conversationId: string; text: string }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
   typing: Array<{ conversationId: string; isTyping: boolean; timeoutMs: number }> = [];
   upserts: Array<{ conversationId: string; text: string; replaceEventId: string | null }> = [];
+
+  async start(_handler: InboundHandler): Promise<void> {}
 
   async sendMessage(conversationId: string, text: string): Promise<void> {
     this.sent.push({ conversationId, text });
@@ -30,6 +34,8 @@ class FakeChannel {
     this.upserts.push({ conversationId, text, replaceEventId });
     return replaceEventId ?? `$notice-${this.upserts.length}`;
   }
+
+  async stop(): Promise<void> {}
 }
 
 interface FakeSessionState {
@@ -188,6 +194,51 @@ class ImmediateExecutor {
   }
 }
 
+type SequencedExecutionOutcome =
+  | { kind: "success"; reply?: string }
+  | { kind: "error"; error: unknown };
+
+class SequencedExecutor {
+  callCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null; imagePaths: string[] }> = [];
+  private readonly outcomes: SequencedExecutionOutcome[];
+
+  constructor(outcomes: SequencedExecutionOutcome[]) {
+    this.outcomes = outcomes;
+  }
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string; imagePaths?: string[] },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+      imagePaths: startOptions?.imagePaths ? [...startOptions.imagePaths] : [],
+    });
+
+    const outcome = this.outcomes[this.callCount - 1] ?? { kind: "success" };
+    if (outcome.kind === "error") {
+      return {
+        result: Promise.reject(outcome.error),
+        cancel: () => {},
+      };
+    }
+
+    return {
+      result: Promise.resolve({
+        sessionId: sessionId ?? "thread-1",
+        reply: outcome.reply ?? `ok:${text}`,
+      }),
+      cancel: () => {},
+    };
+  }
+}
+
 class CancellableExecutor {
   callCount = 0;
   private rejectCurrent: ((error: unknown) => void) | null = null;
@@ -274,12 +325,49 @@ function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
   };
 }
 
+async function createSqliteStateStore(prefix = "codeharbor-orch-queue-"): Promise<{ dir: string; store: StateStore }> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  return {
+    dir,
+    store: new StateStore(path.join(dir, "state.db"), path.join(dir, "state.json"), 200, 30, 500),
+  };
+}
+
+function enqueueQueuedTask(store: StateStore, message: InboundMessage, prompt = message.text): { sessionKey: string; taskId: number } {
+  const sessionKey = buildSessionKey(message);
+  const result = store.enqueueTask({
+    sessionKey,
+    eventId: message.eventId,
+    requestId: message.requestId,
+    payloadJson: JSON.stringify({
+      message,
+      receivedAt: Date.now() - 500,
+      prompt,
+    }),
+  });
+  return {
+    sessionKey,
+    taskId: result.task.id,
+  };
+}
+
+async function waitForCondition(check: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    if (check()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Timed out waiting for expected condition.");
+}
+
 describe("Orchestrator", () => {
   it("respects room-level trigger policy for prefix-only groups", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       defaultGroupTriggerPolicy: {
@@ -312,7 +400,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       groupDirectModeEnabled: true,
@@ -335,7 +423,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -360,7 +448,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new CancellableExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -390,6 +478,321 @@ describe("Orchestrator", () => {
     expect(channel.sent.some((entry) => entry.text.includes("Failed to process request"))).toBe(false);
   });
 
+  it("recovers queued tasks after restart and drains them in order", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const first = makeInbound({
+        requestId: "req-queue-1",
+        eventId: "$queue-1",
+        isDirectMessage: true,
+        text: "first queued task",
+      });
+      const second = makeInbound({
+        requestId: "req-queue-2",
+        eventId: "$queue-2",
+        isDirectMessage: true,
+        text: "second queued task",
+      });
+      const sessionKey = buildSessionKey(first);
+      const task1 = store.enqueueTask({
+        sessionKey,
+        eventId: first.eventId,
+        requestId: first.requestId,
+        payloadJson: JSON.stringify({
+          message: first,
+          receivedAt: Date.now() - 2_000,
+          prompt: first.text,
+        }),
+      });
+      const task2 = store.enqueueTask({
+        sessionKey,
+        eventId: second.eventId,
+        requestId: second.requestId,
+        payloadJson: JSON.stringify({
+          message: second,
+          receivedAt: Date.now() - 1_000,
+          prompt: second.text,
+        }),
+      });
+      expect(store.claimNextTask(sessionKey)?.id).toBe(task1.task.id);
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => {
+        const counts = store.getTaskQueueStatusCounts();
+        return counts.pending === 0 && counts.running === 0 && counts.succeeded === 2;
+      });
+
+      expect(store.getTaskById(task1.task.id)?.status).toBe("succeeded");
+      expect(store.getTaskById(task2.task.id)?.status).toBe("succeeded");
+      expect(executor.calls.map((call) => call.text)).toEqual([first.text, second.text]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails malformed queued payload and continues with later tasks", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const bad = makeInbound({
+        requestId: "req-queue-bad",
+        eventId: "$queue-bad",
+        isDirectMessage: true,
+        text: "broken payload",
+      });
+      const good = makeInbound({
+        requestId: "req-queue-good",
+        eventId: "$queue-good",
+        isDirectMessage: true,
+        text: "valid payload",
+      });
+      const sessionKey = buildSessionKey(bad);
+      const badTask = store.enqueueTask({
+        sessionKey,
+        eventId: bad.eventId,
+        requestId: bad.requestId,
+        payloadJson: '{"message":',
+      });
+      const goodTask = store.enqueueTask({
+        sessionKey,
+        eventId: good.eventId,
+        requestId: good.requestId,
+        payloadJson: JSON.stringify({
+          message: good,
+          receivedAt: Date.now() - 500,
+          prompt: good.text,
+        }),
+      });
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => {
+        const counts = store.getTaskQueueStatusCounts();
+        return counts.pending === 0 && counts.running === 0;
+      });
+
+      expect(store.getTaskById(badTask.task.id)?.status).toBe("failed");
+      expect(store.getTaskById(goodTask.task.id)?.status).toBe("succeeded");
+      expect(store.getTaskById(badTask.task.id)?.error).toContain("Invalid queued payload");
+      expect(store.listTaskFailureArchive(5)[0]).toEqual(
+        expect.objectContaining({
+          taskId: badTask.task.id,
+          retryReason: "invalid_payload",
+          archiveReason: "invalid_payload",
+        }),
+      );
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).toBe(good.text);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries transient queue failures and eventually succeeds", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const transientError = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+      const executor = new SequencedExecutor([
+        { kind: "error", error: transientError },
+        { kind: "success", reply: "retry-ok" },
+      ]);
+      const message = makeInbound({
+        requestId: "req-queue-transient",
+        eventId: "$queue-transient",
+        isDirectMessage: true,
+        text: "retry me",
+      });
+      const queued = enqueueQueuedTask(store, message);
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        taskQueueRetryPolicy: {
+          maxAttempts: 3,
+          initialDelayMs: 1,
+          maxDelayMs: 5,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+      });
+
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded");
+
+      expect(executor.callCount).toBe(2);
+      expect(store.getTaskById(queued.taskId)?.attempt).toBe(2);
+      expect(store.listTaskFailureArchive(5)).toHaveLength(0);
+      expect(store.hasProcessedEvent(queued.sessionKey, message.eventId)).toBe(true);
+      expect(channel.sent.some((entry) => entry.text.includes("归档"))).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("archives queue task after max retry attempts", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const retryableError = Object.assign(new Error("gateway timeout"), { status: 504 });
+      const executor = new SequencedExecutor([
+        { kind: "error", error: retryableError },
+        { kind: "error", error: retryableError },
+      ]);
+      const message = makeInbound({
+        requestId: "req-queue-max-attempts",
+        eventId: "$queue-max-attempts",
+        isDirectMessage: true,
+        text: "always fail",
+      });
+      const queued = enqueueQueuedTask(store, message);
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        taskQueueRetryPolicy: {
+          maxAttempts: 2,
+          initialDelayMs: 1,
+          maxDelayMs: 5,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+      });
+
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed");
+
+      expect(executor.callCount).toBe(2);
+      expect(store.getTaskById(queued.taskId)?.attempt).toBe(2);
+      expect(store.hasProcessedEvent(queued.sessionKey, message.eventId)).toBe(true);
+      const archive = store.listTaskFailureArchive(5);
+      expect(archive).toHaveLength(1);
+      expect(archive[0]).toEqual(
+        expect.objectContaining({
+          taskId: queued.taskId,
+          retryReason: "http_504",
+          archiveReason: "max_attempts_reached",
+          retryAfterMs: null,
+        }),
+      );
+      expect(channel.sent.some((entry) => entry.text.includes("达到最大重试次数(2)"))).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("archives non-retryable queue task errors without retry", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const executor = new SequencedExecutor([
+        { kind: "error", error: new Error("permission denied") },
+        { kind: "success", reply: "should-not-run" },
+      ]);
+      const message = makeInbound({
+        requestId: "req-queue-no-retry",
+        eventId: "$queue-no-retry",
+        isDirectMessage: true,
+        text: "archive directly",
+      });
+      const queued = enqueueQueuedTask(store, message);
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        taskQueueRetryPolicy: {
+          maxAttempts: 4,
+          initialDelayMs: 1,
+          maxDelayMs: 5,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+      });
+
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed");
+
+      expect(executor.callCount).toBe(1);
+      expect(store.getTaskById(queued.taskId)?.attempt).toBe(1);
+      const archive = store.listTaskFailureArchive(5);
+      expect(archive).toHaveLength(1);
+      expect(archive[0]).toEqual(
+        expect.objectContaining({
+          taskId: queued.taskId,
+          retryReason: "non_retryable_error",
+          archiveReason: "non_retryable_error",
+          retryAfterMs: null,
+        }),
+      );
+      expect(channel.sent.some((entry) => entry.text.includes("不可重试错误(non_retryable_error)"))).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("respects Retry-After before retrying queue tasks", async () => {
+    const { dir, store } = await createSqliteStateStore();
+    try {
+      const channel = new FakeChannel();
+      const retryAfterMs = 600;
+      const retryableError = Object.assign(new Error("HTTP 429 Too Many Requests"), {
+        status: 429,
+        retryAfterMs,
+      });
+      const executor = new SequencedExecutor([
+        { kind: "error", error: retryableError },
+        { kind: "success", reply: "retry-after-ok" },
+      ]);
+      const message = makeInbound({
+        requestId: "req-queue-retry-after",
+        eventId: "$queue-retry-after",
+        isDirectMessage: true,
+        text: "respect retry after",
+      });
+      const queued = enqueueQueuedTask(store, message);
+
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        taskQueueRetryPolicy: {
+          maxAttempts: 3,
+          initialDelayMs: 1,
+          maxDelayMs: 10,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+      });
+
+      const startedAt = Date.now();
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(executor.callCount).toBe(1);
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 3_000);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(450);
+      expect(executor.callCount).toBe(2);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses room-configured workdir for execution", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
@@ -407,7 +810,7 @@ describe("Orchestrator", () => {
         workdir: "/tmp/project-b",
       }),
     };
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -444,7 +847,7 @@ describe("Orchestrator", () => {
         workdir: "/tmp/disabled-room",
       }),
     };
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -476,7 +879,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new ImmediateExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -532,7 +935,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new ImmediateExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -582,7 +985,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new ImmediateExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -654,7 +1057,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new ImmediateExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -752,7 +1155,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -785,7 +1188,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -833,7 +1236,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -856,7 +1259,7 @@ describe("Orchestrator", () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,
@@ -894,7 +1297,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new WorkflowExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -940,7 +1343,7 @@ describe("Orchestrator", () => {
       const channel = new FakeChannel();
       const executor = new WorkflowExecutor();
       const store = new FakeStateStore();
-      const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
         commandPrefix: "!code",
         matrixUserId: "@bot:example.com",
         progressUpdatesEnabled: false,
@@ -966,11 +1369,111 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("shows /diag autodev run records with stage trace", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-diag-autodev-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T2.1 | diag task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-diag-run",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/diag autodev 3",
+          eventId: "$autodev-diag-view",
+        }),
+      );
+
+      const notice = channel.notices.find((entry) => entry.text.includes("诊断信息（autodev）"));
+      expect(notice).toBeDefined();
+      expect(notice?.text).toContain("recentCount:");
+      expect(notice?.text).toContain("task=T2.1");
+      expect(notice?.text).toContain("events=");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("shows /diag queue with counts and pending session details", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-diag-queue-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+      const queued = makeInbound({
+        requestId: "req-diag-queue",
+        eventId: "$diag-queue-pending",
+        isDirectMessage: true,
+        text: "queued task",
+      });
+      const sessionKey = buildSessionKey(queued);
+      store.enqueueTask({
+        sessionKey,
+        eventId: queued.eventId,
+        requestId: queued.requestId,
+        payloadJson: JSON.stringify({
+          message: queued,
+          receivedAt: Date.now() - 2_000,
+          prompt: queued.text,
+        }),
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/diag queue 5",
+          eventId: "$diag-queue-view",
+        }),
+      );
+
+      const notice = channel.notices.find((entry) => entry.text.includes("诊断信息（queue）"));
+      expect(notice).toBeDefined();
+      expect(notice?.text).toContain("counts: pending=1");
+      expect(notice?.text).toContain("pendingSessions: 1");
+      expect(notice?.text).toContain(`session=${sessionKey}`);
+      expect(notice?.text).toContain("archive:");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs multi-agent workflow when enabled", async () => {
     const channel = new FakeChannel();
     const executor = new WorkflowExecutor();
     const store = new FakeStateStore();
-    const orchestrator = new Orchestrator(channel as never, executor as never, store as never, logger as never, {
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
       commandPrefix: "!code",
       matrixUserId: "@bot:example.com",
       progressUpdatesEnabled: false,

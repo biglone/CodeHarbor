@@ -127,6 +127,37 @@ describe("CodexExecutor", () => {
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
+  it("supports per-request timeout override", async () => {
+    vi.useFakeTimers();
+    const child = createFakeChildProcess();
+    child.kill = vi.fn((signal?: NodeJS.Signals) => {
+      if (signal === "SIGTERM") {
+        child.emit("close", 143);
+      }
+      return true;
+    }) as unknown as (signal?: NodeJS.Signals) => boolean;
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      bin: "codex",
+      model: null,
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 100,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("long task", null, undefined, { timeoutMs: 250 });
+    const assertion = expect(resultPromise).rejects.toThrow("codex execution timed out after 250ms");
+    await vi.advanceTimersByTimeAsync(250);
+
+    await assertion;
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("supports explicit cancellation through execution handle", async () => {
     const child = createFakeChildProcess();
     child.kill = vi.fn((signal?: NodeJS.Signals) => {
