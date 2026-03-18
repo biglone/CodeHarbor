@@ -565,7 +565,8 @@ AutoDev (`/autodev`) conventions:
 
 - Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
-- `/autodev run` selects `🔄` task first, then `⬜` task.
+- `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
+- `/autodev run <taskId>` runs only the specified task.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with `chore(autodev): complete <taskId>`.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
