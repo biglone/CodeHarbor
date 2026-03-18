@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -308,6 +310,8 @@ const logger = {
   warn: vi.fn(),
   error: vi.fn(),
 };
+
+const execFileAsync = promisify(execFile);
 
 function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
@@ -1456,6 +1460,62 @@ describe("Orchestrator", () => {
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 启动任务 T9.1"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 任务结果"))).toBe(true);
       expect(executor.calls.some((call) => call.text.includes("[role:planner]"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Requirements\n- implement T10.1\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |",
+        "|--------|----------|----------|--------|------|------|",
+        "| T10.1 | 自动提交验证 | 1h | P0 | - | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init autodev test"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-commit",
+        }),
+      );
+
+      const latest = await execFileAsync("git", ["log", "--oneline", "-n", "1"], { cwd: tempRoot });
+      expect(latest.stdout).toContain("chore(autodev): complete T10.1");
+      const status = await execFileAsync("git", ["status", "--porcelain"], { cwd: tempRoot });
+      expect(status.stdout.trim()).toBe("");
+      expect(channel.notices.some((entry) => entry.text.includes("git commit: committed"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

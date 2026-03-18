@@ -62,6 +62,7 @@ import {
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
 import {
+  type AutoDevTask,
   buildAutoDevObjective,
   formatTaskForDisplay,
   loadAutoDevContext,
@@ -165,6 +166,16 @@ interface AutoDevRunSnapshot {
   repairRounds: number;
   error: string | null;
 }
+
+interface AutoDevGitBaseline {
+  available: boolean;
+  cleanBeforeRun: boolean;
+}
+
+type AutoDevGitCommitResult =
+  | { kind: "committed"; commitHash: string; commitSubject: string }
+  | { kind: "skipped"; reason: string }
+  | { kind: "failed"; error: string };
 
 export interface ApiTaskSubmitInput {
   conversationId: string;
@@ -1804,6 +1815,7 @@ export class Orchestrator {
   ): Promise<void> {
     const requestedTaskId = taskId?.trim() || null;
     const context = await loadAutoDevContext(workdir);
+    const gitBaseline = await this.captureAutoDevGitBaseline(workdir);
     if (!context.requirementsContent) {
       await this.channel.sendNotice(
         message.conversationId,
@@ -1899,8 +1911,13 @@ export class Orchestrator {
       }
 
       let finalTask = activeTask;
+      let gitCommit: AutoDevGitCommitResult = {
+        kind: "skipped",
+        reason: "reviewer 未批准，未自动提交",
+      };
       if (result.approved) {
         finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
+        gitCommit = await this.tryAutoDevGitCommit(workdir, finalTask, gitBaseline);
       }
       const endedAtIso = new Date().toISOString();
       this.setAutoDevSnapshot(sessionKey, {
@@ -1922,6 +1939,7 @@ export class Orchestrator {
 - task: ${finalTask.id}
 - reviewer approved: ${result.approved ? "yes" : "no"}
 - task status: ${statusToSymbol(finalTask.status)}
+- git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
       );
       this.appendWorkflowDiagEvent(
@@ -1929,7 +1947,7 @@ export class Orchestrator {
         "autodev",
         "autodev",
         0,
-        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}`,
+        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}`,
       );
     } catch (error) {
       if (promotedToInProgress) {
@@ -1964,6 +1982,118 @@ export class Orchestrator {
       );
       throw error;
     }
+  }
+
+  private async captureAutoDevGitBaseline(workdir: string): Promise<AutoDevGitBaseline> {
+    const insideRepo = await this.isGitRepository(workdir);
+    if (!insideRepo) {
+      return {
+        available: false,
+        cleanBeforeRun: false,
+      };
+    }
+    try {
+      const status = await this.runGitCommand(workdir, ["status", "--porcelain"]);
+      return {
+        available: true,
+        cleanBeforeRun: status.trim().length === 0,
+      };
+    } catch (error) {
+      this.logger.warn("Failed to capture AutoDev git baseline", {
+        workdir,
+        error: formatError(error),
+      });
+      return {
+        available: false,
+        cleanBeforeRun: false,
+      };
+    }
+  }
+
+  private async tryAutoDevGitCommit(
+    workdir: string,
+    task: AutoDevTask,
+    baseline: AutoDevGitBaseline,
+  ): Promise<AutoDevGitCommitResult> {
+    if (!baseline.available) {
+      return {
+        kind: "skipped",
+        reason: "未检测到 git 仓库",
+      };
+    }
+    if (!baseline.cleanBeforeRun) {
+      return {
+        kind: "skipped",
+        reason: "运行前存在未提交改动，已跳过自动提交",
+      };
+    }
+
+    try {
+      const preAddStatus = await this.runGitCommand(workdir, ["status", "--porcelain"]);
+      if (!preAddStatus.trim()) {
+        return {
+          kind: "skipped",
+          reason: "无文件改动可提交",
+        };
+      }
+
+      await this.runGitCommand(workdir, ["add", "-A"]);
+      const subject = `chore(autodev): complete ${task.id}`;
+      const detail = summarizeSingleLine(task.description, 120);
+      await this.runGitCommand(workdir, [
+        "-c",
+        "user.name=CodeHarbor AutoDev",
+        "-c",
+        "user.email=autodev@codeharbor.local",
+        "commit",
+        "-m",
+        subject,
+        "-m",
+        `Task: ${task.id} ${detail}\nGenerated-by: CodeHarbor AutoDev`,
+      ]);
+      const hash = (await this.runGitCommand(workdir, ["rev-parse", "--short", "HEAD"])).trim();
+      return {
+        kind: "committed",
+        commitHash: hash || "unknown",
+        commitSubject: subject,
+      };
+    } catch (error) {
+      const message = formatError(error);
+      if (/nothing to commit|no changes added to commit/i.test(message)) {
+        return {
+          kind: "skipped",
+          reason: "无文件改动可提交",
+        };
+      }
+      this.logger.warn("AutoDev git auto-commit failed", {
+        workdir,
+        taskId: task.id,
+        error: message,
+      });
+      return {
+        kind: "failed",
+        error: message,
+      };
+    }
+  }
+
+  private async isGitRepository(workdir: string): Promise<boolean> {
+    try {
+      const output = await this.runGitCommand(workdir, ["rev-parse", "--is-inside-work-tree"]);
+      return output.trim() === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  private async runGitCommand(workdir: string, args: string[]): Promise<string> {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd: workdir,
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+    return String(stdout ?? "");
   }
 
   private async handleWorkflowRunCommand(
@@ -4567,6 +4697,16 @@ function formatAutoDevDiagRuns(
       ].join("\n");
     })
     .join("\n");
+}
+
+function formatAutoDevGitCommitResult(result: AutoDevGitCommitResult): string {
+  if (result.kind === "committed") {
+    return `committed ${result.commitHash} (${result.commitSubject})`;
+  }
+  if (result.kind === "skipped") {
+    return `skipped (${result.reason})`;
+  }
+  return `failed (${result.error})`;
 }
 
 function formatQueuePendingSessions(sessions: TaskQueuePendingSessionRecord[]): string {
