@@ -228,6 +228,15 @@ export interface ApiTaskSubmitResult {
   requestId: string;
 }
 
+export type ApiTaskStage = "queued" | "retrying" | "executing" | "completed" | "failed";
+
+export interface ApiTaskQueryResult {
+  taskId: number;
+  status: TaskQueueRecord["status"];
+  stage: ApiTaskStage;
+  errorSummary: string | null;
+}
+
 export class ApiTaskIdempotencyConflictError extends Error {
   readonly sessionKey: string;
   readonly eventId: string;
@@ -862,6 +871,24 @@ export class Orchestrator {
       sessionKey,
       eventId: result.task.eventId,
       requestId: result.task.requestId,
+    };
+  }
+
+  getApiTaskById(taskId: number): ApiTaskQueryResult | null {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      throw new Error("Task queue is unavailable.");
+    }
+
+    const task = queueStore.getTaskById(taskId);
+    if (!task) {
+      return null;
+    }
+    return {
+      taskId: task.id,
+      status: task.status,
+      stage: mapApiTaskStage(task),
+      errorSummary: buildApiTaskErrorSummary(task),
     };
   }
 
@@ -4048,6 +4075,32 @@ function summarizeSingleLine(text: string, maxLen: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLen)}...`;
+}
+
+function mapApiTaskStage(task: TaskQueueRecord): ApiTaskStage {
+  if (task.status === "pending") {
+    return task.nextRetryAt === null ? "queued" : "retrying";
+  }
+  if (task.status === "running") {
+    return "executing";
+  }
+  if (task.status === "succeeded") {
+    return "completed";
+  }
+  return "failed";
+}
+
+function buildApiTaskErrorSummary(task: TaskQueueRecord): string | null {
+  const source =
+    task.status === "failed"
+      ? task.error ?? task.lastError
+      : task.status === "pending" && task.nextRetryAt !== null
+        ? task.lastError
+        : null;
+  if (!source) {
+    return null;
+  }
+  return summarizeSingleLine(source, 240);
 }
 
 function parseQueuedInboundPayload(payloadJson: string): QueuedInboundPayload {

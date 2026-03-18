@@ -4,13 +4,21 @@ import { ApiServer, type TaskSubmissionService } from "../src/api-server";
 import { Logger } from "../src/logger";
 import {
   ApiTaskIdempotencyConflictError,
+  type ApiTaskQueryResult,
   type ApiTaskSubmitInput,
   type ApiTaskSubmitResult,
 } from "../src/orchestrator";
 
 class FakeTaskSubmissionService implements TaskSubmissionService {
   calls: ApiTaskSubmitInput[] = [];
+  queryCalls: number[] = [];
   nextResult: ApiTaskSubmitResult = buildSubmitResult({ created: true, taskId: 1 });
+  nextQueryResult: ApiTaskQueryResult | null = buildQueryResult({
+    taskId: 1,
+    status: "pending",
+    stage: "queued",
+    errorSummary: null,
+  });
   nextError: unknown = null;
 
   submitApiTask(input: ApiTaskSubmitInput): ApiTaskSubmitResult {
@@ -19,6 +27,14 @@ class FakeTaskSubmissionService implements TaskSubmissionService {
       throw this.nextError;
     }
     return this.nextResult;
+  }
+
+  getApiTaskById(taskId: number): ApiTaskQueryResult | null {
+    this.queryCalls.push(taskId);
+    if (this.nextError) {
+      throw this.nextError;
+    }
+    return this.nextQueryResult;
   }
 }
 
@@ -43,6 +59,20 @@ function buildSubmitResult(input: { created: boolean; taskId: number }): ApiTask
       error: null,
       lastError: null,
     },
+  };
+}
+
+function buildQueryResult(input: {
+  taskId: number;
+  status: ApiTaskQueryResult["status"];
+  stage: ApiTaskQueryResult["stage"];
+  errorSummary: string | null;
+}): ApiTaskQueryResult {
+  return {
+    taskId: input.taskId,
+    status: input.status,
+    stage: input.stage,
+    errorSummary: input.errorSummary,
   };
 }
 
@@ -213,5 +243,102 @@ describe("ApiServer", () => {
     const responseText = JSON.stringify(response.body);
     expect(response.status).toBe(409);
     expect(responseText).toContain('"code":"IDEMPOTENCY_CONFLICT"');
+  });
+
+  it("returns task status snapshot for GET /api/tasks/:taskId", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextQueryResult = buildQueryResult({
+      taskId: 42,
+      status: "running",
+      stage: "executing",
+      errorSummary: null,
+    });
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks/42`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      ok: true,
+      data: {
+        taskId: 42,
+        status: "running",
+        stage: "executing",
+        errorSummary: null,
+      },
+    });
+    expect(service.queryCalls).toEqual([42]);
+  });
+
+  it("rejects task query without bearer token", async () => {
+    const service = new FakeTaskSubmissionService();
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks/7`, {
+      method: "GET",
+    });
+
+    expect(response.status).toBe(401);
+    expect(service.queryCalls).toHaveLength(0);
+  });
+
+  it("rejects task query when taskId is invalid", async () => {
+    const service = new FakeTaskSubmissionService();
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks/not-a-number`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(service.queryCalls).toHaveLength(0);
+  });
+
+  it("returns 404 when queried task does not exist", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextQueryResult = null;
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks/404`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect(service.queryCalls).toEqual([404]);
+  });
+
+  it("returns failed task error summary in query response", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextQueryResult = buildQueryResult({
+      taskId: 55,
+      status: "failed",
+      stage: "failed",
+      errorSummary: "HTTP 429 Too Many Requests",
+    });
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks/55`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+
+    const responseText = JSON.stringify(response.body);
+    expect(response.status).toBe(200);
+    expect(responseText).toContain('"status":"failed"');
+    expect(responseText).toContain('"stage":"failed"');
+    expect(responseText).toContain('"errorSummary":"HTTP 429 Too Many Requests"');
   });
 });

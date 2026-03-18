@@ -944,6 +944,76 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("exposes API task query snapshot with status, stage, and error summary", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-query-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      const queued = enqueueQueuedTask(
+        store,
+        makeInbound({
+          requestId: "req-api-query-1",
+          eventId: "$api-query-1",
+          conversationId: "!api-room:example.com",
+          senderId: "@ci:example.com",
+          isDirectMessage: true,
+          text: "run integration",
+        }),
+      );
+
+      expect(orchestrator.getApiTaskById(queued.taskId)).toEqual({
+        taskId: queued.taskId,
+        status: "pending",
+        stage: "queued",
+        errorSummary: null,
+      });
+
+      store.scheduleRetry(queued.taskId, {
+        nextRetryAt: Date.now() + 30_000,
+        error: "HTTP 429 Too Many Requests",
+      });
+      expect(orchestrator.getApiTaskById(queued.taskId)).toEqual({
+        taskId: queued.taskId,
+        status: "pending",
+        stage: "retrying",
+        errorSummary: "HTTP 429 Too Many Requests",
+      });
+
+      store.failTask(queued.taskId, "executor crashed unexpectedly");
+      expect(orchestrator.getApiTaskById(queued.taskId)).toEqual({
+        taskId: queued.taskId,
+        status: "failed",
+        stage: "failed",
+        errorSummary: "executor crashed unexpectedly",
+      });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when querying unknown API task id", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-query-miss-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      expect(orchestrator.getApiTaskById(999999)).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("uses room-configured workdir for execution", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();

@@ -1,7 +1,12 @@
 import http from "node:http";
 
 import { Logger } from "./logger";
-import { ApiTaskIdempotencyConflictError, type ApiTaskSubmitInput, type ApiTaskSubmitResult } from "./orchestrator";
+import {
+  ApiTaskIdempotencyConflictError,
+  type ApiTaskQueryResult,
+  type ApiTaskSubmitInput,
+  type ApiTaskSubmitResult,
+} from "./orchestrator";
 
 const API_MAX_JSON_BODY_BYTES = 1_048_576;
 const IDEMPOTENCY_KEY_MAX_CHARS = 256;
@@ -19,6 +24,7 @@ interface AddressInfo {
 
 export interface TaskSubmissionService {
   submitApiTask(input: ApiTaskSubmitInput): ApiTaskSubmitResult;
+  getApiTaskById(taskId: number): ApiTaskQueryResult | null;
 }
 
 class HttpError extends Error {
@@ -104,11 +110,13 @@ export class ApiServer {
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const taskDetailMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
+      const isTaskSubmitRoute = url.pathname === "/api/tasks";
       this.setSecurityHeaders(res);
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key");
-      res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 
-      if (url.pathname !== "/api/tasks") {
+      if (!isTaskSubmitRoute && !taskDetailMatch) {
         this.sendJson(res, 404, {
           ok: false,
           error: `Not found: ${req.method ?? "GET"} ${url.pathname}`,
@@ -130,8 +138,32 @@ export class ApiServer {
         return;
       }
 
-      if (req.method !== "POST") {
-        res.setHeader("Allow", "POST, OPTIONS");
+      if (isTaskSubmitRoute) {
+        if (req.method !== "POST") {
+          res.setHeader("Allow", "POST, OPTIONS");
+          this.sendJson(res, 405, {
+            ok: false,
+            error: `Method not allowed: ${req.method ?? "GET"}.`,
+          });
+          return;
+        }
+
+        const idempotencyKey = readIdempotencyKey(req);
+        const body = await readJsonBody(req, API_MAX_JSON_BODY_BYTES);
+        const payload = parseTaskSubmitBody(body);
+        const result = this.taskService.submitApiTask({
+          ...payload,
+          idempotencyKey,
+        });
+        this.sendJson(res, result.created ? 202 : 200, {
+          ok: true,
+          data: formatTaskSubmitResponse(result),
+        });
+        return;
+      }
+
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
         this.sendJson(res, 405, {
           ok: false,
           error: `Method not allowed: ${req.method ?? "GET"}.`,
@@ -139,16 +171,18 @@ export class ApiServer {
         return;
       }
 
-      const idempotencyKey = readIdempotencyKey(req);
-      const body = await readJsonBody(req, API_MAX_JSON_BODY_BYTES);
-      const payload = parseTaskSubmitBody(body);
-      const result = this.taskService.submitApiTask({
-        ...payload,
-        idempotencyKey,
-      });
-      this.sendJson(res, result.created ? 202 : 200, {
+      const taskId = parseTaskId(taskDetailMatch?.[1]);
+      const result = this.taskService.getApiTaskById(taskId);
+      if (!result) {
+        this.sendJson(res, 404, {
+          ok: false,
+          error: `Task not found: ${taskId}.`,
+        });
+        return;
+      }
+      this.sendJson(res, 200, {
         ok: true,
-        data: formatTaskSubmitResponse(result),
+        data: formatTaskQueryResponse(result),
       });
     } catch (error) {
       if (error instanceof HttpError) {
@@ -216,6 +250,20 @@ function formatTaskSubmitResponse(result: ApiTaskSubmitResult): {
   };
 }
 
+function formatTaskQueryResponse(result: ApiTaskQueryResult): {
+  taskId: number;
+  status: ApiTaskQueryResult["status"];
+  stage: ApiTaskQueryResult["stage"];
+  errorSummary: string | null;
+} {
+  return {
+    taskId: result.taskId,
+    status: result.status,
+    stage: result.stage,
+    errorSummary: result.errorSummary,
+  };
+}
+
 function readIdempotencyKey(req: http.IncomingMessage): string {
   const raw = req.headers["idempotency-key"];
   const value = normalizeHeaderValue(raw);
@@ -226,6 +274,29 @@ function readIdempotencyKey(req: http.IncomingMessage): string {
     throw new HttpError(400, `Idempotency-Key is too long. Max allowed chars: ${IDEMPOTENCY_KEY_MAX_CHARS}.`);
   }
   return value;
+}
+
+function parseTaskId(value: string | undefined): number {
+  if (!value) {
+    throw new HttpError(400, "taskId is required.");
+  }
+  const decoded = decodePathParam(value, "taskId");
+  if (!/^\d+$/.test(decoded)) {
+    throw new HttpError(400, "taskId must be a positive integer.");
+  }
+  const taskId = Number.parseInt(decoded, 10);
+  if (!Number.isSafeInteger(taskId) || taskId <= 0) {
+    throw new HttpError(400, "taskId must be a positive integer.");
+  }
+  return taskId;
+}
+
+function decodePathParam(value: string, fieldName: string): string {
+  try {
+    return decodeURIComponent(value).trim();
+  } catch {
+    throw new HttpError(400, `Invalid URI encoding for ${fieldName}.`);
+  }
 }
 
 function readBearerToken(req: http.IncomingMessage): string | null {
