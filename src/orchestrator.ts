@@ -358,6 +358,7 @@ const DEFAULT_AUTODEV_LOOP_MAX_RUNS = 20;
 const DEFAULT_AUTODEV_LOOP_MAX_MINUTES = 120;
 const DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES = 3;
 const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
+const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
 const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   maxAttempts: 4,
   initialDelayMs: 1_000,
@@ -2441,6 +2442,15 @@ export class Orchestrator {
     }
 
     try {
+      const removedArtifacts = await this.cleanupAutoDevGitArtifacts(workdir);
+      if (removedArtifacts.length > 0) {
+        this.logger.warn("Removed AutoDev shell artifact files before git commit", {
+          workdir,
+          taskId: task.id,
+          files: removedArtifacts,
+        });
+      }
+
       const preAddStatus = await this.runGitCommand(workdir, ["status", "--porcelain"]);
       if (!preAddStatus.trim()) {
         return {
@@ -2555,6 +2565,48 @@ export class Orchestrator {
 
   private async listGitCommitChangedFiles(workdir: string): Promise<string[]> {
     const raw = await this.runGitCommand(workdir, ["show", "--name-only", "--pretty=format:", "--no-renames", "HEAD"]);
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  private async cleanupAutoDevGitArtifacts(workdir: string): Promise<string[]> {
+    const untracked = await this.listUntrackedGitFiles(workdir);
+    const targets = untracked.filter((relativePath) => {
+      const basename = path.basename(relativePath);
+      return AUTODEV_GIT_ARTIFACT_BASENAME_REGEX.test(basename);
+    });
+    if (targets.length === 0) {
+      return [];
+    }
+
+    const removed: string[] = [];
+    for (const relativePath of targets) {
+      const absolutePath = path.join(workdir, relativePath);
+      try {
+        const stat = await fs.stat(absolutePath);
+        if (!stat.isFile() || stat.size !== 0) {
+          continue;
+        }
+        await fs.unlink(absolutePath);
+        removed.push(relativePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        this.logger.debug("Failed to remove AutoDev shell artifact file", {
+          workdir,
+          file: relativePath,
+          error: formatError(error),
+        });
+      }
+    }
+    return removed;
+  }
+
+  private async listUntrackedGitFiles(workdir: string): Promise<string[]> {
+    const raw = await this.runGitCommand(workdir, ["ls-files", "--others", "--exclude-standard"]);
     return raw
       .split(/\r?\n/)
       .map((line) => line.trim())

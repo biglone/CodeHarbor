@@ -12,3 +12,8 @@ playwright-report/
 test-results/
 coverage/
 codeharbor-*.tgz
+autodev#*
+workflow#*
+planner#*
+executor#*
+reviewer#*

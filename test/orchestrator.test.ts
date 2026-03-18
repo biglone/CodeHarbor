@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -301,6 +302,28 @@ class WorkflowExecutor {
       }),
       cancel: () => {},
     };
+  }
+}
+
+class ArtifactWorkflowExecutor extends WorkflowExecutor {
+  private createdArtifacts = false;
+
+  override startExecution(
+    text: string,
+    sessionId: string | null,
+    onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    if (!this.createdArtifacts && text.includes("[role:executor]")) {
+      const workdir = startOptions?.workdir;
+      if (workdir) {
+        for (const file of ["autodev#0", "workflow#0", "planner#0", "executor#0", "reviewer#0"]) {
+          writeFileSync(path.join(workdir, file), "", "utf8");
+        }
+        this.createdArtifacts = true;
+      }
+    }
+    return super.startExecution(text, sessionId, onProgress, startOptions);
   }
 }
 
@@ -1704,6 +1727,69 @@ describe("Orchestrator", () => {
       expect(status.stdout.trim()).toBe("");
       expect(channel.notices.some((entry) => entry.text.includes("git commit: committed"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("git changed files:"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("removes shell-style stage artifact files before autodev auto-commit", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-artifact-cleanup-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- implement T10.2\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T10.2 | artifact cleanup | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ArtifactWorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T10.2",
+          eventId: "$autodev-run-artifact-cleanup",
+        }),
+      );
+
+      const latestFiles = await execFileAsync("git", ["show", "--name-only", "--pretty=format:", "-n", "1"], { cwd: tempRoot });
+      expect(latestFiles.stdout).not.toContain("autodev#0");
+      expect(latestFiles.stdout).not.toContain("workflow#0");
+      expect(latestFiles.stdout).not.toContain("planner#0");
+      expect(latestFiles.stdout).not.toContain("executor#0");
+      expect(latestFiles.stdout).not.toContain("reviewer#0");
+
+      for (const file of ["autodev#0", "workflow#0", "planner#0", "executor#0", "reviewer#0"]) {
+        const exists = await fs
+          .stat(path.join(tempRoot, file))
+          .then(() => true)
+          .catch(() => false);
+        expect(exists).toBe(false);
+      }
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
