@@ -3866,49 +3866,60 @@ function parseDiagTarget(
   | { kind: "queue"; limit: number }
   | { kind: "help" }
   | null {
-  const tokens = text.trim().split(/\s+/);
-  if (tokens.length < 2) {
+  const tokens = text
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) {
     return { kind: "help" };
   }
-  const value = tokens[1]?.toLowerCase() ?? "";
+  const diagTokenIndex = tokens.findIndex((token) => token.toLowerCase() === "/diag");
+  if (diagTokenIndex < 0) {
+    return { kind: "help" };
+  }
+  const value = tokens[diagTokenIndex + 1]?.toLowerCase() ?? "";
+  const limitToken = tokens[diagTokenIndex + 2] ?? "";
+  if (!value) {
+    return { kind: "help" };
+  }
   if (value === "version") {
     return { kind: "version" };
   }
   if (value === "media") {
-    if (tokens.length < 3) {
+    if (!limitToken) {
       return { kind: "media", limit: 10 };
     }
-    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    const parsed = Number.parseInt(limitToken, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
       return null;
     }
     return { kind: "media", limit: parsed };
   }
   if (value === "upgrade") {
-    if (tokens.length < 3) {
+    if (!limitToken) {
       return { kind: "upgrade", limit: 5 };
     }
-    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    const parsed = Number.parseInt(limitToken, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 20) {
       return null;
     }
     return { kind: "upgrade", limit: parsed };
   }
   if (value === "autodev") {
-    if (tokens.length < 3) {
+    if (!limitToken) {
       return { kind: "autodev", limit: 10 };
     }
-    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    const parsed = Number.parseInt(limitToken, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
       return null;
     }
     return { kind: "autodev", limit: parsed };
   }
   if (value === "queue") {
-    if (tokens.length < 3) {
+    if (!limitToken) {
       return { kind: "queue", limit: 10 };
     }
-    const parsed = Number.parseInt(tokens[2] ?? "", 10);
+    const parsed = Number.parseInt(limitToken, 10);
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
       return null;
     }

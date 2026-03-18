@@ -1588,7 +1588,7 @@ describe("Orchestrator", () => {
       await orchestrator.handleMessage(
         makeInbound({
           isDirectMessage: true,
-          text: "/diag queue 5",
+          text: "!code /diag queue 5",
           eventId: "$diag-queue-view",
         }),
       );
