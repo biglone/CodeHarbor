@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.43] - 2026-03-18
+
+- Matrix command-prefix compatibility:
+  - fixed `/diag` subcommand parsing when sent with prefix mode (for example `!code /diag queue 5`)
+  - prefixed `/diag queue [count]` now returns queue diagnostics instead of usage fallback
+- Help command improvements:
+  - added AutoDev command guidance in `/help` (`/autodev status`, `/autodev run [taskId]`)
+  - expanded regression test to keep command help text in sync with runtime behavior
+
 ## [0.1.42] - 2026-03-18
 
 - Platform API (T6.1):
