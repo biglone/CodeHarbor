@@ -1321,9 +1321,58 @@ describe("Orchestrator", () => {
       expect(executor.calls).toHaveLength(1);
       expect(executor.calls[0]?.text).toContain("[documents]");
       expect(executor.calls[0]?.text).toContain("name=plan.txt format=txt");
+      expect(executor.calls[0]?.text).toContain("summary=第一行 第二行");
+      expect(executor.calls[0]?.text).toContain("chunk_1:");
       expect(executor.calls[0]?.text).toContain("第一行");
       expect(executor.calls[0]?.text).toContain("第二行");
       expect(channel.notices.some((entry) => entry.text.includes("文档处理提示"))).toBe(false);
+      await expect(fs.access(txtPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("chunks long document context and avoids injecting full raw text", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-doc-chunk-"));
+    const txtPath = path.join(tempRoot, "long.txt");
+    const tailMarker = "TAIL_MARKER_SHOULD_NOT_BE_INCLUDED";
+    const longText = `${"段落A ".repeat(900)}\n\n${"段落B ".repeat(900)}\n\n${tailMarker}`;
+    await fs.writeFile(txtPath, longText, "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请分块处理长文档",
+          eventId: "$doc-chunk",
+          attachments: [
+            {
+              kind: "file",
+              name: "long.txt",
+              mxcUrl: "mxc://example.com/doc-long",
+              mimeType: "text/plain",
+              sizeBytes: 12000,
+              localPath: txtPath,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).toContain("[documents]");
+      expect(executor.calls[0]?.text).toContain("summary=");
+      expect(executor.calls[0]?.text).toContain("chunk_1:");
+      expect(executor.calls[0]?.text).toContain("[truncated] omitted_chunks=");
+      expect(executor.calls[0]?.text).not.toContain(tailMarker);
       await expect(fs.access(txtPath)).rejects.toBeDefined();
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

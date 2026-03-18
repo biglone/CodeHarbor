@@ -22,8 +22,8 @@ import { CodexSessionRuntime } from "./executor/codex-session-runtime";
 import {
   DEFAULT_DOCUMENT_MAX_BYTES,
   extractDocumentText,
-  type SupportedDocumentFormat,
 } from "./document-extractor";
+import { buildDocumentContextPrompt, type DocumentContextItem } from "./document-context";
 import { Logger } from "./logger";
 import {
   DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS,
@@ -167,15 +167,8 @@ interface ImageSelectionResult {
   notice: string | null;
 }
 
-interface ExtractedDocumentContext {
-  name: string;
-  format: SupportedDocumentFormat;
-  sizeBytes: number;
-  text: string;
-}
-
 interface DocumentExtractionSummary {
-  documents: ExtractedDocumentContext[];
+  documents: DocumentContextItem[];
   notice: string | null;
 }
 
@@ -3318,7 +3311,7 @@ export class Orchestrator {
     prompt: string,
     message: InboundMessage,
     audioTranscripts: AudioTranscript[],
-    extractedDocuments: ExtractedDocumentContext[],
+    extractedDocuments: DocumentContextItem[],
     bridgeContext: string | null,
   ): string {
     let composed: string;
@@ -3349,14 +3342,10 @@ export class Orchestrator {
       }
 
       if (extractedDocuments.length > 0) {
-        const documentSummary = extractedDocuments
-          .map((document) => {
-            const normalizedText = document.text.trim() || "(empty)";
-            const indentedText = indentMultiline(normalizedText, "  ");
-            return `- name=${document.name} format=${document.format} size=${document.sizeBytes}\n${indentedText}`;
-          })
-          .join("\n");
-        sections.push(`[documents]\n${documentSummary}\n[/documents]`);
+        const documentSummary = buildDocumentContextPrompt(extractedDocuments);
+        if (documentSummary.content) {
+          sections.push(`[documents]\n${documentSummary.content}\n[/documents]`);
+        }
       }
       composed = sections.join("\n\n");
     }
@@ -5212,13 +5201,6 @@ function normalizeOptionalCommandOutput(value: string | Buffer | null | undefine
     return "";
   }
   return normalizeCommandOutput(value);
-}
-
-function indentMultiline(value: string, indent: string): string {
-  return value
-    .split("\n")
-    .map((line) => `${indent}${line}`)
-    .join("\n");
 }
 
 function summarizeCommandOutput(text: string, maxLen = 400): string {
