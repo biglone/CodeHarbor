@@ -61,6 +61,7 @@ program.addHelpText(
     "  - /diag upgrade [count]",
     "  - /upgrade [version]",
     "  - /backend codex|claude|status",
+    "  - /autodev stop",
     "  - /reset",
     "  - /stop",
   ].join("\n"),

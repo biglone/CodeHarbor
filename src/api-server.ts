@@ -1,6 +1,15 @@
 import http from "node:http";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  API_TOKEN_SCOPES,
+  hasRequiredScopes,
+  listMissingScopes,
+  resolveApiScopeRequirement,
+  resolveWebhookScopeRequirement,
+  WEBHOOK_SIGNATURE_SCOPES,
+  type TokenScopePattern,
+} from "./auth/scope-matrix";
 import { Logger } from "./logger";
 import {
   ApiTaskIdempotencyConflictError,
@@ -41,6 +50,12 @@ interface ApiServerOptions {
 interface AddressInfo {
   host: string;
   port: number;
+}
+
+interface ApiAuthIdentity {
+  actor: string | null;
+  source: "legacy";
+  scopes: TokenScopePattern[];
 }
 
 export interface TaskSubmissionService {
@@ -167,10 +182,21 @@ export class ApiServer {
         return;
       }
 
-      if (!this.isAuthorized(req)) {
+      const scopeRequirement = resolveApiScopeRequirement(url.pathname);
+      const authIdentity = scopeRequirement ? this.resolveApiIdentity(req) : null;
+
+      if (scopeRequirement && !authIdentity) {
         this.sendJson(res, 401, {
           ok: false,
           error: "Unauthorized. Provide Authorization: Bearer <API_TOKEN>.",
+        });
+        return;
+      }
+      if (scopeRequirement && authIdentity && !hasRequiredScopes(authIdentity.scopes, scopeRequirement.requiredScopes)) {
+        const missingScopes = listMissingScopes(authIdentity.scopes, scopeRequirement.requiredScopes);
+        this.sendJson(res, 403, {
+          ok: false,
+          error: `Forbidden. Missing required scope: ${missingScopes.join(", ")}.`,
         });
         return;
       }
@@ -264,12 +290,26 @@ export class ApiServer {
       throw new HttpError(503, "Webhook is unavailable because API_WEBHOOK_SECRET is not configured.");
     }
 
+    const scopeRequirement = resolveWebhookScopeRequirement(`/api/webhooks/${sourceParam ?? ""}`);
+    if (!scopeRequirement) {
+      throw new HttpError(404, "Webhook route permission is not configured.");
+    }
+
     const source = parseWebhookSource(sourceParam);
     const rawBody = await readBodyBuffer(req, API_MAX_JSON_BODY_BYTES);
     const timestamp = readWebhookTimestamp(req);
     verifyWebhookTimestamp(timestamp, this.webhookTimestampToleranceSeconds);
     const signature = readWebhookSignature(req);
     verifyWebhookSignature(rawBody, timestamp.raw, signature, this.webhookSecret);
+    const webhookIdentity: ApiAuthIdentity = {
+      actor: `webhook:${source}`,
+      source: "legacy",
+      scopes: [...WEBHOOK_SIGNATURE_SCOPES],
+    };
+    if (!hasRequiredScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes)) {
+      const missingScopes = listMissingScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes);
+      throw new HttpError(403, `Webhook is missing required scope: ${missingScopes.join(", ")}.`);
+    }
     const body = parseJsonBuffer(rawBody);
     const mapped = mapWebhookPayload(source, body);
     const idempotencyKey = buildWebhookIdempotencyKey(req, source, rawBody, mapped.idempotencyHint);
@@ -287,9 +327,16 @@ export class ApiServer {
     });
   }
 
-  private isAuthorized(req: http.IncomingMessage): boolean {
+  private resolveApiIdentity(req: http.IncomingMessage): ApiAuthIdentity | null {
     const token = readBearerToken(req);
-    return token !== null && token === this.apiToken;
+    if (token === null || token !== this.apiToken) {
+      return null;
+    }
+    return {
+      actor: null,
+      source: "legacy",
+      scopes: [...API_TOKEN_SCOPES],
+    };
   }
 
   private setSecurityHeaders(res: http.ServerResponse): void {

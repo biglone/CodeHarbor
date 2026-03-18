@@ -734,10 +734,12 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("升级指标:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("升级锁:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/version 可实时刷新"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent context: plan=unlimited"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("可用命令"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/help:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/autodev status"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/autodev run [taskId]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/autodev stop"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag media [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag autodev [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag queue [count]"))).toBe(true);

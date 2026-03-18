@@ -350,7 +350,7 @@ function clampPromptContext(label: string, value: string, maxChars: number | nul
   if (!normalized) {
     return "(empty)";
   }
-  if (!Number.isFinite(maxChars) || maxChars < 1) {
+  if (typeof maxChars !== "number" || !Number.isFinite(maxChars) || maxChars < 1) {
     return normalized;
   }
   const resolvedMax = Math.floor(maxChars);

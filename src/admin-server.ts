@@ -9,6 +9,14 @@ import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
 import { AdminTokenConfig, AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
+import {
+  hasRequiredScopes,
+  listMissingScopes,
+  resolveAdminScopeRequirement,
+  scopesForAdminRole,
+  TOKEN_SCOPES,
+  type TokenScopePattern,
+} from "./auth/scope-matrix";
 import { parseRuntimeMetricsSnapshot, renderPrometheusMetrics, type RuntimeMetricsSnapshot } from "./metrics";
 import {
   NpmRegistryUpdateChecker,
@@ -50,6 +58,7 @@ interface AdminAuthIdentity {
   role: AdminAccessRole;
   actor: string | null;
   source: AdminAuthSource;
+  scopes: TokenScopePattern[];
 }
 
 interface AdminServerOptions {
@@ -222,19 +231,20 @@ export class AdminServer {
         return;
       }
 
-      const requiredRole = requiredAdminRoleForRequest(req.method, url.pathname);
-      const authIdentity = requiredRole ? this.resolveAdminIdentity(req) : null;
-      if (requiredRole && !authIdentity) {
+      const scopeRequirement = resolveAdminScopeRequirement(req.method, url.pathname);
+      const authIdentity = scopeRequirement ? this.resolveAdminIdentity(req) : null;
+      if (scopeRequirement && !authIdentity) {
         this.sendJson(res, 401, {
           ok: false,
           error: "Unauthorized. Provide Authorization: Bearer <ADMIN_TOKEN> (or token from ADMIN_TOKENS_JSON).",
         });
         return;
       }
-      if (requiredRole && authIdentity && !hasRequiredAdminRole(authIdentity.role, requiredRole)) {
+      if (scopeRequirement && authIdentity && !hasRequiredScopes(authIdentity.scopes, scopeRequirement.requiredScopes)) {
+        const missingScopes = listMissingScopes(authIdentity.scopes, scopeRequirement.requiredScopes);
         this.sendJson(res, 403, {
           ok: false,
-          error: "Forbidden. This endpoint requires admin write permission.",
+          error: `Forbidden. Missing required scope: ${missingScopes.join(", ")}.`,
         });
         return;
       }
@@ -253,7 +263,8 @@ export class AdminServer {
             role: authIdentity?.role ?? null,
             source: authIdentity?.source ?? "none",
             actor: resolveIdentityActor(authIdentity),
-            canWrite: authIdentity ? hasRequiredAdminRole(authIdentity.role, "admin") : false,
+            scopes: authIdentity ? [...authIdentity.scopes] : [],
+            canWrite: authIdentity ? hasRequiredScopes(authIdentity.scopes, [TOKEN_SCOPES.ADMIN_WRITE]) : false,
           },
         });
         return;
@@ -794,6 +805,7 @@ export class AdminServer {
         role: "admin",
         actor: null,
         source: "open",
+        scopes: scopesForAdminRole("admin"),
       };
     }
 
@@ -807,6 +819,7 @@ export class AdminServer {
         role: "admin",
         actor: null,
         source: "legacy",
+        scopes: scopesForAdminRole("admin"),
       };
     }
 
@@ -819,6 +832,7 @@ export class AdminServer {
       role: mappedIdentity.role,
       actor: mappedIdentity.actor,
       source: "scoped",
+      scopes: [...mappedIdentity.scopes],
     };
   }
 
@@ -1263,34 +1277,13 @@ function resolveAuditActor(req: http.IncomingMessage, identity: AdminAuthIdentit
   return actor || null;
 }
 
-function requiredAdminRoleForRequest(method: string | undefined, pathname: string): AdminAccessRole | null {
-  if (pathname === "/metrics") {
-    return "viewer";
-  }
-  if (!pathname.startsWith("/api/admin/")) {
-    return null;
-  }
-
-  const normalizedMethod = (method ?? "GET").toUpperCase();
-  if (normalizedMethod === "GET" || normalizedMethod === "HEAD") {
-    return "viewer";
-  }
-  return "admin";
-}
-
-function hasRequiredAdminRole(role: AdminAccessRole, requiredRole: AdminAccessRole): boolean {
-  if (requiredRole === "viewer") {
-    return role === "viewer" || role === "admin";
-  }
-  return role === "admin";
-}
-
 function buildAdminTokenMap(tokens: AdminTokenConfig[]): Map<string, Omit<AdminAuthIdentity, "source">> {
   const mapped = new Map<string, Omit<AdminAuthIdentity, "source">>();
   for (const token of tokens) {
     mapped.set(token.token, {
       role: token.role,
       actor: token.actor,
+      scopes: scopesForAdminRole(token.role),
     });
   }
   return mapped;

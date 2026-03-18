@@ -392,6 +392,157 @@ class WorkflowExecutor {
   }
 }
 
+class LargeContextWorkflowExecutor {
+  callCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null }> = [];
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
+
+    if (text.includes("[role:planner]")) {
+      return {
+        result: Promise.resolve({
+          sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+          reply: "1) 规划\n2) 实施\n3) 复核",
+        }),
+        cancel: () => {},
+      };
+    }
+
+    if (text.includes("[role:executor]")) {
+      return {
+        result: Promise.resolve({
+          sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+          reply: "x".repeat(24_000),
+        }),
+        cancel: () => {},
+      };
+    }
+
+    return {
+      result: Promise.resolve({
+        sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+        reply: "VERDICT: APPROVED\nSUMMARY: ok\nISSUES:\n- none",
+      }),
+      cancel: () => {},
+    };
+  }
+}
+
+class GracefulLoopWorkflowExecutor {
+  callCount = 0;
+  reviewerCount = 0;
+  firstReviewerCancelled = false;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null }> = [];
+  private pendingFirstReviewer:
+    | {
+        sessionId: string | null;
+        resolve: (value: { sessionId: string; reply: string }) => void;
+        reject: (error: unknown) => void;
+      }
+    | null = null;
+
+  isFirstReviewerPending(): boolean {
+    return this.pendingFirstReviewer !== null;
+  }
+
+  releaseFirstReviewer(): void {
+    if (!this.pendingFirstReviewer) {
+      throw new Error("No pending first reviewer call.");
+    }
+    const pending = this.pendingFirstReviewer;
+    this.pendingFirstReviewer = null;
+    pending.resolve({
+      sessionId: pending.sessionId ?? "wf-thread-reviewer-1",
+      reply: "VERDICT: APPROVED\nSUMMARY: 通过\nISSUES:\n- none",
+    });
+  }
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
+
+    if (text.includes("[role:planner]")) {
+      return {
+        result: Promise.resolve({
+          sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+          reply: "1) 执行任务\n2) 校验结果\n3) 更新任务状态",
+        }),
+        cancel: () => {},
+      };
+    }
+
+    if (text.includes("[role:executor]")) {
+      return {
+        result: Promise.resolve({
+          sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+          reply: "执行完成。",
+        }),
+        cancel: () => {},
+      };
+    }
+
+    if (text.includes("[role:reviewer]")) {
+      this.reviewerCount += 1;
+      if (this.reviewerCount === 1) {
+        const result = new Promise<{ sessionId: string; reply: string }>((resolve, reject) => {
+          this.pendingFirstReviewer = {
+            sessionId,
+            resolve,
+            reject,
+          };
+        });
+        return {
+          result,
+          cancel: () => {
+            this.firstReviewerCancelled = true;
+            if (!this.pendingFirstReviewer) {
+              return;
+            }
+            const pending = this.pendingFirstReviewer;
+            this.pendingFirstReviewer = null;
+            pending.reject(new CodexExecutionCancelledError());
+          },
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+          reply: "VERDICT: APPROVED\nSUMMARY: 通过\nISSUES:\n- none",
+        }),
+        cancel: () => {},
+      };
+    }
+
+    return {
+      result: Promise.resolve({
+        sessionId: sessionId ?? `wf-thread-${this.callCount}`,
+        reply: `echo:${text}`,
+      }),
+      cancel: () => {},
+    };
+  }
+}
+
 class ArtifactWorkflowExecutor extends WorkflowExecutor {
   private createdArtifacts = false;
 
@@ -2128,6 +2279,69 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("supports /autodev stop to finish current task then stop loop", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-stop-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T11.1 | first loop task | ⬜ |",
+        "| T11.2 | second loop task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new GracefulLoopWorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      const runPromise = orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-loop-stop",
+        }),
+      );
+      await waitForCondition(() => executor.isFirstReviewerPending(), 2_000);
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev stop",
+          eventId: "$autodev-loop-stop-command",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("当前任务执行完成后停止 AutoDev 循环"))).toBe(true);
+
+      executor.releaseFirstReviewer();
+      await runPromise;
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T11.1 | first loop task | ✅ |");
+      expect(updated).toContain("| T11.2 | second loop task | ⬜ |");
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 循环执行已按请求停止"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("completedRuns: 1"))).toBe(true);
+      expect(executor.firstReviewerCancelled).toBe(false);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("stops /autodev run loop when loop max runs is reached", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-limit-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
@@ -2592,5 +2806,52 @@ describe("Orchestrator", () => {
     expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text.includes("[planner]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
+  });
+
+  it("applies AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS when assembling reviewer prompt", async () => {
+    const previous = process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS;
+    process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS = "1200";
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new LargeContextWorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/agents run 输出超长上下文以测试预算",
+          eventId: "$wf-context-budget",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/status",
+          eventId: "$wf-context-budget-status",
+        }),
+      );
+
+      const reviewerPrompt = executor.calls.find((call) => call.text.includes("[role:reviewer]"))?.text ?? "";
+      expect(reviewerPrompt).toContain("executor_output truncated");
+      expect(reviewerPrompt.length).toBeLessThan(2_000);
+      expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent context:"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("output=1200"))).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS;
+      } else {
+        process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS = previous;
+      }
+    }
   });
 });
