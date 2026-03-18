@@ -23,6 +23,7 @@ import {
   sleep,
   type RetryPolicy,
 } from "../reliability/retry-policy";
+import { DEFAULT_DOCUMENT_MAX_BYTES, isSupportedDocumentAttachment } from "../document-extractor";
 import { InboundAttachment, InboundMessage } from "../types";
 import { splitText } from "../utils/message";
 import { Channel, type InboundHandler } from "./channel";
@@ -364,7 +365,7 @@ export class MatrixChannel implements Channel {
 
     const hydrated = await Promise.all(
       attachments.map(async (attachment, index) => {
-        if (!shouldHydrateAttachment(attachment.kind, this.transcribeAudio) || !attachment.mxcUrl) {
+        if (!shouldHydrateAttachment(attachment, this.transcribeAudio) || !attachment.mxcUrl) {
           return attachment;
         }
         try {
@@ -638,12 +639,21 @@ function parseMxcUrl(mxcUrl: string): { serverName: string; mediaId: string } | 
   return { serverName, mediaId };
 }
 
-function shouldHydrateAttachment(kind: InboundAttachment["kind"], transcribeAudio: boolean): boolean {
-  if (kind === "image") {
+function shouldHydrateAttachment(attachment: InboundAttachment, transcribeAudio: boolean): boolean {
+  if (attachment.kind === "image") {
     return true;
   }
-  if (kind === "audio") {
+  if (attachment.kind === "audio") {
     return transcribeAudio;
+  }
+  if (attachment.kind === "file") {
+    if (!isSupportedDocumentAttachment({ name: attachment.name, mimeType: attachment.mimeType })) {
+      return false;
+    }
+    if (attachment.sizeBytes !== null && attachment.sizeBytes > DEFAULT_DOCUMENT_MAX_BYTES) {
+      return false;
+    }
+    return true;
   }
   return false;
 }
@@ -657,31 +667,49 @@ function resolveFileExtension(fileName: string, mimeType: string | null): string
   if (ext) {
     return ext;
   }
-  if (mimeType === "image/png") {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  if (normalizedMimeType === "image/png") {
     return ".png";
   }
-  if (mimeType === "image/jpeg") {
+  if (normalizedMimeType === "image/jpeg") {
     return ".jpg";
   }
-  if (mimeType === "image/webp") {
+  if (normalizedMimeType === "image/webp") {
     return ".webp";
   }
-  if (mimeType === "audio/mpeg") {
+  if (normalizedMimeType === "audio/mpeg") {
     return ".mp3";
   }
-  if (mimeType === "audio/mp4" || mimeType === "audio/x-m4a") {
+  if (normalizedMimeType === "audio/mp4" || normalizedMimeType === "audio/x-m4a") {
     return ".m4a";
   }
-  if (mimeType === "audio/wav" || mimeType === "audio/x-wav") {
+  if (normalizedMimeType === "audio/wav" || normalizedMimeType === "audio/x-wav") {
     return ".wav";
   }
-  if (mimeType === "audio/ogg") {
+  if (normalizedMimeType === "audio/ogg") {
     return ".ogg";
   }
-  if (mimeType === "audio/flac") {
+  if (normalizedMimeType === "audio/flac") {
     return ".flac";
   }
+  if (normalizedMimeType === "application/pdf") {
+    return ".pdf";
+  }
+  if (normalizedMimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    return ".docx";
+  }
+  if (normalizedMimeType === "text/plain") {
+    return ".txt";
+  }
   return ".bin";
+}
+
+function normalizeMimeType(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.split(";", 1)[0]?.trim().toLowerCase();
+  return normalized || null;
 }
 
 function buildMatrixRichMessageContent(

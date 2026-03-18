@@ -19,6 +19,11 @@ import {
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
+import {
+  DEFAULT_DOCUMENT_MAX_BYTES,
+  extractDocumentText,
+  type SupportedDocumentFormat,
+} from "./document-extractor";
 import { Logger } from "./logger";
 import {
   DEFAULT_DURATION_HISTOGRAM_BUCKETS_MS,
@@ -159,6 +164,18 @@ interface ImageSelectionResult {
   skippedUnsupportedMime: number;
   skippedTooLarge: number;
   skippedOverLimit: number;
+  notice: string | null;
+}
+
+interface ExtractedDocumentContext {
+  name: string;
+  format: SupportedDocumentFormat;
+  sizeBytes: number;
+  text: string;
+}
+
+interface DocumentExtractionSummary {
+  documents: ExtractedDocumentContext[];
   notice: string | null;
 }
 
@@ -1247,7 +1264,17 @@ export class Orchestrator {
         if (imageSelection.notice) {
           await this.channel.sendNotice(message.conversationId, imageSelection.notice);
         }
-        const executionPrompt = this.buildExecutionPrompt(route.prompt, message, audioTranscripts, bridgeContext);
+        const documentSummary = await this.prepareDocumentAttachments(message, requestId, sessionKey);
+        if (documentSummary.notice) {
+          await this.channel.sendNotice(message.conversationId, documentSummary.notice);
+        }
+        const executionPrompt = this.buildExecutionPrompt(
+          route.prompt,
+          message,
+          audioTranscripts,
+          documentSummary.documents,
+          bridgeContext,
+        );
         const imagePaths = imageSelection.imagePaths;
         let lastProgressAt = 0;
         let lastProgressText = "";
@@ -3181,6 +3208,100 @@ export class Orchestrator {
     }
   }
 
+  private async prepareDocumentAttachments(
+    message: InboundMessage,
+    requestId: string,
+    sessionKey: string,
+  ): Promise<DocumentExtractionSummary> {
+    const result: DocumentExtractionSummary = {
+      documents: [],
+      notice: null,
+    };
+
+    const fileAttachments = message.attachments.filter((attachment) => attachment.kind === "file");
+    if (fileAttachments.length === 0) {
+      return result;
+    }
+
+    let skippedUnsupportedType = 0;
+    let skippedTooLarge = 0;
+    let skippedMissingLocalPath = 0;
+    let failedExtraction = 0;
+
+    for (const attachment of fileAttachments) {
+      const extraction = await extractDocumentText({
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        localPath: attachment.localPath,
+        maxBytes: DEFAULT_DOCUMENT_MAX_BYTES,
+      });
+
+      if (extraction.ok) {
+        result.documents.push({
+          name: extraction.name,
+          format: extraction.format,
+          sizeBytes: extraction.sizeBytes,
+          text: extraction.text,
+        });
+        continue;
+      }
+
+      if (extraction.reason === "unsupported_type") {
+        skippedUnsupportedType += 1;
+        continue;
+      }
+      if (extraction.reason === "file_too_large") {
+        skippedTooLarge += 1;
+        continue;
+      }
+      if (extraction.reason === "missing_local_path") {
+        skippedMissingLocalPath += 1;
+        continue;
+      }
+
+      failedExtraction += 1;
+      this.logger.warn("Failed to extract document attachment", {
+        requestId,
+        sessionKey,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        reason: extraction.reason,
+        message: extraction.message,
+      });
+    }
+
+    if (
+      skippedUnsupportedType === 0 &&
+      skippedTooLarge === 0 &&
+      skippedMissingLocalPath === 0 &&
+      failedExtraction === 0
+    ) {
+      return result;
+    }
+
+    const parts: string[] = [];
+    if (result.documents.length > 0) {
+      parts.push(`已提取 ${result.documents.length} 份文档`);
+    } else {
+      parts.push("未提取到可用文档");
+    }
+    if (skippedUnsupportedType > 0) {
+      parts.push(`类型不支持 ${skippedUnsupportedType} 份（仅支持 txt/pdf/docx）`);
+    }
+    if (skippedTooLarge > 0) {
+      parts.push(`超过大小限制 ${skippedTooLarge} 份（上限 ${formatByteSize(DEFAULT_DOCUMENT_MAX_BYTES)}）`);
+    }
+    if (skippedMissingLocalPath > 0) {
+      parts.push(`未下载到本地 ${skippedMissingLocalPath} 份`);
+    }
+    if (failedExtraction > 0) {
+      parts.push(`解析失败 ${failedExtraction} 份`);
+    }
+    result.notice = `[CodeHarbor] 文档处理提示：${parts.join("；")}。`;
+    return result;
+  }
+
   private async resolveAttachmentSizeBytes(sizeBytes: number | null, localPath: string): Promise<number | null> {
     if (sizeBytes !== null) {
       return sizeBytes;
@@ -3197,10 +3318,11 @@ export class Orchestrator {
     prompt: string,
     message: InboundMessage,
     audioTranscripts: AudioTranscript[],
+    extractedDocuments: ExtractedDocumentContext[],
     bridgeContext: string | null,
   ): string {
     let composed: string;
-    if (message.attachments.length === 0 && audioTranscripts.length === 0) {
+    if (message.attachments.length === 0 && audioTranscripts.length === 0 && extractedDocuments.length === 0) {
       composed = prompt;
     } else {
       const attachmentSummary = message.attachments
@@ -3224,6 +3346,17 @@ export class Orchestrator {
           .map((transcript) => `- name=${transcript.name} text=${transcript.text.replace(/\s+/g, " ").trim()}`)
           .join("\n");
         sections.push(`[audio_transcripts]\n${transcriptSummary}\n[/audio_transcripts]`);
+      }
+
+      if (extractedDocuments.length > 0) {
+        const documentSummary = extractedDocuments
+          .map((document) => {
+            const normalizedText = document.text.trim() || "(empty)";
+            const indentedText = indentMultiline(normalizedText, "  ");
+            return `- name=${document.name} format=${document.format} size=${document.sizeBytes}\n${indentedText}`;
+          })
+          .join("\n");
+        sections.push(`[documents]\n${documentSummary}\n[/documents]`);
       }
       composed = sections.join("\n\n");
     }
@@ -5079,6 +5212,13 @@ function normalizeOptionalCommandOutput(value: string | Buffer | null | undefine
     return "";
   }
   return normalizeCommandOutput(value);
+}
+
+function indentMultiline(value: string, indent: string): string {
+  return value
+    .split("\n")
+    .map((line) => `${indent}${line}`)
+    .join("\n");
 }
 
 function summarizeCommandOutput(text: string, maxLen = 400): string {

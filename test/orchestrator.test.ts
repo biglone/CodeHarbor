@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 
 import { type Channel, type InboundHandler } from "../src/channels/channel";
+import { DEFAULT_DOCUMENT_MAX_BYTES } from "../src/document-extractor";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { ApiTaskIdempotencyConflictError, Orchestrator, buildSessionKey } from "../src/orchestrator";
 import { StateStore } from "../src/store/state-store";
@@ -1279,6 +1280,126 @@ describe("Orchestrator", () => {
       expect(executor.calls).toHaveLength(1);
       expect(executor.calls[0]?.text).not.toContain("[audio_transcripts]");
       await expect(fs.access(audioPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("appends extracted document text context to prompt", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-doc-"));
+    const txtPath = path.join(tempRoot, "plan.txt");
+    await fs.writeFile(txtPath, "第一行\n第二行", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请参考附件文档",
+          eventId: "$doc-context",
+          attachments: [
+            {
+              kind: "file",
+              name: "plan.txt",
+              mxcUrl: "mxc://example.com/doc",
+              mimeType: "text/plain",
+              sizeBytes: 30,
+              localPath: txtPath,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).toContain("[documents]");
+      expect(executor.calls[0]?.text).toContain("name=plan.txt format=txt");
+      expect(executor.calls[0]?.text).toContain("第一行");
+      expect(executor.calls[0]?.text).toContain("第二行");
+      expect(channel.notices.some((entry) => entry.text.includes("文档处理提示"))).toBe(false);
+      await expect(fs.access(txtPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports unsupported, oversized, and failed document extractions via notice", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-doc-notice-"));
+    const txtPath = path.join(tempRoot, "ok.txt");
+    const unsupportedPath = path.join(tempRoot, "ignore.md");
+    const brokenDirPath = path.join(tempRoot, "broken.txt");
+    await fs.writeFile(txtPath, "可提取文档内容", "utf8");
+    await fs.writeFile(unsupportedPath, "unsupported", "utf8");
+    await fs.mkdir(brokenDirPath, { recursive: true });
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "处理文档混合输入",
+          eventId: "$doc-notice",
+          attachments: [
+            {
+              kind: "file",
+              name: "ok.txt",
+              mxcUrl: "mxc://example.com/ok",
+              mimeType: "text/plain",
+              sizeBytes: 64,
+              localPath: txtPath,
+            },
+            {
+              kind: "file",
+              name: "ignore.md",
+              mxcUrl: "mxc://example.com/md",
+              mimeType: "text/markdown",
+              sizeBytes: 32,
+              localPath: unsupportedPath,
+            },
+            {
+              kind: "file",
+              name: "large.pdf",
+              mxcUrl: "mxc://example.com/large",
+              mimeType: "application/pdf",
+              sizeBytes: DEFAULT_DOCUMENT_MAX_BYTES + 1,
+              localPath: null,
+            },
+            {
+              kind: "file",
+              name: "broken.txt",
+              mxcUrl: "mxc://example.com/broken",
+              mimeType: "text/plain",
+              sizeBytes: null,
+              localPath: brokenDirPath,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.text).toContain("[documents]");
+      expect(executor.calls[0]?.text).toContain("可提取文档内容");
+      expect(channel.notices.some((entry) => entry.text.includes("文档处理提示"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("类型不支持 1 份"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("超过大小限制 1 份"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("解析失败 1 份"))).toBe(true);
+      await expect(fs.access(txtPath)).rejects.toBeDefined();
+      await expect(fs.access(unsupportedPath)).rejects.toBeDefined();
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

@@ -23,6 +23,7 @@ vi.mock("matrix-js-sdk", () => ({
 }));
 
 import { MatrixChannel } from "../src/channels/matrix-channel";
+import { DEFAULT_DOCUMENT_MAX_BYTES } from "../src/document-extractor";
 
 class FakeMatrixClient extends EventEmitter {
   startClient = vi.fn((_options?: unknown) => {});
@@ -331,6 +332,143 @@ describe("MatrixChannel", () => {
     if (localPath) {
       await fs.unlink(localPath).catch(() => {});
     }
+
+    await channel.stop();
+  });
+
+  it("hydrates supported document attachment when media fetch is enabled", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+    fetchMock.mockResolvedValue(createMediaResponse("pdf-bytes"));
+
+    const channel = new MatrixChannel(
+      {
+        ...config,
+        cliCompat: {
+          ...config.cliCompat,
+          fetchMedia: true,
+        },
+      } as never,
+      logger as never,
+    );
+    const handler = vi.fn(async (_message: unknown) => {});
+    await channel.start(handler);
+
+    const event = {
+      getType: () => "m.room.message",
+      getSender: () => "@alice:example.com",
+      getContent: () => ({
+        msgtype: "m.file",
+        body: "plan.pdf",
+        url: "mxc://example.com/doc123",
+        info: {
+          mimetype: "application/pdf",
+          size: 2048,
+        },
+      }),
+      getId: () => "$event-doc",
+    };
+
+    const room = {
+      roomId: "!room:example.com",
+      getJoinedMemberCount: () => 2,
+      findEventById: (_eventId: string) => undefined,
+    };
+
+    client.emit("Room.timeline", event, room, false);
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    const message = handler.mock.calls[0]?.[0] as { attachments: Array<{ localPath: string | null }> };
+    const localPath = message.attachments[0]?.localPath;
+    expect(localPath).toBeTruthy();
+    expect(localPath).toContain("codeharbor-media");
+    expect(localPath).toMatch(/\.pdf$/);
+    if (localPath) {
+      await fs.unlink(localPath).catch(() => {});
+    }
+
+    await channel.stop();
+  });
+
+  it("keeps unsupported or oversized document attachments as metadata only", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(
+      {
+        ...config,
+        cliCompat: {
+          ...config.cliCompat,
+          fetchMedia: true,
+        },
+      } as never,
+      logger as never,
+    );
+    const handler = vi.fn(async (_message: unknown) => {});
+    await channel.start(handler);
+
+    const room = {
+      roomId: "!room:example.com",
+      getJoinedMemberCount: () => 2,
+      findEventById: (_eventId: string) => undefined,
+    };
+
+    client.emit(
+      "Room.timeline",
+      {
+        getType: () => "m.room.message",
+        getSender: () => "@alice:example.com",
+        getContent: () => ({
+          msgtype: "m.file",
+          body: "notes.md",
+          url: "mxc://example.com/md123",
+          info: {
+            mimetype: "text/markdown",
+            size: 128,
+          },
+        }),
+        getId: () => "$event-doc-unsupported",
+      },
+      room,
+      false,
+    );
+    client.emit(
+      "Room.timeline",
+      {
+        getType: () => "m.room.message",
+        getSender: () => "@alice:example.com",
+        getContent: () => ({
+          msgtype: "m.file",
+          body: "large.pdf",
+          url: "mxc://example.com/pdf-large",
+          info: {
+            mimetype: "application/pdf",
+            size: DEFAULT_DOCUMENT_MAX_BYTES + 1,
+          },
+        }),
+        getId: () => "$event-doc-large",
+      },
+      room,
+      false,
+    );
+
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const firstMessage = handler.mock.calls[0]?.[0] as { attachments: Array<{ localPath: string | null }> };
+    const secondMessage = handler.mock.calls[1]?.[0] as { attachments: Array<{ localPath: string | null }> };
+    expect(firstMessage.attachments[0]?.localPath).toBeNull();
+    expect(secondMessage.attachments[0]?.localPath).toBeNull();
 
     await channel.stop();
   });
