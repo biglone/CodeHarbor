@@ -9,6 +9,9 @@ export interface MultiAgentWorkflowConfig {
   enabled: boolean;
   autoRepairMaxRounds: number;
   executionTimeoutMs?: number;
+  planContextMaxChars?: number | null;
+  outputContextMaxChars?: number | null;
+  feedbackContextMaxChars?: number | null;
 }
 
 export interface MultiAgentWorkflowProgressEvent {
@@ -41,15 +44,23 @@ interface ExecuteRoleResult {
 
 const DEFAULT_WORKFLOW_EXECUTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
+interface WorkflowPromptContextLimits {
+  plan: number | null;
+  output: number | null;
+  feedback: number | null;
+}
+
 export class MultiAgentWorkflowRunner {
   private readonly executor: CodexExecutor;
   private readonly logger: Logger;
   private readonly config: MultiAgentWorkflowConfig;
+  private readonly promptContextLimits: WorkflowPromptContextLimits;
 
   constructor(executor: CodexExecutor, logger: Logger, config: MultiAgentWorkflowConfig) {
     this.executor = executor;
     this.logger = logger;
     this.config = config;
+    this.promptContextLimits = resolvePromptContextLimits(config);
   }
 
   isEnabled(): boolean {
@@ -64,9 +75,6 @@ export class MultiAgentWorkflowRunner {
     }
 
     const maxRepairRounds = Math.max(0, this.config.autoRepairMaxRounds);
-    let plannerSessionId: string | null = null;
-    let executorSessionId: string | null = null;
-    let reviewerSessionId: string | null = null;
     let activeHandle: CodexExecutionHandle | null = null;
     let cancelled = false;
 
@@ -84,7 +92,7 @@ export class MultiAgentWorkflowRunner {
     const planResult = await this.executeRole(
       "planner",
       buildPlannerPrompt(objective),
-      plannerSessionId,
+      null,
       input.workdir,
       roleTimeoutMs,
       () => cancelled,
@@ -92,7 +100,6 @@ export class MultiAgentWorkflowRunner {
         activeHandle = handle;
       },
     );
-    plannerSessionId = planResult.sessionId;
     const plan = planResult.reply;
 
     await emitProgress(input, {
@@ -102,8 +109,8 @@ export class MultiAgentWorkflowRunner {
     });
     let outputResult = await this.executeRole(
       "executor",
-      buildExecutorPrompt(objective, plan),
-      executorSessionId,
+      buildExecutorPrompt(objective, plan, this.promptContextLimits),
+      null,
       input.workdir,
       roleTimeoutMs,
       () => cancelled,
@@ -111,7 +118,6 @@ export class MultiAgentWorkflowRunner {
         activeHandle = handle;
       },
     );
-    executorSessionId = outputResult.sessionId;
 
     let finalReviewReply = "";
     let approved = false;
@@ -125,8 +131,8 @@ export class MultiAgentWorkflowRunner {
       });
       const reviewResult = await this.executeRole(
         "reviewer",
-        buildReviewerPrompt(objective, plan, outputResult.reply),
-        reviewerSessionId,
+        buildReviewerPrompt(objective, plan, outputResult.reply, this.promptContextLimits),
+        null,
         input.workdir,
         roleTimeoutMs,
         () => cancelled,
@@ -134,7 +140,6 @@ export class MultiAgentWorkflowRunner {
           activeHandle = handle;
         },
       );
-      reviewerSessionId = reviewResult.sessionId;
       finalReviewReply = reviewResult.reply;
 
       const verdict = parseReviewerVerdict(finalReviewReply);
@@ -156,8 +161,8 @@ export class MultiAgentWorkflowRunner {
 
       outputResult = await this.executeRole(
         "executor",
-        buildRepairPrompt(objective, plan, outputResult.reply, verdict.feedback, repairRounds),
-        executorSessionId,
+        buildRepairPrompt(objective, plan, outputResult.reply, verdict.feedback, repairRounds, this.promptContextLimits),
+        null,
         input.workdir,
         roleTimeoutMs,
         () => cancelled,
@@ -165,7 +170,6 @@ export class MultiAgentWorkflowRunner {
           activeHandle = handle;
         },
       );
-      executorSessionId = outputResult.sessionId;
     }
 
     const durationMs = Date.now() - startedAt;
@@ -242,7 +246,8 @@ function buildPlannerPrompt(objective: string): string {
   ].join("\n");
 }
 
-function buildExecutorPrompt(objective: string, plan: string): string {
+function buildExecutorPrompt(objective: string, plan: string, limits: WorkflowPromptContextLimits): string {
+  const planContext = clampPromptContext("planner_plan", plan, limits.plan);
   return [
     "[role:executor]",
     "你是软件执行代理。请根据计划完成交付内容。",
@@ -254,12 +259,19 @@ function buildExecutorPrompt(objective: string, plan: string): string {
     `目标：${objective}`,
     "",
     "[planner_plan]",
-    plan,
+    planContext,
     "[/planner_plan]",
   ].join("\n");
 }
 
-function buildReviewerPrompt(objective: string, plan: string, output: string): string {
+function buildReviewerPrompt(
+  objective: string,
+  plan: string,
+  output: string,
+  limits: WorkflowPromptContextLimits,
+): string {
+  const planContext = clampPromptContext("planner_plan", plan, limits.plan);
+  const outputContext = clampPromptContext("executor_output", output, limits.output);
   return [
     "[role:reviewer]",
     "你是质量审查代理。请严格审查执行结果是否达成目标。",
@@ -276,11 +288,11 @@ function buildReviewerPrompt(objective: string, plan: string, output: string): s
     `目标：${objective}`,
     "",
     "[planner_plan]",
-    plan,
+    planContext,
     "[/planner_plan]",
     "",
     "[executor_output]",
-    output,
+    outputContext,
     "[/executor_output]",
   ].join("\n");
 }
@@ -291,7 +303,11 @@ function buildRepairPrompt(
   previousOutput: string,
   reviewerFeedback: string,
   round: number,
+  limits: WorkflowPromptContextLimits,
 ): string {
+  const planContext = clampPromptContext("planner_plan", plan, limits.plan);
+  const previousOutputContext = clampPromptContext("previous_output", previousOutput, limits.output);
+  const reviewerFeedbackContext = clampPromptContext("reviewer_feedback", reviewerFeedback, limits.feedback);
   return [
     "[role:executor]",
     `你是软件执行代理。请根据审查反馈进行第 ${round} 轮修复并输出最终版本。`,
@@ -300,15 +316,15 @@ function buildRepairPrompt(
     `目标：${objective}`,
     "",
     "[planner_plan]",
-    plan,
+    planContext,
     "[/planner_plan]",
     "",
     "[previous_output]",
-    previousOutput,
+    previousOutputContext,
     "[/previous_output]",
     "",
     "[reviewer_feedback]",
-    reviewerFeedback,
+    reviewerFeedbackContext,
     "[/reviewer_feedback]",
   ].join("\n");
 }
@@ -326,6 +342,39 @@ function parseReviewerVerdict(review: string): { approved: boolean; feedback: st
   return {
     approved: false,
     feedback: review.trim() || "Reviewer 未返回规范 verdict，默认按 REJECTED 处理。",
+  };
+}
+
+function clampPromptContext(label: string, value: string, maxChars: number | null): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "(empty)";
+  }
+  if (!Number.isFinite(maxChars) || maxChars < 1) {
+    return normalized;
+  }
+  const resolvedMax = Math.floor(maxChars);
+  if (normalized.length <= resolvedMax) {
+    return normalized;
+  }
+  const marker = `\n...[${label} truncated: total=${normalized.length} chars]...\n`;
+  const remaining = Math.max(0, resolvedMax - marker.length);
+  const safeHeadLength = Math.min(Math.floor(remaining * 0.7), normalized.length);
+  const tailLength = Math.max(0, remaining - safeHeadLength);
+  return `${normalized.slice(0, safeHeadLength)}${marker}${tailLength > 0 ? normalized.slice(-tailLength) : ""}`;
+}
+
+function resolvePromptContextLimits(config: MultiAgentWorkflowConfig): WorkflowPromptContextLimits {
+  const resolve = (value: number | null | undefined): number | null => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+      return null;
+    }
+    return Math.floor(value);
+  };
+  return {
+    plan: resolve(config.planContextMaxChars),
+    output: resolve(config.outputContextMaxChars),
+    feedback: resolve(config.feedbackContextMaxChars),
   };
 }
 

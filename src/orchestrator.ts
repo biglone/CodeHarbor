@@ -103,6 +103,9 @@ interface OrchestratorOptions {
     enabled: boolean;
     autoRepairMaxRounds: number;
     executionTimeoutMs?: number;
+    planContextMaxChars?: number | null;
+    outputContextMaxChars?: number | null;
+    feedbackContextMaxChars?: number | null;
   };
   packageUpdateChecker?: PackageUpdateChecker;
   updateCheckTtlMs?: number;
@@ -743,6 +746,9 @@ export class Orchestrator {
   private readonly autoDevLoopMaxMinutes: number;
   private readonly autoDevAutoCommit: boolean;
   private readonly autoDevMaxConsecutiveFailures: number;
+  private readonly workflowPlanContextMaxChars: number | null;
+  private readonly workflowOutputContextMaxChars: number | null;
+  private readonly workflowFeedbackContextMaxChars: number | null;
   private readonly upgradeAllowedUsers: Set<string>;
   private readonly upgradeLockOwner: string;
   private readonly selfUpdateRunner: SelfUpdateRunner;
@@ -833,10 +839,25 @@ export class Orchestrator {
         maxConcurrentPerRoom: 4,
       },
     );
+    const workflowPlanContextMaxChars =
+      options?.multiAgentWorkflow?.planContextMaxChars ??
+      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS);
+    const workflowOutputContextMaxChars =
+      options?.multiAgentWorkflow?.outputContextMaxChars ??
+      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS);
+    const workflowFeedbackContextMaxChars =
+      options?.multiAgentWorkflow?.feedbackContextMaxChars ??
+      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS);
+    this.workflowPlanContextMaxChars = workflowPlanContextMaxChars;
+    this.workflowOutputContextMaxChars = workflowOutputContextMaxChars;
+    this.workflowFeedbackContextMaxChars = workflowFeedbackContextMaxChars;
     this.workflowRunner = new MultiAgentWorkflowRunner(this.executor, this.logger, {
       enabled: options?.multiAgentWorkflow?.enabled ?? false,
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
       executionTimeoutMs: options?.multiAgentWorkflow?.executionTimeoutMs,
+      planContextMaxChars: workflowPlanContextMaxChars,
+      outputContextMaxChars: workflowOutputContextMaxChars,
+      feedbackContextMaxChars: workflowFeedbackContextMaxChars,
     });
     this.autoDevLoopMaxRuns = Math.max(
       1,
@@ -1865,6 +1886,9 @@ export class Orchestrator {
       this.skipBridgeForNextPrompt.add(sessionKey);
       this.workflowSnapshots.delete(sessionKey);
       this.autoDevSnapshots.delete(sessionKey);
+      this.pendingStopRequests.delete(sessionKey);
+      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
+      this.activeAutoDevLoopSessions.delete(sessionKey);
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
@@ -1898,8 +1922,9 @@ export class Orchestrator {
 - /help: 查看命令帮助
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
-- /autodev status: 查看 AutoDev 任务状态与下一个任务
+- /autodev status: 查看 AutoDev 当前任务、下一个任务与运行状态
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
+- /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
 - 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
@@ -1965,6 +1990,9 @@ export class Orchestrator {
         this.cliCompat.enabled ? "on" : "off"
       }
 - Multi-Agent workflow: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${workflow.state}
+- Multi-Agent context: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
+        this.workflowOutputContextMaxChars,
+      )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
 - AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, task=${autoDev.taskId ?? "N/A"}`,
     );
   }
@@ -1980,6 +2008,9 @@ export class Orchestrator {
 - objective: ${snapshot.objective ?? "N/A"}
 - approved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - repairRounds: ${snapshot.repairRounds}
+- contextBudget: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
+        this.workflowOutputContextMaxChars,
+      )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
 - error: ${snapshot.error ?? "N/A"}`,
     );
   }
@@ -2892,6 +2923,8 @@ export class Orchestrator {
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
+    this.pendingAutoDevLoopStopRequests.delete(sessionKey);
+    this.activeAutoDevLoopSessions.delete(sessionKey);
     this.stateStore.deactivateSession(sessionKey);
     this.stateStore.clearCodexSessionId(sessionKey);
     this.sessionRuntime.clearSession(sessionKey);
@@ -2928,6 +2961,7 @@ export class Orchestrator {
     const lockEntry = this.sessionLocks.get(sessionKey);
     if (lockEntry?.mutex.isLocked()) {
       this.pendingStopRequests.add(sessionKey);
+      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 已请求停止当前任务，并已清理会话上下文。",
@@ -2940,6 +2974,7 @@ export class Orchestrator {
     }
 
     this.pendingStopRequests.delete(sessionKey);
+    this.pendingAutoDevLoopStopRequests.delete(sessionKey);
     await this.channel.sendNotice(
       message.conversationId,
       "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
@@ -2951,6 +2986,14 @@ export class Orchestrator {
       return false;
     }
     this.pendingStopRequests.delete(sessionKey);
+    return true;
+  }
+
+  private consumePendingAutoDevLoopStopRequest(sessionKey: string): boolean {
+    if (!this.pendingAutoDevLoopStopRequests.has(sessionKey)) {
+      return false;
+    }
+    this.pendingAutoDevLoopStopRequests.delete(sessionKey);
     return true;
   }
 
@@ -5012,6 +5055,18 @@ function parseEnvPositiveInt(raw: string | undefined, fallback: number): number 
   return parsed;
 }
 
+function parseEnvOptionalPositiveInt(raw: string | undefined): number | null {
+  const normalized = raw?.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return null;
+  }
+  return parsed;
+}
+
 function parseEnvBoolean(raw: string | undefined, fallback: boolean): boolean {
   const normalized = raw?.trim().toLowerCase();
   if (!normalized) {
@@ -5454,6 +5509,13 @@ function formatUpgradeLockSummary(lock: UpgradeExecutionLockRecord | null): stri
     return "idle";
   }
   return `owner=${lock.owner}, expiresAt=${new Date(lock.expiresAt).toISOString()}`;
+}
+
+function formatWorkflowContextBudget(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+    return "unlimited";
+  }
+  return String(Math.floor(value));
 }
 
 function formatUpgradeDiagRecords(runs: UpgradeRunRecord[]): string {

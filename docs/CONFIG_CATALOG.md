@@ -24,6 +24,9 @@ These must be valid before `codeharbor start`.
 | `CODEX_EXTRA_ENV_JSON` | No | empty | No | Restart | Extra child env map |
 | `AGENT_WORKFLOW_ENABLED` | No | `false` | Yes | Restart | Enable Phase B multi-agent workflow commands |
 | `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS` | No | `1` | Yes | Restart | Max executor repair rounds after reviewer rejection |
+| `AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS` | No | empty | No | Restart | Optional max planner-plan context chars injected into role prompts (`<=0`/empty means unlimited) |
+| `AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS` | No | empty | No | Restart | Optional max executor output chars injected into reviewer/repair prompts (`<=0`/empty means unlimited) |
+| `AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS` | No | empty | No | Restart | Optional max reviewer feedback chars injected into repair prompts (`<=0`/empty means unlimited) |
 
 ## 2) State / Persistence
 

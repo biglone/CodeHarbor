@@ -294,6 +294,9 @@ This section explains all runtime capabilities and the keys that control them.
 - **Keys**:
   - `AGENT_WORKFLOW_ENABLED`
   - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`
+  - `AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS`
+  - `AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS`
+  - `AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS`
 
 ### H. Persistence and retention
 

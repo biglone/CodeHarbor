@@ -106,7 +106,7 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(executor.calls.every((call) => call.workdir === "/tmp/workflow-unit")).toBe(true);
   });
 
-  it("caps repair rounds and reuses reviewer/executor sessions across rounds", async () => {
+  it("caps repair rounds and keeps each role call stateless across rounds", async () => {
     let reviewCount = 0;
     const executor = new ScenarioExecutor((input) => {
       if (input.prompt.includes("[role:planner]")) {
@@ -157,10 +157,7 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(result.repairRounds).toBe(2);
     expect(reviewCount).toBe(3);
     expect(executor.calls).toHaveLength(7);
-    expect(executor.calls[3]?.sessionId).toBe("executor-thread");
-    expect(executor.calls[4]?.sessionId).toBe("reviewer-thread");
-    expect(executor.calls[5]?.sessionId).toBe("executor-thread");
-    expect(executor.calls[6]?.sessionId).toBe("reviewer-thread");
+    expect(executor.calls.every((call) => call.sessionId === null)).toBe(true);
   });
 
   it("cancels active role execution when registered cancel callback is invoked", async () => {
@@ -244,5 +241,42 @@ describe("MultiAgentWorkflowRunner", () => {
       workdir: "/tmp/workflow-unit",
     });
     expect(executor.calls[0]?.timeoutMs).toBe(42_000);
+  });
+
+  it("truncates oversized role context before passing it to the next stage", async () => {
+    const oversizedOutput = "x".repeat(30_000);
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: "planner-thread", reply: "plan" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({ sessionId: "reviewer-thread", reply: "VERDICT: APPROVED\nSUMMARY: done" }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({ sessionId: "executor-thread", reply: oversizedOutput }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+      outputContextMaxChars: 1_200,
+    });
+    await runner.run({
+      objective: "keep prompt budget stable",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    const reviewerPrompt = executor.calls.find((call) => call.prompt.includes("[role:reviewer]"))?.prompt ?? "";
+    expect(reviewerPrompt).toContain("executor_output truncated");
+    expect(reviewerPrompt).not.toContain(oversizedOutput);
+    expect(reviewerPrompt.length).toBeLessThan(2_000);
   });
 });

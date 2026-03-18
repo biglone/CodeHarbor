@@ -552,8 +552,9 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
   - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
-  - `/autodev status` show AutoDev doc/task summary + run snapshot (when enabled)
+  - `/autodev status` show AutoDev doc/task summary + currentTask/nextTask + run snapshot (when enabled)
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
+  - `/autodev stop` graceful loop stop: finish current task, then stop before next task
 
 Version update check controls:
 
@@ -597,6 +598,12 @@ Cross-backend context bridge behavior:
   - enable `/agents` and `/autodev` workflow commands
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`
   - reviewer reject loop upper bound (default `1`)
+- `AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS`
+  - optional planner-plan context char budget per role prompt (default: unlimited / no truncation)
+- `AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS`
+  - optional executor/reviewer output context char budget per role prompt (default: unlimited / no truncation)
+- `AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS`
+  - optional reviewer feedback context char budget per repair prompt (default: unlimited / no truncation)
 - `AUTODEV_LOOP_MAX_RUNS`
   - max task attempts for one `/autodev run` loop execution (default `20`)
 - `AUTODEV_LOOP_MAX_MINUTES`
@@ -613,6 +620,7 @@ AutoDev (`/autodev`) conventions:
 - `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
 - `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit stops safely with a summary notice.
 - `/autodev run <taskId>` runs only the specified task.
+- `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with `chore(autodev): complete <taskId>`.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
