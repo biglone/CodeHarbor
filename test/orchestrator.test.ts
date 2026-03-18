@@ -304,6 +304,18 @@ class WorkflowExecutor {
   }
 }
 
+class FailingWorkflowExecutor {
+  callCount = 0;
+
+  startExecution(): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    return {
+      result: Promise.reject(new Error("simulated autodev failure")),
+      cancel: () => {},
+    };
+  }
+}
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -1515,6 +1527,57 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("stops /autodev run loop when loop max runs is reached", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-limit-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T12.1 | first | ⬜ |",
+        "| T12.2 | second | ⬜ |",
+        "| T12.3 | third | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevLoopMaxRuns: 2,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-limit",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T12.1 | first | ✅ |");
+      expect(updated).toContain("| T12.2 | second | ✅ |");
+      expect(updated).toContain("| T12.3 | third | ⬜ |");
+      expect(channel.notices.some((entry) => entry.text.includes("循环执行已达到上限"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("loopMaxRuns: 2"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
@@ -1566,6 +1629,115 @@ describe("Orchestrator", () => {
       const status = await execFileAsync("git", ["status", "--porcelain"], { cwd: tempRoot });
       expect(status.stdout.trim()).toBe("");
       expect(channel.notices.some((entry) => entry.text.includes("git commit: committed"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("git changed files:"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("skips autodev git commit when auto-commit is disabled", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-no-commit-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T13.1 | no auto commit | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevAutoCommit: false,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T13.1",
+          eventId: "$autodev-run-no-commit",
+        }),
+      );
+
+      const latest = await execFileAsync("git", ["log", "--oneline", "-n", "1"], { cwd: tempRoot });
+      expect(latest.stdout).toContain("chore: init");
+      expect(latest.stdout).not.toContain("chore(autodev): complete");
+      expect(channel.notices.some((entry) => entry.text.includes("AUTODEV_AUTO_COMMIT=false"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("marks autodev task blocked after consecutive failures", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-fail-streak-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T14.1 | flaky task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new FailingWorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevMaxConsecutiveFailures: 2,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T14.1",
+          eventId: "$autodev-run-fail-1",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T14.1",
+          eventId: "$autodev-run-fail-2",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T14.1 | flaky task | 🚫 |");
+      expect(channel.notices.some((entry) => entry.text.includes("连续失败 2 次"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -1660,7 +1832,9 @@ describe("Orchestrator", () => {
       const notice = channel.notices.find((entry) => entry.text.includes("诊断信息（autodev）"));
       expect(notice).toBeDefined();
       expect(notice?.text).toContain("recentCount:");
+      expect(notice?.text).toContain("recentGitCommits:");
       expect(notice?.text).toContain("task=T2.1");
+      expect(notice?.text).toContain("未检测到 git 仓库");
       expect(notice?.text).toContain("events=");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

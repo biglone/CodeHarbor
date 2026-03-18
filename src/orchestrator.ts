@@ -109,6 +109,10 @@ interface OrchestratorOptions {
   taskQueueRecoveryEnabled?: boolean;
   taskQueueRecoveryBatchLimit?: number;
   taskQueueRetryPolicy?: RetryPolicyInput;
+  autoDevLoopMaxRuns?: number;
+  autoDevLoopMaxMinutes?: number;
+  autoDevAutoCommit?: boolean;
+  autoDevMaxConsecutiveFailures?: number;
 }
 
 interface SessionLockEntry {
@@ -165,6 +169,13 @@ interface AutoDevRunSnapshot {
   approved: boolean | null;
   repairRounds: number;
   error: string | null;
+  mode: "idle" | "single" | "loop";
+  loopRound: number;
+  loopCompletedRuns: number;
+  loopMaxRuns: number;
+  loopDeadlineAt: string | null;
+  lastGitCommitSummary: string | null;
+  lastGitCommitAt: string | null;
 }
 
 interface AutoDevGitBaseline {
@@ -173,9 +184,30 @@ interface AutoDevGitBaseline {
 }
 
 type AutoDevGitCommitResult =
-  | { kind: "committed"; commitHash: string; commitSubject: string }
+  | { kind: "committed"; commitHash: string; commitSubject: string; changedFiles: string[] }
   | { kind: "skipped"; reason: string }
   | { kind: "failed"; error: string };
+
+interface AutoDevRunContext {
+  mode: "single" | "loop";
+  loopRound: number;
+  loopCompletedRuns: number;
+  loopMaxRuns: number;
+  loopDeadlineAt: string | null;
+}
+
+interface AutoDevFailurePolicyResult {
+  blocked: boolean;
+  streak: number;
+  task: AutoDevTask;
+}
+
+interface AutoDevGitCommitRecord {
+  at: string;
+  sessionKey: string;
+  taskId: string;
+  result: AutoDevGitCommitResult;
+}
 
 export interface ApiTaskSubmitInput {
   conversationId: string;
@@ -311,6 +343,10 @@ const DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT = 200;
 const WORKFLOW_DIAG_SNAPSHOT_KEY = "workflow_diag";
 const WORKFLOW_DIAG_MAX_RUNS = 120;
 const WORKFLOW_DIAG_MAX_EVENTS = 2_000;
+const DEFAULT_AUTODEV_LOOP_MAX_RUNS = 20;
+const DEFAULT_AUTODEV_LOOP_MAX_MINUTES = 120;
+const DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES = 3;
+const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
 const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   maxAttempts: 4,
   initialDelayMs: 1_000,
@@ -600,6 +636,12 @@ export class Orchestrator {
   private readonly matrixAdminUsers: Set<string>;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
+  private readonly autoDevFailureStreaks = new Map<string, number>();
+  private readonly autoDevGitCommitRecords: AutoDevGitCommitRecord[] = [];
+  private readonly autoDevLoopMaxRuns: number;
+  private readonly autoDevLoopMaxMinutes: number;
+  private readonly autoDevAutoCommit: boolean;
+  private readonly autoDevMaxConsecutiveFailures: number;
   private readonly upgradeAllowedUsers: Set<string>;
   private readonly upgradeLockOwner: string;
   private readonly selfUpdateRunner: SelfUpdateRunner;
@@ -692,6 +734,22 @@ export class Orchestrator {
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
       executionTimeoutMs: options?.multiAgentWorkflow?.executionTimeoutMs,
     });
+    this.autoDevLoopMaxRuns = Math.max(
+      1,
+      options?.autoDevLoopMaxRuns ??
+        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, DEFAULT_AUTODEV_LOOP_MAX_RUNS),
+    );
+    this.autoDevLoopMaxMinutes = Math.max(
+      1,
+      options?.autoDevLoopMaxMinutes ??
+        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, DEFAULT_AUTODEV_LOOP_MAX_MINUTES),
+    );
+    this.autoDevAutoCommit = options?.autoDevAutoCommit ?? parseEnvBoolean(process.env.AUTODEV_AUTO_COMMIT, true);
+    this.autoDevMaxConsecutiveFailures = Math.max(
+      1,
+      options?.autoDevMaxConsecutiveFailures ??
+        parseEnvPositiveInt(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES),
+    );
     const currentVersion = resolvePackageVersion();
     this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
     this.packageUpdateChecker =
@@ -1796,10 +1854,15 @@ export class Orchestrator {
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}
+- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}
 - runState: ${snapshot.state}
 - runTask: ${snapshot.taskId ? `${snapshot.taskId} ${snapshot.taskDescription ?? ""}`.trim() : "N/A"}
+- runMode: ${snapshot.mode}
+- runLoop: round=${snapshot.loopRound}, completed=${snapshot.loopCompletedRuns}/${snapshot.loopMaxRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
-- runError: ${snapshot.error ?? "N/A"}`,
+- runError: ${snapshot.error ?? "N/A"}
+- runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
+- runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}`,
       );
     } catch (error) {
       await this.channel.sendNotice(message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
@@ -1812,9 +1875,20 @@ export class Orchestrator {
     message: InboundMessage,
     requestId: string,
     workdir: string,
+    runContext?: AutoDevRunContext,
   ): Promise<void> {
     const requestedTaskId = taskId?.trim() || null;
     const context = await loadAutoDevContext(workdir);
+    const activeContext: AutoDevRunContext = runContext ?? {
+      mode: requestedTaskId ? "single" : "loop",
+      loopRound: requestedTaskId ? 1 : 0,
+      loopCompletedRuns: 0,
+      loopMaxRuns: requestedTaskId ? 1 : this.autoDevLoopMaxRuns,
+      loopDeadlineAt:
+        requestedTaskId || this.autoDevLoopMaxMinutes <= 0
+          ? null
+          : new Date(Date.now() + this.autoDevLoopMaxMinutes * 60_000).toISOString(),
+    };
     if (!context.requirementsContent) {
       await this.channel.sendNotice(
         message.conversationId,
@@ -1838,9 +1912,48 @@ export class Orchestrator {
     }
 
     if (!requestedTaskId) {
+      const loopStartedAt = Date.now();
+      const loopDeadlineAtIso = activeContext.loopDeadlineAt;
+      const loopDeadlineAtMs = loopDeadlineAtIso ? Date.parse(loopDeadlineAtIso) : null;
       let completedRuns = 0;
+      let attemptedRuns = 0;
+      this.setAutoDevSnapshot(sessionKey, {
+        state: "running",
+        startedAt: new Date(loopStartedAt).toISOString(),
+        endedAt: null,
+        taskId: null,
+        taskDescription: null,
+        approved: null,
+        repairRounds: 0,
+        error: null,
+        mode: "loop",
+        loopRound: 0,
+        loopCompletedRuns: 0,
+        loopMaxRuns: activeContext.loopMaxRuns,
+        loopDeadlineAt: loopDeadlineAtIso,
+        lastGitCommitSummary: null,
+        lastGitCommitAt: null,
+      });
       while (true) {
         if (this.consumePendingStopRequest(sessionKey)) {
+          const endedAtIso = new Date().toISOString();
+          this.setAutoDevSnapshot(sessionKey, {
+            state: "idle",
+            startedAt: new Date(loopStartedAt).toISOString(),
+            endedAt: endedAtIso,
+            taskId: null,
+            taskDescription: null,
+            approved: null,
+            repairRounds: 0,
+            error: "stopped by /stop",
+            mode: "loop",
+            loopRound: attemptedRuns,
+            loopCompletedRuns: completedRuns,
+            loopMaxRuns: activeContext.loopMaxRuns,
+            loopDeadlineAt: loopDeadlineAtIso,
+            lastGitCommitSummary: null,
+            lastGitCommitAt: null,
+          });
           await this.channel.sendNotice(
             message.conversationId,
             `[CodeHarbor] AutoDev 循环执行已停止。
@@ -1848,10 +1961,84 @@ export class Orchestrator {
           );
           return;
         }
+        if (attemptedRuns >= activeContext.loopMaxRuns) {
+          const endedAtIso = new Date().toISOString();
+          this.setAutoDevSnapshot(sessionKey, {
+            state: "succeeded",
+            startedAt: new Date(loopStartedAt).toISOString(),
+            endedAt: endedAtIso,
+            taskId: null,
+            taskDescription: null,
+            approved: null,
+            repairRounds: 0,
+            error: null,
+            mode: "loop",
+            loopRound: attemptedRuns,
+            loopCompletedRuns: completedRuns,
+            loopMaxRuns: activeContext.loopMaxRuns,
+            loopDeadlineAt: loopDeadlineAtIso,
+            lastGitCommitSummary: null,
+            lastGitCommitAt: null,
+          });
+          await this.channel.sendNotice(
+            message.conversationId,
+            `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- loopMaxRuns: ${activeContext.loopMaxRuns}`,
+          );
+          return;
+        }
+        if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
+          const endedAtIso = new Date().toISOString();
+          this.setAutoDevSnapshot(sessionKey, {
+            state: "succeeded",
+            startedAt: new Date(loopStartedAt).toISOString(),
+            endedAt: endedAtIso,
+            taskId: null,
+            taskDescription: null,
+            approved: null,
+            repairRounds: 0,
+            error: null,
+            mode: "loop",
+            loopRound: attemptedRuns,
+            loopCompletedRuns: completedRuns,
+            loopMaxRuns: activeContext.loopMaxRuns,
+            loopDeadlineAt: loopDeadlineAtIso,
+            lastGitCommitSummary: null,
+            lastGitCommitAt: null,
+          });
+          await this.channel.sendNotice(
+            message.conversationId,
+            `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- loopDeadlineAt: ${loopDeadlineAtIso}`,
+          );
+          return;
+        }
 
         const loopContext = await loadAutoDevContext(workdir);
         const loopTask = selectAutoDevTask(loopContext.tasks);
         if (!loopTask) {
+          const endedAtIso = new Date().toISOString();
+          this.setAutoDevSnapshot(sessionKey, {
+            state: "succeeded",
+            startedAt: new Date(loopStartedAt).toISOString(),
+            endedAt: endedAtIso,
+            taskId: null,
+            taskDescription: null,
+            approved: null,
+            repairRounds: 0,
+            error: null,
+            mode: "loop",
+            loopRound: attemptedRuns,
+            loopCompletedRuns: completedRuns,
+            loopMaxRuns: activeContext.loopMaxRuns,
+            loopDeadlineAt: loopDeadlineAtIso,
+            lastGitCommitSummary: null,
+            lastGitCommitAt: null,
+          });
           if (completedRuns === 0) {
             await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
             return;
@@ -1866,11 +2053,20 @@ export class Orchestrator {
           return;
         }
 
-        await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir);
-        completedRuns += 1;
+        attemptedRuns += 1;
+        await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir, {
+          mode: "loop",
+          loopRound: attemptedRuns,
+          loopCompletedRuns: completedRuns,
+          loopMaxRuns: activeContext.loopMaxRuns,
+          loopDeadlineAt: loopDeadlineAtIso,
+        });
 
         const refreshed = await loadAutoDevContext(workdir);
         const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
+        if (refreshedTask?.status === "completed") {
+          completedRuns += 1;
+        }
         if (refreshedTask && refreshedTask.status !== "completed") {
           await this.channel.sendNotice(
             message.conversationId,
@@ -1900,6 +2096,13 @@ export class Orchestrator {
     }
 
     const gitBaseline = await this.captureAutoDevGitBaseline(workdir);
+    const effectiveContext: AutoDevRunContext = {
+      mode: activeContext.mode,
+      loopRound: Math.max(1, activeContext.loopRound),
+      loopCompletedRuns: Math.max(0, activeContext.loopCompletedRuns),
+      loopMaxRuns: Math.max(1, activeContext.loopMaxRuns),
+      loopDeadlineAt: activeContext.loopDeadlineAt,
+    };
     let activeTask = selectedTask;
     let promotedToInProgress = false;
     if (selectedTask.status === "pending") {
@@ -1917,6 +2120,13 @@ export class Orchestrator {
       approved: null,
       repairRounds: 0,
       error: null,
+      mode: effectiveContext.mode,
+      loopRound: effectiveContext.loopRound,
+      loopCompletedRuns: effectiveContext.loopCompletedRuns,
+      loopMaxRuns: effectiveContext.loopMaxRuns,
+      loopDeadlineAt: effectiveContext.loopDeadlineAt,
+      lastGitCommitSummary: null,
+      lastGitCommitAt: null,
     });
     const workflowDiagRunId = this.beginWorkflowDiagRun({
       kind: "autodev",
@@ -1963,6 +2173,15 @@ export class Orchestrator {
         finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
         gitCommit = await this.tryAutoDevGitCommit(workdir, finalTask, gitBaseline);
       }
+      this.recordAutoDevGitCommit(sessionKey, finalTask.id, gitCommit);
+      this.appendWorkflowDiagEvent(
+        workflowDiagRunId,
+        "autodev",
+        "git_commit",
+        0,
+        `task=${finalTask.id} result=${formatAutoDevGitCommitResult(gitCommit)} files=${formatAutoDevGitChangedFiles(gitCommit)}`,
+      );
+      this.resetAutoDevFailureStreak(workdir, finalTask.id);
       const endedAtIso = new Date().toISOString();
       this.setAutoDevSnapshot(sessionKey, {
         state: "succeeded",
@@ -1973,6 +2192,13 @@ export class Orchestrator {
         approved: result.approved,
         repairRounds: result.repairRounds,
         error: null,
+        mode: effectiveContext.mode,
+        loopRound: effectiveContext.loopRound,
+        loopCompletedRuns: effectiveContext.loopCompletedRuns + (finalTask.status === "completed" ? 1 : 0),
+        loopMaxRuns: effectiveContext.loopMaxRuns,
+        loopDeadlineAt: effectiveContext.loopDeadlineAt,
+        lastGitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
+        lastGitCommitAt: new Date().toISOString(),
       });
 
       const refreshed = await loadAutoDevContext(workdir);
@@ -1984,6 +2210,7 @@ export class Orchestrator {
 - reviewer approved: ${result.approved ? "yes" : "no"}
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
+- git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
       );
       this.appendWorkflowDiagEvent(
@@ -1994,7 +2221,13 @@ export class Orchestrator {
         `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}`,
       );
     } catch (error) {
-      if (promotedToInProgress) {
+      const failurePolicy = await this.applyAutoDevFailurePolicy({
+        workdir,
+        task: activeTask,
+        taskListPath: context.taskListPath,
+      });
+      activeTask = failurePolicy.task;
+      if (promotedToInProgress && !failurePolicy.blocked) {
         try {
           await updateAutoDevTaskStatus(context.taskListPath, activeTask, "pending");
         } catch (restoreError) {
@@ -2016,14 +2249,32 @@ export class Orchestrator {
         approved: null,
         repairRounds: 0,
         error: formatError(error),
+        mode: effectiveContext.mode,
+        loopRound: effectiveContext.loopRound,
+        loopCompletedRuns: effectiveContext.loopCompletedRuns,
+        loopMaxRuns: effectiveContext.loopMaxRuns,
+        loopDeadlineAt: effectiveContext.loopDeadlineAt,
+        lastGitCommitSummary: null,
+        lastGitCommitAt: null,
       });
       this.appendWorkflowDiagEvent(
         workflowDiagRunId,
         "autodev",
         "autodev",
         0,
-        `AutoDev 失败: ${formatError(error)}`,
+        `AutoDev 失败: ${formatError(error)}, streak=${failurePolicy.streak}, blocked=${
+          failurePolicy.blocked ? "yes" : "no"
+        }`,
       );
+      if (failurePolicy.blocked) {
+        await this.channel.sendNotice(
+          message.conversationId,
+          `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
+        );
+      }
+      if (failurePolicy.blocked && effectiveContext.mode === "loop") {
+        return;
+      }
       throw error;
     }
   }
@@ -2059,6 +2310,12 @@ export class Orchestrator {
     task: AutoDevTask,
     baseline: AutoDevGitBaseline,
   ): Promise<AutoDevGitCommitResult> {
+    if (!this.autoDevAutoCommit) {
+      return {
+        kind: "skipped",
+        reason: "AUTODEV_AUTO_COMMIT=false",
+      };
+    }
     if (!baseline.available) {
       return {
         kind: "skipped",
@@ -2096,10 +2353,12 @@ export class Orchestrator {
         `Task: ${task.id} ${detail}\nGenerated-by: CodeHarbor AutoDev`,
       ]);
       const hash = (await this.runGitCommand(workdir, ["rev-parse", "--short", "HEAD"])).trim();
+      const changedFiles = await this.listGitCommitChangedFiles(workdir);
       return {
         kind: "committed",
         commitHash: hash || "unknown",
         commitSubject: subject,
+        changedFiles,
       };
     } catch (error) {
       const message = formatError(error);
@@ -2119,6 +2378,76 @@ export class Orchestrator {
         error: message,
       };
     }
+  }
+
+  private async applyAutoDevFailurePolicy(input: {
+    workdir: string;
+    task: AutoDevTask;
+    taskListPath: string;
+  }): Promise<AutoDevFailurePolicyResult> {
+    const key = this.buildAutoDevFailureKey(input.workdir, input.task.id);
+    const streak = (this.autoDevFailureStreaks.get(key) ?? 0) + 1;
+    this.autoDevFailureStreaks.set(key, streak);
+    if (streak < this.autoDevMaxConsecutiveFailures) {
+      return {
+        blocked: false,
+        streak,
+        task: input.task,
+      };
+    }
+    try {
+      const blockedTask = await updateAutoDevTaskStatus(input.taskListPath, input.task, "blocked");
+      return {
+        blocked: true,
+        streak,
+        task: blockedTask,
+      };
+    } catch (error) {
+      this.logger.warn("Failed to mark AutoDev task as blocked after consecutive failures", {
+        taskId: input.task.id,
+        streak,
+        error: formatError(error),
+      });
+      return {
+        blocked: false,
+        streak,
+        task: input.task,
+      };
+    }
+  }
+
+  private resetAutoDevFailureStreak(workdir: string, taskId: string): void {
+    const key = this.buildAutoDevFailureKey(workdir, taskId);
+    this.autoDevFailureStreaks.delete(key);
+  }
+
+  private buildAutoDevFailureKey(workdir: string, taskId: string): string {
+    return `${workdir}::${taskId.trim().toLowerCase()}`;
+  }
+
+  private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
+    this.autoDevGitCommitRecords.push({
+      at: new Date().toISOString(),
+      sessionKey,
+      taskId,
+      result,
+    });
+    if (this.autoDevGitCommitRecords.length > AUTODEV_GIT_COMMIT_HISTORY_MAX) {
+      this.autoDevGitCommitRecords.splice(0, this.autoDevGitCommitRecords.length - AUTODEV_GIT_COMMIT_HISTORY_MAX);
+    }
+  }
+
+  private listAutoDevGitCommitRecords(limit: number): AutoDevGitCommitRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.autoDevGitCommitRecords.slice(Math.max(0, this.autoDevGitCommitRecords.length - safeLimit)).reverse();
+  }
+
+  private async listGitCommitChangedFiles(workdir: string): Promise<string[]> {
+    const raw = await this.runGitCommand(workdir, ["show", "--name-only", "--pretty=format:", "--no-renames", "HEAD"]);
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
   }
 
   private async isGitRepository(workdir: string): Promise<boolean> {
@@ -3311,11 +3640,22 @@ ${formatMediaDiagEvents(snapshot.recentEvents)}`,
         },
         { running: 0, succeeded: 0, failed: 0, cancelled: 0 },
       );
+      const sessionKey = buildSessionKey(message);
+      const snapshot = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
+      const commitRecords = this.listAutoDevGitCommitRecords(target.limit);
+      const commitText =
+        commitRecords.length > 0
+          ? formatAutoDevGitCommitRecords(commitRecords)
+          : this.listRecentAutoDevGitCommitEventSummaries(target.limit).join("\n") || "- (empty)";
       await this.channel.sendNotice(
         message.conversationId,
         `${this.botNoticePrefix} 诊断信息（autodev）
 - recentCount: ${runs.length}
 - status: running=${counts.running}, succeeded=${counts.succeeded}, failed=${counts.failed}, cancelled=${counts.cancelled}
+- live: state=${snapshot.state}, mode=${snapshot.mode}, loop=${snapshot.loopRound}/${snapshot.loopMaxRuns}, completed=${snapshot.loopCompletedRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
+- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}
+- recentGitCommits:
+${commitText}
 - records:
 ${formatAutoDevDiagRuns(runs, (runId) => this.listWorkflowDiagEvents(runId, 5))}`,
       );
@@ -3562,6 +3902,16 @@ ${formatUpgradeDiagRecords(runs)}`,
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
       .slice(-safeLimit);
   }
+
+  private listRecentAutoDevGitCommitEventSummaries(limit: number): string[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.workflowDiagStore.events
+      .filter((event) => event.kind === "autodev" && event.stage === "git_commit")
+      .slice()
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, safeLimit)
+      .map((event) => `- at=${event.at} ${event.message}`);
+  }
 }
 
 function pruneSnapshotMap<T>(
@@ -3627,6 +3977,13 @@ function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
     approved: null,
     repairRounds: 0,
     error: null,
+    mode: "idle",
+    loopRound: 0,
+    loopCompletedRuns: 0,
+    loopMaxRuns: 0,
+    loopDeadlineAt: null,
+    lastGitCommitSummary: null,
+    lastGitCommitAt: null,
   };
 }
 
@@ -4161,6 +4518,32 @@ function parseCsvValues(raw: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseEnvPositiveInt(raw: string | undefined, fallback: number): number {
+  const normalized = raw?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function parseEnvBoolean(raw: string | undefined, fallback: boolean): boolean {
+  const normalized = raw?.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return fallback;
 }
 
 async function runSelfUpdateCommand(input: { version: string | null; timeoutMs: number }): Promise<SelfUpdateResult> {
@@ -4751,6 +5134,35 @@ function formatAutoDevGitCommitResult(result: AutoDevGitCommitResult): string {
     return `skipped (${result.reason})`;
   }
   return `failed (${result.error})`;
+}
+
+function formatAutoDevGitChangedFiles(result: AutoDevGitCommitResult): string {
+  if (result.kind !== "committed") {
+    return "N/A";
+  }
+  if (result.changedFiles.length === 0) {
+    return "(none)";
+  }
+  const preview = result.changedFiles.slice(0, 8).join(", ");
+  if (result.changedFiles.length <= 8) {
+    return preview;
+  }
+  return `${preview}, ... (+${result.changedFiles.length - 8})`;
+}
+
+function formatAutoDevGitCommitRecords(records: AutoDevGitCommitRecord[]): string {
+  if (records.length === 0) {
+    return "- (empty)";
+  }
+  return records
+    .map((record) => {
+      const base = `- at=${record.at} session=${record.sessionKey} task=${record.taskId} result=${formatAutoDevGitCommitResult(record.result)}`;
+      if (record.result.kind !== "committed") {
+        return base;
+      }
+      return `${base} files=${formatAutoDevGitChangedFiles(record.result)}`;
+    })
+    .join("\n");
 }
 
 function formatQueuePendingSessions(sessions: TaskQueuePendingSessionRecord[]): string {
