@@ -1465,6 +1465,56 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("loops /autodev run without task id until no executable tasks remain", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Requirements\n- implement T11.x\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T11.1 | first loop task | ⬜ |",
+        "| T11.2 | second loop task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-loop",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T11.1 | first loop task | ✅ |");
+      expect(updated).toContain("| T11.2 | second loop task | ✅ |");
+      expect(channel.notices.filter((entry) => entry.text.includes("AutoDev 启动任务")).length).toBe(2);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 循环执行完成"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("completedRuns: 2"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");

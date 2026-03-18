@@ -1693,7 +1693,7 @@ export class Orchestrator {
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
 - /autodev status: 查看 AutoDev 任务状态与下一个任务
-- /autodev run [taskId]: 执行下一个任务或指定任务（示例: /autodev run T6.2）
+- /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
@@ -1815,7 +1815,6 @@ export class Orchestrator {
   ): Promise<void> {
     const requestedTaskId = taskId?.trim() || null;
     const context = await loadAutoDevContext(workdir);
-    const gitBaseline = await this.captureAutoDevGitBaseline(workdir);
     if (!context.requirementsContent) {
       await this.channel.sendNotice(
         message.conversationId,
@@ -1838,6 +1837,50 @@ export class Orchestrator {
       return;
     }
 
+    if (!requestedTaskId) {
+      let completedRuns = 0;
+      while (true) {
+        if (this.consumePendingStopRequest(sessionKey)) {
+          await this.channel.sendNotice(
+            message.conversationId,
+            `[CodeHarbor] AutoDev 循环执行已停止。
+- completedRuns: ${completedRuns}`,
+          );
+          return;
+        }
+
+        const loopContext = await loadAutoDevContext(workdir);
+        const loopTask = selectAutoDevTask(loopContext.tasks);
+        if (!loopTask) {
+          if (completedRuns === 0) {
+            await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+            return;
+          }
+          const summary = summarizeAutoDevTasks(loopContext.tasks);
+          await this.channel.sendNotice(
+            message.conversationId,
+            `[CodeHarbor] AutoDev 循环执行完成
+- completedRuns: ${completedRuns}
+- remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+          );
+          return;
+        }
+
+        await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir);
+        completedRuns += 1;
+
+        const refreshed = await loadAutoDevContext(workdir);
+        const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
+        if (refreshedTask && refreshedTask.status !== "completed") {
+          await this.channel.sendNotice(
+            message.conversationId,
+            `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
+          );
+          return;
+        }
+      }
+    }
+
     const selectedTask = selectAutoDevTask(context.tasks, requestedTaskId);
     if (!selectedTask) {
       if (requestedTaskId) {
@@ -1856,6 +1899,7 @@ export class Orchestrator {
       return;
     }
 
+    const gitBaseline = await this.captureAutoDevGitBaseline(workdir);
     let activeTask = selectedTask;
     let promotedToInProgress = false;
     if (selectedTask.status === "pending") {
