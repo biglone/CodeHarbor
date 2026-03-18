@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- (none yet)
+
+## [0.1.41] - 2026-03-18
+
+- Reliability and recoverability:
+  - added a persistent recoverable task queue with restart recovery, retry/backoff policy, and failure archive
+  - added shared retry-policy module and queue diagnostics hooks in runtime metrics/state store
+- AutoDev and multi-agent diagnostics:
+  - persist AutoDev/workflow run records and stage events for postmortem debugging
+  - added `/diag autodev [count]` and `/diag queue [count]` for queue/run visibility
+  - updated `/help` command output to include new diagnostics commands
+- Test coverage:
+  - expanded reliability and diagnostics regression tests across orchestrator, state store, admin server, and compat replay suites
+- Operations and docs:
+  - added Prometheus alert rules example (`docs/PROMETHEUS_ALERT_RULES_EXAMPLE.yml`)
+  - added auto loop runner helper (`scripts/autodev-loop-runner.sh`)
+  - updated roadmap/task tracking and operation docs for metrics + queue workflows
 - Community and growth infrastructure:
   - added GitHub issue forms (bug/feature), issue template config, and pull request template
   - added release note category config via `.github/release.yml`
