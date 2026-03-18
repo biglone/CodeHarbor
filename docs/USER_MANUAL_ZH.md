@@ -162,6 +162,10 @@ codeharbor admin serve
 
 - `AGENT_WORKFLOW_ENABLED=true`：开启 `/agents`、`/autodev`
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`：自动修复轮次上限
+- `/autodev run [taskId]`：执行任务清单中的下一项（优先 `🔄`，再选 `⬜`）
+- 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
+  - 提交信息格式：`chore(autodev): complete <taskId>`
+- 若运行前仓库已存在未提交改动，或当前目录不是 Git 仓库，会跳过自动提交并在结果消息提示原因
 
 ### 5.6 版本检查与更新提示
 

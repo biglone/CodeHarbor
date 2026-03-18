@@ -567,6 +567,8 @@ AutoDev (`/autodev`) conventions:
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
 - `/autodev run` selects `🔄` task first, then `⬜` task.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
+- When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with `chore(autodev): complete <taskId>`.
+- If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
 - When using `scripts/autodev-loop-runner.sh`, a new trigger is skipped while any task is already `🔄` in progress.
 
 Default is disabled to keep legacy behavior unchanged.
