@@ -162,10 +162,15 @@ codeharbor admin serve
 
 - `AGENT_WORKFLOW_ENABLED=true`：开启 `/agents`、`/autodev`
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`：自动修复轮次上限
+- `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20）
+- `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120）
+- `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
+- `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交信息格式：`chore(autodev): complete <taskId>`
+- AutoDev 结果消息会固定输出 `git commit` 与 `git changed files`
 - 若运行前仓库已存在未提交改动，或当前目录不是 Git 仓库，会跳过自动提交并在结果消息提示原因
 
 ### 5.6 版本检查与更新提示

@@ -172,7 +172,7 @@ Common in-chat control commands:
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
 - `/diag upgrade [count]` show upgrade diagnostics (distributed lock, aggregate stats, recent upgrade records)
-- `/diag autodev [count]` show AutoDev workflow diagnostics (stage trace, status, last error)
+- `/diag autodev [count]` show AutoDev diagnostics (stage trace, live loop snapshot, and recent git commit records)
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
@@ -505,7 +505,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
   - `/diag upgrade [count]` show distributed lock + aggregate stats + recent upgrade run diagnostics
-  - `/diag autodev [count]` show AutoDev diagnostics (stage trace + status + error summary)
+  - `/diag autodev [count]` show AutoDev diagnostics (stage trace + loop status + recent git commit records + error summary)
   - `/diag queue [count]` show queue diagnostics (counts + pending sessions + failure archive)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
@@ -560,15 +560,26 @@ Cross-backend context bridge behavior:
   - enable `/agents` and `/autodev` workflow commands
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`
   - reviewer reject loop upper bound (default `1`)
+- `AUTODEV_LOOP_MAX_RUNS`
+  - max task attempts for one `/autodev run` loop execution (default `20`)
+- `AUTODEV_LOOP_MAX_MINUTES`
+  - max wall-clock minutes for one `/autodev run` loop execution (default `120`)
+- `AUTODEV_AUTO_COMMIT=true|false`
+  - enable/disable AutoDev git auto-commit after reviewer `APPROVED` (default `true`)
+- `AUTODEV_MAX_CONSECUTIVE_FAILURES`
+  - when the same task fails repeatedly and reaches this threshold, mark it `🚫` blocked (default `3`)
 
 AutoDev (`/autodev`) conventions:
 
 - Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
 - `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
+- `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit stops safely with a summary notice.
 - `/autodev run <taskId>` runs only the specified task.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with `chore(autodev): complete <taskId>`.
+- AutoDev result notice always includes git commit status and changed files (`git changed files`).
+- If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
 - When using `scripts/autodev-loop-runner.sh`, a new trigger is skipped while any task is already `🔄` in progress.
 
