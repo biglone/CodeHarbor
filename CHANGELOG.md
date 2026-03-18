@@ -8,6 +8,19 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.45] - 2026-03-18
+
+- Platform API (T6.2):
+  - added task query endpoint `GET /api/tasks/:taskId` (auth + status/stage/error summary)
+  - added API task status mapping in orchestrator and coverage for retry/failed snapshots
+  - updated roadmap status for T6.2
+- AutoDev observability:
+  - added Prometheus runtime metrics for AutoDev run outcomes, loop stop reasons, and blocked tasks
+  - `/metrics` output and alert-rule examples now include AutoDev loop/block anomaly signals
+- Matrix command UX:
+  - now supports escaped slash commands (`//help`, `//diag ...`, `//autodev ...`, `//agents ...`) for clients that intercept `/...`
+  - synced help/docs and regression tests for escaped command flow
+
 ## [0.1.44] - 2026-03-18
 
 - AutoDev loop controls:
