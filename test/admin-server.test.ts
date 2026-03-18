@@ -627,6 +627,63 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
   });
 
+  it("marks hot-only global updates as runtime-applied without restart", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_TYPING_TIMEOUT_MS=10000\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const updated = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "ops-hot-only",
+      },
+      body: JSON.stringify({
+        matrixTypingTimeoutMs: 15000,
+      }),
+    });
+    expect(updated.status).toBe(200);
+    const updatedBody = updated.body as {
+      restartRequired: boolean;
+      hotAppliedKeys: string[];
+      restartRequiredKeys: string[];
+      runtimeConfigVersion: number | null;
+    };
+    expect(updatedBody.restartRequired).toBe(false);
+    expect(updatedBody.hotAppliedKeys).toEqual(["matrixTypingTimeoutMs"]);
+    expect(updatedBody.restartRequiredKeys).toEqual([]);
+    expect(updatedBody.runtimeConfigVersion).toBe(1);
+
+    const runtimeSnapshot = stateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
+    expect(runtimeSnapshot).not.toBeNull();
+    expect(runtimeSnapshot?.version).toBe(1);
+    expect(runtimeSnapshot?.payloadJson ?? "").toContain('"matrixTypingTimeoutMs":15000');
+
+    const audit = await fetchJson(`${baseUrl}/api/admin/audit?limit=5`);
+    expect(audit.status).toBe(200);
+    const auditJson = JSON.stringify(audit.body);
+    expect(auditJson).toContain('"mode":"hot"');
+    expect(auditJson).toContain('"hotAppliedKeys":["matrixTypingTimeoutMs"]');
+    expect(auditJson).toContain('"restartRequiredKeys":[]');
+    expect(auditJson).toContain('"actor":"ops-hot-only"');
+  });
+
   it("splits hot-applied keys and restart-required keys with audit metadata", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
@@ -660,12 +717,16 @@ describe("AdminServer", () => {
       }),
     });
     expect(updated.status).toBe(200);
-    const updatedJson = JSON.stringify(updated.body);
-    expect(updatedJson).toContain("hotAppliedKeys");
-    expect(updatedJson).toContain("restartRequiredKeys");
-    expect(updatedJson).toContain('"matrixTypingTimeoutMs"');
-    expect(updatedJson).toContain('"matrixCommandPrefix"');
-    expect(updatedJson).toContain('"restartRequired":true');
+    const updatedBody = updated.body as {
+      restartRequired: boolean;
+      hotAppliedKeys: string[];
+      restartRequiredKeys: string[];
+      runtimeConfigVersion: number | null;
+    };
+    expect(updatedBody.restartRequired).toBe(true);
+    expect(updatedBody.hotAppliedKeys).toEqual(["matrixTypingTimeoutMs"]);
+    expect(updatedBody.restartRequiredKeys).toEqual(["matrixCommandPrefix"]);
+    expect(updatedBody.runtimeConfigVersion).toBe(1);
 
     const runtimeSnapshot = stateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
     expect(runtimeSnapshot).not.toBeNull();

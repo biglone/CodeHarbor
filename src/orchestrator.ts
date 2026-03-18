@@ -702,6 +702,8 @@ export class Orchestrator {
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
   private readonly runningExecutions = new Map<string, RunningExecution>();
   private readonly pendingStopRequests = new Set<string>();
+  private readonly pendingAutoDevLoopStopRequests = new Set<string>();
+  private readonly activeAutoDevLoopSessions = new Set<string>();
   private readonly skipBridgeForNextPrompt = new Set<string>();
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
@@ -1117,6 +1119,11 @@ export class Orchestrator {
           this.stateStore.markEventProcessed(sessionKey, message.eventId);
           return;
         }
+        if (autoDevCommand?.kind === "stop") {
+          await this.handleAutoDevLoopStopCommand(sessionKey, message);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
 
         if (!options.bypassQueue) {
           const queueStore = this.getTaskQueueStateStore();
@@ -1524,8 +1531,9 @@ export class Orchestrator {
     const autoDevCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
     const isWorkflowStatus = workflowCommand?.kind === "status";
     const isAutoDevStatus = autoDevCommand?.kind === "status";
+    const isAutoDevStop = autoDevCommand?.kind === "stop";
 
-    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus) {
+    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus && !isAutoDevStop) {
       return false;
     }
 
@@ -1544,6 +1552,8 @@ export class Orchestrator {
       await this.handleControlCommand(route.command, sessionKey, message, requestId);
     } else if (isWorkflowStatus) {
       await this.handleWorkflowStatusCommand(sessionKey, message);
+    } else if (isAutoDevStop) {
+      await this.handleAutoDevLoopStopCommand(sessionKey, message);
     } else {
       await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
     }
@@ -1552,7 +1562,14 @@ export class Orchestrator {
       requestId,
       eventId: message.eventId,
       sessionKey,
-      route: route.kind === "command" ? route.command : isWorkflowStatus ? "workflow.status" : "autodev.status",
+      route:
+        route.kind === "command"
+          ? route.command
+          : isWorkflowStatus
+            ? "workflow.status"
+            : isAutoDevStop
+              ? "autodev.stop"
+              : "autodev.status",
       queueWaitMs,
     });
     return true;
@@ -2001,6 +2018,26 @@ export class Orchestrator {
     }
   }
 
+  private async handleAutoDevLoopStopCommand(sessionKey: string, message: InboundMessage): Promise<void> {
+    if (!this.activeAutoDevLoopSessions.has(sessionKey)) {
+      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有运行中的 AutoDev 循环任务。");
+      return;
+    }
+    if (this.pendingAutoDevLoopStopRequests.has(sessionKey)) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 已收到停止请求：当前任务完成后会停止循环，不会启动下一任务。",
+      );
+      return;
+    }
+
+    this.pendingAutoDevLoopStopRequests.add(sessionKey);
+    await this.channel.sendNotice(
+      message.conversationId,
+      "[CodeHarbor] 已收到停止请求：将等待当前任务执行完成后停止 AutoDev 循环。",
+    );
+  }
+
   private async handleAutoDevRunCommand(
     taskId: string | null,
     sessionKey: string,
@@ -2049,6 +2086,8 @@ export class Orchestrator {
       const loopDeadlineAtMs = loopDeadlineAtIso ? Date.parse(loopDeadlineAtIso) : null;
       let completedRuns = 0;
       let attemptedRuns = 0;
+      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
+      this.activeAutoDevLoopSessions.add(sessionKey);
       this.setAutoDevSnapshot(sessionKey, {
         state: "running",
         startedAt: new Date(loopStartedAt).toISOString(),
@@ -2066,151 +2105,184 @@ export class Orchestrator {
         lastGitCommitSummary: null,
         lastGitCommitAt: null,
       });
-      while (true) {
-        if (this.consumePendingStopRequest(sessionKey)) {
-          this.autoDevMetrics.recordLoopStop("stop_requested");
-          const endedAtIso = new Date().toISOString();
-          this.setAutoDevSnapshot(sessionKey, {
-            state: "idle",
-            startedAt: new Date(loopStartedAt).toISOString(),
-            endedAt: endedAtIso,
-            taskId: null,
-            taskDescription: null,
-            approved: null,
-            repairRounds: 0,
-            error: "stopped by /stop",
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-            lastGitCommitSummary: null,
-            lastGitCommitAt: null,
-          });
-          await this.channel.sendNotice(
-            message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行已停止。
+      try {
+        while (true) {
+          if (this.consumePendingStopRequest(sessionKey)) {
+            this.autoDevMetrics.recordLoopStop("stop_requested");
+            const endedAtIso = new Date().toISOString();
+            this.setAutoDevSnapshot(sessionKey, {
+              state: "idle",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: null,
+              taskDescription: null,
+              approved: null,
+              repairRounds: 0,
+              error: "stopped by /stop",
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行已停止。
 - completedRuns: ${completedRuns}`,
-          );
-          return;
-        }
-        if (attemptedRuns >= activeContext.loopMaxRuns) {
-          this.autoDevMetrics.recordLoopStop("max_runs");
-          const endedAtIso = new Date().toISOString();
-          this.setAutoDevSnapshot(sessionKey, {
-            state: "succeeded",
-            startedAt: new Date(loopStartedAt).toISOString(),
-            endedAt: endedAtIso,
-            taskId: null,
-            taskDescription: null,
-            approved: null,
-            repairRounds: 0,
-            error: null,
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-            lastGitCommitSummary: null,
-            lastGitCommitAt: null,
-          });
-          await this.channel.sendNotice(
-            message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
+            );
+            return;
+          }
+          if (this.consumePendingAutoDevLoopStopRequest(sessionKey)) {
+            this.autoDevMetrics.recordLoopStop("stop_requested");
+            const endedAtIso = new Date().toISOString();
+            this.setAutoDevSnapshot(sessionKey, {
+              state: "succeeded",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: null,
+              taskDescription: null,
+              approved: null,
+              repairRounds: 0,
+              error: null,
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}`,
+            );
+            return;
+          }
+          if (attemptedRuns >= activeContext.loopMaxRuns) {
+            this.autoDevMetrics.recordLoopStop("max_runs");
+            const endedAtIso = new Date().toISOString();
+            this.setAutoDevSnapshot(sessionKey, {
+              state: "succeeded",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: null,
+              taskDescription: null,
+              approved: null,
+              repairRounds: 0,
+              error: null,
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopMaxRuns: ${activeContext.loopMaxRuns}`,
-          );
-          return;
-        }
-        if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
-          this.autoDevMetrics.recordLoopStop("deadline");
-          const endedAtIso = new Date().toISOString();
-          this.setAutoDevSnapshot(sessionKey, {
-            state: "succeeded",
-            startedAt: new Date(loopStartedAt).toISOString(),
-            endedAt: endedAtIso,
-            taskId: null,
-            taskDescription: null,
-            approved: null,
-            repairRounds: 0,
-            error: null,
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-            lastGitCommitSummary: null,
-            lastGitCommitAt: null,
-          });
-          await this.channel.sendNotice(
-            message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
+            );
+            return;
+          }
+          if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
+            this.autoDevMetrics.recordLoopStop("deadline");
+            const endedAtIso = new Date().toISOString();
+            this.setAutoDevSnapshot(sessionKey, {
+              state: "succeeded",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: null,
+              taskDescription: null,
+              approved: null,
+              repairRounds: 0,
+              error: null,
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopDeadlineAt: ${loopDeadlineAtIso}`,
-          );
-          return;
-        }
+            );
+            return;
+          }
 
-        const loopContext = await loadAutoDevContext(workdir);
-        const loopTask = selectAutoDevTask(loopContext.tasks);
-        if (!loopTask) {
-          this.autoDevMetrics.recordLoopStop(completedRuns === 0 ? "no_task" : "drained");
-          const endedAtIso = new Date().toISOString();
-          this.setAutoDevSnapshot(sessionKey, {
-            state: "succeeded",
-            startedAt: new Date(loopStartedAt).toISOString(),
-            endedAt: endedAtIso,
-            taskId: null,
-            taskDescription: null,
-            approved: null,
-            repairRounds: 0,
-            error: null,
+          const loopContext = await loadAutoDevContext(workdir);
+          const loopTask = selectAutoDevTask(loopContext.tasks);
+          if (!loopTask) {
+            this.autoDevMetrics.recordLoopStop(completedRuns === 0 ? "no_task" : "drained");
+            const endedAtIso = new Date().toISOString();
+            this.setAutoDevSnapshot(sessionKey, {
+              state: "succeeded",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: null,
+              taskDescription: null,
+              approved: null,
+              repairRounds: 0,
+              error: null,
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            if (completedRuns === 0) {
+              await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+              return;
+            }
+            const summary = summarizeAutoDevTasks(loopContext.tasks);
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行完成
+- completedRuns: ${completedRuns}
+- remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+            );
+            return;
+          }
+
+          attemptedRuns += 1;
+          await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir, {
             mode: "loop",
             loopRound: attemptedRuns,
             loopCompletedRuns: completedRuns,
             loopMaxRuns: activeContext.loopMaxRuns,
             loopDeadlineAt: loopDeadlineAtIso,
-            lastGitCommitSummary: null,
-            lastGitCommitAt: null,
           });
-          if (completedRuns === 0) {
-            await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+
+          const refreshed = await loadAutoDevContext(workdir);
+          const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
+          if (refreshedTask?.status === "completed") {
+            completedRuns += 1;
+          }
+          if (refreshedTask && refreshedTask.status !== "completed") {
+            this.autoDevMetrics.recordLoopStop("task_incomplete");
+            await this.channel.sendNotice(
+              message.conversationId,
+              `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
+            );
             return;
           }
-          const summary = summarizeAutoDevTasks(loopContext.tasks);
-          await this.channel.sendNotice(
-            message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行完成
-- completedRuns: ${completedRuns}
-- remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-          );
-          return;
         }
-
-        attemptedRuns += 1;
-        await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir, {
-          mode: "loop",
-          loopRound: attemptedRuns,
-          loopCompletedRuns: completedRuns,
-          loopMaxRuns: activeContext.loopMaxRuns,
-          loopDeadlineAt: loopDeadlineAtIso,
-        });
-
-        const refreshed = await loadAutoDevContext(workdir);
-        const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
-        if (refreshedTask?.status === "completed") {
-          completedRuns += 1;
-        }
-        if (refreshedTask && refreshedTask.status !== "completed") {
-          this.autoDevMetrics.recordLoopStop("task_incomplete");
-          await this.channel.sendNotice(
-            message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
-          );
-          return;
-        }
+      } finally {
+        this.activeAutoDevLoopSessions.delete(sessionKey);
+        this.pendingAutoDevLoopStopRequests.delete(sessionKey);
       }
     }
 

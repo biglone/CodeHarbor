@@ -28,7 +28,7 @@ export interface AutoDevContext {
   tasks: AutoDevTask[];
 }
 
-export type AutoDevCommand = { kind: "status" } | { kind: "run"; taskId: string | null };
+export type AutoDevCommand = { kind: "status" } | { kind: "run"; taskId: string | null } | { kind: "stop" };
 
 export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   const normalized = text.trim();
@@ -40,6 +40,9 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   const parts = normalizedCommand.split(/\s+/);
   if (parts.length === 1 || parts[1]?.toLowerCase() === "status") {
     return { kind: "status" };
+  }
+  if (parts[1]?.toLowerCase() === "stop") {
+    return { kind: "stop" };
   }
   if (parts[1]?.toLowerCase() !== "run") {
     return null;

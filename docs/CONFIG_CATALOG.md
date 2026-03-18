@@ -40,14 +40,14 @@ These must be valid before `codeharbor start`.
 | Key | Required | Default | Admin UI | Effect Timing | Notes |
 |---|---|---|---|---|---|
 | `MATRIX_COMMAND_PREFIX` | No | `!code` | Yes | Restart | Group explicit trigger prefix |
-| `SESSION_ACTIVE_WINDOW_MINUTES` | No | `20` | Yes | Restart | Active window for group follow-up |
+| `SESSION_ACTIVE_WINDOW_MINUTES` | No | `20` | Yes | Hot (new requests) | Active window for group follow-up |
 | `MATRIX_ADMIN_USERS` | No | empty | No | Restart | Optional Matrix admin mxid list used as `/upgrade` auth fallback |
 | `MATRIX_UPGRADE_ALLOWED_USERS` | No | empty | No | Restart | Optional explicit mxid allowlist for in-chat `/upgrade` (higher priority than `MATRIX_ADMIN_USERS`) |
-| `GROUP_DIRECT_MODE_ENABLED` | No | `false` | Yes | Restart | Process all group messages without trigger matching |
-| `GROUP_TRIGGER_ALLOW_MENTION` | No | `true` | Yes | Restart | Default group policy |
-| `GROUP_TRIGGER_ALLOW_REPLY` | No | `true` | Yes | Restart | Default group policy |
-| `GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW` | No | `true` | Yes | Restart | Default group policy |
-| `GROUP_TRIGGER_ALLOW_PREFIX` | No | `true` | Yes | Restart | Default group policy |
+| `GROUP_DIRECT_MODE_ENABLED` | No | `false` | Yes | Hot (new requests) | Process all group messages without trigger matching |
+| `GROUP_TRIGGER_ALLOW_MENTION` | No | `true` | Yes | Hot (new requests) | Default group policy |
+| `GROUP_TRIGGER_ALLOW_REPLY` | No | `true` | Yes | Hot (new requests) | Default group policy |
+| `GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW` | No | `true` | Yes | Hot (new requests) | Default group policy |
+| `GROUP_TRIGGER_ALLOW_PREFIX` | No | `true` | Yes | Hot (new requests) | Default group policy |
 | `ROOM_TRIGGER_POLICY_JSON` | No | empty | No | Restart | Legacy JSON override map |
 | Room settings in DB (`room_settings`) | N/A | N/A | Yes | Immediate (new requests) | Room enable flags, per-room trigger policy, room workdir |
 
@@ -55,21 +55,21 @@ These must be valid before `codeharbor start`.
 
 | Key | Required | Default | Admin UI | Effect Timing | Notes |
 |---|---|---|---|---|---|
-| `RATE_LIMIT_WINDOW_SECONDS` | No | `60` | Yes | Restart | Window size |
-| `RATE_LIMIT_MAX_REQUESTS_PER_USER` | No | `20` | Yes | Restart | User request cap per window |
-| `RATE_LIMIT_MAX_REQUESTS_PER_ROOM` | No | `120` | Yes | Restart | Room request cap per window |
-| `RATE_LIMIT_MAX_CONCURRENT_GLOBAL` | No | `8` | Yes | Restart | Global concurrency cap |
-| `RATE_LIMIT_MAX_CONCURRENT_PER_USER` | No | `1` | Yes | Restart | User concurrency cap |
-| `RATE_LIMIT_MAX_CONCURRENT_PER_ROOM` | No | `4` | Yes | Restart | Room concurrency cap |
+| `RATE_LIMIT_WINDOW_SECONDS` | No | `60` | Yes | Hot (new requests) | Window size |
+| `RATE_LIMIT_MAX_REQUESTS_PER_USER` | No | `20` | Yes | Hot (new requests) | User request cap per window |
+| `RATE_LIMIT_MAX_REQUESTS_PER_ROOM` | No | `120` | Yes | Hot (new requests) | Room request cap per window |
+| `RATE_LIMIT_MAX_CONCURRENT_GLOBAL` | No | `8` | Yes | Hot (new requests) | Global concurrency cap |
+| `RATE_LIMIT_MAX_CONCURRENT_PER_USER` | No | `1` | Yes | Hot (new requests) | User concurrency cap |
+| `RATE_LIMIT_MAX_CONCURRENT_PER_ROOM` | No | `4` | Yes | Hot (new requests) | Room concurrency cap |
 
 ## 5) Progress / Response Behavior
 
 | Key | Required | Default | Admin UI | Effect Timing | Notes |
 |---|---|---|---|---|---|
 | `REPLY_CHUNK_SIZE` | No | `3500` | No | Restart | Message split size |
-| `MATRIX_PROGRESS_UPDATES` | No | `true` | Yes | Restart | Emit progress updates |
-| `MATRIX_PROGRESS_MIN_INTERVAL_MS` | No | `2500` | Yes | Restart | Progress update interval |
-| `MATRIX_TYPING_TIMEOUT_MS` | No | `10000` | Yes | Restart | Typing indicator timeout |
+| `MATRIX_PROGRESS_UPDATES` | No | `true` | Yes | Hot (new requests) | Emit progress updates |
+| `MATRIX_PROGRESS_MIN_INTERVAL_MS` | No | `2500` | Yes | Hot (new requests) | Progress update interval |
+| `MATRIX_TYPING_TIMEOUT_MS` | No | `10000` | Yes | Hot (new requests) | Typing indicator timeout |
 | `PACKAGE_UPDATE_CHECK_ENABLED` | No | `true` | Yes | Restart | Enable npm latest-version lookup for `/status`, `/version`, and Admin health app row |
 | `PACKAGE_UPDATE_CHECK_TIMEOUT_MS` | No | `3000` | Yes | Restart | Timeout (ms) for npm latest-version lookup |
 | `PACKAGE_UPDATE_CHECK_TTL_MS` | No | `21600000` | Yes | Restart | Cache TTL (ms) for npm latest-version lookup results |
@@ -133,3 +133,21 @@ These must be valid before `codeharbor start`.
 - Set strong `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON`
 - Expose only through trusted gateway (for example Cloudflare Tunnel)
 - Do not use `--allow-insecure-no-token`
+
+## Hot Update Rollback (Ops)
+
+1. Create a snapshot before changing config:
+   - `codeharbor config export -o backups/pre-hot-update.json`
+2. For a bad hot update (whitelist keys), write back the previous value from Admin UI/API:
+   - `PUT /api/admin/config/global`
+   - verify response has `restartRequired=false` and expected `hotAppliedKeys`
+3. For full rollback (includes restart-required keys), import snapshot and restart service:
+   - `codeharbor config import backups/pre-hot-update.json --dry-run`
+   - `codeharbor config import backups/pre-hot-update.json`
+   - `codeharbor service restart` (or `codeharbor service restart --with-admin`)
+4. Verify and audit:
+   - `GET /api/admin/audit?limit=20`
+   - `GET /api/admin/health`
+   - send a Matrix smoke request in one room
+
+Boundary: hot updates affect new requests only; in-flight requests continue with their existing execution state.

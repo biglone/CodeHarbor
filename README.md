@@ -310,6 +310,7 @@ It documents:
 - which keys are required vs optional
 - which keys can be edited in Admin UI
 - whether changes are immediate or restart-scoped
+- hot-update rollback paths (quick hot rollback vs full snapshot rollback)
 - recommended profiles for local/internal/public deployment
 - a complete setup sequence from install to production operations
 
@@ -456,6 +457,33 @@ Rotate tokens quickly (repository script):
 ```
 
 Note: `PUT /api/admin/config/global` always writes `.env`; high-frequency whitelist keys hot-apply for new requests, while non-whitelist keys still require restart.
+
+### Hot Update Rollback
+
+1. Backup before change:
+
+```bash
+codeharbor config export -o backups/pre-hot-update.json
+```
+
+2. Fast rollback for hot-whitelist keys (`restartRequired=false`):
+- write previous value back via Admin UI, or call `PUT /api/admin/config/global`
+- confirm response `hotAppliedKeys` contains expected key(s)
+
+3. Full rollback for mixed/restart-required changes:
+
+```bash
+codeharbor config import backups/pre-hot-update.json --dry-run
+codeharbor config import backups/pre-hot-update.json
+codeharbor service restart
+```
+
+4. Verify + audit:
+- `GET /api/admin/audit?limit=20`
+- `GET /api/admin/health`
+- send one Matrix smoke request in each critical room
+
+Boundary: hot updates affect new requests only; in-flight requests are not rolled back.
 
 ### Admin UI Quick Walkthrough
 

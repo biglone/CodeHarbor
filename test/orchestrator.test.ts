@@ -286,6 +286,68 @@ class CancellableExecutor {
   }
 }
 
+interface DeferredExecutionEntry {
+  text: string;
+  sessionId: string | null;
+  resolve: (value: { sessionId: string; reply: string }) => void;
+  reject: (error: unknown) => void;
+}
+
+class DeferredExecutor {
+  callCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null; imagePaths: string[] }> = [];
+  private readonly pending: Array<DeferredExecutionEntry | undefined> = [];
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string; imagePaths?: string[] },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+      imagePaths: startOptions?.imagePaths ? [...startOptions.imagePaths] : [],
+    });
+
+    const pendingIndex = this.pending.length;
+    const result = new Promise<{ sessionId: string; reply: string }>((resolve, reject) => {
+      this.pending[pendingIndex] = {
+        text,
+        sessionId,
+        resolve,
+        reject,
+      };
+    });
+
+    return {
+      result,
+      cancel: () => {
+        const pending = this.pending[pendingIndex];
+        if (!pending) {
+          return;
+        }
+        this.pending[pendingIndex] = undefined;
+        pending.reject(new CodexExecutionCancelledError());
+      },
+    };
+  }
+
+  resolveCall(index: number, reply?: string): void {
+    const pending = this.pending[index];
+    if (!pending) {
+      throw new Error(`No pending call at index ${index}.`);
+    }
+    this.pending[index] = undefined;
+    pending.resolve({
+      sessionId: pending.sessionId ?? "thread-1",
+      reply: reply ?? `ok:${pending.text}`,
+    });
+  }
+}
+
 class WorkflowExecutor {
   callCount = 0;
   reviewCount = 0;
@@ -609,6 +671,155 @@ describe("Orchestrator", () => {
 
     expect(executor.callCount).toBe(1);
     expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(true);
+  });
+
+  it("applies a later valid hot config snapshot after rejecting an invalid snapshot", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 1,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 10,
+        maxConcurrentPerRoom: 10,
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first", eventId: "$hv1" }));
+
+    store.upsertRuntimeConfigSnapshot(
+      GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+      JSON.stringify({
+        rateLimiter: {
+          windowMs: 60_000,
+          maxRequestsPerUser: -1,
+          maxRequestsPerRoom: 100,
+          maxConcurrentGlobal: 10,
+          maxConcurrentPerUser: 10,
+          maxConcurrentPerRoom: 10,
+        },
+        matrixProgressUpdates: false,
+        matrixProgressMinIntervalMs: 2_500,
+        matrixTypingTimeoutMs: 10_000,
+        sessionActiveWindowMinutes: 20,
+        groupDirectModeEnabled: false,
+        defaultGroupTriggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+      }),
+    );
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second", eventId: "$hv2" }));
+
+    store.upsertRuntimeConfigSnapshot(
+      GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+      JSON.stringify({
+        rateLimiter: {
+          windowMs: 60_000,
+          maxRequestsPerUser: 2,
+          maxRequestsPerRoom: 100,
+          maxConcurrentGlobal: 10,
+          maxConcurrentPerUser: 10,
+          maxConcurrentPerRoom: 10,
+        },
+        matrixProgressUpdates: false,
+        matrixProgressMinIntervalMs: 2_500,
+        matrixTypingTimeoutMs: 10_000,
+        sessionActiveWindowMinutes: 20,
+        groupDirectModeEnabled: false,
+        defaultGroupTriggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+      }),
+    );
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "third", eventId: "$hv3" }));
+
+    expect(executor.callCount).toBe(2);
+    expect(channel.notices.filter((entry) => entry.text.includes("请求过于频繁"))).toHaveLength(1);
+  });
+
+  it("applies hot config only to new requests and does not rollback in-flight requests", async () => {
+    const channel = new FakeChannel();
+    const executor = new DeferredExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 20,
+        maxRequestsPerRoom: 120,
+        maxConcurrentGlobal: 1,
+        maxConcurrentPerUser: 2,
+        maxConcurrentPerRoom: 2,
+      },
+    });
+
+    const firstRequest = orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        senderId: "@alice:example.com",
+        eventId: "$hn1",
+        text: "first",
+      }),
+    );
+    await waitForCondition(() => executor.callCount === 1);
+
+    store.upsertRuntimeConfigSnapshot(
+      GLOBAL_RUNTIME_HOT_CONFIG_KEY,
+      JSON.stringify({
+        rateLimiter: {
+          windowMs: 60_000,
+          maxRequestsPerUser: 20,
+          maxRequestsPerRoom: 120,
+          maxConcurrentGlobal: 2,
+          maxConcurrentPerUser: 2,
+          maxConcurrentPerRoom: 2,
+        },
+        matrixProgressUpdates: false,
+        matrixProgressMinIntervalMs: 2_500,
+        matrixTypingTimeoutMs: 10_000,
+        sessionActiveWindowMinutes: 20,
+        groupDirectModeEnabled: false,
+        defaultGroupTriggerPolicy: {
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+        },
+      }),
+    );
+
+    const secondRequest = orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        senderId: "@bob:example.com",
+        eventId: "$hn2",
+        text: "second",
+      }),
+    );
+    await waitForCondition(() => executor.callCount === 2);
+
+    executor.resolveCall(0, "first-done");
+    executor.resolveCall(1, "second-done");
+    await Promise.all([firstRequest, secondRequest]);
+
+    expect(channel.notices.some((entry) => entry.text.includes("请求过于频繁"))).toBe(false);
+    expect(channel.sent.map((entry) => entry.text)).toEqual(expect.arrayContaining(["first-done", "second-done"]));
   });
 
   it("/stop cancels an active execution immediately", async () => {
