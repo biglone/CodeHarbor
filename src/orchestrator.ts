@@ -1681,6 +1681,8 @@ export class Orchestrator {
 - /help: 查看命令帮助
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
+- /autodev status: 查看 AutoDev 任务状态与下一个任务
+- /autodev run [taskId]: 执行下一个任务或指定任务（示例: /autodev run T6.2）
 - 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
