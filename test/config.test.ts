@@ -220,3 +220,23 @@ describe("loadConfig MATRIX upgrade permissions", () => {
     expect(config.matrixUpgradeAllowedUsers).toEqual(["@upgrade:example.com"]);
   });
 });
+
+describe("loadConfig API task server", () => {
+  it("uses disabled API defaults", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.apiEnabled).toBe(false);
+    expect(config.apiBindHost).toBe("127.0.0.1");
+    expect(config.apiPort).toBe(8788);
+    expect(config.apiToken).toBeNull();
+  });
+
+  it("requires API_TOKEN when API_ENABLED=true", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          API_ENABLED: "true",
+        }),
+      ),
+    ).toThrow(/API_TOKEN is required/i);
+  });
+});

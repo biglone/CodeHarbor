@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { type Channel, type InboundHandler } from "../src/channels/channel";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
-import { Orchestrator, buildSessionKey } from "../src/orchestrator";
+import { ApiTaskIdempotencyConflictError, Orchestrator, buildSessionKey } from "../src/orchestrator";
 import { StateStore } from "../src/store/state-store";
 import { InboundMessage } from "../src/types";
 
@@ -788,6 +788,71 @@ describe("Orchestrator", () => {
       await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 3_000);
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(450);
       expect(executor.callCount).toBe(2);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("submits API task into queue and returns idempotent hit for duplicate payload", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-queue-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      const first = orchestrator.submitApiTask({
+        conversationId: "!api-room:example.com",
+        senderId: "@ci:example.com",
+        text: "run integration",
+        idempotencyKey: "idem-api-1",
+      });
+      const second = orchestrator.submitApiTask({
+        conversationId: "!api-room:example.com",
+        senderId: "@ci:example.com",
+        text: "run integration",
+        idempotencyKey: "idem-api-1",
+      });
+
+      expect(first.created).toBe(true);
+      expect(second.created).toBe(false);
+      expect(second.task.id).toBe(first.task.id);
+      expect(first.sessionKey).toBe("matrix:!api-room:example.com:@ci:example.com");
+      expect(store.listTasks(10)).toHaveLength(1);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects API idempotency key reuse when payload differs", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-conflict-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      orchestrator.submitApiTask({
+        conversationId: "!api-room:example.com",
+        senderId: "@ci:example.com",
+        text: "run integration",
+        idempotencyKey: "idem-api-conflict",
+      });
+
+      expect(() =>
+        orchestrator.submitApiTask({
+          conversationId: "!api-room:example.com",
+          senderId: "@ci:example.com",
+          text: "run deployment",
+          idempotencyKey: "idem-api-conflict",
+        }),
+      ).toThrow(ApiTaskIdempotencyConflictError);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
