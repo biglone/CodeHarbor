@@ -32,11 +32,12 @@ export type AutoDevCommand = { kind: "status" } | { kind: "run"; taskId: string 
 
 export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   const normalized = text.trim();
-  if (!/^\/autodev(?:\s|$)/i.test(normalized)) {
+  if (!/^\/{1,2}autodev(?:\s|$)/i.test(normalized)) {
     return null;
   }
 
-  const parts = normalized.split(/\s+/);
+  const normalizedCommand = normalized.startsWith("//") ? normalized.slice(1) : normalized;
+  const parts = normalizedCommand.split(/\s+/);
   if (parts.length === 1 || parts[1]?.toLowerCase() === "status") {
     return { kind: "status" };
   }
@@ -44,7 +45,7 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     return null;
   }
 
-  const taskId = normalized.replace(/^\/autodev\s+run\s*/i, "").trim();
+  const taskId = normalizedCommand.replace(/^\/autodev\s+run\s*/i, "").trim();
   return {
     kind: "run",
     taskId: taskId || null,

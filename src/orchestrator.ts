@@ -1864,6 +1864,7 @@ export class Orchestrator {
 - /backend codex|claude|status: 查看/切换后端工具
 - /reset: 清空当前会话上下文
 - /stop: 停止当前执行任务
+- Matrix 客户端若拦截 / 命令，可发送 //autodev run T6.2（兼容 //agents、//diag、//upgrade）
 - help|帮助|菜单: /help 的文本别名（用于 Matrix 拦截 /help 的客户端）`,
       );
       return;
@@ -4483,7 +4484,7 @@ function parseControlCommand(
     return "upgrade";
   }
 
-  const command = text.split(/\s+/, 1)[0].toLowerCase();
+  const command = normalizeSlashCommandToken(text.split(/\s+/, 1)[0] ?? "");
   if (command === "/status") {
     return "status";
   }
@@ -4509,6 +4510,14 @@ function parseControlCommand(
     return "upgrade";
   }
   return null;
+}
+
+function normalizeSlashCommandToken(token: string): string {
+  const normalized = token.trim().toLowerCase();
+  if (normalized.startsWith("//")) {
+    return normalized.slice(1);
+  }
+  return normalized;
 }
 
 function isPlainUpgradeCommand(normalized: string): boolean {
@@ -4543,11 +4552,11 @@ function parseDiagTarget(
   if (tokens.length === 0) {
     return { kind: "help" };
   }
-  const diagTokenIndex = tokens.findIndex((token) => token.toLowerCase() === "/diag");
+  const diagTokenIndex = tokens.findIndex((token) => normalizeSlashCommandToken(token) === "/diag");
   if (diagTokenIndex < 0) {
     return { kind: "help" };
   }
-  const value = tokens[diagTokenIndex + 1]?.toLowerCase() ?? "";
+  const value = (tokens[diagTokenIndex + 1] ?? "").toLowerCase();
   const limitToken = tokens[diagTokenIndex + 2] ?? "";
   if (!value) {
     return { kind: "help" };

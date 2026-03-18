@@ -51,9 +51,14 @@ describe("MultiAgentWorkflowRunner", () => {
   it("parses /agents commands", () => {
     expect(parseWorkflowCommand("/agents")).toEqual({ kind: "status" });
     expect(parseWorkflowCommand(" /agents status ")).toEqual({ kind: "status" });
+    expect(parseWorkflowCommand("//agents status")).toEqual({ kind: "status" });
     expect(parseWorkflowCommand("/agents run   build release package")).toEqual({
       kind: "run",
       objective: "build release package",
+    });
+    expect(parseWorkflowCommand("//agents run fix flaky tests")).toEqual({
+      kind: "run",
+      objective: "fix flaky tests",
     });
     expect(parseWorkflowCommand("/agents unknown")).toBeNull();
     expect(parseWorkflowCommand("/agent run x")).toBeNull();

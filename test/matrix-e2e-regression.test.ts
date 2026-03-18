@@ -716,6 +716,7 @@ describe("Matrix e2e regression", () => {
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first task" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/help" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "//help" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/reset" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second task" }));
 
@@ -740,6 +741,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("/diag media [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag autodev [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag queue [count]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("//autodev run T6.2"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("多模态状态:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("上下文已重置"))).toBe(true);
   });
@@ -1010,6 +1012,36 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("pid:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("backend: codex (gpt-5-codex)"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("latestHint:"))).toBe(true);
+  });
+
+  it("supports escaped //diag version command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const getStatus = vi.fn(async () => ({
+      packageName: "codeharbor",
+      currentVersion: "0.1.31",
+      latestVersion: "0.1.31",
+      state: "up_to_date" as const,
+      checkedAt: "2026-03-16T10:11:12.000Z",
+      error: null,
+      upgradeCommand: "npm install -g codeharbor@latest",
+    }));
+
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      packageUpdateChecker: {
+        getStatus,
+      },
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "//diag version" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(getStatus).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(channel.notices.some((entry) => entry.text.includes("诊断信息（version）"))).toBe(true);
   });
 
   it("shows media diagnosis for /diag media command", async () => {

@@ -331,11 +331,12 @@ function parseReviewerVerdict(review: string): { approved: boolean; feedback: st
 
 export function parseWorkflowCommand(text: string): { kind: "status" } | { kind: "run"; objective: string } | null {
   const normalized = text.trim();
-  if (!normalized.startsWith("/agents")) {
+  if (!/^\/{1,2}agents(?:\s|$)/i.test(normalized)) {
     return null;
   }
 
-  const parts = normalized.split(/\s+/);
+  const normalizedCommand = normalized.startsWith("//") ? normalized.slice(1) : normalized;
+  const parts = normalizedCommand.split(/\s+/);
   if (parts.length === 1 || parts[1]?.toLowerCase() === "status") {
     return { kind: "status" };
   }
@@ -343,7 +344,7 @@ export function parseWorkflowCommand(text: string): { kind: "status" } | { kind:
     return null;
   }
 
-  const objective = normalized.replace(/^\/agents\s+run\s*/i, "").trim();
+  const objective = normalizedCommand.replace(/^\/agents\s+run\s*/i, "").trim();
   return {
     kind: "run",
     objective,
