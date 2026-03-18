@@ -8,6 +8,22 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.44] - 2026-03-18
+
+- AutoDev loop controls:
+  - `/autodev run` (without task id) now supports loop guardrails via `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`
+  - loop execution publishes explicit stop reasons when reaching run-count or time limits
+- AutoDev commit behavior:
+  - added `AUTODEV_AUTO_COMMIT=true|false` to control post-approval git auto-commit
+  - AutoDev result now includes both git commit summary and changed file list (`git changed files`)
+- AutoDev failure resilience:
+  - added `AUTODEV_MAX_CONSECUTIVE_FAILURES`, automatically marks tasks as `🚫` after repeated failures
+  - loop mode skips blocked tasks and continues processing next executable tasks
+- AutoDev diagnostics:
+  - `/diag autodev [count]` now includes live loop snapshot, runtime config, and recent git commit records
+- Docs and config sync:
+  - updated `.env.example`, `README.md`, and `docs/USER_MANUAL_ZH.md` with new AutoDev controls and behavior notes
+
 ## [0.1.43] - 2026-03-18
 
 - Matrix command-prefix compatibility:
