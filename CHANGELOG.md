@@ -8,6 +8,20 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.48] - 2026-03-19
+
+- Routing engine and diagnostics (T7.5/T7.6):
+  - added `BACKEND_MODEL_ROUTING_RULES_JSON` rule engine for automatic backend/model selection by room/sender/task-type/text conditions
+  - added `/diag route [count]` with rule hit/fallback reason details and recent per-session route records
+  - `/status` and `/backend ... status` now expose route reason description and fallback marker
+  - added `/backend auto` to recover rule-based auto routing after manual override
+- AutoDev and command UX hardening:
+  - fixed `/autodev stop` handling edge cases in group trigger/off-window and loop handoff windows
+  - accepted multi-slash escaped workflow commands (for example `///autodev stop`, `///agents status`)
+  - improved AutoDev git commit subject/body conventions to use semantic task-related messages
+- History export completion (T7.4):
+  - completed session export + retention policy cleanup task and aligned related docs/tests
+
 ## [0.1.47] - 2026-03-19
 
 - AutoDev token pressure controls:
