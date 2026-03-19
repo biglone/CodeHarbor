@@ -2409,6 +2409,80 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("does not start next loop task when /autodev stop arrives between iterations", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-stop-race-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T11.1 | first loop task | ⬜ |",
+        "| T11.2 | second loop task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const originalReadFile = fs.readFile.bind(fs) as (...args: unknown[]) => Promise<string>;
+    let taskListReadCount = 0;
+    let injectedStop = false;
+    let readFileSpy: { mockRestore: () => void } | null = null;
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      readFileSpy = vi.spyOn(fs, "readFile").mockImplementation(async (...args: unknown[]) => {
+        const target = String(args[0] ?? "");
+        if (path.resolve(target) === path.resolve(taskListPath)) {
+          taskListReadCount += 1;
+          if (!injectedStop && taskListReadCount === 6) {
+            injectedStop = true;
+            await orchestrator.handleMessage(
+              makeInbound({
+                isDirectMessage: true,
+                text: "/autodev stop",
+                eventId: "$autodev-loop-stop-race",
+              }),
+            );
+          }
+        }
+        return originalReadFile(...args);
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-loop-race",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(injectedStop).toBe(true);
+      expect(updated).toContain("| T11.1 | first loop task | ✅ |");
+      expect(updated).toContain("| T11.2 | second loop task | ⬜ |");
+      expect(channel.notices.some((entry) => entry.text.includes("当前任务执行完成后停止 AutoDev 循环"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 循环执行已按请求停止"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 启动任务 T11.2"))).toBe(false);
+    } finally {
+      readFileSpy?.mockRestore();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("stops /autodev run loop when loop max runs is reached", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-limit-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
