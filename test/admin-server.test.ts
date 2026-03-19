@@ -285,6 +285,114 @@ describe("AdminServer", () => {
     expect(JSON.stringify(invalidWindow.body)).toContain("from must be less than or equal to to");
   });
 
+  it("exports session history and supports retention policy cleanup", async () => {
+    const { dir, db, legacy } = createPaths();
+    const staleSessionKey = "matrix:!room-stale:example.com:@legacy:example.com";
+    fs.writeFileSync(
+      legacy,
+      JSON.stringify({
+        sessions: {
+          [staleSessionKey]: {
+            codexSessionId: "thread-stale",
+            processedEventIds: [],
+            activeUntil: null,
+            updatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1_000).toISOString(),
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+
+    const exportSessionKey = "matrix:!room-export:example.com:@alice:example.com";
+    stateStore.enqueueTask({
+      sessionKey: exportSessionKey,
+      eventId: "$export-1",
+      requestId: "req-export-1",
+      payloadJson: JSON.stringify({
+        message: {
+          channel: "matrix",
+          conversationId: "!room-export:example.com",
+          senderId: "@alice:example.com",
+        },
+      }),
+    });
+    stateStore.appendConversationMessage(exportSessionKey, "user", "codex", "export me");
+
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const exported = await fetchJson(
+      `${baseUrl}/api/admin/sessions/export?roomId=${encodeURIComponent("!room-export:example.com")}&includeMessages=true&messageLimitPerSession=10`,
+    );
+    expect(exported.status).toBe(200);
+    expect(JSON.stringify(exported.body)).toContain(exportSessionKey);
+    expect(JSON.stringify(exported.body)).toContain("export me");
+    expect(JSON.stringify(exported.body)).toContain("exportedAtIso");
+
+    const policy = await fetchJson(`${baseUrl}/api/admin/history/retention`);
+    expect(policy.status).toBe(200);
+    expect(JSON.stringify(policy.body)).toContain('"retentionDays":30');
+
+    const updatedPolicy = await fetchJson(`${baseUrl}/api/admin/history/retention`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "ops-history",
+      },
+      body: JSON.stringify({
+        enabled: true,
+        retentionDays: 1,
+        cleanupIntervalMinutes: 60,
+        maxDeleteSessions: 50,
+      }),
+    });
+    expect(updatedPolicy.status).toBe(200);
+    expect(JSON.stringify(updatedPolicy.body)).toContain('"enabled":true');
+    expect(JSON.stringify(updatedPolicy.body)).toContain('"cleanupIntervalMinutes":60');
+
+    const cleanup = await fetchJson(`${baseUrl}/api/admin/history/cleanup`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "ops-history",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+        retentionDays: 1,
+        maxDeleteSessions: 50,
+      }),
+    });
+    expect(cleanup.status).toBe(200);
+    expect(JSON.stringify(cleanup.body)).toContain('"status":"succeeded"');
+    expect(JSON.stringify(cleanup.body)).toContain('"deletedSessions":1');
+
+    const staleSessions = await fetchJson(
+      `${baseUrl}/api/admin/sessions?roomId=${encodeURIComponent("!room-stale:example.com")}&limit=10`,
+    );
+    expect(staleSessions.status).toBe(200);
+    expect(JSON.stringify(staleSessions.body)).toContain('"total":0');
+
+    const runs = await fetchJson(`${baseUrl}/api/admin/history/cleanup/runs?limit=5`);
+    expect(runs.status).toBe(200);
+    expect(JSON.stringify(runs.body)).toContain('"trigger":"manual"');
+    expect(JSON.stringify(runs.body)).toContain("cutoffTsIso");
+  });
+
   it("serves Prometheus metrics on /metrics", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);

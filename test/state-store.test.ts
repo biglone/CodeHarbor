@@ -625,4 +625,100 @@ describe("StateStore", () => {
     });
     expect(filteredByTime.items.every((item) => item.updatedAt >= from)).toBe(true);
   });
+
+  it("stores history retention policy", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    const defaults = store.getHistoryRetentionPolicy();
+    expect(defaults).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        retentionDays: 30,
+        cleanupIntervalMinutes: 1440,
+        maxDeleteSessions: 500,
+      }),
+    );
+
+    const updated = store.upsertHistoryRetentionPolicy({
+      enabled: true,
+      retentionDays: 7,
+      cleanupIntervalMinutes: 30,
+      maxDeleteSessions: 120,
+    });
+    expect(updated).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        retentionDays: 7,
+        cleanupIntervalMinutes: 30,
+        maxDeleteSessions: 120,
+      }),
+    );
+
+    const loaded = store.getHistoryRetentionPolicy();
+    expect(loaded).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        retentionDays: 7,
+        cleanupIntervalMinutes: 30,
+        maxDeleteSessions: 120,
+      }),
+    );
+  });
+
+  it("supports cleanup dry-run and persists cleanup runs", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    store.appendConversationMessage("session-a", "user", "codex", "hello a");
+    store.appendConversationMessage("session-b", "assistant", "codex", "hello b");
+
+    const dryRun = store.executeHistoryCleanup({
+      cutoffTs: Date.now() + 1_000,
+      maxDeleteSessions: 1,
+      dryRun: true,
+    });
+    expect(dryRun.scannedSessions).toBe(1);
+    expect(dryRun.scannedMessages).toBe(1);
+    expect(dryRun.deletedSessions).toBe(0);
+    expect(dryRun.hasMore).toBe(true);
+
+    const executed = store.executeHistoryCleanup({
+      cutoffTs: Date.now() + 1_000,
+      maxDeleteSessions: 1,
+      dryRun: false,
+    });
+    expect(executed.scannedSessions).toBe(1);
+    expect(executed.deletedSessions).toBe(1);
+
+    const run = store.appendHistoryCleanupRun({
+      trigger: "manual",
+      requestedBy: "ops",
+      dryRun: false,
+      status: "succeeded",
+      retentionDays: 1,
+      maxDeleteSessions: 100,
+      cutoffTs: Date.now() + 1_000,
+      scannedSessions: executed.scannedSessions,
+      scannedMessages: executed.scannedMessages,
+      deletedSessions: executed.deletedSessions,
+      deletedMessages: executed.deletedMessages,
+      hasMore: executed.hasMore,
+      sampledSessionKeys: executed.sampledSessionKeys,
+      startedAt: Date.now() - 10,
+    });
+    expect(run).toEqual(
+      expect.objectContaining({
+        trigger: "manual",
+        requestedBy: "ops",
+        status: "succeeded",
+      }),
+    );
+
+    const latest = store.getLatestHistoryCleanupRun();
+    expect(latest?.id).toBe(run.id);
+    const listed = store.listHistoryCleanupRuns(5);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(run.id);
+  });
 });

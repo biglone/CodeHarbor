@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { ConfigService } from "./config-service";
 import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
 import { AdminTokenConfig, AppConfig } from "./config";
+import { HistoryService } from "./history-service";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
 import {
@@ -31,6 +32,8 @@ import {
 import { restartSystemdServices } from "./service-manager";
 import {
   ConfigRevisionRecord,
+  HistoryCleanupRunRecord,
+  HistoryRetentionPolicyRecord,
   SessionHistoryRecord,
   SessionMessageRecord,
   StateStore,
@@ -42,6 +45,10 @@ const ADMIN_DEFAULT_SESSION_QUERY_LIMIT = 50;
 const ADMIN_MAX_SESSION_QUERY_LIMIT = 200;
 const ADMIN_DEFAULT_SESSION_MESSAGES_LIMIT = 100;
 const ADMIN_MAX_SESSION_MESSAGES_LIMIT = 500;
+const ADMIN_DEFAULT_EXPORT_MESSAGE_LIMIT = 200;
+const ADMIN_MAX_EXPORT_MESSAGE_LIMIT = 500;
+const ADMIN_DEFAULT_HISTORY_CLEANUP_RUN_LIMIT = 20;
+const ADMIN_MAX_HISTORY_CLEANUP_RUN_LIMIT = 200;
 
 interface CodexHealthResult {
   ok: boolean;
@@ -78,6 +85,7 @@ interface AdminServerOptions {
   adminIpAllowlist?: string[];
   adminAllowedOrigins?: string[];
   cwd?: string;
+  historyService?: HistoryService;
   checkCodex?: (bin: string) => Promise<CodexHealthResult>;
   checkMatrix?: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
   packageUpdateChecker?: PackageUpdateChecker;
@@ -103,6 +111,7 @@ export class AdminServer {
   private readonly logger: Logger;
   private readonly stateStore: StateStore;
   private readonly configService: ConfigService;
+  private readonly historyService: HistoryService;
   private readonly host: string;
   private readonly port: number;
   private readonly adminToken: string | null;
@@ -130,6 +139,11 @@ export class AdminServer {
     this.logger = logger;
     this.stateStore = stateStore;
     this.configService = configService;
+    this.historyService =
+      options.historyService ??
+      new HistoryService(stateStore, logger, {
+        cleanupOwner: `admin-api:${process.pid}`,
+      });
     this.host = options.host;
     this.port = options.port;
     this.adminToken = options.adminToken;
@@ -345,6 +359,57 @@ export class AdminServer {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/admin/sessions/export") {
+        const roomId = normalizeOptionalString(url.searchParams.get("roomId"));
+        const userId = normalizeOptionalString(url.searchParams.get("userId"));
+        const from = parseOptionalTimestampQuery(url.searchParams.get("from"), "from");
+        const to = parseOptionalTimestampQuery(url.searchParams.get("to"), "to");
+        if (from !== null && to !== null && from > to) {
+          throw new HttpError(400, "from must be less than or equal to to.");
+        }
+        const limit = normalizePositiveInt(
+          url.searchParams.get("limit"),
+          ADMIN_DEFAULT_SESSION_QUERY_LIMIT,
+          1,
+          ADMIN_MAX_SESSION_QUERY_LIMIT,
+        );
+        const offset = normalizeNonNegativeInt(url.searchParams.get("offset"), 0);
+        const includeMessages = normalizeBooleanQuery(url.searchParams.get("includeMessages"), true);
+        const messageLimitPerSession = normalizePositiveInt(
+          url.searchParams.get("messageLimitPerSession"),
+          ADMIN_DEFAULT_EXPORT_MESSAGE_LIMIT,
+          1,
+          ADMIN_MAX_EXPORT_MESSAGE_LIMIT,
+        );
+
+        const exported = this.historyService.exportSessionHistory({
+          roomId,
+          userId,
+          from,
+          to,
+          limit,
+          offset,
+          includeMessages,
+          messageLimitPerSession,
+        });
+        this.sendJson(res, 200, {
+          ok: true,
+          data: {
+            exportedAt: exported.exportedAt,
+            exportedAtIso: new Date(exported.exportedAt).toISOString(),
+            total: exported.total,
+            sessions: exported.items.map((entry) => formatSessionExportEntry(entry)),
+          },
+          paging: {
+            total: exported.total,
+            limit,
+            offset,
+            hasMore: offset + exported.items.length < exported.total,
+          },
+        });
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/admin/sessions") {
         const roomId = normalizeOptionalString(url.searchParams.get("roomId"));
         const userId = normalizeOptionalString(url.searchParams.get("userId"));
@@ -401,6 +466,72 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: true,
           data: this.stateStore.listRecentConversationMessages(sessionKey, limit).map((entry) => formatSessionMessageEntry(entry)),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/history/retention") {
+        this.sendJson(res, 200, {
+          ok: true,
+          data: formatHistoryRetentionPolicyEntry(this.historyService.getRetentionPolicy()),
+        });
+        return;
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/admin/history/retention") {
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "history retention payload");
+        const current = this.historyService.getRetentionPolicy();
+        const next = {
+          enabled: "enabled" in body ? normalizeBoolean(body.enabled, current.enabled) : current.enabled,
+          retentionDays:
+            "retentionDays" in body ? normalizePositiveInt(body.retentionDays, current.retentionDays, 1, 3_650) : current.retentionDays,
+          cleanupIntervalMinutes:
+            "cleanupIntervalMinutes" in body
+              ? normalizePositiveInt(body.cleanupIntervalMinutes, current.cleanupIntervalMinutes, 5, 10_080)
+              : current.cleanupIntervalMinutes,
+          maxDeleteSessions:
+            "maxDeleteSessions" in body
+              ? normalizePositiveInt(body.maxDeleteSessions, current.maxDeleteSessions, 1, 10_000)
+              : current.maxDeleteSessions,
+        };
+        const actor = resolveAuditActor(req, authIdentity);
+        const updated = this.historyService.updateRetentionPolicy(next, actor);
+        this.sendJson(res, 200, {
+          ok: true,
+          data: formatHistoryRetentionPolicyEntry(updated),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/history/cleanup/runs") {
+        const limit = normalizePositiveInt(
+          url.searchParams.get("limit"),
+          ADMIN_DEFAULT_HISTORY_CLEANUP_RUN_LIMIT,
+          1,
+          ADMIN_MAX_HISTORY_CLEANUP_RUN_LIMIT,
+        );
+        this.sendJson(res, 200, {
+          ok: true,
+          data: this.historyService.listCleanupRuns(limit).map((entry) => formatHistoryCleanupRunEntry(entry)),
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/admin/history/cleanup") {
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "history cleanup payload");
+        const actor = resolveAuditActor(req, authIdentity);
+        const run = this.historyService.runCleanup({
+          trigger: "manual",
+          requestedBy: actor,
+          dryRun: "dryRun" in body ? normalizeBoolean(body.dryRun, false) : false,
+          retentionDays:
+            "retentionDays" in body ? normalizePositiveInt(body.retentionDays, 30, 1, 3_650) : undefined,
+          maxDeleteSessions:
+            "maxDeleteSessions" in body ? normalizePositiveInt(body.maxDeleteSessions, 500, 1, 10_000) : undefined,
+        });
+        this.sendJson(res, run.status === "failed" ? 500 : 200, {
+          ok: run.status !== "failed",
+          data: formatHistoryCleanupRunEntry(run),
         });
         return;
       }
@@ -1134,6 +1265,105 @@ function formatSessionMessageEntry(entry: SessionMessageRecord): {
   };
 }
 
+function formatSessionExportEntry(entry: SessionHistoryRecord & { messages?: SessionMessageRecord[] }): {
+  sessionKey: string;
+  channel: string | null;
+  roomId: string | null;
+  userId: string | null;
+  codexSessionId: string | null;
+  activeUntil: number | null;
+  activeUntilIso: string | null;
+  updatedAt: number;
+  updatedAtIso: string;
+  messageCount: number;
+  lastMessageAt: number | null;
+  lastMessageAtIso: string | null;
+  messages?: Array<{
+    id: number;
+    sessionKey: string;
+    role: "user" | "assistant";
+    provider: "codex" | "claude";
+    content: string;
+    createdAt: number;
+    createdAtIso: string;
+  }>;
+} {
+  const base = formatSessionHistoryEntry(entry);
+  if (!entry.messages) {
+    return base;
+  }
+  return {
+    ...base,
+    messages: entry.messages.map((message) => formatSessionMessageEntry(message)),
+  };
+}
+
+function formatHistoryRetentionPolicyEntry(entry: HistoryRetentionPolicyRecord): {
+  enabled: boolean;
+  retentionDays: number;
+  cleanupIntervalMinutes: number;
+  maxDeleteSessions: number;
+  updatedAt: number;
+  updatedAtIso: string | null;
+} {
+  return {
+    enabled: entry.enabled,
+    retentionDays: entry.retentionDays,
+    cleanupIntervalMinutes: entry.cleanupIntervalMinutes,
+    maxDeleteSessions: entry.maxDeleteSessions,
+    updatedAt: entry.updatedAt,
+    updatedAtIso: entry.updatedAt > 0 ? new Date(entry.updatedAt).toISOString() : null,
+  };
+}
+
+function formatHistoryCleanupRunEntry(entry: HistoryCleanupRunRecord): {
+  id: number;
+  trigger: "manual" | "scheduled";
+  requestedBy: string | null;
+  dryRun: boolean;
+  status: "succeeded" | "failed" | "skipped";
+  retentionDays: number;
+  maxDeleteSessions: number;
+  cutoffTs: number;
+  cutoffTsIso: string;
+  scannedSessions: number;
+  scannedMessages: number;
+  deletedSessions: number;
+  deletedMessages: number;
+  hasMore: boolean;
+  sampledSessionKeys: string[];
+  skippedReason: string | null;
+  error: string | null;
+  startedAt: number;
+  startedAtIso: string;
+  finishedAt: number;
+  finishedAtIso: string;
+} {
+  return {
+    id: entry.id,
+    trigger: entry.trigger,
+    requestedBy: entry.requestedBy,
+    dryRun: entry.dryRun,
+    status: entry.status,
+    retentionDays: entry.retentionDays,
+    maxDeleteSessions: entry.maxDeleteSessions,
+    cutoffTs: entry.cutoffTs,
+    cutoffTsIso: new Date(entry.cutoffTs).toISOString(),
+    scannedSessions: entry.scannedSessions,
+    scannedMessages: entry.scannedMessages,
+    deletedSessions: entry.deletedSessions,
+    deletedMessages: entry.deletedMessages,
+    hasMore: entry.hasMore,
+    sampledSessionKeys: [...entry.sampledSessionKeys],
+    skippedReason: entry.skippedReason,
+    error: entry.error,
+    startedAt: entry.startedAt,
+    startedAtIso: new Date(entry.startedAt).toISOString(),
+    finishedAt: entry.finishedAt,
+    finishedAtIso: new Date(entry.finishedAt).toISOString(),
+  };
+}
+
 function parseJsonLoose(raw: string): unknown {
   try {
     return JSON.parse(raw) as unknown;
@@ -1329,6 +1559,23 @@ function normalizeOptionalString(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function normalizeBooleanQuery(value: string | null, fallback: boolean): boolean {
+  if (value === null) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "1" || normalized === "true" || normalized === "yes") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no") {
+    return false;
+  }
+  throw new HttpError(400, "Expected boolean query value.");
 }
 
 function decodePathParam(value: string, fieldName: string): string {

@@ -8,6 +8,7 @@ import { MatrixChannel } from "./channels/matrix-channel";
 import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
 import { CodexExecutor } from "./executor/codex-executor";
+import { HistoryService } from "./history-service";
 import { Logger } from "./logger";
 import { Orchestrator } from "./orchestrator";
 import { NpmRegistryUpdateChecker, resolvePackageVersion } from "./package-update-checker";
@@ -20,6 +21,7 @@ export class CodeHarborApp {
   private readonly config: AppConfig;
   private readonly logger: Logger;
   private readonly stateStore: StateStore;
+  private readonly historyService: HistoryService;
   private readonly channel: Channel;
   private readonly orchestrator: Orchestrator;
   private readonly configService: ConfigService;
@@ -36,6 +38,9 @@ export class CodeHarborApp {
       config.maxSessionAgeDays,
       config.maxSessions,
     );
+    this.historyService = new HistoryService(this.stateStore, this.logger, {
+      cleanupOwner: `main:${process.pid}`,
+    });
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
     const buildExecutor = (provider: "codex" | "claude"): CodexExecutor =>
       new CodexExecutor({
@@ -106,6 +111,7 @@ export class CodeHarborApp {
       provider: this.config.aiCliProvider,
       prefix: this.config.matrixCommandPrefix || "<none>",
     });
+    this.historyService.startCleanupScheduler();
     await this.channel.start(this.orchestrator.handleMessage.bind(this.orchestrator));
     await this.orchestrator.bootstrapTaskQueueRecovery();
     if (this.apiServer) {
@@ -121,6 +127,7 @@ export class CodeHarborApp {
 
   async stop(): Promise<void> {
     this.logger.info("CodeHarbor stopping.");
+    this.historyService.stopCleanupScheduler();
     let firstError: unknown = null;
     try {
       await this.apiServer?.stop();
@@ -149,6 +156,7 @@ export class CodeHarborAdminApp {
   private readonly config: AppConfig;
   private readonly logger: Logger;
   private readonly stateStore: StateStore;
+  private readonly historyService: HistoryService;
   private readonly configService: ConfigService;
   private readonly adminServer: AdminServer;
 
@@ -162,6 +170,9 @@ export class CodeHarborAdminApp {
       config.maxSessionAgeDays,
       config.maxSessions,
     );
+    this.historyService = new HistoryService(this.stateStore, this.logger, {
+      cleanupOwner: `admin:${process.pid}`,
+    });
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
     this.adminServer = new AdminServer(config, this.logger, this.stateStore, this.configService, {
       host: options?.host ?? config.adminBindHost,
@@ -170,11 +181,13 @@ export class CodeHarborAdminApp {
       adminTokens: config.adminTokens,
       adminIpAllowlist: config.adminIpAllowlist,
       adminAllowedOrigins: config.adminAllowedOrigins,
+      historyService: this.historyService,
     });
   }
 
   async start(): Promise<void> {
     await this.adminServer.start();
+    this.historyService.startCleanupScheduler();
     const address = this.adminServer.getAddress();
     this.logger.info("CodeHarbor admin server started", {
       host: address?.host ?? this.config.adminBindHost,
@@ -185,6 +198,7 @@ export class CodeHarborAdminApp {
 
   async stop(): Promise<void> {
     this.logger.info("CodeHarbor admin server stopping.");
+    this.historyService.stopCleanupScheduler();
     try {
       await this.adminServer.stop();
     } finally {

@@ -407,7 +407,12 @@ Main endpoints:
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50`
 - `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`
+- `GET /api/admin/sessions/export?roomId=...&userId=...&from=...&to=...&limit=50&offset=0&includeMessages=true`
 - `GET /api/admin/sessions/:sessionKey/messages?limit=100`
+- `GET /api/admin/history/retention`
+- `PUT /api/admin/history/retention`
+- `POST /api/admin/history/cleanup`
+- `GET /api/admin/history/cleanup/runs?limit=20`
 
 When `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON` is set, requests must include:
 

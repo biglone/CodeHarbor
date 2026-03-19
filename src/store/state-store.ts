@@ -84,6 +84,87 @@ export interface SessionHistoryQueryResult {
   items: SessionHistoryRecord[];
 }
 
+export interface HistoryRetentionPolicyRecord {
+  enabled: boolean;
+  retentionDays: number;
+  cleanupIntervalMinutes: number;
+  maxDeleteSessions: number;
+  updatedAt: number;
+}
+
+export interface HistoryRetentionPolicyUpsertInput {
+  enabled: boolean;
+  retentionDays: number;
+  cleanupIntervalMinutes: number;
+  maxDeleteSessions: number;
+}
+
+export type HistoryCleanupTrigger = "manual" | "scheduled";
+export type HistoryCleanupStatus = "succeeded" | "failed" | "skipped";
+
+export interface HistoryCleanupRunRecord {
+  id: number;
+  trigger: HistoryCleanupTrigger;
+  requestedBy: string | null;
+  dryRun: boolean;
+  status: HistoryCleanupStatus;
+  retentionDays: number;
+  maxDeleteSessions: number;
+  cutoffTs: number;
+  scannedSessions: number;
+  scannedMessages: number;
+  deletedSessions: number;
+  deletedMessages: number;
+  hasMore: boolean;
+  sampledSessionKeys: string[];
+  skippedReason: string | null;
+  error: string | null;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface HistoryCleanupRunAppendInput {
+  trigger: HistoryCleanupTrigger;
+  requestedBy: string | null;
+  dryRun: boolean;
+  status: HistoryCleanupStatus;
+  retentionDays: number;
+  maxDeleteSessions: number;
+  cutoffTs: number;
+  scannedSessions: number;
+  scannedMessages: number;
+  deletedSessions: number;
+  deletedMessages: number;
+  hasMore: boolean;
+  sampledSessionKeys: string[];
+  skippedReason?: string | null;
+  error?: string | null;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface HistoryCleanupExecutionInput {
+  cutoffTs: number;
+  maxDeleteSessions: number;
+  dryRun: boolean;
+}
+
+export interface HistoryCleanupExecutionResult {
+  cutoffTs: number;
+  scannedSessions: number;
+  scannedMessages: number;
+  deletedSessions: number;
+  deletedMessages: number;
+  hasMore: boolean;
+  sampledSessionKeys: string[];
+}
+
+export interface HistoryCleanupLockRecord {
+  owner: string;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
 export interface UpgradeRunRecord {
   id: number;
   requestedBy: string | null;
@@ -213,6 +294,11 @@ export interface TaskQueueCancelResult {
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 const MAX_TASK_FAILURE_ARCHIVE_ROWS = 1_000;
 const MAX_SESSION_HISTORY_QUERY_LIMIT = 200;
+const DEFAULT_HISTORY_RETENTION_DAYS = 30;
+const DEFAULT_HISTORY_CLEANUP_INTERVAL_MINUTES = 1_440;
+const DEFAULT_HISTORY_MAX_DELETE_SESSIONS = 500;
+const MAX_HISTORY_CLEANUP_RUN_QUERY_LIMIT = 200;
+const HISTORY_CLEANUP_LOCK_NAME = "global_history_cleanup";
 
 export class StateStore {
   private readonly dbPath: string;
@@ -1365,6 +1451,343 @@ export class StateStore {
     };
   }
 
+  getHistoryRetentionPolicy(): HistoryRetentionPolicyRecord {
+    const row = this.db
+      .prepare(
+        `SELECT enabled, retention_days, cleanup_interval_minutes, max_delete_sessions, updated_at
+         FROM history_retention_policy
+         WHERE id = 1`,
+      )
+      .get() as
+      | {
+          enabled: number;
+          retention_days: number;
+          cleanup_interval_minutes: number;
+          max_delete_sessions: number;
+          updated_at: number;
+        }
+      | undefined;
+    if (!row) {
+      return {
+        enabled: false,
+        retentionDays: DEFAULT_HISTORY_RETENTION_DAYS,
+        cleanupIntervalMinutes: DEFAULT_HISTORY_CLEANUP_INTERVAL_MINUTES,
+        maxDeleteSessions: DEFAULT_HISTORY_MAX_DELETE_SESSIONS,
+        updatedAt: 0,
+      };
+    }
+    return {
+      enabled: row.enabled === 1,
+      retentionDays: row.retention_days,
+      cleanupIntervalMinutes: row.cleanup_interval_minutes,
+      maxDeleteSessions: row.max_delete_sessions,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  upsertHistoryRetentionPolicy(input: HistoryRetentionPolicyUpsertInput): HistoryRetentionPolicyRecord {
+    const normalized = normalizeHistoryRetentionPolicyInput(input);
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO history_retention_policy
+          (id, enabled, retention_days, cleanup_interval_minutes, max_delete_sessions, updated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+          enabled = excluded.enabled,
+          retention_days = excluded.retention_days,
+          cleanup_interval_minutes = excluded.cleanup_interval_minutes,
+          max_delete_sessions = excluded.max_delete_sessions,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        boolToInt(normalized.enabled),
+        normalized.retentionDays,
+        normalized.cleanupIntervalMinutes,
+        normalized.maxDeleteSessions,
+        now,
+      );
+    return {
+      ...normalized,
+      updatedAt: now,
+    };
+  }
+
+  executeHistoryCleanup(input: HistoryCleanupExecutionInput): HistoryCleanupExecutionResult {
+    const cutoffTs = Math.max(0, Math.floor(input.cutoffTs));
+    const maxDeleteSessions = Math.max(1, Math.floor(input.maxDeleteSessions));
+    if (input.dryRun) {
+      const staleTotal = this.countStaleSessions(cutoffTs);
+      const sessionKeys = this.listStaleSessionKeys(cutoffTs, maxDeleteSessions);
+      const scannedMessages = this.countMessagesForSessionKeys(sessionKeys);
+      return {
+        cutoffTs,
+        scannedSessions: sessionKeys.length,
+        scannedMessages,
+        deletedSessions: 0,
+        deletedMessages: 0,
+        hasMore: staleTotal > sessionKeys.length,
+        sampledSessionKeys: sessionKeys.slice(0, 20),
+      };
+    }
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const staleTotal = this.countStaleSessions(cutoffTs);
+      const sessionKeys = this.listStaleSessionKeys(cutoffTs, maxDeleteSessions);
+      const scannedMessages = this.countMessagesForSessionKeys(sessionKeys);
+      const deletedSessions = this.deleteSessionsBySessionKeys(sessionKeys);
+      this.db.exec("COMMIT");
+      return {
+        cutoffTs,
+        scannedSessions: sessionKeys.length,
+        scannedMessages,
+        deletedSessions,
+        deletedMessages: deletedSessions > 0 ? scannedMessages : 0,
+        hasMore: staleTotal > sessionKeys.length,
+        sampledSessionKeys: sessionKeys.slice(0, 20),
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  appendHistoryCleanupRun(input: HistoryCleanupRunAppendInput): HistoryCleanupRunRecord {
+    const normalized = normalizeHistoryCleanupRunInput(input);
+    const row = this.db
+      .prepare(
+        `INSERT INTO history_cleanup_runs (
+           trigger,
+           requested_by,
+           dry_run,
+           status,
+           retention_days,
+           max_delete_sessions,
+           cutoff_ts,
+           scanned_sessions,
+           scanned_messages,
+           deleted_sessions,
+           deleted_messages,
+           has_more,
+           sampled_session_keys_json,
+           skipped_reason,
+           error,
+           started_at,
+           finished_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+         RETURNING
+           id,
+           trigger,
+           requested_by,
+           dry_run,
+           status,
+           retention_days,
+           max_delete_sessions,
+           cutoff_ts,
+           scanned_sessions,
+           scanned_messages,
+           deleted_sessions,
+           deleted_messages,
+           has_more,
+           sampled_session_keys_json,
+           skipped_reason,
+           error,
+           started_at,
+           finished_at`,
+      )
+      .get(
+        normalized.trigger,
+        normalized.requestedBy,
+        boolToInt(normalized.dryRun),
+        normalized.status,
+        normalized.retentionDays,
+        normalized.maxDeleteSessions,
+        normalized.cutoffTs,
+        normalized.scannedSessions,
+        normalized.scannedMessages,
+        normalized.deletedSessions,
+        normalized.deletedMessages,
+        boolToInt(normalized.hasMore),
+        JSON.stringify(normalized.sampledSessionKeys),
+        normalized.skippedReason,
+        normalized.error,
+        normalized.startedAt,
+        normalized.finishedAt,
+      ) as HistoryCleanupRunRow | undefined;
+    if (!row) {
+      throw new Error("Failed to append history cleanup run.");
+    }
+    return mapHistoryCleanupRunRow(row);
+  }
+
+  listHistoryCleanupRuns(limit = 20): HistoryCleanupRunRecord[] {
+    const safeLimit = clampInt(limit, 20, 1, MAX_HISTORY_CLEANUP_RUN_QUERY_LIMIT);
+    const rows = this.db
+      .prepare(
+        `SELECT
+           id,
+           trigger,
+           requested_by,
+           dry_run,
+           status,
+           retention_days,
+           max_delete_sessions,
+           cutoff_ts,
+           scanned_sessions,
+           scanned_messages,
+           deleted_sessions,
+           deleted_messages,
+           has_more,
+           sampled_session_keys_json,
+           skipped_reason,
+           error,
+           started_at,
+           finished_at
+         FROM history_cleanup_runs
+         ORDER BY id DESC
+         LIMIT ?1`,
+      )
+      .all(safeLimit) as HistoryCleanupRunRow[];
+    return rows.map((row) => mapHistoryCleanupRunRow(row));
+  }
+
+  getLatestHistoryCleanupRun(trigger?: HistoryCleanupTrigger): HistoryCleanupRunRecord | null {
+    const row = (trigger
+      ? this.db
+          .prepare(
+            `SELECT
+               id,
+               trigger,
+               requested_by,
+               dry_run,
+               status,
+               retention_days,
+               max_delete_sessions,
+               cutoff_ts,
+               scanned_sessions,
+               scanned_messages,
+               deleted_sessions,
+               deleted_messages,
+               has_more,
+               sampled_session_keys_json,
+               skipped_reason,
+               error,
+               started_at,
+               finished_at
+             FROM history_cleanup_runs
+             WHERE trigger = ?1
+             ORDER BY id DESC
+             LIMIT 1`,
+          )
+          .get(trigger)
+      : this.db
+          .prepare(
+            `SELECT
+               id,
+               trigger,
+               requested_by,
+               dry_run,
+               status,
+               retention_days,
+               max_delete_sessions,
+               cutoff_ts,
+               scanned_sessions,
+               scanned_messages,
+               deleted_sessions,
+               deleted_messages,
+               has_more,
+               sampled_session_keys_json,
+               skipped_reason,
+               error,
+               started_at,
+               finished_at
+             FROM history_cleanup_runs
+             ORDER BY id DESC
+             LIMIT 1`,
+          )
+          .get()) as HistoryCleanupRunRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return mapHistoryCleanupRunRow(row);
+  }
+
+  acquireHistoryCleanupLock(input: {
+    owner: string;
+    ttlMs: number;
+  }): { acquired: boolean; owner: string | null; expiresAt: number | null } {
+    const owner = input.owner.trim();
+    if (!owner) {
+      throw new Error("history cleanup lock owner is required.");
+    }
+    const now = Date.now();
+    const ttlMs = Math.max(1_000, Math.floor(input.ttlMs));
+    const expiresAt = now + ttlMs;
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db
+        .prepare("SELECT owner, expires_at FROM history_cleanup_locks WHERE name = ?1")
+        .get(HISTORY_CLEANUP_LOCK_NAME) as { owner: string; expires_at: number } | undefined;
+      if (!existing || existing.expires_at <= now) {
+        this.db
+          .prepare(
+            `INSERT INTO history_cleanup_locks (name, owner, acquired_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, acquired_at = excluded.acquired_at, expires_at = excluded.expires_at`,
+          )
+          .run(HISTORY_CLEANUP_LOCK_NAME, owner, now, expiresAt);
+        this.db.exec("COMMIT");
+        return {
+          acquired: true,
+          owner,
+          expiresAt,
+        };
+      }
+      this.db.exec("COMMIT");
+      return {
+        acquired: false,
+        owner: existing.owner,
+        expiresAt: existing.expires_at,
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  releaseHistoryCleanupLock(owner: string): void {
+    const normalizedOwner = owner.trim();
+    if (!normalizedOwner) {
+      return;
+    }
+    this.db
+      .prepare("DELETE FROM history_cleanup_locks WHERE name = ?1 AND owner = ?2")
+      .run(HISTORY_CLEANUP_LOCK_NAME, normalizedOwner);
+  }
+
+  getHistoryCleanupLock(now = Date.now()): HistoryCleanupLockRecord | null {
+    const row = this.db
+      .prepare("SELECT owner, acquired_at, expires_at FROM history_cleanup_locks WHERE name = ?1")
+      .get(HISTORY_CLEANUP_LOCK_NAME) as { owner: string; acquired_at: number; expires_at: number } | undefined;
+    if (!row) {
+      return null;
+    }
+    if (row.expires_at <= now) {
+      this.db
+        .prepare("DELETE FROM history_cleanup_locks WHERE name = ?1 AND expires_at <= ?2")
+        .run(HISTORY_CLEANUP_LOCK_NAME, now);
+      return null;
+    }
+    return {
+      owner: row.owner,
+      acquiredAt: row.acquired_at,
+      expiresAt: row.expires_at,
+    };
+  }
+
   private ensureSessionIndexBackfill(limit = 500): void {
     const safeLimit = Math.max(1, Math.floor(limit));
     const rows = this.db
@@ -1402,6 +1825,49 @@ export class StateStore {
            END`,
       )
       .run(sessionKey, metadata.channel, metadata.roomId, metadata.userId, updatedAt);
+  }
+
+  private countStaleSessions(cutoffTs: number): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM sessions WHERE updated_at < ?1")
+      .get(cutoffTs) as { count: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+
+  private listStaleSessionKeys(cutoffTs: number, limit: number): string[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const rows = this.db
+      .prepare(
+        `SELECT session_key
+         FROM sessions
+         WHERE updated_at < ?1
+         ORDER BY updated_at ASC, session_key ASC
+         LIMIT ?2`,
+      )
+      .all(cutoffTs, safeLimit) as Array<{ session_key: string }>;
+    return rows.map((row) => row.session_key);
+  }
+
+  private countMessagesForSessionKeys(sessionKeys: string[]): number {
+    if (sessionKeys.length === 0) {
+      return 0;
+    }
+    const placeholders = buildSqlPlaceholders(sessionKeys.length);
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM session_messages WHERE session_key IN (${placeholders})`)
+      .get(...sessionKeys) as { count: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+
+  private deleteSessionsBySessionKeys(sessionKeys: string[]): number {
+    if (sessionKeys.length === 0) {
+      return 0;
+    }
+    const placeholders = buildSqlPlaceholders(sessionKeys.length);
+    const result = this.db
+      .prepare(`DELETE FROM sessions WHERE session_key IN (${placeholders})`)
+      .run(...sessionKeys) as { changes?: number };
+    return Number(result.changes ?? 0);
   }
 
   async flush(): Promise<void> {
@@ -1601,6 +2067,46 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_session_index_room_updated ON session_index(room_id, updated_at DESC, session_key);
       CREATE INDEX IF NOT EXISTS idx_session_index_user_updated ON session_index(user_id, updated_at DESC, session_key);
       CREATE INDEX IF NOT EXISTS idx_session_index_updated ON session_index(updated_at DESC, session_key);
+
+      CREATE TABLE IF NOT EXISTS history_retention_policy (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled INTEGER NOT NULL DEFAULT 0,
+        retention_days INTEGER NOT NULL DEFAULT 30,
+        cleanup_interval_minutes INTEGER NOT NULL DEFAULT 1440,
+        max_delete_sessions INTEGER NOT NULL DEFAULT 500,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS history_cleanup_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+        requested_by TEXT,
+        dry_run INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed', 'skipped')),
+        retention_days INTEGER NOT NULL,
+        max_delete_sessions INTEGER NOT NULL,
+        cutoff_ts INTEGER NOT NULL,
+        scanned_sessions INTEGER NOT NULL DEFAULT 0,
+        scanned_messages INTEGER NOT NULL DEFAULT 0,
+        deleted_sessions INTEGER NOT NULL DEFAULT 0,
+        deleted_messages INTEGER NOT NULL DEFAULT 0,
+        has_more INTEGER NOT NULL DEFAULT 0,
+        sampled_session_keys_json TEXT NOT NULL DEFAULT '[]',
+        skipped_reason TEXT,
+        error TEXT,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_history_cleanup_runs_started ON history_cleanup_runs(started_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_history_cleanup_runs_trigger_started ON history_cleanup_runs(trigger, started_at DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS history_cleanup_locks (
+        name TEXT PRIMARY KEY,
+        owner TEXT NOT NULL,
+        acquired_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS runtime_metrics_snapshots (
         key TEXT PRIMARY KEY,
@@ -1975,6 +2481,89 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
+function normalizeHistoryRetentionPolicyInput(input: HistoryRetentionPolicyUpsertInput): HistoryRetentionPolicyUpsertInput {
+  return {
+    enabled: input.enabled,
+    retentionDays: clampInt(input.retentionDays, DEFAULT_HISTORY_RETENTION_DAYS, 1, 3_650),
+    cleanupIntervalMinutes: clampInt(input.cleanupIntervalMinutes, DEFAULT_HISTORY_CLEANUP_INTERVAL_MINUTES, 5, 10_080),
+    maxDeleteSessions: clampInt(input.maxDeleteSessions, DEFAULT_HISTORY_MAX_DELETE_SESSIONS, 1, 10_000),
+  };
+}
+
+function normalizeHistoryCleanupRunInput(input: HistoryCleanupRunAppendInput): HistoryCleanupRunAppendInput & {
+  skippedReason: string | null;
+  error: string | null;
+  finishedAt: number;
+} {
+  const requestedBy = normalizeOptionalFilterValue(input.requestedBy);
+  const skippedReason = normalizeOptionalFilterValue(input.skippedReason);
+  const error = normalizeOptionalFilterValue(input.error);
+  const startedAt = Math.max(0, Math.floor(input.startedAt));
+  const finishedAt = Math.max(startedAt, Math.floor(input.finishedAt ?? Date.now()));
+  return {
+    trigger: input.trigger,
+    requestedBy,
+    dryRun: input.dryRun,
+    status: input.status,
+    retentionDays: clampInt(input.retentionDays, DEFAULT_HISTORY_RETENTION_DAYS, 1, 3_650),
+    maxDeleteSessions: clampInt(input.maxDeleteSessions, DEFAULT_HISTORY_MAX_DELETE_SESSIONS, 1, 10_000),
+    cutoffTs: Math.max(0, Math.floor(input.cutoffTs)),
+    scannedSessions: Math.max(0, Math.floor(input.scannedSessions)),
+    scannedMessages: Math.max(0, Math.floor(input.scannedMessages)),
+    deletedSessions: Math.max(0, Math.floor(input.deletedSessions)),
+    deletedMessages: Math.max(0, Math.floor(input.deletedMessages)),
+    hasMore: input.hasMore,
+    sampledSessionKeys: input.sampledSessionKeys
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .slice(0, 100),
+    skippedReason,
+    error,
+    startedAt,
+    finishedAt,
+  };
+}
+
+function parseSessionKeyArrayJson(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function buildSqlPlaceholders(count: number): string {
+  return new Array(count).fill("?").join(", ");
+}
+
+type HistoryCleanupRunRow = {
+  id: number;
+  trigger: HistoryCleanupTrigger;
+  requested_by: string | null;
+  dry_run: number;
+  status: HistoryCleanupStatus;
+  retention_days: number;
+  max_delete_sessions: number;
+  cutoff_ts: number;
+  scanned_sessions: number;
+  scanned_messages: number;
+  deleted_sessions: number;
+  deleted_messages: number;
+  has_more: number;
+  sampled_session_keys_json: string;
+  skipped_reason: string | null;
+  error: string | null;
+  started_at: number;
+  finished_at: number;
+};
+
 type TaskQueueRow = {
   id: number;
   session_key: string;
@@ -2006,5 +2595,28 @@ function mapTaskQueueRow(row: TaskQueueRow): TaskQueueRecord {
     finishedAt: row.finished_at,
     error: row.error,
     lastError: row.last_error,
+  };
+}
+
+function mapHistoryCleanupRunRow(row: HistoryCleanupRunRow): HistoryCleanupRunRecord {
+  return {
+    id: row.id,
+    trigger: row.trigger,
+    requestedBy: row.requested_by,
+    dryRun: row.dry_run === 1,
+    status: row.status,
+    retentionDays: row.retention_days,
+    maxDeleteSessions: row.max_delete_sessions,
+    cutoffTs: row.cutoff_ts,
+    scannedSessions: row.scanned_sessions,
+    scannedMessages: row.scanned_messages,
+    deletedSessions: row.deleted_sessions,
+    deletedMessages: row.deleted_messages,
+    hasMore: row.has_more === 1,
+    sampledSessionKeys: parseSessionKeyArrayJson(row.sampled_session_keys_json),
+    skippedReason: row.skipped_reason,
+    error: row.error,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
   };
 }
