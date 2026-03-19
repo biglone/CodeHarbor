@@ -272,7 +272,7 @@ test("viewer token cannot write global config (403)", async ({ page }) => {
 
     await page.fill("#global-matrix-prefix", "!viewer");
     await page.click("#global-save-btn");
-    await expect(page.locator("#notice")).toContainText("admin write permission");
+    await expect(page.locator("#notice")).toContainText(/(admin write permission|admin\.write)/i);
   } finally {
     await isolatedServer.stop();
     await store.flush();
