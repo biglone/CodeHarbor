@@ -380,11 +380,11 @@ function resolvePromptContextLimits(config: MultiAgentWorkflowConfig): WorkflowP
 
 export function parseWorkflowCommand(text: string): { kind: "status" } | { kind: "run"; objective: string } | null {
   const normalized = text.trim();
-  if (!/^\/{1,2}agents(?:\s|$)/i.test(normalized)) {
+  if (!/^\/+agents(?:\s|$)/i.test(normalized)) {
     return null;
   }
 
-  const normalizedCommand = normalized.startsWith("//") ? normalized.slice(1) : normalized;
+  const normalizedCommand = normalized.replace(/^\/+/, "/");
   const parts = normalizedCommand.split(/\s+/);
   if (parts.length === 1 || parts[1]?.toLowerCase() === "status") {
     return { kind: "status" };
