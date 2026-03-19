@@ -256,6 +256,18 @@ interface AutoDevGitCommitRecord {
   result: AutoDevGitCommitResult;
 }
 
+interface BackendRouteDiagRecord {
+  at: string;
+  sessionKey: string;
+  conversationId: string;
+  senderId: string;
+  taskType: BackendModelRouteTaskType;
+  source: SessionBackendDecision["source"];
+  reasonCode: SessionBackendDecision["reasonCode"];
+  ruleId: string | null;
+  profile: BackendModelRouteProfile;
+}
+
 export interface ApiTaskSubmitInput {
   conversationId: string;
   senderId: string;
@@ -403,6 +415,7 @@ const DEFAULT_AUTODEV_LOOP_MAX_RUNS = 20;
 const DEFAULT_AUTODEV_LOOP_MAX_MINUTES = 120;
 const DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES = 3;
 const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
+const BACKEND_ROUTE_DIAG_HISTORY_MAX = 200;
 const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
 const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   maxAttempts: 4,
@@ -771,6 +784,7 @@ export class Orchestrator {
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly autoDevFailureStreaks = new Map<string, number>();
   private readonly autoDevGitCommitRecords: AutoDevGitCommitRecord[] = [];
+  private readonly backendRouteDiagRecords: BackendRouteDiagRecord[] = [];
   private readonly autoDevLoopMaxRuns: number;
   private readonly autoDevLoopMaxMinutes: number;
   private readonly autoDevAutoCommit: boolean;
@@ -1247,6 +1261,12 @@ export class Orchestrator {
         });
         const backendRuntime = this.prepareBackendRuntimeForSession(sessionKey, backendDecision.profile);
         this.sessionLastBackendDecisions.set(sessionKey, backendDecision);
+        this.recordBackendRouteDecision({
+          sessionKey,
+          message,
+          taskType,
+          decision: backendDecision,
+        });
 
         if (workflowCommand?.kind === "run") {
           const executionStartedAt = Date.now();
@@ -1992,6 +2012,7 @@ export class Orchestrator {
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
 - /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
+- /diag route [count]: 查看后端路由命中与回退原因诊断（count 默认 10）
 - /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
 - /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
@@ -2033,6 +2054,8 @@ export class Orchestrator {
     const backendRouteMode = backendOverride ? "manual" : "auto";
     const backendRouteReason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
     const backendRouteRuleId = backendDecision?.ruleId ?? "none";
+    const backendRouteReasonDesc = describeBackendRouteReason(backendRouteReason);
+    const backendRouteFallback = isBackendRouteFallbackReason(backendRouteReason) ? "yes" : "no";
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -2044,6 +2067,7 @@ export class Orchestrator {
 - 当前工作目录: ${roomConfig.workdir}
 - AI CLI: ${this.formatBackendToolLabel(backendProfile)}
 - backend route: mode=${backendRouteMode}, reason=${backendRouteReason}, rule=${backendRouteRuleId}
+- backend route detail: desc=${backendRouteReasonDesc}, fallback=${backendRouteFallback}
 - 当前版本: ${packageUpdate.currentVersion}
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 更新检查时间: ${packageUpdate.checkedAt}
@@ -3486,6 +3510,37 @@ export class Orchestrator {
     };
   }
 
+  private recordBackendRouteDecision(input: {
+    sessionKey: string;
+    message: InboundMessage;
+    taskType: BackendModelRouteTaskType;
+    decision: SessionBackendDecision;
+  }): void {
+    this.backendRouteDiagRecords.push({
+      at: new Date().toISOString(),
+      sessionKey: input.sessionKey,
+      conversationId: input.message.conversationId,
+      senderId: input.message.senderId,
+      taskType: input.taskType,
+      source: input.decision.source,
+      reasonCode: input.decision.reasonCode,
+      ruleId: input.decision.ruleId,
+      profile: input.decision.profile,
+    });
+    if (this.backendRouteDiagRecords.length > BACKEND_ROUTE_DIAG_HISTORY_MAX) {
+      this.backendRouteDiagRecords.splice(
+        0,
+        this.backendRouteDiagRecords.length - BACKEND_ROUTE_DIAG_HISTORY_MAX,
+      );
+    }
+  }
+
+  private listBackendRouteDiagRecords(limit: number, sessionKey: string): BackendRouteDiagRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const scoped = this.backendRouteDiagRecords.filter((record) => record.sessionKey === sessionKey);
+    return scoped.slice(Math.max(0, scoped.length - safeLimit)).reverse();
+  }
+
   private async prepareImageAttachments(
     message: InboundMessage,
     requestId: string,
@@ -4292,9 +4347,11 @@ export class Orchestrator {
       const decision = this.sessionLastBackendDecisions.get(sessionKey);
       const reason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
       const rule = decision?.ruleId ?? "none";
+      const reasonDesc = describeBackendRouteReason(reason);
+      const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
       await this.channel.sendNotice(
         message.conversationId,
-        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n命中规则: ${rule}\n可用命令: /backend codex | /backend claude | /backend auto | /backend status`,
+        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n原因说明: ${reasonDesc}\n命中规则: ${rule}\n是否回退: ${fallback}\n可用命令: /backend codex | /backend claude | /backend auto | /backend status`,
       );
       return;
     }
@@ -4374,10 +4431,7 @@ export class Orchestrator {
   }
 
   private formatBackendToolLabel(profile: BackendModelRouteProfile = this.defaultBackendProfile): string {
-    if (!profile.model) {
-      return profile.provider;
-    }
-    return `${profile.provider} (${profile.model})`;
+    return formatBackendRouteProfile(profile);
   }
 
   private formatMultimodalHelpStatus(): string {
@@ -4395,7 +4449,7 @@ export class Orchestrator {
     if (!target || target.kind === "help") {
       await this.channel.sendNotice(
         message.conversationId,
-        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag autodev [count] | /diag queue [count]",
+        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count]",
       );
       return;
     }
@@ -4472,6 +4526,33 @@ ${formatMediaDiagEvents(snapshot.recentEvents)}`,
 ${commitText}
 - records:
 ${formatAutoDevDiagRuns(runs, (runId) => this.listWorkflowDiagEvents(runId, 5))}`,
+      );
+      return;
+    }
+    if (target.kind === "route") {
+      const sessionKey = buildSessionKey(message);
+      const backendProfile = this.resolveSessionBackendStatusProfile(sessionKey);
+      const backendOverride = this.sessionBackendOverrides.get(sessionKey);
+      const backendDecision = this.sessionLastBackendDecisions.get(sessionKey);
+      const mode = backendOverride ? "manual" : "auto";
+      const source = backendOverride ? "manual_override" : backendDecision?.source ?? "default";
+      const reason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
+      const rule = backendDecision?.ruleId ?? "none";
+      const reasonDesc = describeBackendRouteReason(reason);
+      const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
+      const ruleStats = this.backendModelRouter.getStats();
+      const records = this.listBackendRouteDiagRecords(target.limit, sessionKey);
+      await this.channel.sendNotice(
+        message.conversationId,
+        `${this.botNoticePrefix} 诊断信息（route）
+- current: backend=${this.formatBackendToolLabel(backendProfile)}, mode=${mode}
+- defaultBackend: ${this.formatBackendToolLabel(this.defaultBackendProfile)}
+- rules: total=${ruleStats.total}, enabled=${ruleStats.enabled}
+- lastDecision: source=${source}, reason=${reason}, rule=${rule}
+- reasonDesc: ${reasonDesc}
+- fallback: ${fallback}
+- records:
+${formatBackendRouteDiagRecords(records)}`,
       );
       return;
     }
@@ -5406,6 +5487,7 @@ function parseDiagTarget(
   | { kind: "version" }
   | { kind: "media"; limit: number }
   | { kind: "upgrade"; limit: number }
+  | { kind: "route"; limit: number }
   | { kind: "autodev"; limit: number }
   | { kind: "queue"; limit: number }
   | { kind: "help" }
@@ -5448,6 +5530,16 @@ function parseDiagTarget(
       return null;
     }
     return { kind: "upgrade", limit: parsed };
+  }
+  if (value === "route") {
+    if (!limitToken) {
+      return { kind: "route", limit: 10 };
+    }
+    const parsed = Number.parseInt(limitToken, 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
+      return null;
+    }
+    return { kind: "route", limit: parsed };
   }
   if (value === "autodev") {
     if (!limitToken) {
@@ -6230,6 +6322,46 @@ function formatAutoDevGitCommitRecords(records: AutoDevGitCommitRecord[]): strin
       return `${base} files=${formatAutoDevGitChangedFiles(record.result)}`;
     })
     .join("\n");
+}
+
+function formatBackendRouteDiagRecords(records: BackendRouteDiagRecord[]): string {
+  if (records.length === 0) {
+    return "- (empty)";
+  }
+  return records
+    .map((record) => {
+      return [
+        `- at=${record.at} taskType=${record.taskType} backend=${formatBackendRouteProfile(record.profile)}`,
+        `  source=${record.source} reason=${record.reasonCode}(${describeBackendRouteReason(record.reasonCode)}) rule=${
+          record.ruleId ?? "none"
+        } fallback=${isBackendRouteFallbackReason(record.reasonCode) ? "yes" : "no"}`,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+function formatBackendRouteProfile(profile: BackendModelRouteProfile): string {
+  if (!profile.model) {
+    return profile.provider;
+  }
+  return `${profile.provider} (${profile.model})`;
+}
+
+function isBackendRouteFallbackReason(reasonCode: SessionBackendDecision["reasonCode"]): boolean {
+  return reasonCode === "default_fallback" || reasonCode === "factory_unavailable";
+}
+
+function describeBackendRouteReason(reasonCode: SessionBackendDecision["reasonCode"]): string {
+  if (reasonCode === "manual_override") {
+    return "会话已通过 /backend 手动固定后端";
+  }
+  if (reasonCode === "rule_match") {
+    return "命中路由规则并使用规则目标";
+  }
+  if (reasonCode === "factory_unavailable") {
+    return "命中规则但目标执行器不可用，回退默认后端";
+  }
+  return "未命中规则，使用默认后端";
 }
 
 function formatQueuePendingSessions(sessions: TaskQueuePendingSessionRecord[]): string {

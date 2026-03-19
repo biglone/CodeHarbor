@@ -741,6 +741,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("/autodev run [taskId]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/autodev stop"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag media [count]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/diag route [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag autodev [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/diag queue [count]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("//autodev run T6.2"))).toBe(true);
@@ -1088,6 +1089,46 @@ describe("Matrix e2e regression", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("shows route diagnosis for /diag route command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "route-session", reply: "route-ok" }),
+      cancel: () => {},
+    }));
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5",
+      backendModelRoutingRules: [
+        {
+          id: "prefer-claude-chat",
+          enabled: true,
+          priority: 100,
+          when: {
+            taskTypes: ["chat"],
+            textIncludes: ["anthropic"],
+          },
+          target: {
+            provider: "claude",
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "please ask anthropic model" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag route 5" }));
+
+    const routeDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（route）"));
+    expect(routeDiagNotice).toBeDefined();
+    expect(routeDiagNotice?.text).toContain("rules: total=1, enabled=1");
+    expect(routeDiagNotice?.text).toContain("reason=factory_unavailable");
+    expect(routeDiagNotice?.text).toContain("fallback: yes");
   });
 
   it("shows recent upgrade records for /diag upgrade command", async () => {

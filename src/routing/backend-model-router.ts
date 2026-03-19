@@ -87,6 +87,19 @@ export class BackendModelRouter {
     return this.rules.some((rule) => rule.enabled);
   }
 
+  getStats(): { total: number; enabled: number } {
+    let enabled = 0;
+    for (const rule of this.rules) {
+      if (rule.enabled) {
+        enabled += 1;
+      }
+    }
+    return {
+      total: this.rules.length,
+      enabled,
+    };
+  }
+
   resolve(input: BackendModelRouteInput, fallback: BackendModelRouteProfile): BackendModelRouteDecision {
     for (const rule of this.rules) {
       if (!rule.enabled) {

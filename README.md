@@ -173,6 +173,7 @@ Common in-chat control commands:
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
 - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
 - `/diag upgrade [count]` show upgrade diagnostics (distributed lock, aggregate stats, recent upgrade records)
+- `/diag route [count]` show backend routing diagnostics (rule hit/fallback reason + recent route records)
 - `/diag autodev [count]` show AutoDev diagnostics (stage trace, live loop snapshot, and recent git commit records)
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
@@ -549,6 +550,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
   - `/diag media [count]` show multimodal diagnostics (image/audio counters + recent records)
   - `/diag upgrade [count]` show distributed lock + aggregate stats + recent upgrade run diagnostics
+  - `/diag route [count]` show backend routing diagnostics (rule hit + fallback reason + recent route records)
   - `/diag autodev [count]` show AutoDev diagnostics (stage trace + loop status + recent git commit records + error summary)
   - `/diag queue [count]` show queue diagnostics (counts + pending sessions + failure archive)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)

@@ -188,6 +188,7 @@ codeharbor admin serve
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
 - `/diag media [count]`：输出多模态诊断（图片/语音计数器 + 最近处理记录）
 - `/diag upgrade [count]`：输出升级诊断信息（分布式升级锁、聚合指标、最近升级记录）
+- `/diag route [count]`：输出后端路由诊断（策略命中/回退原因 + 最近路由记录）
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - 在 systemd `NoNewPrivileges=true` 场景下会自动走信号重启回退，无需手工 sudo 重启

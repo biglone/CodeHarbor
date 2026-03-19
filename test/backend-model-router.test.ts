@@ -150,4 +150,32 @@ describe("BackendModelRouter", () => {
         ]),
     ).toThrow(/textRegex/i);
   });
+
+  it("reports total/enabled rule stats", () => {
+    const router = new BackendModelRouter([
+      {
+        id: "enabled-rule",
+        enabled: true,
+        priority: 1,
+        when: {},
+        target: {
+          provider: "codex",
+        },
+      },
+      {
+        id: "disabled-rule",
+        enabled: false,
+        priority: 0,
+        when: {},
+        target: {
+          provider: "claude",
+        },
+      },
+    ]);
+
+    expect(router.getStats()).toEqual({
+      total: 2,
+      enabled: 1,
+    });
+  });
 });

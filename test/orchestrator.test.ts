@@ -824,6 +824,56 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("backend route: mode=auto, reason=factory_unavailable, rule=prefer-claude-chat"))).toBe(true);
   });
 
+  it("shows /diag route with rule hit and fallback reason details", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new TaggedExecutor("codex");
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5",
+      backendModelRoutingRules: [
+        {
+          id: "prefer-claude-chat",
+          enabled: true,
+          priority: 100,
+          when: {
+            taskTypes: ["chat"],
+            textIncludes: ["anthropic"],
+          },
+          target: {
+            provider: "claude",
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "please ask anthropic model",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/diag route 5",
+        eventId: "$diag-route",
+      }),
+    );
+
+    const notice = channel.notices.find((entry) => entry.text.includes("诊断信息（route）"));
+    expect(notice).toBeDefined();
+    expect(notice?.text).toContain("rules: total=1, enabled=1");
+    expect(notice?.text).toContain("lastDecision: source=default, reason=factory_unavailable, rule=prefer-claude-chat");
+    expect(notice?.text).toContain("reasonDesc: 命中规则但目标执行器不可用，回退默认后端");
+    expect(notice?.text).toContain("fallback: yes");
+    expect(notice?.text).toContain("taskType=chat");
+  });
+
   it("rejects requests when user is rate-limited", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
