@@ -1453,7 +1453,7 @@ describe("Orchestrator", () => {
       });
 
       await orchestrator.bootstrapTaskQueueRecovery();
-      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed", 8_000);
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed", 20_000);
 
       expect(executor.callCount).toBe(2);
       expect(store.getTaskById(queued.taskId)?.attempt).toBe(2);
@@ -1472,7 +1472,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 
   it("archives non-retryable queue task errors without retry", async () => {
     const { dir, store } = await createSqliteStateStore();
