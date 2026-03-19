@@ -8,6 +8,21 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.47] - 2026-03-19
+
+- AutoDev token pressure controls:
+  - added optional context budget env vars for planner/output/feedback aggregation
+  - default behavior keeps context unlimited to avoid unintended truncation
+  - `/status` now exposes current multi-agent context budget mode (`unlimited` or numeric)
+  - multi-agent role runs are now stateless per round to reduce cross-round context accumulation
+- RBAC scope hardening:
+  - added scope matrix and enforcement for Admin/API/Webhook surfaces
+  - Admin viewer/admin tokens now map to explicit read/write capabilities through scope checks
+- Session history index (T7.3):
+  - added session index query support with room/user/time filters and pagination
+  - added Admin API endpoints for session listing and per-session message history
+  - synced docs/tests and marked T7.3 complete in task tracking
+
 ## [0.1.46] - 2026-03-18
 
 - AutoDev Git artifact hardening:
