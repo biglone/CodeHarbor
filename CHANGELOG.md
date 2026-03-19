@@ -8,6 +8,20 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.50] - 2026-03-19
+
+- Agent role skill system (Planner/Executor/Reviewer):
+  - added built-in role skills with optional local SKILL discovery (`~/.codex/skills`) via new `WorkflowRoleSkillCatalog`
+  - workflow prompts now support role-skill injection blocks and per-run policy overrides
+  - progressive disclosure support (`summary` / `progressive` / `full`) to balance context fidelity and token usage
+- AutoDev role-skill controls and observability:
+  - added `/autodev skills on|off|summary|progressive|full|status` for session-level role-skill toggle/mode control
+  - `/status`, `/agents status`, and `/autodev status` now show effective role-skill config and loaded skills
+  - workflow progress notices include role-skill usage metadata for each stage
+- Config/docs/tests:
+  - added role-skill env options in `.env.example`, README, and Chinese user manual
+  - added new unit coverage for role-skill catalog and workflow/orchestrator integration
+
 ## [0.1.49] - 2026-03-19
 
 - AutoDev status observability:
