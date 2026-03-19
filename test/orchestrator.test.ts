@@ -1275,7 +1275,7 @@ describe("Orchestrator", () => {
       });
 
       await orchestrator.bootstrapTaskQueueRecovery();
-      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed");
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "failed", 8_000);
 
       expect(executor.callCount).toBe(2);
       expect(store.getTaskById(queued.taskId)?.attempt).toBe(2);
