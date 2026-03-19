@@ -629,7 +629,8 @@ AutoDev (`/autodev`) conventions:
 - `/autodev run <taskId>` runs only the specified task.
 - `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
-- When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with `chore(autodev): complete <taskId>`.
+- When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <taskId> <task-summary>`.
+- AutoDev commit body includes `Task`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
 - If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.

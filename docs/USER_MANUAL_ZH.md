@@ -173,7 +173,8 @@ codeharbor admin serve
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
-  - 提交信息格式：`chore(autodev): complete <taskId>`
+  - 提交标题格式：`<type>(<scope>): <taskId> <task-summary>`（按任务描述与改动文件自动推断）
+  - 提交正文固定包含：`Task`、`Changed-files`、`Generated-by`
 - AutoDev 结果消息会固定输出 `git commit` 与 `git changed files`
 - 若运行前仓库已存在未提交改动，或当前目录不是 Git 仓库，会跳过自动提交并在结果消息提示原因
 

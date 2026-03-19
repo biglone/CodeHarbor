@@ -2576,8 +2576,14 @@ export class Orchestrator {
       }
 
       await this.runGitCommand(workdir, ["add", "-A"]);
-      const subject = `chore(autodev): complete ${task.id}`;
-      const detail = summarizeSingleLine(task.description, 120);
+      const stagedFiles = await this.listGitStagedFiles(workdir);
+      if (stagedFiles.length === 0) {
+        return {
+          kind: "skipped",
+          reason: "无文件改动可提交",
+        };
+      }
+      const commitMessage = buildAutoDevCommitMessage(task, stagedFiles);
       await this.runGitCommand(workdir, [
         "-c",
         "user.name=CodeHarbor AutoDev",
@@ -2585,16 +2591,16 @@ export class Orchestrator {
         "user.email=autodev@codeharbor.local",
         "commit",
         "-m",
-        subject,
+        commitMessage.subject,
         "-m",
-        `Task: ${task.id} ${detail}\nGenerated-by: CodeHarbor AutoDev`,
+        commitMessage.body,
       ]);
       const hash = (await this.runGitCommand(workdir, ["rev-parse", "--short", "HEAD"])).trim();
       const changedFiles = await this.listGitCommitChangedFiles(workdir);
       return {
         kind: "committed",
         commitHash: hash || "unknown",
-        commitSubject: subject,
+        commitSubject: commitMessage.subject,
         changedFiles,
       };
     } catch (error) {
@@ -2681,6 +2687,14 @@ export class Orchestrator {
 
   private async listGitCommitChangedFiles(workdir: string): Promise<string[]> {
     const raw = await this.runGitCommand(workdir, ["show", "--name-only", "--pretty=format:", "--no-renames", "HEAD"]);
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  private async listGitStagedFiles(workdir: string): Promise<string[]> {
+    const raw = await this.runGitCommand(workdir, ["diff", "--cached", "--name-only", "--no-renames"]);
     return raw
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -4591,6 +4605,168 @@ function summarizeSingleLine(text: string, maxLen: number): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLen)}...`;
+}
+
+interface AutoDevCommitMessage {
+  subject: string;
+  body: string;
+}
+
+type AutoDevCommitType = "feat" | "fix" | "docs" | "test" | "chore";
+
+const AUTODEV_COMMIT_FIX_KEYWORDS = ["fix", "bug", "hotfix", "repair", "修复", "错误", "异常", "故障", "报错"];
+const AUTODEV_COMMIT_DOC_KEYWORDS = ["doc", "readme", "manual", "文档", "说明"];
+const AUTODEV_COMMIT_TEST_KEYWORDS = ["test", "spec", "测试", "验收", "回归"];
+const AUTODEV_COMMIT_SCOPE_HINTS: Array<{ scope: string; patterns: RegExp[] }> = [
+  { scope: "autodev", patterns: [/autodev/i, /orchestrator/i, /workflow\/autodev/i, /多智能体/, /自动开发/] },
+  { scope: "history", patterns: [/history/i, /retention/i, /archive/i, /历史/, /导出/, /保留策略/] },
+  { scope: "routing", patterns: [/route/i, /router/i, /routing/i, /路由/, /策略引擎/] },
+  { scope: "auth", patterns: [/auth/i, /rbac/i, /oauth/i, /鉴权/, /权限/] },
+  { scope: "admin", patterns: [/admin/i, /管理端/, /后台/] },
+  { scope: "store", patterns: [/state-store/i, /store/i, /state/i, /存储/] },
+  { scope: "api", patterns: [/api/i, /endpoint/i, /webhook/i, /接口/] },
+  { scope: "ci", patterns: [/ci/i, /publish/i, /release/i, /pipeline/i, /workflow/i, /发布/] },
+];
+
+function buildAutoDevCommitMessage(task: AutoDevTask, changedFiles: string[]): AutoDevCommitMessage {
+  const normalizedFiles = normalizeAutoDevCommitFiles(changedFiles);
+  const detail = summarizeSingleLine(task.description, 160);
+  const type = inferAutoDevCommitType(detail, normalizedFiles);
+  const scope = inferAutoDevCommitScope(detail, normalizedFiles, type);
+  const subjectPrefix = `${type}(${scope}): `;
+  const headline = buildAutoDevCommitHeadline(task.id, detail, Math.max(48, 110 - subjectPrefix.length));
+  const subject = `${subjectPrefix}${headline}`;
+  const body = [
+    `Task: ${task.id} ${detail}`,
+    `Changed-files: ${summarizeAutoDevCommitFiles(normalizedFiles)}`,
+    "Generated-by: CodeHarbor AutoDev",
+  ].join("\n");
+  return {
+    subject,
+    body,
+  };
+}
+
+function inferAutoDevCommitType(description: string, changedFiles: string[]): AutoDevCommitType {
+  const normalized = description.toLowerCase();
+  if (includesAnyKeyword(normalized, AUTODEV_COMMIT_FIX_KEYWORDS)) {
+    return "fix";
+  }
+  if (changedFiles.length > 0 && changedFiles.every((file) => isAutoDevDocFile(file))) {
+    return "docs";
+  }
+  if (changedFiles.length > 0 && changedFiles.every((file) => isAutoDevTestFile(file))) {
+    return "test";
+  }
+  if (includesAnyKeyword(normalized, AUTODEV_COMMIT_DOC_KEYWORDS)) {
+    return "docs";
+  }
+  if (includesAnyKeyword(normalized, AUTODEV_COMMIT_TEST_KEYWORDS) && !changedFiles.some((file) => !isAutoDevTestFile(file))) {
+    return "test";
+  }
+  if (changedFiles.length > 0 && changedFiles.every((file) => isAutoDevChoreFile(file))) {
+    return "chore";
+  }
+  return "feat";
+}
+
+function inferAutoDevCommitScope(description: string, changedFiles: string[], type: AutoDevCommitType): string {
+  if (type === "docs") {
+    return "docs";
+  }
+  if (type === "test") {
+    return "test";
+  }
+
+  const candidates = [description, ...changedFiles];
+  for (const hint of AUTODEV_COMMIT_SCOPE_HINTS) {
+    if (candidates.some((candidate) => hint.patterns.some((pattern) => pattern.test(candidate)))) {
+      return hint.scope;
+    }
+  }
+
+  if (changedFiles.length > 0) {
+    const first = changedFiles[0];
+    const firstPart = first.split("/").filter((part) => part.length > 0);
+    if (firstPart.length >= 2) {
+      return normalizeCommitScopeFragment(firstPart[1]);
+    }
+    if (firstPart.length === 1) {
+      return normalizeCommitScopeFragment(firstPart[0]);
+    }
+  }
+  return "autodev";
+}
+
+function normalizeAutoDevCommitFiles(files: string[]): string[] {
+  const unique = new Set<string>();
+  for (const file of files) {
+    const normalized = file.trim();
+    if (!normalized) {
+      continue;
+    }
+    unique.add(normalized);
+  }
+  return Array.from(unique);
+}
+
+function summarizeAutoDevCommitFiles(files: string[]): string {
+  if (files.length === 0) {
+    return "(none)";
+  }
+  const preview = files.slice(0, 12).join(", ");
+  if (files.length <= 12) {
+    return preview;
+  }
+  return `${preview}, ... (+${files.length - 12} more)`;
+}
+
+function buildAutoDevCommitHeadline(taskId: string, description: string, maxLen: number): string {
+  const normalizedTaskId = taskId.trim();
+  const plainDetail = description
+    .replace(/[:：]/g, " ")
+    .replace(/[()（）]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const base = plainDetail.toLowerCase().startsWith(normalizedTaskId.toLowerCase())
+    ? plainDetail
+    : `${normalizedTaskId} ${plainDetail || "task update"}`.trim();
+  return summarizeSingleLine(base, maxLen);
+}
+
+function includesAnyKeyword(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function isAutoDevDocFile(file: string): boolean {
+  return /(^|\/)(readme|changelog|contributing|license)(\.[^/]+)?$/i.test(file) || /\.(md|mdx|rst|txt)$/i.test(file);
+}
+
+function isAutoDevTestFile(file: string): boolean {
+  return /(^|\/)(test|tests|__tests__)\//i.test(file) || /\.(test|spec)\.[^/]+$/i.test(file);
+}
+
+function isAutoDevChoreFile(file: string): boolean {
+  if (isAutoDevDocFile(file) || isAutoDevTestFile(file)) {
+    return false;
+  }
+  return (
+    /(^|\/)\.github\/workflows\/.+\.(ya?ml)$/i.test(file) ||
+    /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/i.test(file) ||
+    /(^|\/)(tsconfig(\..+)?\.json|eslint\.config\.[^/]+|\.eslintrc(\.[^/]+)?|prettier\.config\.[^/]+|\.prettierrc(\.[^/]+)?)$/i.test(
+      file,
+    )
+  );
+}
+
+function normalizeCommitScopeFragment(raw: string): string {
+  const normalized = raw
+    .toLowerCase()
+    .replace(/\.[^./]+$/g, "")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "autodev";
 }
 
 function mapApiTaskStage(task: TaskQueueRecord): ApiTaskStage {

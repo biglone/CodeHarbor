@@ -2585,7 +2585,11 @@ describe("Orchestrator", () => {
       );
 
       const latest = await execFileAsync("git", ["log", "--oneline", "-n", "1"], { cwd: tempRoot });
-      expect(latest.stdout).toContain("chore(autodev): complete T10.1");
+      expect(latest.stdout).toMatch(/(feat|fix|docs|test|chore)\([a-z0-9-]+\): T10\.1 /);
+      const latestBody = await execFileAsync("git", ["log", "--pretty=%B", "-n", "1"], { cwd: tempRoot });
+      expect(latestBody.stdout).toContain("Task: T10.1 自动提交验证");
+      expect(latestBody.stdout).toContain("Changed-files:");
+      expect(latestBody.stdout).toContain("Generated-by: CodeHarbor AutoDev");
       const status = await execFileAsync("git", ["status", "--porcelain"], { cwd: tempRoot });
       expect(status.stdout.trim()).toBe("");
       expect(channel.notices.some((entry) => entry.text.includes("git commit: committed"))).toBe(true);
