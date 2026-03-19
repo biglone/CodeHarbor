@@ -28,7 +28,11 @@ export interface AutoDevContext {
   tasks: AutoDevTask[];
 }
 
-export type AutoDevCommand = { kind: "status" } | { kind: "run"; taskId: string | null } | { kind: "stop" };
+export type AutoDevCommand =
+  | { kind: "status" }
+  | { kind: "run"; taskId: string | null }
+  | { kind: "stop" }
+  | { kind: "progress"; mode: "status" | "on" | "off" };
 
 export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   const normalized = text.trim();
@@ -43,6 +47,19 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   }
   if (parts[1]?.toLowerCase() === "stop") {
     return { kind: "stop" };
+  }
+  if (parts[1]?.toLowerCase() === "progress") {
+    const option = (parts[2] ?? "").trim().toLowerCase();
+    if (!option || option === "status") {
+      return { kind: "progress", mode: "status" };
+    }
+    if (["on", "enable", "enabled", "true", "1"].includes(option)) {
+      return { kind: "progress", mode: "on" };
+    }
+    if (["off", "disable", "disabled", "false", "0"].includes(option)) {
+      return { kind: "progress", mode: "off" };
+    }
+    return null;
   }
   if (parts[1]?.toLowerCase() !== "run") {
     return null;

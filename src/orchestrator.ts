@@ -77,6 +77,7 @@ import {
   createIdleWorkflowSnapshot,
   MultiAgentWorkflowRunner,
   parseWorkflowCommand,
+  type MultiAgentWorkflowProgressEvent,
   type MultiAgentWorkflowRunResult,
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
@@ -136,6 +137,7 @@ interface OrchestratorOptions {
   autoDevLoopMaxMinutes?: number;
   autoDevAutoCommit?: boolean;
   autoDevMaxConsecutiveFailures?: number;
+  autoDevDetailedProgressEnabled?: boolean;
 }
 
 interface SessionLockEntry {
@@ -413,6 +415,7 @@ const WORKFLOW_DIAG_MAX_EVENTS = 2_000;
 const DEFAULT_AUTODEV_LOOP_MAX_RUNS = 20;
 const DEFAULT_AUTODEV_LOOP_MAX_MINUTES = 120;
 const DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES = 3;
+const DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED = true;
 const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
 const BACKEND_ROUTE_DIAG_HISTORY_MAX = 200;
 const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
@@ -788,6 +791,8 @@ export class Orchestrator {
   private readonly autoDevLoopMaxMinutes: number;
   private readonly autoDevAutoCommit: boolean;
   private readonly autoDevMaxConsecutiveFailures: number;
+  private readonly autoDevDetailedProgressDefaultEnabled: boolean;
+  private readonly autoDevDetailedProgressOverrides = new Map<string, boolean>();
   private readonly workflowPlanContextMaxChars: number | null;
   private readonly workflowOutputContextMaxChars: number | null;
   private readonly workflowFeedbackContextMaxChars: number | null;
@@ -916,6 +921,8 @@ export class Orchestrator {
       options?.autoDevMaxConsecutiveFailures ??
         parseEnvPositiveInt(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES),
     );
+    this.autoDevDetailedProgressDefaultEnabled =
+      options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED;
     const currentVersion = resolvePackageVersion();
     this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
     this.packageUpdateChecker =
@@ -1186,6 +1193,11 @@ export class Orchestrator {
         }
         if (autoDevCommand?.kind === "status") {
           await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
+        if (autoDevCommand?.kind === "progress") {
+          await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
           this.stateStore.markEventProcessed(sessionKey, message.eventId);
           return;
         }
@@ -1623,9 +1635,10 @@ export class Orchestrator {
     const autoDevCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
     const isWorkflowStatus = workflowCommand?.kind === "status";
     const isAutoDevStatus = autoDevCommand?.kind === "status";
+    const isAutoDevProgress = autoDevCommand?.kind === "progress";
     const isAutoDevStop = autoDevCommand?.kind === "stop";
 
-    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus && !isAutoDevStop) {
+    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus && !isAutoDevProgress && !isAutoDevStop) {
       return false;
     }
 
@@ -1644,6 +1657,8 @@ export class Orchestrator {
       await this.handleControlCommand(route.command, sessionKey, message, requestId);
     } else if (isWorkflowStatus) {
       await this.handleWorkflowStatusCommand(sessionKey, message);
+    } else if (isAutoDevProgress) {
+      await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
     } else if (isAutoDevStop) {
       await this.handleAutoDevLoopStopCommand(sessionKey, message);
     } else {
@@ -1659,6 +1674,8 @@ export class Orchestrator {
           ? route.command
           : isWorkflowStatus
             ? "workflow.status"
+            : isAutoDevProgress
+              ? "autodev.progress"
             : isAutoDevStop
               ? "autodev.stop"
               : "autodev.status",
@@ -1894,7 +1911,11 @@ export class Orchestrator {
     }
 
     const rawAutoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(incomingTrimmed) : null;
-    if (rawAutoDevCommand?.kind === "status" || rawAutoDevCommand?.kind === "stop") {
+    if (
+      rawAutoDevCommand?.kind === "status" ||
+      rawAutoDevCommand?.kind === "stop" ||
+      rawAutoDevCommand?.kind === "progress"
+    ) {
       return {
         kind: "execute",
         prompt: incomingTrimmed,
@@ -1968,6 +1989,7 @@ export class Orchestrator {
       this.skipBridgeForNextPrompt.add(sessionKey);
       this.workflowSnapshots.delete(sessionKey);
       this.autoDevSnapshots.delete(sessionKey);
+      this.autoDevDetailedProgressOverrides.delete(sessionKey);
       this.pendingStopRequests.delete(sessionKey);
       this.pendingAutoDevLoopStopRequests.delete(sessionKey);
       this.activeAutoDevLoopSessions.delete(sessionKey);
@@ -2004,9 +2026,10 @@ export class Orchestrator {
 - /help: 查看命令帮助
 - /status: 查看会话状态（版本检查为缓存结果）
 - /version: 实时检查最新版本
-- /autodev status: 查看 AutoDev 当前任务、下一个任务与运行状态
+- /autodev status: 查看 AutoDev 当前任务、过程阶段与运行状态
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
+- /autodev progress [on|off|status]: 控制 AutoDev/Multi-Agent 过程回显详细模式（默认 on）
 - 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
@@ -2042,6 +2065,26 @@ export class Orchestrator {
     const runtime = this.getBackendRuntimeStats();
     const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
     const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
+    const autoDevTask =
+      autoDev.taskId && autoDev.taskDescription
+        ? `${autoDev.taskId} ${autoDev.taskDescription}`.trim()
+        : autoDev.taskId
+          ? autoDev.taskId
+          : "N/A";
+    const autoDevLoopActive = this.activeAutoDevLoopSessions.has(sessionKey) ? "yes" : "no";
+    const autoDevLoopStopRequested = this.pendingAutoDevLoopStopRequests.has(sessionKey) ? "yes" : "no";
+    const autoDevStopRequested = this.pendingStopRequests.has(sessionKey) ? "yes" : "no";
+    const autoDevDetailedProgress = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
+    const autoDevDetailedProgressDefault = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+    const autoDevRunDuration = formatRunWindowDuration(autoDev.startedAt, autoDev.endedAt);
+    const autoDevDiagRun = this.listWorkflowDiagRunsBySession("autodev", sessionKey, 1)[0] ?? null;
+    const autoDevLatestStageEvent = autoDevDiagRun ? this.listWorkflowDiagEvents(autoDevDiagRun.runId, 1)[0] ?? null : null;
+    const autoDevStageSummary = autoDevLatestStageEvent
+      ? `${autoDevLatestStageEvent.stage}#${autoDevLatestStageEvent.round}@${autoDevLatestStageEvent.at}`
+      : autoDevDiagRun?.lastStage
+        ? `${autoDevDiagRun.lastStage}@${autoDevDiagRun.updatedAt}`
+        : "N/A";
+    const autoDevStageMessage = autoDevLatestStageEvent?.message ?? autoDevDiagRun?.lastMessage ?? "N/A";
     const packageUpdate = await this.packageUpdateChecker.getStatus();
     const latestUpgrade = this.getLatestUpgradeRun();
     const recentUpgrades = this.getRecentUpgradeRuns(3);
@@ -2086,7 +2129,11 @@ export class Orchestrator {
 - Multi-Agent context: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
         this.workflowOutputContextMaxChars,
       )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
-- AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, task=${autoDev.taskId ?? "N/A"}`,
+- AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, mode=${autoDev.mode}, task=${autoDevTask}, duration=${autoDevRunDuration}
+- AutoDev loop: round=${autoDev.loopRound}/${autoDev.loopMaxRuns}, completed=${autoDev.loopCompletedRuns}, deadline=${autoDev.loopDeadlineAt ?? "N/A"}, active=${autoDevLoopActive}
+- AutoDev control: loopStopRequested=${autoDevLoopStopRequested}, stopRequested=${autoDevStopRequested}, detailedProgress=${autoDevDetailedProgress} (default=${autoDevDetailedProgressDefault})
+- AutoDev stage: run=${autoDevDiagRun?.runId ?? "N/A"}, status=${autoDevDiagRun?.status ?? "N/A"}, latest=${autoDevStageSummary}
+- AutoDev stage detail: ${autoDevStageMessage}`,
     );
   }
 
@@ -2118,6 +2165,22 @@ export class Orchestrator {
       const context = await loadAutoDevContext(workdir);
       const summary = summarizeAutoDevTasks(context.tasks);
       const inProgressTask = context.tasks.find((task) => task.status === "in_progress") ?? null;
+      const runDuration = formatRunWindowDuration(snapshot.startedAt, snapshot.endedAt);
+      const loopActive = this.activeAutoDevLoopSessions.has(sessionKey) ? "yes" : "no";
+      const loopStopRequested = this.pendingAutoDevLoopStopRequests.has(sessionKey) ? "yes" : "no";
+      const stopRequested = this.pendingStopRequests.has(sessionKey) ? "yes" : "no";
+      const detailedProgress = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
+      const detailedProgressDefault = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+      const recentRuns = this.listWorkflowDiagRunsBySession("autodev", sessionKey, 3);
+      const latestRun = recentRuns[0] ?? null;
+      const stageEvents = latestRun ? this.listWorkflowDiagEvents(latestRun.runId, 12) : [];
+      const latestStageEvent = stageEvents.length > 0 ? stageEvents[stageEvents.length - 1] : null;
+      const latestStageSummary = latestStageEvent
+        ? `stage=${latestStageEvent.stage}, round=${latestStageEvent.round}, at=${latestStageEvent.at}, message=${latestStageEvent.message}`
+        : "N/A";
+      const latestRunLastStage = latestRun?.lastStage
+        ? `${latestRun.lastStage}${latestRun.lastMessage ? `(${latestRun.lastMessage})` : ""}`
+        : "N/A";
       const currentTask =
         snapshot.taskId && snapshot.taskDescription
           ? `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
@@ -2134,19 +2197,57 @@ export class Orchestrator {
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}
+- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - runState: ${snapshot.state}
 - currentTask: ${currentTask}
+- runWindow: startedAt=${snapshot.startedAt ?? "N/A"}, endedAt=${snapshot.endedAt ?? "N/A"}, duration=${runDuration}
 - runMode: ${snapshot.mode}
 - runLoop: round=${snapshot.loopRound}, completed=${snapshot.loopCompletedRuns}/${snapshot.loopMaxRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
+- runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - runError: ${snapshot.error ?? "N/A"}
 - runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
-- runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}`,
+- runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
+- workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
+- workflowDiagLastStage: ${latestRunLastStage}
+- workflowStage: ${latestStageSummary}
+- recentRuns:
+${formatAutoDevStatusRunSummaries(recentRuns)}
+- stageTrace:
+${formatAutoDevStatusStageTrace(stageEvents)}`,
       );
     } catch (error) {
       await this.channel.sendNotice(message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
     }
+  }
+
+  private async handleAutoDevProgressCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "on" | "off",
+  ): Promise<void> {
+    const current = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
+    const defaultMode = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+    if (mode === "status") {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] AutoDev 过程回显设置
+- detailedProgress: ${current}
+- default: ${defaultMode}
+- usage: /autodev progress on|off|status`,
+      );
+      return;
+    }
+
+    const enabled = mode === "on";
+    this.setAutoDevDetailedProgressEnabled(sessionKey, enabled);
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] AutoDev 过程回显已更新
+- detailedProgress: ${enabled ? "on" : "off"}
+- default: ${defaultMode}
+- session: ${sessionKey}`,
+    );
   }
 
   private async handleAutoDevLoopStopCommand(sessionKey: string, message: InboundMessage): Promise<void> {
@@ -2914,6 +3015,7 @@ export class Orchestrator {
       0,
       "Multi-Agent workflow 启动：Planner -> Executor -> Reviewer",
     );
+    const detailedProgressEnabled = this.isAutoDevDetailedProgressEnabled(sessionKey);
 
     try {
       const result = await this.workflowRunner.run({
@@ -2926,9 +3028,11 @@ export class Orchestrator {
           }
         },
         onProgress: async (event) => {
-          const stepLabel = event.stage.toUpperCase();
           this.appendWorkflowDiagEvent(workflowDiagRunId, diagRunKind, event.stage, event.round, event.message);
-          await this.sendProgressUpdate(progressCtx, `[CodeHarbor] [${stepLabel}] ${event.message}`);
+          await this.sendProgressUpdate(
+            progressCtx,
+            `[CodeHarbor] ${formatWorkflowProgressNotice(event, detailedProgressEnabled)}`,
+          );
         },
       });
 
@@ -3078,6 +3182,7 @@ export class Orchestrator {
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
     this.pendingAutoDevLoopStopRequests.delete(sessionKey);
     this.activeAutoDevLoopSessions.delete(sessionKey);
+    this.autoDevDetailedProgressOverrides.delete(sessionKey);
     this.stateStore.deactivateSession(sessionKey);
     this.stateStore.clearCodexSessionId(sessionKey);
     this.clearSessionFromAllRuntimes(sessionKey);
@@ -3970,6 +4075,18 @@ export class Orchestrator {
     this.pruneRunSnapshots(Date.now());
   }
 
+  private isAutoDevDetailedProgressEnabled(sessionKey: string): boolean {
+    return this.autoDevDetailedProgressOverrides.get(sessionKey) ?? this.autoDevDetailedProgressDefaultEnabled;
+  }
+
+  private setAutoDevDetailedProgressEnabled(sessionKey: string, enabled: boolean): void {
+    if (enabled === this.autoDevDetailedProgressDefaultEnabled) {
+      this.autoDevDetailedProgressOverrides.delete(sessionKey);
+      return;
+    }
+    this.autoDevDetailedProgressOverrides.set(sessionKey, enabled);
+  }
+
   private pruneRunSnapshots(now: number): void {
     pruneSnapshotMap(
       this.workflowSnapshots,
@@ -4789,6 +4906,19 @@ ${formatUpgradeDiagRecords(runs)}`,
       .slice(0, safeLimit);
   }
 
+  private listWorkflowDiagRunsBySession(
+    kind: WorkflowDiagRunKind,
+    sessionKey: string,
+    limit: number,
+  ): WorkflowDiagRunRecord[] {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.workflowDiagStore.runs
+      .filter((run) => run.kind === kind && run.sessionKey === sessionKey)
+      .slice()
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, safeLimit);
+  }
+
   private listWorkflowDiagEvents(runId: string, limit = 8): WorkflowDiagEventRecord[] {
     const safeLimit = Math.max(1, Math.floor(limit));
     return this.workflowDiagStore.events
@@ -5416,6 +5546,34 @@ function mapProgressText(progress: CodexProgressEvent, cliCompatMode: boolean): 
     return `事件: ${progress.message}`;
   }
   return null;
+}
+
+function formatWorkflowProgressNotice(event: MultiAgentWorkflowProgressEvent, detailed: boolean): string {
+  const stageLabel = event.stage.toUpperCase();
+  const agent = resolveWorkflowStageAgent(event.stage);
+  const round = event.stage === "repair" ? Math.max(1, event.round) : event.round + 1;
+  if (detailed) {
+    return `[${stageLabel}] agent=${agent}, round=${round} ${event.message}`;
+  }
+  return `[${stageLabel}] round=${round} ${compactWorkflowProgressMessage(event.message)}`;
+}
+
+function compactWorkflowProgressMessage(message: string): string {
+  const stripped = message.replace(/（[^（）]*）/g, "").replace(/\s+/g, " ").trim();
+  if (!stripped) {
+    return "阶段处理中";
+  }
+  return stripped;
+}
+
+function resolveWorkflowStageAgent(stage: MultiAgentWorkflowProgressEvent["stage"]): string {
+  if (stage === "planner") {
+    return "planner";
+  }
+  if (stage === "reviewer") {
+    return "reviewer";
+  }
+  return "executor";
 }
 
 function parseControlCommand(
@@ -6077,6 +6235,28 @@ function formatDurationMs(durationMs: number): string {
   return `${minutes}m${seconds}s`;
 }
 
+function formatRunWindowDuration(startedAt: string | null, endedAt: string | null, nowMs = Date.now()): string {
+  if (!startedAt) {
+    return "N/A";
+  }
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return "N/A";
+  }
+  const endedAtMs = endedAt ? Date.parse(endedAt) : nowMs;
+  if (!Number.isFinite(endedAtMs)) {
+    return "N/A";
+  }
+  return formatDurationMs(Math.max(0, endedAtMs - startedAtMs));
+}
+
+function formatWorkflowDiagRunDuration(run: WorkflowDiagRunRecord, nowMs = Date.now()): string {
+  if (run.durationMs !== null && Number.isFinite(run.durationMs)) {
+    return formatDurationMs(Math.max(0, run.durationMs));
+  }
+  return formatRunWindowDuration(run.startedAt, run.endedAt, nowMs);
+}
+
 function formatCacheTtl(ttlMs: number): string {
   if (ttlMs < 1_000) {
     return `${ttlMs}ms`;
@@ -6280,6 +6460,33 @@ function formatAutoDevDiagRuns(
         `  ${eventSummary}`,
         `  error=${errorText}`,
       ].join("\n");
+    })
+    .join("\n");
+}
+
+function formatAutoDevStatusRunSummaries(runs: WorkflowDiagRunRecord[]): string {
+  if (runs.length === 0) {
+    return "- (empty)";
+  }
+  return runs
+    .map((run) => {
+      const task = run.taskId
+        ? `${run.taskId}${run.taskDescription ? ` ${run.taskDescription}` : ""}`.trim()
+        : "N/A";
+      const stage = run.lastStage ? `${run.lastStage}${run.lastMessage ? `(${run.lastMessage})` : ""}` : "N/A";
+      const approvedText = run.approved === null ? "N/A" : run.approved ? "yes" : "no";
+      return `- run=${run.runId} status=${run.status} task=${task} approved=${approvedText} duration=${formatWorkflowDiagRunDuration(run)} updatedAt=${run.updatedAt} lastStage=${summarizeSingleLine(stage, 180)}`;
+    })
+    .join("\n");
+}
+
+function formatAutoDevStatusStageTrace(events: WorkflowDiagEventRecord[]): string {
+  if (events.length === 0) {
+    return "- (empty)";
+  }
+  return events
+    .map((event, index) => {
+      return `- #${index + 1} at=${event.at} stage=${event.stage} round=${event.round} message=${summarizeSingleLine(event.message, 180)}`;
     })
     .join("\n");
 }

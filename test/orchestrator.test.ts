@@ -2987,8 +2987,72 @@ describe("Orchestrator", () => {
         }),
       );
 
-      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态"))).toBe(true);
-      expect(channel.notices.some((entry) => entry.text.includes("currentTask: N/A"))).toBe(true);
+      const statusNotice = channel.notices.find((entry) => entry.text.includes("AutoDev 状态"))?.text ?? "";
+      expect(statusNotice).toContain("AutoDev 状态");
+      expect(statusNotice).toContain("currentTask: N/A");
+      expect(statusNotice).toContain("runWindow: startedAt=N/A, endedAt=N/A, duration=N/A");
+      expect(statusNotice).toContain("runControl: loopActive=no, loopStopRequested=no, stopRequested=no");
+      expect(statusNotice).toContain("workflowDiag: runId=N/A");
+      expect(statusNotice).toContain("stageTrace:");
+      expect(statusNotice).toContain("- (empty)");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports /autodev status with workflow stage trace details", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-trace-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T1.2 | trace task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T1.2",
+          eventId: "$autodev-status-run",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status-after-run",
+        }),
+      );
+
+      const statusNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev 状态"))?.text ?? "";
+      expect(statusNotice).toContain("workflowDiag: runId=");
+      expect(statusNotice).toContain("status=succeeded");
+      expect(statusNotice).toContain("workflowStage: stage=");
+      expect(statusNotice).toContain("stageTrace:");
+      expect(statusNotice).toContain("stage=planner");
+      expect(statusNotice).toContain("stage=executor");
+      expect(statusNotice).toContain("stage=reviewer");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -3129,6 +3193,102 @@ describe("Orchestrator", () => {
     expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text.includes("[planner]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
+  });
+
+  it("emits detailed workflow progress notices with agent and stage execution details", async () => {
+    const channel = new FakeChannel();
+    const executor = new WorkflowExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: true,
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.48",
+          latestVersion: "0.1.48",
+          state: "up_to_date",
+          checkedAt: "2026-03-19T00:00:00.000Z",
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 输出详细进度",
+        eventId: "$wf-progress-detail",
+      }),
+    );
+
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] agent=planner, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Planner 执行完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[EXECUTOR] agent=executor, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[REVIEWER] agent=reviewer, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("verdict=REJECTED"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[REPAIR] agent=executor, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
+  });
+
+  it("supports /autodev progress off and switches workflow progress to concise mode", async () => {
+    const channel = new FakeChannel();
+    const executor = new WorkflowExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: true,
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.48",
+          latestVersion: "0.1.48",
+          state: "up_to_date",
+          checkedAt: "2026-03-19T00:00:00.000Z",
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev progress off",
+        eventId: "$autodev-progress-off",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev status",
+        eventId: "$autodev-status-after-progress-off",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 验证简洁进度回显",
+        eventId: "$wf-progress-compact",
+      }),
+    );
+
+    expect(channel.notices.some((entry) => entry.text.includes("AutoDev 过程回显已更新"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("detailedProgress: off"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] agent=planner"))).toBe(false);
+    expect(channel.notices.some((entry) => entry.text.includes("timeout="))).toBe(false);
   });
 
   it("applies AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS when assembling reviewer prompt", async () => {

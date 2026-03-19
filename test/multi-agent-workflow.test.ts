@@ -106,7 +106,10 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(result.approved).toBe(false);
     expect(result.repairRounds).toBe(0);
     expect(result.review).toContain("missing verdict");
-    expect(progress).toEqual(["planner:0", "executor:0", "reviewer:0"]);
+    expect(progress).toEqual(expect.arrayContaining(["planner:0", "executor:0", "reviewer:0"]));
+    expect(progress.filter((entry) => entry === "planner:0").length).toBeGreaterThanOrEqual(2);
+    expect(progress.filter((entry) => entry === "executor:0").length).toBeGreaterThanOrEqual(2);
+    expect(progress.filter((entry) => entry === "reviewer:0").length).toBeGreaterThanOrEqual(2);
     expect(executor.calls).toHaveLength(3);
     expect(executor.calls.every((call) => call.workdir === "/tmp/workflow-unit")).toBe(true);
   });

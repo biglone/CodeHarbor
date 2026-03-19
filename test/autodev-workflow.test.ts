@@ -21,6 +21,11 @@ describe("AutoDev workflow helpers", () => {
     expect(parseAutoDevCommand("/autodev stop")).toEqual({ kind: "stop" });
     expect(parseAutoDevCommand("//autodev stop")).toEqual({ kind: "stop" });
     expect(parseAutoDevCommand("///autodev stop")).toEqual({ kind: "stop" });
+    expect(parseAutoDevCommand("/autodev progress")).toEqual({ kind: "progress", mode: "status" });
+    expect(parseAutoDevCommand("/autodev progress status")).toEqual({ kind: "progress", mode: "status" });
+    expect(parseAutoDevCommand("/autodev progress on")).toEqual({ kind: "progress", mode: "on" });
+    expect(parseAutoDevCommand("//autodev progress off")).toEqual({ kind: "progress", mode: "off" });
+    expect(parseAutoDevCommand("/autodev progress maybe")).toBeNull();
     expect(parseAutoDevCommand("/autodev run")).toEqual({ kind: "run", taskId: null });
     expect(parseAutoDevCommand("/autodev run T3.2")).toEqual({ kind: "run", taskId: "T3.2" });
     expect(parseAutoDevCommand("//autodev run T3.3")).toEqual({ kind: "run", taskId: "T3.3" });

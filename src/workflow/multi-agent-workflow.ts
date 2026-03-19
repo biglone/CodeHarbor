@@ -40,6 +40,9 @@ export interface MultiAgentWorkflowRunResult {
 interface ExecuteRoleResult {
   sessionId: string;
   reply: string;
+  durationMs: number;
+  promptChars: number;
+  replyChars: number;
 }
 
 const DEFAULT_WORKFLOW_EXECUTION_TIMEOUT_MS = 30 * 60 * 1_000;
@@ -87,12 +90,12 @@ export class MultiAgentWorkflowRunner {
       activeHandle?.cancel();
     });
 
+    const roleTimeoutMs = this.resolveRoleTimeoutMs();
     await emitProgress(input, {
       stage: "planner",
       round: 0,
-      message: "Planner 正在生成执行计划",
+      message: `Planner 开始生成执行计划（agent=planner, timeout=${formatDurationMs(roleTimeoutMs)}）`,
     });
-    const roleTimeoutMs = this.resolveRoleTimeoutMs();
     const planResult = await this.executeRole(
       "planner",
       buildPlannerPrompt(objective),
@@ -105,11 +108,16 @@ export class MultiAgentWorkflowRunner {
       },
     );
     const plan = planResult.reply;
+    await emitProgress(input, {
+      stage: "planner",
+      round: 0,
+      message: `Planner 执行完成（agent=planner, ${formatRoleExecutionStats(planResult)}）`,
+    });
 
     await emitProgress(input, {
       stage: "executor",
       round: 0,
-      message: "Executor 正在根据计划执行任务",
+      message: `Executor 开始根据计划执行任务（agent=executor, timeout=${formatDurationMs(roleTimeoutMs)}）`,
     });
     let outputResult = await this.executeRole(
       "executor",
@@ -122,6 +130,11 @@ export class MultiAgentWorkflowRunner {
         activeHandle = handle;
       },
     );
+    await emitProgress(input, {
+      stage: "executor",
+      round: 0,
+      message: `Executor 初版交付完成（agent=executor, ${formatRoleExecutionStats(outputResult)}）`,
+    });
 
     let finalReviewReply = "";
     let approved = false;
@@ -131,7 +144,9 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "reviewer",
         round: attempt,
-        message: `Reviewer 正在进行质量审查（round ${attempt + 1}）`,
+        message: `Reviewer 开始质量审查（agent=reviewer, round=${attempt + 1}, timeout=${formatDurationMs(
+          roleTimeoutMs,
+        )}）`,
       });
       const reviewResult = await this.executeRole(
         "reviewer",
@@ -147,6 +162,13 @@ export class MultiAgentWorkflowRunner {
       finalReviewReply = reviewResult.reply;
 
       const verdict = parseReviewerVerdict(finalReviewReply);
+      await emitProgress(input, {
+        stage: "reviewer",
+        round: attempt,
+        message: `Reviewer 审查完成（agent=reviewer, round=${attempt + 1}, verdict=${
+          verdict.approved ? "APPROVED" : "REJECTED"
+        }, ${formatRoleExecutionStats(reviewResult)}）${verdict.approved ? "" : `，summary=${extractReviewSummary(finalReviewReply)}`}`,
+      });
       if (verdict.approved) {
         approved = true;
         break;
@@ -160,7 +182,9 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "repair",
         round: repairRounds,
-        message: `Executor 正在按 Reviewer 反馈进行修复（round ${repairRounds}）`,
+        message: `Executor 开始按 Reviewer 反馈修复（agent=executor, repairRound=${repairRounds}, timeout=${formatDurationMs(
+          roleTimeoutMs,
+        )}）`,
       });
 
       outputResult = await this.executeRole(
@@ -174,6 +198,11 @@ export class MultiAgentWorkflowRunner {
           activeHandle = handle;
         },
       );
+      await emitProgress(input, {
+        stage: "repair",
+        round: repairRounds,
+        message: `Executor 修复轮次完成（agent=executor, repairRound=${repairRounds}, ${formatRoleExecutionStats(outputResult)}）`,
+      });
     }
 
     const durationMs = Date.now() - startedAt;
@@ -208,13 +237,19 @@ export class MultiAgentWorkflowRunner {
       throw new CodexExecutionCancelledError("workflow cancelled");
     }
 
+    const startedAt = Date.now();
+    const promptChars = prompt.length;
     const handle = this.executor.startExecution(prompt, sessionId, undefined, { workdir, timeoutMs });
     setActiveHandle(handle);
     try {
       const result = await handle.result;
+      const durationMs = Math.max(0, Date.now() - startedAt);
       return {
         sessionId: result.sessionId,
         reply: result.reply,
+        durationMs,
+        promptChars,
+        replyChars: result.reply.length,
       };
     } finally {
       setActiveHandle(null);
@@ -347,6 +382,49 @@ function parseReviewerVerdict(review: string): { approved: boolean; feedback: st
     approved: false,
     feedback: review.trim() || "Reviewer 未返回规范 verdict，默认按 REJECTED 处理。",
   };
+}
+
+function extractReviewSummary(review: string): string {
+  const lines = review
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const summaryLine = lines.find((line) => /^summary\s*:/i.test(line));
+  if (summaryLine) {
+    return summarizeSingleLine(summaryLine.replace(/^summary\s*:/i, "").trim(), 120);
+  }
+  const verdictLine = lines.find((line) => /^verdict\s*:/i.test(line));
+  if (verdictLine) {
+    return summarizeSingleLine(verdictLine, 120);
+  }
+  return summarizeSingleLine(lines[0] ?? "(no summary)", 120);
+}
+
+function summarizeSingleLine(value: string, maxLen: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "(empty)";
+  }
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLen)}...`;
+}
+
+function formatRoleExecutionStats(result: ExecuteRoleResult): string {
+  return `duration=${formatDurationMs(result.durationMs)}, promptChars=${result.promptChars}, replyChars=${result.replyChars}`;
+}
+
+function formatDurationMs(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${durationMs}ms`;
+  }
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(1)}s`;
+  }
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = ((durationMs % 60_000) / 1_000).toFixed(1);
+  return `${minutes}m${seconds}s`;
 }
 
 function clampPromptContext(label: string, value: string, maxChars: number | null): string {
