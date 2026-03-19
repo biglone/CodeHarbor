@@ -4,6 +4,12 @@ import {
   type CodexExecutionHandle,
 } from "../executor/codex-executor";
 import { Logger } from "../logger";
+import {
+  WorkflowRoleSkillCatalog,
+  type WorkflowRoleSkillPolicyOverride,
+  type WorkflowRoleSkillPromptInput,
+  type WorkflowRoleSkillPromptResult,
+} from "./role-skills";
 
 export interface MultiAgentWorkflowConfig {
   enabled: boolean;
@@ -12,6 +18,7 @@ export interface MultiAgentWorkflowConfig {
   planContextMaxChars?: number | null;
   outputContextMaxChars?: number | null;
   feedbackContextMaxChars?: number | null;
+  roleSkillCatalog?: WorkflowRoleSkillCatalog;
 }
 
 export interface MultiAgentWorkflowProgressEvent {
@@ -23,6 +30,7 @@ export interface MultiAgentWorkflowProgressEvent {
 export interface MultiAgentWorkflowRunInput {
   objective: string;
   workdir: string;
+  roleSkillPolicy?: WorkflowRoleSkillPolicyOverride;
   onProgress?: (event: MultiAgentWorkflowProgressEvent) => void | Promise<void>;
   onRegisterCancel?: (cancel: () => void) => void;
 }
@@ -58,12 +66,14 @@ export class MultiAgentWorkflowRunner {
   private readonly logger: Logger;
   private readonly config: MultiAgentWorkflowConfig;
   private readonly promptContextLimits: WorkflowPromptContextLimits;
+  private readonly roleSkillCatalog: WorkflowRoleSkillCatalog | null;
 
   constructor(executor: CodexExecutor, logger: Logger, config: MultiAgentWorkflowConfig) {
     this.executor = executor;
     this.logger = logger;
     this.config = config;
     this.promptContextLimits = resolvePromptContextLimits(config);
+    this.roleSkillCatalog = config.roleSkillCatalog ?? null;
   }
 
   isEnabled(): boolean {
@@ -91,14 +101,22 @@ export class MultiAgentWorkflowRunner {
     });
 
     const roleTimeoutMs = this.resolveRoleTimeoutMs();
+    const plannerSkillPrompt = this.buildRoleSkillPrompt({
+      role: "planner",
+      stage: "planner",
+      round: 0,
+      policy: input.roleSkillPolicy,
+    });
     await emitProgress(input, {
       stage: "planner",
       round: 0,
-      message: `Planner 开始生成执行计划（agent=planner, timeout=${formatDurationMs(roleTimeoutMs)}）`,
+      message: `Planner 开始生成执行计划（agent=planner, timeout=${formatDurationMs(
+        roleTimeoutMs,
+      )}, ${formatRoleSkillProgress(plannerSkillPrompt)}）`,
     });
     const planResult = await this.executeRole(
       "planner",
-      buildPlannerPrompt(objective),
+      buildPlannerPrompt(objective, plannerSkillPrompt.text),
       null,
       input.workdir,
       roleTimeoutMs,
@@ -114,14 +132,22 @@ export class MultiAgentWorkflowRunner {
       message: `Planner 执行完成（agent=planner, ${formatRoleExecutionStats(planResult)}）`,
     });
 
+    const executorSkillPrompt = this.buildRoleSkillPrompt({
+      role: "executor",
+      stage: "executor",
+      round: 0,
+      policy: input.roleSkillPolicy,
+    });
     await emitProgress(input, {
       stage: "executor",
       round: 0,
-      message: `Executor 开始根据计划执行任务（agent=executor, timeout=${formatDurationMs(roleTimeoutMs)}）`,
+      message: `Executor 开始根据计划执行任务（agent=executor, timeout=${formatDurationMs(
+        roleTimeoutMs,
+      )}, ${formatRoleSkillProgress(executorSkillPrompt)}）`,
     });
     let outputResult = await this.executeRole(
       "executor",
-      buildExecutorPrompt(objective, plan, this.promptContextLimits),
+      buildExecutorPrompt(objective, plan, this.promptContextLimits, executorSkillPrompt.text),
       null,
       input.workdir,
       roleTimeoutMs,
@@ -141,16 +167,22 @@ export class MultiAgentWorkflowRunner {
     let repairRounds = 0;
 
     for (let attempt = 0; attempt <= maxRepairRounds; attempt += 1) {
+      const reviewerSkillPrompt = this.buildRoleSkillPrompt({
+        role: "reviewer",
+        stage: "reviewer",
+        round: attempt,
+        policy: input.roleSkillPolicy,
+      });
       await emitProgress(input, {
         stage: "reviewer",
         round: attempt,
         message: `Reviewer 开始质量审查（agent=reviewer, round=${attempt + 1}, timeout=${formatDurationMs(
           roleTimeoutMs,
-        )}）`,
+        )}, ${formatRoleSkillProgress(reviewerSkillPrompt)}）`,
       });
       const reviewResult = await this.executeRole(
         "reviewer",
-        buildReviewerPrompt(objective, plan, outputResult.reply, this.promptContextLimits),
+        buildReviewerPrompt(objective, plan, outputResult.reply, this.promptContextLimits, reviewerSkillPrompt.text),
         null,
         input.workdir,
         roleTimeoutMs,
@@ -179,17 +211,31 @@ export class MultiAgentWorkflowRunner {
       }
 
       repairRounds = attempt + 1;
+      const repairSkillPrompt = this.buildRoleSkillPrompt({
+        role: "executor",
+        stage: "repair",
+        round: repairRounds,
+        policy: input.roleSkillPolicy,
+      });
       await emitProgress(input, {
         stage: "repair",
         round: repairRounds,
         message: `Executor 开始按 Reviewer 反馈修复（agent=executor, repairRound=${repairRounds}, timeout=${formatDurationMs(
           roleTimeoutMs,
-        )}）`,
+        )}, ${formatRoleSkillProgress(repairSkillPrompt)}）`,
       });
 
       outputResult = await this.executeRole(
         "executor",
-        buildRepairPrompt(objective, plan, outputResult.reply, verdict.feedback, repairRounds, this.promptContextLimits),
+        buildRepairPrompt(
+          objective,
+          plan,
+          outputResult.reply,
+          verdict.feedback,
+          repairRounds,
+          this.promptContextLimits,
+          repairSkillPrompt.text,
+        ),
         null,
         input.workdir,
         roleTimeoutMs,
@@ -256,6 +302,19 @@ export class MultiAgentWorkflowRunner {
     }
   }
 
+  private buildRoleSkillPrompt(input: WorkflowRoleSkillPromptInput): WorkflowRoleSkillPromptResult {
+    if (!this.roleSkillCatalog) {
+      return {
+        text: null,
+        enabled: false,
+        mode: input.policy?.mode ?? "progressive",
+        disclosure: null,
+        usedSkills: [],
+      };
+    }
+    return this.roleSkillCatalog.buildPrompt(input);
+  }
+
   private resolveRoleTimeoutMs(): number {
     const configured = this.config.executionTimeoutMs;
     if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
@@ -272,9 +331,12 @@ async function emitProgress(input: MultiAgentWorkflowRunInput, event: MultiAgent
   await input.onProgress(event);
 }
 
-function buildPlannerPrompt(objective: string): string {
-  return [
-    "[role:planner]",
+function buildPlannerPrompt(objective: string, roleSkillBlock: string | null): string {
+  const sections = ["[role:planner]"];
+  if (roleSkillBlock) {
+    sections.push(roleSkillBlock);
+  }
+  sections.push(
     "你是软件交付规划代理。请基于目标给出可执行计划。",
     "输出要求：",
     "1. 任务拆解（3-7 步）",
@@ -282,13 +344,22 @@ function buildPlannerPrompt(objective: string): string {
     "3. 风险与回退方案",
     "",
     `目标：${objective}`,
-  ].join("\n");
+  );
+  return sections.join("\n");
 }
 
-function buildExecutorPrompt(objective: string, plan: string, limits: WorkflowPromptContextLimits): string {
+function buildExecutorPrompt(
+  objective: string,
+  plan: string,
+  limits: WorkflowPromptContextLimits,
+  roleSkillBlock: string | null,
+): string {
   const planContext = clampPromptContext("planner_plan", plan, limits.plan);
-  return [
-    "[role:executor]",
+  const sections = ["[role:executor]"];
+  if (roleSkillBlock) {
+    sections.push(roleSkillBlock);
+  }
+  sections.push(
     "你是软件执行代理。请根据计划完成交付内容。",
     "输出要求：",
     "1. 直接给出最终可执行结果",
@@ -300,7 +371,8 @@ function buildExecutorPrompt(objective: string, plan: string, limits: WorkflowPr
     "[planner_plan]",
     planContext,
     "[/planner_plan]",
-  ].join("\n");
+  );
+  return sections.join("\n");
 }
 
 function buildReviewerPrompt(
@@ -308,11 +380,15 @@ function buildReviewerPrompt(
   plan: string,
   output: string,
   limits: WorkflowPromptContextLimits,
+  roleSkillBlock: string | null,
 ): string {
   const planContext = clampPromptContext("planner_plan", plan, limits.plan);
   const outputContext = clampPromptContext("executor_output", output, limits.output);
-  return [
-    "[role:reviewer]",
+  const sections = ["[role:reviewer]"];
+  if (roleSkillBlock) {
+    sections.push(roleSkillBlock);
+  }
+  sections.push(
     "你是质量审查代理。请严格审查执行结果是否达成目标。",
     "输出格式必须包含以下字段：",
     "VERDICT: APPROVED 或 REJECTED",
@@ -333,7 +409,8 @@ function buildReviewerPrompt(
     "[executor_output]",
     outputContext,
     "[/executor_output]",
-  ].join("\n");
+  );
+  return sections.join("\n");
 }
 
 function buildRepairPrompt(
@@ -343,12 +420,16 @@ function buildRepairPrompt(
   reviewerFeedback: string,
   round: number,
   limits: WorkflowPromptContextLimits,
+  roleSkillBlock: string | null,
 ): string {
   const planContext = clampPromptContext("planner_plan", plan, limits.plan);
   const previousOutputContext = clampPromptContext("previous_output", previousOutput, limits.output);
   const reviewerFeedbackContext = clampPromptContext("reviewer_feedback", reviewerFeedback, limits.feedback);
-  return [
-    "[role:executor]",
+  const sections = ["[role:executor]"];
+  if (roleSkillBlock) {
+    sections.push(roleSkillBlock);
+  }
+  sections.push(
     `你是软件执行代理。请根据审查反馈进行第 ${round} 轮修复并输出最终版本。`,
     "要求：保持正确内容，修复问题，不要丢失已完成部分。",
     "",
@@ -365,7 +446,8 @@ function buildRepairPrompt(
     "[reviewer_feedback]",
     reviewerFeedbackContext,
     "[/reviewer_feedback]",
-  ].join("\n");
+  );
+  return sections.join("\n");
 }
 
 function parseReviewerVerdict(review: string): { approved: boolean; feedback: string } {
@@ -413,6 +495,19 @@ function summarizeSingleLine(value: string, maxLen: number): string {
 
 function formatRoleExecutionStats(result: ExecuteRoleResult): string {
   return `duration=${formatDurationMs(result.durationMs)}, promptChars=${result.promptChars}, replyChars=${result.replyChars}`;
+}
+
+function formatRoleSkillProgress(result: WorkflowRoleSkillPromptResult): string {
+  if (!result.enabled) {
+    return "roleSkills=off";
+  }
+  if (!result.disclosure || result.usedSkills.length === 0) {
+    return `roleSkills=on(mode=${result.mode}, used=0)`;
+  }
+  const preview = result.usedSkills.slice(0, 3).join("|");
+  const extra = result.usedSkills.length > 3 ? `+${result.usedSkills.length - 3}` : "";
+  const ids = preview ? `, ids=${preview}${extra}` : "";
+  return `roleSkills=on(mode=${result.mode}, disclosure=${result.disclosure}, used=${result.usedSkills.length}${ids})`;
 }
 
 function formatDurationMs(durationMs: number): string {

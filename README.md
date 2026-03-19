@@ -564,6 +564,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/autodev status` show AutoDev doc/task summary + currentTask/nextTask + run snapshot (when enabled)
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
   - `/autodev stop` graceful loop stop: finish current task, then stop before next task
+  - `/autodev skills [on|off|summary|progressive|full|status]` control role-skill injection and disclosure mode per session
 
 Version update check controls:
 
@@ -621,6 +622,16 @@ Backend/model rule routing:
   - optional executor/reviewer output context char budget per role prompt (default: unlimited / no truncation)
 - `AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS`
   - optional reviewer feedback context char budget per repair prompt (default: unlimited / no truncation)
+- `AGENT_WORKFLOW_ROLE_SKILLS_ENABLED=true|false`
+  - enable/disable Planner/Executor/Reviewer role-skill prompt injection (default `true`)
+- `AGENT_WORKFLOW_ROLE_SKILLS_MODE=summary|progressive|full`
+  - role-skill disclosure mode (`progressive` default: summary first round, full in later rounds/repair)
+- `AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS`
+  - max chars for injected `[role_skills]` block (default `2400`)
+- `AGENT_WORKFLOW_ROLE_SKILLS_ROOTS`
+  - optional comma-separated local skill roots (default `~/.codex/skills`)
+- `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`
+  - optional role-to-skill mapping override JSON (`planner`/`executor`/`reviewer` -> `string[]`)
 - `AUTODEV_LOOP_MAX_RUNS`
   - max task attempts for one `/autodev run` loop execution (default `20`)
 - `AUTODEV_LOOP_MAX_MINUTES`
@@ -638,6 +649,7 @@ AutoDev (`/autodev`) conventions:
 - `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit stops safely with a summary notice.
 - `/autodev run <taskId>` runs only the specified task.
 - `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
+- `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <taskId> <task-summary>`.
 - AutoDev commit body includes `Task`, `Changed-files`, and `Generated-by` for traceability.

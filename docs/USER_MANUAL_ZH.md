@@ -166,6 +166,11 @@ codeharbor admin serve
 - `AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS`：可选，Planner 计划上下文最大字符数（默认不限）
 - `AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS`：可选，Executor 输出上下文最大字符数（默认不限）
 - `AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS`：可选，Reviewer 反馈上下文最大字符数（默认不限）
+- `AGENT_WORKFLOW_ROLE_SKILLS_ENABLED=true|false`：是否启用角色 SKILL 注入（默认 true）
+- `AGENT_WORKFLOW_ROLE_SKILLS_MODE=summary|progressive|full`：角色 SKILL 披露模式（默认 progressive）
+- `AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS`：角色 SKILL 注入块最大字符数（默认 2400）
+- `AGENT_WORKFLOW_ROLE_SKILLS_ROOTS`：可选，SKILL 根目录列表（逗号分隔，默认 `~/.codex/skills`）
+- `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`：可选，角色到 SKILL 列表映射（JSON）
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
@@ -173,6 +178,7 @@ codeharbor admin serve
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
+- `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <taskId> <task-summary>`（按任务描述与改动文件自动推断）
   - 提交正文固定包含：`Task`、`Changed-files`、`Generated-by`

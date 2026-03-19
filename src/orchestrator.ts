@@ -92,6 +92,13 @@ import {
   summarizeAutoDevTasks,
   updateAutoDevTaskStatus,
 } from "./workflow/autodev";
+import {
+  WorkflowRoleSkillCatalog,
+  type WorkflowRole,
+  type WorkflowRoleSkillDisclosureMode,
+  type WorkflowRoleSkillPolicyOverride,
+  type WorkflowRoleSkillStatusSnapshot,
+} from "./workflow/role-skills";
 
 interface OrchestratorOptions {
   lockTtlMs?: number;
@@ -114,6 +121,13 @@ interface OrchestratorOptions {
     planContextMaxChars?: number | null;
     outputContextMaxChars?: number | null;
     feedbackContextMaxChars?: number | null;
+    roleSkills?: {
+      enabled?: boolean;
+      mode?: WorkflowRoleSkillDisclosureMode;
+      maxChars?: number;
+      roots?: string[];
+      roleAssignments?: Partial<Record<WorkflowRole, string[]>>;
+    };
   };
   packageUpdateChecker?: PackageUpdateChecker;
   updateCheckTtlMs?: number;
@@ -416,6 +430,8 @@ const DEFAULT_AUTODEV_LOOP_MAX_RUNS = 20;
 const DEFAULT_AUTODEV_LOOP_MAX_MINUTES = 120;
 const DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES = 3;
 const DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED = true;
+const DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED = true;
+const DEFAULT_WORKFLOW_ROLE_SKILLS_MODE: WorkflowRoleSkillDisclosureMode = "progressive";
 const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
 const BACKEND_ROUTE_DIAG_HISTORY_MAX = 200;
 const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
@@ -793,6 +809,9 @@ export class Orchestrator {
   private readonly autoDevMaxConsecutiveFailures: number;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
   private readonly autoDevDetailedProgressOverrides = new Map<string, boolean>();
+  private readonly workflowRoleSkillCatalog: WorkflowRoleSkillCatalog;
+  private readonly workflowRoleSkillDefaultPolicy: WorkflowRoleSkillPolicyOverride;
+  private readonly workflowRoleSkillPolicyOverrides = new Map<string, WorkflowRoleSkillPolicyOverride>();
   private readonly workflowPlanContextMaxChars: number | null;
   private readonly workflowOutputContextMaxChars: number | null;
   private readonly workflowFeedbackContextMaxChars: number | null;
@@ -894,6 +913,34 @@ export class Orchestrator {
     const workflowFeedbackContextMaxChars =
       options?.multiAgentWorkflow?.feedbackContextMaxChars ??
       parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS);
+    const workflowRoleSkillsEnabled =
+      options?.multiAgentWorkflow?.roleSkills?.enabled ??
+      parseEnvBoolean(process.env.AGENT_WORKFLOW_ROLE_SKILLS_ENABLED, DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED);
+    const workflowRoleSkillsMode = parseRoleSkillDisclosureMode(
+      options?.multiAgentWorkflow?.roleSkills?.mode ?? process.env.AGENT_WORKFLOW_ROLE_SKILLS_MODE,
+      DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
+    );
+    const workflowRoleSkillsMaxChars =
+      options?.multiAgentWorkflow?.roleSkills?.maxChars ??
+      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS) ??
+      undefined;
+    const workflowRoleSkillsRoots = options?.multiAgentWorkflow?.roleSkills?.roots ?? parseOptionalCsvValues(
+      process.env.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS,
+    );
+    const workflowRoleSkillAssignments =
+      options?.multiAgentWorkflow?.roleSkills?.roleAssignments ??
+      parseRoleSkillAssignments(process.env.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON);
+    this.workflowRoleSkillCatalog = new WorkflowRoleSkillCatalog({
+      enabled: workflowRoleSkillsEnabled,
+      mode: workflowRoleSkillsMode,
+      maxChars: workflowRoleSkillsMaxChars,
+      roots: workflowRoleSkillsRoots,
+      roleAssignments: workflowRoleSkillAssignments,
+    });
+    this.workflowRoleSkillDefaultPolicy = {
+      enabled: workflowRoleSkillsEnabled,
+      mode: workflowRoleSkillsMode,
+    };
     this.workflowPlanContextMaxChars = workflowPlanContextMaxChars;
     this.workflowOutputContextMaxChars = workflowOutputContextMaxChars;
     this.workflowFeedbackContextMaxChars = workflowFeedbackContextMaxChars;
@@ -904,6 +951,7 @@ export class Orchestrator {
       planContextMaxChars: workflowPlanContextMaxChars,
       outputContextMaxChars: workflowOutputContextMaxChars,
       feedbackContextMaxChars: workflowFeedbackContextMaxChars,
+      roleSkillCatalog: this.workflowRoleSkillCatalog,
     });
     this.autoDevLoopMaxRuns = Math.max(
       1,
@@ -1198,6 +1246,11 @@ export class Orchestrator {
         }
         if (autoDevCommand?.kind === "progress") {
           await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
+          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+          return;
+        }
+        if (autoDevCommand?.kind === "skills") {
+          await this.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
           this.stateStore.markEventProcessed(sessionKey, message.eventId);
           return;
         }
@@ -1636,9 +1689,17 @@ export class Orchestrator {
     const isWorkflowStatus = workflowCommand?.kind === "status";
     const isAutoDevStatus = autoDevCommand?.kind === "status";
     const isAutoDevProgress = autoDevCommand?.kind === "progress";
+    const isAutoDevSkills = autoDevCommand?.kind === "skills";
     const isAutoDevStop = autoDevCommand?.kind === "stop";
 
-    if (!isReadOnlyControlCommand && !isWorkflowStatus && !isAutoDevStatus && !isAutoDevProgress && !isAutoDevStop) {
+    if (
+      !isReadOnlyControlCommand &&
+      !isWorkflowStatus &&
+      !isAutoDevStatus &&
+      !isAutoDevProgress &&
+      !isAutoDevSkills &&
+      !isAutoDevStop
+    ) {
       return false;
     }
 
@@ -1659,6 +1720,8 @@ export class Orchestrator {
       await this.handleWorkflowStatusCommand(sessionKey, message);
     } else if (isAutoDevProgress) {
       await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
+    } else if (isAutoDevSkills) {
+      await this.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
     } else if (isAutoDevStop) {
       await this.handleAutoDevLoopStopCommand(sessionKey, message);
     } else {
@@ -1673,9 +1736,11 @@ export class Orchestrator {
         route.kind === "command"
           ? route.command
           : isWorkflowStatus
-            ? "workflow.status"
+          ? "workflow.status"
             : isAutoDevProgress
               ? "autodev.progress"
+            : isAutoDevSkills
+              ? "autodev.skills"
             : isAutoDevStop
               ? "autodev.stop"
               : "autodev.status",
@@ -1914,7 +1979,8 @@ export class Orchestrator {
     if (
       rawAutoDevCommand?.kind === "status" ||
       rawAutoDevCommand?.kind === "stop" ||
-      rawAutoDevCommand?.kind === "progress"
+      rawAutoDevCommand?.kind === "progress" ||
+      rawAutoDevCommand?.kind === "skills"
     ) {
       return {
         kind: "execute",
@@ -1990,6 +2056,7 @@ export class Orchestrator {
       this.workflowSnapshots.delete(sessionKey);
       this.autoDevSnapshots.delete(sessionKey);
       this.autoDevDetailedProgressOverrides.delete(sessionKey);
+      this.workflowRoleSkillPolicyOverrides.delete(sessionKey);
       this.pendingStopRequests.delete(sessionKey);
       this.pendingAutoDevLoopStopRequests.delete(sessionKey);
       this.activeAutoDevLoopSessions.delete(sessionKey);
@@ -2030,6 +2097,7 @@ export class Orchestrator {
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
 - /autodev progress [on|off|status]: 控制 AutoDev/Multi-Agent 过程回显详细模式（默认 on）
+- /autodev skills [on|off|summary|progressive|full|status]: 控制角色技能注入开关与披露模式（默认 progressive）
 - 多模态状态: ${this.formatMultimodalHelpStatus()}
 - /diag version: 查看运行实例诊断信息
 - /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
@@ -2085,6 +2153,7 @@ export class Orchestrator {
         ? `${autoDevDiagRun.lastStage}@${autoDevDiagRun.updatedAt}`
         : "N/A";
     const autoDevStageMessage = autoDevLatestStageEvent?.message ?? autoDevDiagRun?.lastMessage ?? "N/A";
+    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
     const packageUpdate = await this.packageUpdateChecker.getStatus();
     const latestUpgrade = this.getLatestUpgradeRun();
     const recentUpgrades = this.getRecentUpgradeRuns(3);
@@ -2129,6 +2198,8 @@ export class Orchestrator {
 - Multi-Agent context: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
         this.workflowOutputContextMaxChars,
       )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
+- Multi-Agent role skills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
+- Multi-Agent role skills loaded: ${roleSkillStatus.loaded}
 - AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, mode=${autoDev.mode}, task=${autoDevTask}, duration=${autoDevRunDuration}
 - AutoDev loop: round=${autoDev.loopRound}/${autoDev.loopMaxRuns}, completed=${autoDev.loopCompletedRuns}, deadline=${autoDev.loopDeadlineAt ?? "N/A"}, active=${autoDevLoopActive}
 - AutoDev control: loopStopRequested=${autoDevLoopStopRequested}, stopRequested=${autoDevStopRequested}, detailedProgress=${autoDevDetailedProgress} (default=${autoDevDetailedProgressDefault})
@@ -2139,6 +2210,7 @@ export class Orchestrator {
 
   private async handleWorkflowStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
     const snapshot = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
+    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
     await this.channel.sendNotice(
       message.conversationId,
       `[CodeHarbor] Multi-Agent 工作流状态
@@ -2151,6 +2223,8 @@ export class Orchestrator {
 - contextBudget: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
         this.workflowOutputContextMaxChars,
       )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
+- roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
+- roleSkillsLoaded: ${roleSkillStatus.loaded}
 - error: ${snapshot.error ?? "N/A"}`,
     );
   }
@@ -2171,6 +2245,7 @@ export class Orchestrator {
       const stopRequested = this.pendingStopRequests.has(sessionKey) ? "yes" : "no";
       const detailedProgress = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
       const detailedProgressDefault = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+      const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
       const recentRuns = this.listWorkflowDiagRunsBySession("autodev", sessionKey, 3);
       const latestRun = recentRuns[0] ?? null;
       const stageEvents = latestRun ? this.listWorkflowDiagEvents(latestRun.runId, 12) : [];
@@ -2198,6 +2273,8 @@ export class Orchestrator {
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
+- roleSkillsLoaded: ${roleSkillStatus.loaded}
 - runState: ${snapshot.state}
 - currentTask: ${currentTask}
 - runWindow: startedAt=${snapshot.startedAt ?? "N/A"}, endedAt=${snapshot.endedAt ?? "N/A"}, duration=${runDuration}
@@ -2247,6 +2324,42 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
 - detailedProgress: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${sessionKey}`,
+    );
+  }
+
+  private async handleAutoDevSkillsCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
+  ): Promise<void> {
+    if (mode !== "status") {
+      if (mode === "on") {
+        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
+          enabled: true,
+        });
+      } else if (mode === "off") {
+        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
+          enabled: false,
+        });
+      } else {
+        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
+          enabled: true,
+          mode,
+        });
+      }
+    }
+
+    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
+    await this.channel.sendNotice(
+      message.conversationId,
+      `[CodeHarbor] AutoDev 角色技能设置
+- enabled: ${roleSkillStatus.enabled ? "on" : "off"}
+- mode: ${roleSkillStatus.mode}
+- maxChars: ${roleSkillStatus.maxChars}
+- roots: ${roleSkillStatus.roots}
+- override: ${roleSkillStatus.override}
+- loaded: ${roleSkillStatus.loaded}
+- usage: /autodev skills on|off|summary|progressive|full|status`,
     );
   }
 
@@ -3016,11 +3129,13 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
       "Multi-Agent workflow 启动：Planner -> Executor -> Reviewer",
     );
     const detailedProgressEnabled = this.isAutoDevDetailedProgressEnabled(sessionKey);
+    const roleSkillPolicy = this.resolveWorkflowRoleSkillPolicy(sessionKey);
 
     try {
       const result = await this.workflowRunner.run({
         objective: normalizedObjective,
         workdir,
+        roleSkillPolicy,
         onRegisterCancel: (cancel) => {
           cancelWorkflow = cancel;
           if (cancelRequested) {
@@ -4085,6 +4200,54 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
       return;
     }
     this.autoDevDetailedProgressOverrides.set(sessionKey, enabled);
+  }
+
+  private resolveWorkflowRoleSkillPolicy(sessionKey: string): { enabled: boolean; mode: WorkflowRoleSkillDisclosureMode } {
+    const override = this.workflowRoleSkillPolicyOverrides.get(sessionKey);
+    return {
+      enabled: override?.enabled ?? this.workflowRoleSkillDefaultPolicy.enabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
+      mode: override?.mode ?? this.workflowRoleSkillDefaultPolicy.mode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
+    };
+  }
+
+  private setWorkflowRoleSkillPolicyOverride(sessionKey: string, next: WorkflowRoleSkillPolicyOverride): void {
+    const current = this.workflowRoleSkillPolicyOverrides.get(sessionKey) ?? {};
+    const mergedEnabled = next.enabled ?? current.enabled ?? this.workflowRoleSkillDefaultPolicy.enabled;
+    const mergedMode = next.mode ?? current.mode ?? this.workflowRoleSkillDefaultPolicy.mode;
+    const enabled = mergedEnabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED;
+    const mode = mergedMode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE;
+    const sameAsDefault =
+      enabled === (this.workflowRoleSkillDefaultPolicy.enabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED) &&
+      mode === (this.workflowRoleSkillDefaultPolicy.mode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE);
+    if (sameAsDefault) {
+      this.workflowRoleSkillPolicyOverrides.delete(sessionKey);
+      return;
+    }
+    this.workflowRoleSkillPolicyOverrides.set(sessionKey, {
+      enabled,
+      mode,
+    });
+  }
+
+  private buildWorkflowRoleSkillStatus(sessionKey: string): {
+    enabled: boolean;
+    mode: WorkflowRoleSkillDisclosureMode;
+    maxChars: number;
+    roots: string;
+    loaded: string;
+    override: string;
+  } {
+    const policy = this.resolveWorkflowRoleSkillPolicy(sessionKey);
+    const snapshot = this.workflowRoleSkillCatalog.getStatusSnapshot();
+    const override = this.workflowRoleSkillPolicyOverrides.get(sessionKey);
+    return {
+      enabled: policy.enabled,
+      mode: policy.mode,
+      maxChars: snapshot.maxChars,
+      roots: snapshot.roots.length > 0 ? snapshot.roots.join(", ") : "(default)",
+      loaded: formatWorkflowRoleSkillLoaded(snapshot),
+      override: override ? `enabled=${override.enabled ? "on" : "off"}, mode=${override.mode}` : "none",
+    };
   }
 
   private pruneRunSnapshots(now: number): void {
@@ -5759,6 +5922,9 @@ function classifyBackendTaskType(
   if (autoDevCommand?.kind === "status") {
     return "autodev_status";
   }
+  if (autoDevCommand?.kind === "skills" || autoDevCommand?.kind === "progress") {
+    return "autodev_status";
+  }
   if (autoDevCommand?.kind === "stop") {
     return "autodev_stop";
   }
@@ -5815,6 +5981,56 @@ function parseCsvValues(raw: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseOptionalCsvValues(raw: string | undefined): string[] | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  return parseCsvValues(raw);
+}
+
+function parseRoleSkillDisclosureMode(
+  raw: string | WorkflowRoleSkillDisclosureMode | undefined,
+  fallback: WorkflowRoleSkillDisclosureMode,
+): WorkflowRoleSkillDisclosureMode {
+  const normalized = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "summary" || normalized === "progressive" || normalized === "full") {
+    return normalized;
+  }
+  return fallback;
+}
+
+function parseRoleSkillAssignments(raw: string | undefined): Partial<Record<WorkflowRole, string[]>> | undefined {
+  const normalized = raw?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalized);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+
+  const payload = parsed as Record<string, unknown>;
+  const output: Partial<Record<WorkflowRole, string[]>> = {};
+  for (const role of ["planner", "executor", "reviewer"] as WorkflowRole[]) {
+    const value = payload[role];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    output[role] = value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
 }
 
 function parseEnvPositiveInt(raw: string | undefined, fallback: number): number {
@@ -6312,6 +6528,24 @@ function formatWorkflowContextBudget(value: number | null): string {
     return "unlimited";
   }
   return String(Math.floor(value));
+}
+
+function formatWorkflowRoleSkillLoaded(snapshot: WorkflowRoleSkillStatusSnapshot): string {
+  return [
+    `planner=${formatWorkflowRoleSkillList(snapshot.loadedSkills.planner)}`,
+    `executor=${formatWorkflowRoleSkillList(snapshot.loadedSkills.executor)}`,
+    `reviewer=${formatWorkflowRoleSkillList(snapshot.loadedSkills.reviewer)}`,
+  ].join("; ");
+}
+
+function formatWorkflowRoleSkillList(items: string[]): string {
+  if (items.length === 0) {
+    return "(none)";
+  }
+  if (items.length <= 6) {
+    return items.join(", ");
+  }
+  return `${items.slice(0, 6).join(", ")}, ... (+${items.length - 6})`;
 }
 
 function formatUpgradeDiagRecords(runs: UpgradeRunRecord[]): string {

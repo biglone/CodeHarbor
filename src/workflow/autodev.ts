@@ -32,7 +32,8 @@ export type AutoDevCommand =
   | { kind: "status" }
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
-  | { kind: "progress"; mode: "status" | "on" | "off" };
+  | { kind: "progress"; mode: "status" | "on" | "off" }
+  | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" };
 
 export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   const normalized = text.trim();
@@ -58,6 +59,22 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     }
     if (["off", "disable", "disabled", "false", "0"].includes(option)) {
       return { kind: "progress", mode: "off" };
+    }
+    return null;
+  }
+  if (parts[1]?.toLowerCase() === "skills") {
+    const option = (parts[2] ?? "").trim().toLowerCase();
+    if (!option || option === "status") {
+      return { kind: "skills", mode: "status" };
+    }
+    if (["on", "enable", "enabled", "true", "1"].includes(option)) {
+      return { kind: "skills", mode: "on" };
+    }
+    if (["off", "disable", "disabled", "false", "0"].includes(option)) {
+      return { kind: "skills", mode: "off" };
+    }
+    if (option === "summary" || option === "progressive" || option === "full") {
+      return { kind: "skills", mode: option };
     }
     return null;
   }

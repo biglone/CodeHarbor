@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { MultiAgentWorkflowRunner, parseWorkflowCommand } from "../src/workflow/multi-agent-workflow";
+import { WorkflowRoleSkillCatalog } from "../src/workflow/role-skills";
 
 type ScenarioInput = {
   prompt: string;
@@ -286,5 +287,99 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(reviewerPrompt).toContain("executor_output truncated");
     expect(reviewerPrompt).not.toContain(oversizedOutput);
     expect(reviewerPrompt.length).toBeLessThan(2_000);
+  });
+
+  it("injects role skill blocks into role prompts when catalog is configured", async () => {
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: "planner-thread", reply: "plan" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({ sessionId: "reviewer-thread", reply: "VERDICT: APPROVED\nSUMMARY: done" }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({ sessionId: "executor-thread", reply: "output" }),
+        cancel: () => {},
+      };
+    });
+
+    const roleSkillCatalog = new WorkflowRoleSkillCatalog({
+      enabled: true,
+      mode: "summary",
+      roots: [],
+      roleAssignments: {
+        planner: ["builtin-planner-core"],
+        executor: ["builtin-executor-core"],
+        reviewer: ["builtin-reviewer-core"],
+      },
+    });
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+      roleSkillCatalog,
+    });
+
+    await runner.run({
+      objective: "inject role skills",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    const plannerPrompt = executor.calls.find((call) => call.prompt.includes("[role:planner]"))?.prompt ?? "";
+    const reviewerPrompt = executor.calls.find((call) => call.prompt.includes("[role:reviewer]"))?.prompt ?? "";
+    expect(plannerPrompt).toContain("[role_skills]");
+    expect(plannerPrompt).toContain("role=planner");
+    expect(reviewerPrompt).toContain("role=reviewer");
+  });
+
+  it("supports per-run role skill disable override", async () => {
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: "planner-thread", reply: "plan" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({ sessionId: "reviewer-thread", reply: "VERDICT: APPROVED\nSUMMARY: done" }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({ sessionId: "executor-thread", reply: "output" }),
+        cancel: () => {},
+      };
+    });
+
+    const roleSkillCatalog = new WorkflowRoleSkillCatalog({
+      enabled: true,
+      mode: "full",
+      roots: [],
+      roleAssignments: {
+        planner: ["builtin-planner-core"],
+      },
+    });
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+      roleSkillCatalog,
+    });
+
+    await runner.run({
+      objective: "disable role skills",
+      workdir: "/tmp/workflow-unit",
+      roleSkillPolicy: {
+        enabled: false,
+      },
+    });
+
+    const plannerPrompt = executor.calls.find((call) => call.prompt.includes("[role:planner]"))?.prompt ?? "";
+    expect(plannerPrompt).not.toContain("[role_skills]");
   });
 });

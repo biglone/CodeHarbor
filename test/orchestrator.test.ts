@@ -3291,6 +3291,71 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("timeout="))).toBe(false);
   });
 
+  it("supports /autodev skills mode switch and injects role skills into workflow prompts", async () => {
+    const channel = new FakeChannel();
+    const executor = new WorkflowExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 0,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev skills full",
+        eventId: "$autodev-skills-full",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev status",
+        eventId: "$autodev-status-after-skills-full",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 验证角色技能注入",
+        eventId: "$wf-role-skills-full",
+      }),
+    );
+
+    expect(channel.notices.some((entry) => entry.text.includes("AutoDev 角色技能设置"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("mode: full"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("roleSkills: enabled=on, mode=full"))).toBe(true);
+
+    const plannerPromptWithSkills = executor.calls.find((call) => call.text.includes("[role:planner]"))?.text ?? "";
+    expect(plannerPromptWithSkills).toContain("[role_skills]");
+    expect(plannerPromptWithSkills).toContain("disclosure=full");
+
+    executor.calls.length = 0;
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev skills off",
+        eventId: "$autodev-skills-off",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run 验证关闭角色技能",
+        eventId: "$wf-role-skills-off",
+      }),
+    );
+
+    const plannerPromptWithoutSkills = executor.calls.find((call) => call.text.includes("[role:planner]"))?.text ?? "";
+    expect(plannerPromptWithoutSkills).not.toContain("[role_skills]");
+  });
+
   it("applies AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS when assembling reviewer prompt", async () => {
     const previous = process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS;
     process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS = "1200";
