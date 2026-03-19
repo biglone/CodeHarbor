@@ -2024,7 +2024,15 @@ export class Orchestrator {
     try {
       const context = await loadAutoDevContext(workdir);
       const summary = summarizeAutoDevTasks(context.tasks);
-      const nextTask = selectAutoDevTask(context.tasks);
+      const inProgressTask = context.tasks.find((task) => task.status === "in_progress") ?? null;
+      const currentTask =
+        snapshot.taskId && snapshot.taskDescription
+          ? `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
+          : snapshot.taskId
+            ? snapshot.taskId
+            : inProgressTask
+              ? formatTaskForDisplay(inProgressTask)
+              : "N/A";
 
       await this.channel.sendNotice(
         message.conversationId,
@@ -2033,10 +2041,9 @@ export class Orchestrator {
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}
 - config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}
 - runState: ${snapshot.state}
-- runTask: ${snapshot.taskId ? `${snapshot.taskId} ${snapshot.taskDescription ?? ""}`.trim() : "N/A"}
+- currentTask: ${currentTask}
 - runMode: ${snapshot.mode}
 - runLoop: round=${snapshot.loopRound}, completed=${snapshot.loopCompletedRuns}/${snapshot.loopMaxRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}

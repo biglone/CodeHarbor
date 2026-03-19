@@ -2628,7 +2628,7 @@ describe("Orchestrator", () => {
     }
   });
 
-  it("reports /autodev status with task summary and next task", async () => {
+  it("reports /autodev status with task summary and current task", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
     await fs.writeFile(
@@ -2665,7 +2665,7 @@ describe("Orchestrator", () => {
       );
 
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态"))).toBe(true);
-      expect(channel.notices.some((entry) => entry.text.includes("nextTask: T1.1 first (⬜)"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("currentTask: N/A"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
