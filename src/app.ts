@@ -42,11 +42,11 @@ export class CodeHarborApp {
       cleanupOwner: `main:${process.pid}`,
     });
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
-    const buildExecutor = (provider: "codex" | "claude"): CodexExecutor =>
+    const buildExecutor = (provider: "codex" | "claude", model: string | null = config.codexModel): CodexExecutor =>
       new CodexExecutor({
         provider,
         bin: resolveProviderBin(config, provider),
-        model: config.codexModel,
+        model,
         workdir: config.codexWorkdir,
         dangerousBypass: config.codexDangerousBypass,
         timeoutMs: config.codexExecTimeoutMs,
@@ -55,7 +55,7 @@ export class CodeHarborApp {
         extraArgs: config.codexExtraArgs,
         extraEnv: config.codexExtraEnv,
       });
-    const executor = buildExecutor(config.aiCliProvider);
+    const executor = buildExecutor(config.aiCliProvider, config.codexModel);
     const workflowExecTimeoutMs = Math.max(config.codexExecTimeoutMs, DEFAULT_WORKFLOW_EXEC_TIMEOUT_MS);
 
     this.channel = new MatrixChannel(config, this.logger);
@@ -88,6 +88,7 @@ export class CodeHarborApp {
       defaultCodexWorkdir: config.codexWorkdir,
       aiCliProvider: config.aiCliProvider,
       aiCliModel: config.codexModel,
+      backendModelRoutingRules: config.backendModelRoutingRules,
       matrixAdminUsers: config.matrixAdminUsers,
       upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,

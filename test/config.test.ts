@@ -130,6 +130,99 @@ describe("loadConfig AI_CLI_PROVIDER", () => {
   });
 });
 
+describe("loadConfig BACKEND_MODEL_ROUTING_RULES_JSON", () => {
+  it("parses backend/model routing rules", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        BACKEND_MODEL_ROUTING_RULES_JSON: JSON.stringify([
+          {
+            id: "prefer-claude-autodev",
+            priority: 200,
+            when: {
+              taskTypes: ["autodev_run"],
+              directMessage: true,
+            },
+            target: {
+              provider: "claude",
+              model: "claude-sonnet-4-5",
+            },
+          },
+          {
+            when: {
+              textIncludes: ["fast"],
+            },
+            target: {
+              model: "gpt-5-mini",
+            },
+          },
+        ]),
+      }),
+    );
+
+    expect(config.backendModelRoutingRules).toHaveLength(2);
+    expect(config.backendModelRoutingRules[0]).toMatchObject({
+      id: "prefer-claude-autodev",
+      enabled: true,
+      priority: 200,
+      when: {
+        taskTypes: ["autodev_run"],
+        directMessage: true,
+      },
+      target: {
+        provider: "claude",
+        model: "claude-sonnet-4-5",
+      },
+    });
+    expect(config.backendModelRoutingRules[1]).toMatchObject({
+      id: "rule-2",
+      enabled: true,
+      priority: 0,
+      when: {
+        textIncludes: ["fast"],
+      },
+      target: {
+        model: "gpt-5-mini",
+      },
+    });
+  });
+
+  it("rejects invalid routing rule payload", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          BACKEND_MODEL_ROUTING_RULES_JSON: JSON.stringify([
+            {
+              id: "bad-task-type",
+              when: {
+                taskTypes: ["unknown_task_type"],
+              },
+              target: {
+                provider: "codex",
+              },
+            },
+          ]),
+        }),
+      ),
+    ).toThrow(/unsupported task type/i);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          BACKEND_MODEL_ROUTING_RULES_JSON: JSON.stringify([
+            {
+              id: "missing-target",
+              when: {
+                textIncludes: ["x"],
+              },
+              target: {},
+            },
+          ]),
+        }),
+      ),
+    ).toThrow(/must include provider and\/or model override/i);
+  });
+});
+
 describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("uses safe defaults", () => {
     const config = loadConfig(createBaseEnv());

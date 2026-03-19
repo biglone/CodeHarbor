@@ -64,6 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/biglone/CodeHarbor/main/scripts/ins
 
 - `AI_CLI_PROVIDER`：`codex` 或 `claude`（默认 `codex`）
 - `CODEX_BIN`：一般保持 `codex`
+- `BACKEND_MODEL_ROUTING_RULES_JSON`：可选，按规则自动选择 `backend/model`（JSON 数组）
 - `MATRIX_COMMAND_PREFIX`：群聊触发前缀，默认 `!code`
 
 ---
@@ -190,7 +191,7 @@ codeharbor admin serve
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - 在 systemd `NoNewPrivileges=true` 场景下会自动走信号重启回退，无需手工 sudo 重启
-- `/backend codex|claude|status`：会话内切换后端工具；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
+- `/backend codex|claude|auto|status`：会话内切换后端工具（`auto` 恢复自动路由）；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）

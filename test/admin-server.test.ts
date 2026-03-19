@@ -60,6 +60,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
       allowPrefix: true,
     },
     roomTriggerPolicies: {},
+    backendModelRoutingRules: [],
     rateLimiter: {
       windowMs: 60_000,
       maxRequestsPerUser: 20,

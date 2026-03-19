@@ -41,6 +41,14 @@ import {
 } from "./package-update-checker";
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import {
+  BackendModelRouter,
+  type BackendModelRouteDecision,
+  type BackendModelRouteInput,
+  type BackendModelRouteProfile,
+  type BackendModelRouteRule,
+  type BackendModelRouteTaskType,
+} from "./routing/backend-model-router";
+import {
   GLOBAL_RUNTIME_HOT_CONFIG_KEY,
   parseRuntimeHotConfigPayload,
   type RuntimeHotConfigPayload,
@@ -114,8 +122,9 @@ interface OrchestratorOptions {
   defaultCodexWorkdir?: string;
   aiCliProvider?: "codex" | "claude";
   aiCliModel?: string | null;
+  backendModelRoutingRules?: BackendModelRouteRule[];
   matrixAdminUsers?: string[];
-  executorFactory?: (provider: "codex" | "claude") => CodexExecutor;
+  executorFactory?: (provider: "codex" | "claude", model?: string | null) => CodexExecutor;
   upgradeAllowedUsers?: string[];
   selfUpdateTimeoutMs?: number;
   selfUpdateRunner?: SelfUpdateRunner;
@@ -163,6 +172,24 @@ interface RoomRuntimeConfig {
   enabled: boolean;
   triggerPolicy: TriggerPolicy;
   workdir: string;
+}
+
+interface SessionBackendOverride {
+  profile: BackendModelRouteProfile;
+  updatedAt: number;
+}
+
+interface SessionBackendDecision {
+  profile: BackendModelRouteProfile;
+  source: "manual_override" | "rule" | "default";
+  reasonCode: "manual_override" | "rule_match" | "default_fallback" | "factory_unavailable";
+  ruleId: string | null;
+}
+
+interface BackendRuntimeBundle {
+  profile: BackendModelRouteProfile;
+  executor: CodexExecutor;
+  sessionRuntime: CodexSessionRuntime;
 }
 
 interface ImageSelectionResult {
@@ -697,9 +724,11 @@ class MediaMetrics {
 
 export class Orchestrator {
   private readonly channel: Channel;
-  private executor: CodexExecutor;
-  private sessionRuntime: CodexSessionRuntime;
-  private readonly executorFactory: ((provider: "codex" | "claude") => CodexExecutor) | null;
+  private readonly executorFactory: ((provider: "codex" | "claude", model?: string | null) => CodexExecutor) | null;
+  private readonly backendRuntimes = new Map<string, BackendRuntimeBundle>();
+  private readonly sessionBackendOverrides = new Map<string, SessionBackendOverride>();
+  private readonly sessionBackendProfiles = new Map<string, BackendModelRouteProfile>();
+  private readonly sessionLastBackendDecisions = new Map<string, SessionBackendDecision>();
   private readonly stateStore: StateStore;
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
@@ -733,8 +762,8 @@ export class Orchestrator {
   private readonly taskQueueRetryPolicy: RetryPolicy;
   private readonly sessionQueueDrains = new Map<string, Promise<void>>();
   private readonly sessionQueueRetryTimers = new Map<string, NodeJS.Timeout>();
-  private aiCliProvider: "codex" | "claude";
-  private readonly aiCliModel: string | null;
+  private readonly defaultBackendProfile: BackendModelRouteProfile;
+  private readonly backendModelRouter: BackendModelRouter;
   private readonly botNoticePrefix: string;
   private readonly processStartedAtIso: string;
   private readonly matrixAdminUsers: Set<string>;
@@ -771,7 +800,6 @@ export class Orchestrator {
     options?: OrchestratorOptions,
   ) {
     this.channel = channel;
-    this.executor = executor;
     this.stateStore = stateStore;
     this.logger = logger;
     this.lockTtlMs = options?.lockTtlMs ?? 30 * 60 * 1000;
@@ -851,7 +879,7 @@ export class Orchestrator {
     this.workflowPlanContextMaxChars = workflowPlanContextMaxChars;
     this.workflowOutputContextMaxChars = workflowOutputContextMaxChars;
     this.workflowFeedbackContextMaxChars = workflowFeedbackContextMaxChars;
-    this.workflowRunner = new MultiAgentWorkflowRunner(this.executor, this.logger, {
+    this.workflowRunner = new MultiAgentWorkflowRunner(executor, this.logger, {
       enabled: options?.multiAgentWorkflow?.enabled ?? false,
       autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
       executionTimeoutMs: options?.multiAgentWorkflow?.executionTimeoutMs,
@@ -894,8 +922,17 @@ export class Orchestrator {
       ...options?.taskQueueRetryPolicy,
     });
     this.executorFactory = options?.executorFactory ?? null;
-    this.aiCliProvider = options?.aiCliProvider ?? "codex";
-    this.aiCliModel = options?.aiCliModel?.trim() || null;
+    this.defaultBackendProfile = {
+      provider: options?.aiCliProvider ?? "codex",
+      model: options?.aiCliModel?.trim() || null,
+    };
+    this.backendModelRouter = new BackendModelRouter(options?.backendModelRoutingRules ?? []);
+    const defaultBackendProfileKey = this.serializeBackendProfile(this.defaultBackendProfile);
+    this.backendRuntimes.set(defaultBackendProfileKey, {
+      profile: this.defaultBackendProfile,
+      executor,
+      sessionRuntime: new CodexSessionRuntime(executor),
+    });
     this.matrixAdminUsers = new Set(
       (options?.matrixAdminUsers ?? parseCsvValues(process.env.MATRIX_ADMIN_USERS ?? ""))
         .map((value) => value.trim())
@@ -923,7 +960,6 @@ export class Orchestrator {
         }));
     this.upgradeVersionProbe = options?.upgradeVersionProbe ?? (() => probeInstalledVersion(selfUpdateTimeoutMs));
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
-    this.sessionRuntime = new CodexSessionRuntime(this.executor);
     this.workflowDiagStore = this.restoreWorkflowDiagStore();
     this.persistRuntimeMetricsSnapshot();
   }
@@ -1202,10 +1238,21 @@ export class Orchestrator {
           return;
         }
 
+        const taskType = classifyBackendTaskType(workflowCommand, autoDevCommand);
+        const backendDecision = this.resolveSessionBackendDecision({
+          sessionKey,
+          message,
+          taskType,
+          routePrompt: route.prompt,
+        });
+        const backendRuntime = this.prepareBackendRuntimeForSession(sessionKey, backendDecision.profile);
+        this.sessionLastBackendDecisions.set(sessionKey, backendDecision);
+
         if (workflowCommand?.kind === "run") {
           const executionStartedAt = Date.now();
           let sendDurationMs = 0;
           this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+          this.workflowRunner.setExecutor(backendRuntime.executor);
           try {
             const sendStartedAt = Date.now();
             await this.handleWorkflowRunCommand(
@@ -1244,6 +1291,7 @@ export class Orchestrator {
           const executionStartedAt = Date.now();
           let sendDurationMs = 0;
           this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+          this.workflowRunner.setExecutor(backendRuntime.executor);
           try {
             const sendStartedAt = Date.now();
             await this.handleAutoDevRunCommand(
@@ -1333,11 +1381,15 @@ export class Orchestrator {
           prompt: executionPrompt,
           imageCount: imagePaths.length,
         });
-        this.stateStore.appendConversationMessage(sessionKey, "user", this.aiCliProvider, route.prompt);
+        this.stateStore.appendConversationMessage(sessionKey, "user", backendDecision.profile.provider, route.prompt);
         this.logger.info("Processing message", {
           requestId,
           sessionKey,
           hasCodexSession: Boolean(previousCodexSessionId),
+          backend: this.formatBackendToolLabel(backendDecision.profile),
+          backendRouteSource: backendDecision.source,
+          backendRouteReason: backendDecision.reasonCode,
+          backendRouteRuleId: backendDecision.ruleId,
           queueWaitMs,
           attachmentCount: message.attachments.length,
           workdir: roomConfig.workdir,
@@ -1352,7 +1404,7 @@ export class Orchestrator {
         try {
           const executionStartedAt = Date.now();
           const executeOnce = async (attemptImagePaths: string[]): Promise<{ sessionId: string; reply: string }> => {
-            executionHandle = this.sessionRuntime.startExecution(
+            executionHandle = backendRuntime.sessionRuntime.startExecution(
               sessionKey,
               executionPrompt,
               previousCodexSessionId,
@@ -1405,7 +1457,7 @@ export class Orchestrator {
           try {
             result = await executeOnce(imagePaths);
           } catch (error) {
-            if (!shouldRetryClaudeImageFailure(this.aiCliProvider, imagePaths, error)) {
+            if (!shouldRetryClaudeImageFailure(backendDecision.profile.provider, imagePaths, error)) {
               throw error;
             }
             const reason = summarizeSingleLine(formatError(error), 220);
@@ -1446,7 +1498,7 @@ export class Orchestrator {
 
           const sendStartedAt = Date.now();
           await this.channel.sendMessage(message.conversationId, result.reply);
-          this.stateStore.appendConversationMessage(sessionKey, "assistant", this.aiCliProvider, result.reply);
+          this.stateStore.appendConversationMessage(sessionKey, "assistant", backendDecision.profile.provider, result.reply);
           await this.finishProgress(
             {
               conversationId: message.conversationId,
@@ -1456,7 +1508,7 @@ export class Orchestrator {
                 progressNoticeEventId = next;
               },
             },
-            `处理完成（后端工具: ${this.formatBackendToolLabel()}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+            `处理完成（后端工具: ${this.formatBackendToolLabel(backendDecision.profile)}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
           );
           sendDurationMs = Date.now() - sendStartedAt;
 
@@ -1890,7 +1942,10 @@ export class Orchestrator {
     if (command === "reset") {
       this.stateStore.clearCodexSessionId(sessionKey);
       this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-      this.sessionRuntime.clearSession(sessionKey);
+      this.clearSessionFromAllRuntimes(sessionKey);
+      this.sessionBackendOverrides.delete(sessionKey);
+      this.sessionBackendProfiles.delete(sessionKey);
+      this.sessionLastBackendDecisions.delete(sessionKey);
       this.skipBridgeForNextPrompt.add(sessionKey);
       this.workflowSnapshots.delete(sessionKey);
       this.autoDevSnapshots.delete(sessionKey);
@@ -1940,7 +1995,7 @@ export class Orchestrator {
 - /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
 - /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
-- /backend codex|claude|status: 查看/切换后端工具
+- /backend codex|claude|auto|status: 查看/切换后端工具（auto=恢复自动路由）
 - /reset: 清空当前会话上下文
 - /stop: 停止当前执行任务
 - Matrix 客户端若拦截 / 命令，可发送 //autodev run T6.2（兼容 //agents、//diag、//upgrade）
@@ -1964,7 +2019,7 @@ export class Orchestrator {
     const activeUntil = status.activeUntil ?? "未激活";
     const metrics = this.metrics.snapshot(this.runningExecutions.size);
     const limiter = this.rateLimiter.snapshot();
-    const runtime = this.sessionRuntime.getRuntimeStats();
+    const runtime = this.getBackendRuntimeStats();
     const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
     const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
     const packageUpdate = await this.packageUpdateChecker.getStatus();
@@ -1972,6 +2027,12 @@ export class Orchestrator {
     const recentUpgrades = this.getRecentUpgradeRuns(3);
     const upgradeStats = this.getUpgradeRunStats();
     const upgradeLock = this.getUpgradeExecutionLockSnapshot();
+    const backendProfile = this.resolveSessionBackendStatusProfile(sessionKey);
+    const backendOverride = this.sessionBackendOverrides.get(sessionKey);
+    const backendDecision = this.sessionLastBackendDecisions.get(sessionKey);
+    const backendRouteMode = backendOverride ? "manual" : "auto";
+    const backendRouteReason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
+    const backendRouteRuleId = backendDecision?.ruleId ?? "none";
 
     await this.channel.sendNotice(
       message.conversationId,
@@ -1981,7 +2042,8 @@ export class Orchestrator {
 - activeUntil: ${activeUntil}
 - 已绑定会话: ${status.hasCodexSession ? "是" : "否"}
 - 当前工作目录: ${roomConfig.workdir}
-- AI CLI: ${this.formatBackendToolLabel()}
+- AI CLI: ${this.formatBackendToolLabel(backendProfile)}
+- backend route: mode=${backendRouteMode}, reason=${backendRouteReason}, rule=${backendRouteRuleId}
 - 当前版本: ${packageUpdate.currentVersion}
 - 更新检查: ${formatPackageUpdateHint(packageUpdate)}
 - 更新检查时间: ${packageUpdate.checkedAt}
@@ -2995,7 +3057,8 @@ export class Orchestrator {
     this.activeAutoDevLoopSessions.delete(sessionKey);
     this.stateStore.deactivateSession(sessionKey);
     this.stateStore.clearCodexSessionId(sessionKey);
-    this.sessionRuntime.clearSession(sessionKey);
+    this.clearSessionFromAllRuntimes(sessionKey);
+    this.sessionBackendProfiles.delete(sessionKey);
     this.skipBridgeForNextPrompt.add(sessionKey);
 
     const queueStore = this.getTaskQueueStateStore();
@@ -3011,7 +3074,7 @@ export class Orchestrator {
     const running = this.runningExecutions.get(sessionKey);
     if (running) {
       this.pendingStopRequests.delete(sessionKey);
-      this.sessionRuntime.cancelRunningExecution(sessionKey);
+      this.cancelRunningExecutionInAllRuntimes(sessionKey);
       running.cancel();
       await this.channel.sendNotice(
         message.conversationId,
@@ -3276,6 +3339,151 @@ export class Orchestrator {
     }
 
     return this.configService.resolveRoomConfig(conversationId, fallbackPolicy);
+  }
+
+  private resolveSessionBackendDecision(input: {
+    sessionKey: string;
+    message: InboundMessage;
+    taskType: BackendModelRouteTaskType;
+    routePrompt: string;
+  }): SessionBackendDecision {
+    const manualOverride = this.sessionBackendOverrides.get(input.sessionKey);
+    if (manualOverride) {
+      return {
+        profile: manualOverride.profile,
+        source: "manual_override",
+        reasonCode: "manual_override",
+        ruleId: null,
+      };
+    }
+
+    const routeInput: BackendModelRouteInput = {
+      roomId: input.message.conversationId,
+      senderId: input.message.senderId,
+      taskType: input.taskType,
+      directMessage: input.message.isDirectMessage,
+      text: input.routePrompt,
+    };
+    const routed = this.backendModelRouter.resolve(routeInput, this.defaultBackendProfile);
+    if (!this.executorFactory && !this.hasBackendRuntime(routed.profile)) {
+      if (routed.profile.provider !== this.defaultBackendProfile.provider || routed.profile.model !== this.defaultBackendProfile.model) {
+        this.logger.warn("Backend/model rule matched but executorFactory is unavailable; falling back to default backend.", {
+          sessionKey: input.sessionKey,
+          matchedProvider: routed.profile.provider,
+          matchedModel: routed.profile.model,
+          defaultProvider: this.defaultBackendProfile.provider,
+          defaultModel: this.defaultBackendProfile.model,
+          ruleId: routed.ruleId,
+          taskType: input.taskType,
+        });
+      }
+      return {
+        profile: this.defaultBackendProfile,
+        source: "default",
+        reasonCode: "factory_unavailable",
+        ruleId: routed.ruleId,
+      };
+    }
+
+    return {
+      profile: routed.profile,
+      source: routed.source,
+      reasonCode: routed.reasonCode,
+      ruleId: routed.ruleId,
+    };
+  }
+
+  private prepareBackendRuntimeForSession(sessionKey: string, profile: BackendModelRouteProfile): BackendRuntimeBundle {
+    const nextProfile = normalizeBackendProfile(profile);
+    const previousProfile = this.sessionBackendProfiles.get(sessionKey);
+    const hasPersistedSession = this.stateStore.getCodexSessionId(sessionKey) !== null;
+
+    const shouldResetSession =
+      previousProfile !== undefined
+        ? !isSameBackendProfile(previousProfile, nextProfile)
+        : hasPersistedSession && !isSameBackendProfile(this.defaultBackendProfile, nextProfile);
+    if (shouldResetSession) {
+      this.stateStore.clearCodexSessionId(sessionKey);
+      this.clearSessionFromAllRuntimes(sessionKey);
+      this.workflowSnapshots.delete(sessionKey);
+      this.autoDevSnapshots.delete(sessionKey);
+    }
+
+    const runtime = this.ensureBackendRuntime(nextProfile);
+    this.sessionBackendProfiles.set(sessionKey, nextProfile);
+    return runtime;
+  }
+
+  private resolveSessionBackendStatusProfile(sessionKey: string): BackendModelRouteProfile {
+    const override = this.sessionBackendOverrides.get(sessionKey);
+    if (override) {
+      return override.profile;
+    }
+    return this.sessionBackendProfiles.get(sessionKey) ?? this.defaultBackendProfile;
+  }
+
+  private resolveManualBackendProfile(provider: "codex" | "claude"): BackendModelRouteProfile {
+    const model = provider === this.defaultBackendProfile.provider ? this.defaultBackendProfile.model : null;
+    return {
+      provider,
+      model,
+    };
+  }
+
+  private ensureBackendRuntime(profile: BackendModelRouteProfile): BackendRuntimeBundle {
+    const normalized = normalizeBackendProfile(profile);
+    const key = this.serializeBackendProfile(normalized);
+    const existing = this.backendRuntimes.get(key);
+    if (existing) {
+      return existing;
+    }
+    if (!this.executorFactory) {
+      throw new Error("Backend executor factory is unavailable.");
+    }
+    const executor = this.executorFactory(normalized.provider, normalized.model);
+    const bundle: BackendRuntimeBundle = {
+      profile: normalized,
+      executor,
+      sessionRuntime: new CodexSessionRuntime(executor),
+    };
+    this.backendRuntimes.set(key, bundle);
+    return bundle;
+  }
+
+  private hasBackendRuntime(profile: BackendModelRouteProfile): boolean {
+    const key = this.serializeBackendProfile(profile);
+    return this.backendRuntimes.has(key);
+  }
+
+  private serializeBackendProfile(profile: BackendModelRouteProfile): string {
+    const normalized = normalizeBackendProfile(profile);
+    return `${normalized.provider}::${normalized.model ?? ""}`;
+  }
+
+  private clearSessionFromAllRuntimes(sessionKey: string): void {
+    for (const runtime of this.backendRuntimes.values()) {
+      runtime.sessionRuntime.clearSession(sessionKey);
+    }
+  }
+
+  private cancelRunningExecutionInAllRuntimes(sessionKey: string): void {
+    for (const runtime of this.backendRuntimes.values()) {
+      runtime.sessionRuntime.cancelRunningExecution(sessionKey);
+    }
+  }
+
+  private getBackendRuntimeStats(): { workerCount: number; runningCount: number } {
+    let workerCount = 0;
+    let runningCount = 0;
+    for (const runtime of this.backendRuntimes.values()) {
+      const stats = runtime.sessionRuntime.getRuntimeStats();
+      workerCount += stats.workerCount;
+      runningCount += stats.runningCount;
+    }
+    return {
+      workerCount,
+      runningCount,
+    };
   }
 
   private async prepareImageAttachments(
@@ -4077,58 +4285,108 @@ export class Orchestrator {
 
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
     const target = parseBackendTarget(message.text);
+    const manualOverride = this.sessionBackendOverrides.get(sessionKey);
+    const statusProfile = this.resolveSessionBackendStatusProfile(sessionKey);
     if (!target || target === "status") {
+      const mode = manualOverride ? "manual" : "auto";
+      const decision = this.sessionLastBackendDecisions.get(sessionKey);
+      const reason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
+      const rule = decision?.ruleId ?? "none";
       await this.channel.sendNotice(
         message.conversationId,
-        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel()}\n可用命令: /backend codex | /backend claude | /backend status`,
+        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n命中规则: ${rule}\n可用命令: /backend codex | /backend claude | /backend auto | /backend status`,
       );
       return;
     }
-    if (target === this.aiCliProvider) {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 后端工具已是 ${target}。`);
+
+    if (target === "auto") {
+      if (!manualOverride) {
+        await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前已经处于自动路由模式。");
+        return;
+      }
+      if (this.runningExecutions.has(sessionKey)) {
+        await this.channel.sendNotice(
+          message.conversationId,
+          "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
+        );
+        return;
+      }
+      this.sessionBackendOverrides.delete(sessionKey);
+      this.stateStore.clearCodexSessionId(sessionKey);
+      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+      this.clearSessionFromAllRuntimes(sessionKey);
+      this.sessionBackendProfiles.delete(sessionKey);
+      this.workflowSnapshots.delete(sessionKey);
+      this.autoDevSnapshots.delete(sessionKey);
+      await this.channel.sendNotice(
+        message.conversationId,
+        "[CodeHarbor] 已恢复自动路由模式。下一个请求会自动注入最近本地会话历史作为桥接上下文。",
+      );
       return;
     }
-    if (!this.executorFactory) {
+
+    const targetProfile = this.resolveManualBackendProfile(target);
+    if (manualOverride && this.serializeBackendProfile(manualOverride.profile) === this.serializeBackendProfile(targetProfile)) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        `[CodeHarbor] 后端工具已是 ${this.formatBackendToolLabel(targetProfile)}（manual）。`,
+      );
+      return;
+    }
+
+    if (!this.executorFactory && !this.hasBackendRuntime(targetProfile)) {
       await this.channel.sendNotice(
         message.conversationId,
         "[CodeHarbor] 当前运行模式不支持会话内切换后端，请修改 .env 后重启服务。",
       );
       return;
     }
-    if (this.runningExecutions.size > 0) {
+    if (this.runningExecutions.has(sessionKey)) {
       await this.channel.sendNotice(
         message.conversationId,
-        "[CodeHarbor] 检测到仍有运行中任务，请等待任务完成后再切换后端工具。",
+        "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
       );
       return;
     }
 
-    this.executor = this.executorFactory(target);
-    this.sessionRuntime = new CodexSessionRuntime(this.executor);
-    this.aiCliProvider = target;
+    this.ensureBackendRuntime(targetProfile);
+    this.sessionBackendOverrides.set(sessionKey, {
+      profile: targetProfile,
+      updatedAt: Date.now(),
+    });
+    this.sessionBackendProfiles.set(sessionKey, targetProfile);
+    this.sessionLastBackendDecisions.set(sessionKey, {
+      profile: targetProfile,
+      source: "manual_override",
+      reasonCode: "manual_override",
+      ruleId: null,
+    });
     this.stateStore.clearCodexSessionId(sessionKey);
     this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
+    this.clearSessionFromAllRuntimes(sessionKey);
     this.workflowSnapshots.delete(sessionKey);
     this.autoDevSnapshots.delete(sessionKey);
 
     await this.channel.sendNotice(
       message.conversationId,
-      `[CodeHarbor] 已切换后端工具为 ${this.formatBackendToolLabel()}。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
+      `[CodeHarbor] 已切换后端工具为 ${this.formatBackendToolLabel(targetProfile)}（manual）。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
     );
   }
 
-  private formatBackendToolLabel(): string {
-    if (!this.aiCliModel) {
-      return this.aiCliProvider;
+  private formatBackendToolLabel(profile: BackendModelRouteProfile = this.defaultBackendProfile): string {
+    if (!profile.model) {
+      return profile.provider;
     }
-    return `${this.aiCliProvider} (${this.aiCliModel})`;
+    return `${profile.provider} (${profile.model})`;
   }
 
   private formatMultimodalHelpStatus(): string {
     const imageEnabled = this.cliCompat.fetchMedia ? "on" : "off";
     const audioEnabled = this.audioTranscriber.isEnabled() ? "on" : "off";
     const mimeText = formatMimeAllowlist(this.cliCompat.imageAllowedMimeTypes);
-    const backendImageSupport = this.aiCliProvider === "codex" || this.aiCliProvider === "claude" ? "yes" : "unknown";
+    const backendImageSupport = this.defaultBackendProfile.provider === "codex" || this.defaultBackendProfile.provider === "claude"
+      ? "yes"
+      : "unknown";
     return `图片=${imageEnabled}(max=${this.cliCompat.imageMaxCount},<=${formatByteSize(this.cliCompat.imageMaxBytes)},mime=${mimeText})；语音=${audioEnabled}；后端图片支持=${backendImageSupport}`;
   }
 
@@ -5214,7 +5472,7 @@ function parseDiagTarget(
   return null;
 }
 
-function parseBackendTarget(text: string): "codex" | "claude" | "status" | null {
+function parseBackendTarget(text: string): "codex" | "claude" | "auto" | "status" | null {
   const tokens = text.trim().split(/\s+/);
   if (tokens.length < 2) {
     return "status";
@@ -5226,10 +5484,47 @@ function parseBackendTarget(text: string): "codex" | "claude" | "status" | null 
   if (value === "claude") {
     return "claude";
   }
+  if (value === "auto") {
+    return "auto";
+  }
   if (value === "status") {
     return "status";
   }
   return null;
+}
+
+
+function classifyBackendTaskType(
+  workflowCommand: ReturnType<typeof parseWorkflowCommand> | null,
+  autoDevCommand: ReturnType<typeof parseAutoDevCommand> | null,
+): BackendModelRouteTaskType {
+  if (workflowCommand?.kind === "run") {
+    return "workflow_run";
+  }
+  if (workflowCommand?.kind === "status") {
+    return "workflow_status";
+  }
+  if (autoDevCommand?.kind === "run") {
+    return "autodev_run";
+  }
+  if (autoDevCommand?.kind === "status") {
+    return "autodev_status";
+  }
+  if (autoDevCommand?.kind === "stop") {
+    return "autodev_stop";
+  }
+  return "chat";
+}
+
+function normalizeBackendProfile(profile: BackendModelRouteProfile): BackendModelRouteProfile {
+  return {
+    provider: profile.provider,
+    model: profile.model?.trim() || null,
+  };
+}
+
+function isSameBackendProfile(left: BackendModelRouteProfile, right: BackendModelRouteProfile): boolean {
+  return left.provider === right.provider && (left.model?.trim() || null) === (right.model?.trim() || null);
 }
 
 function parseUpgradeTarget(text: string): { ok: true; version: string | null } | { ok: false; reason: string } {

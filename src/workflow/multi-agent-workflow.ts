@@ -51,7 +51,7 @@ interface WorkflowPromptContextLimits {
 }
 
 export class MultiAgentWorkflowRunner {
-  private readonly executor: CodexExecutor;
+  private executor: CodexExecutor;
   private readonly logger: Logger;
   private readonly config: MultiAgentWorkflowConfig;
   private readonly promptContextLimits: WorkflowPromptContextLimits;
@@ -65,6 +65,10 @@ export class MultiAgentWorkflowRunner {
 
   isEnabled(): boolean {
     return this.config.enabled;
+  }
+
+  setExecutor(executor: CodexExecutor): void {
+    this.executor = executor;
   }
 
   async run(input: MultiAgentWorkflowRunInput): Promise<MultiAgentWorkflowRunResult> {

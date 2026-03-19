@@ -1165,7 +1165,7 @@ describe("Matrix e2e regression", () => {
       cancel: () => {},
     }));
     const store = new InMemoryStateStore();
-    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+    const executorFactory = vi.fn((provider: "codex" | "claude", _model?: string | null) =>
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
 
@@ -1184,7 +1184,7 @@ describe("Matrix e2e regression", () => {
 
     expect(codexExecutor.calls).toHaveLength(1);
     expect(claudeExecutor.calls).toHaveLength(1);
-    expect(executorFactory).toHaveBeenCalledWith("claude");
+    expect(executorFactory).toHaveBeenCalledWith("claude", null);
     expect(channel.notices.some((entry) => entry.text.includes("已切换后端工具为 claude"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("AI CLI: claude"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text === "from-codex")).toBe(true);

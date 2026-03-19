@@ -222,6 +222,35 @@ class ImmediateExecutor {
   }
 }
 
+class TaggedExecutor {
+  callCount = 0;
+  calls: Array<{ text: string; sessionId: string | null; workdir: string | null; imagePaths: string[] }> = [];
+  private readonly tag: string;
+
+  constructor(tag: string) {
+    this.tag = tag;
+  }
+
+  startExecution(
+    text: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string; imagePaths?: string[] },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.callCount += 1;
+    this.calls.push({
+      text,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+      imagePaths: startOptions?.imagePaths ? [...startOptions.imagePaths] : [],
+    });
+    return {
+      result: Promise.resolve({ sessionId: sessionId ?? `${this.tag}-session`, reply: `${this.tag}:${text}` }),
+      cancel: () => {},
+    };
+  }
+}
+
 type SequencedExecutionOutcome =
   | { kind: "success"; reply?: string }
   | { kind: "error"; error: unknown };
@@ -694,6 +723,105 @@ describe("Orchestrator", () => {
 
     expect(executor.callCount).toBe(1);
     expect(channel.sent[0]?.text).toBe("ok:直接处理这条群消息");
+  });
+
+  it("routes backend/model using configured rules for chat requests", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new TaggedExecutor("codex");
+    const claudeExecutor = new TaggedExecutor("claude");
+    const store = new FakeStateStore();
+    const executorFactory = vi.fn((provider: "codex" | "claude", _model?: string | null) =>
+      provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
+    );
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5",
+      backendModelRoutingRules: [
+        {
+          id: "prefer-claude-chat",
+          enabled: true,
+          priority: 100,
+          when: {
+            taskTypes: ["chat"],
+            textIncludes: ["anthropic"],
+          },
+          target: {
+            provider: "claude",
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+      executorFactory: executorFactory as never,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "please ask anthropic model",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/status",
+        eventId: "$backend-rule-status",
+      }),
+    );
+
+    expect(codexExecutor.callCount).toBe(0);
+    expect(claudeExecutor.callCount).toBe(1);
+    expect(executorFactory).toHaveBeenCalledWith("claude", "claude-sonnet-4-5");
+    expect(channel.sent.some((entry) => entry.text.includes("claude:please ask anthropic model"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("backend route: mode=auto, reason=rule_match, rule=prefer-claude-chat"))).toBe(true);
+  });
+
+  it("falls back to default backend when routing rule needs unavailable executor", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new TaggedExecutor("codex");
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5",
+      backendModelRoutingRules: [
+        {
+          id: "prefer-claude-chat",
+          enabled: true,
+          priority: 100,
+          when: {
+            taskTypes: ["chat"],
+            textIncludes: ["anthropic"],
+          },
+          target: {
+            provider: "claude",
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "please ask anthropic model",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/status",
+        eventId: "$backend-fallback-status",
+      }),
+    );
+
+    expect(codexExecutor.callCount).toBe(1);
+    expect(channel.sent.some((entry) => entry.text.includes("codex:please ask anthropic model"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("backend route: mode=auto, reason=factory_unavailable, rule=prefer-claude-chat"))).toBe(true);
   });
 
   it("rejects requests when user is rate-limited", async () => {

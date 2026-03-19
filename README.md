@@ -24,7 +24,7 @@ Quick feedback:
 - Duplicate Matrix event protection
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
 - Room-level trigger policy overrides
-- Runtime backend switch: `/backend codex|claude|status`
+- Runtime backend switch: `/backend codex|claude|auto|status`
 - Cross-backend context bridge on next request after switch
 - Real `/stop` cancellation (kills in-flight AI CLI process)
 - Session runtime workers (logical worker per `channel:room:user`, with worker stats in `/status`)
@@ -178,7 +178,7 @@ Common in-chat control commands:
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports hardened systemd (`NoNewPrivileges=true`) by using signal-based restart fallback
-- `/backend codex|claude|status` switch or inspect active AI backend
+- `/backend codex|claude|auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
 - `/reset` clear current conversation context
 - `/stop` cancel current running request
 
@@ -554,7 +554,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
-  - `/backend codex|claude|status` switch backend AI CLI tool at runtime (next request auto-bridges recent local history)
+  - `/backend codex|claude|auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
@@ -596,8 +596,16 @@ AI CLI backend controls:
 Cross-backend context bridge behavior:
 
 - CodeHarbor stores recent local `user/assistant` turns per Matrix session.
-- After `/backend codex|claude`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
+- After `/backend codex|claude|auto`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
 - `/reset` and `/stop` explicitly suppress this one-shot bridge on the immediate next request so users can start fresh.
+
+Backend/model rule routing:
+
+- `BACKEND_MODEL_ROUTING_RULES_JSON`
+  - optional JSON array rule engine for automatic backend/model selection per request
+  - conditions support `roomIds` / `senderIds` / `taskTypes` / `directMessage` / `textIncludes` / `textRegex`
+  - targets support `provider` (`codex|claude`) and/or `model`; rules are evaluated by `priority` (high -> low), then declaration order
+  - when rule target cannot be instantiated (for example no `executorFactory` runtime), CodeHarbor falls back to default backend and marks status reason as `factory_unavailable`
 
 ### Multi-Agent Workflow (Phase B, Opt-In)
 

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import dotenv from "dotenv";
 import { z } from "zod";
+import type { BackendModelRouteRule, BackendModelRouteTaskType } from "./routing/backend-model-router";
 
 export interface TriggerPolicy {
   allowMention: boolean;
@@ -147,6 +148,7 @@ const configSchema = z
       .default("true")
       .transform((v) => v.toLowerCase() === "true"),
     ROOM_TRIGGER_POLICY_JSON: z.string().default(""),
+    BACKEND_MODEL_ROUTING_RULES_JSON: z.string().default(""),
     RATE_LIMIT_WINDOW_SECONDS: z
       .string()
       .default("60")
@@ -337,6 +339,7 @@ const configSchema = z
       allowPrefix: v.GROUP_TRIGGER_ALLOW_PREFIX,
     },
     roomTriggerPolicies: parseRoomTriggerPolicyOverrides(v.ROOM_TRIGGER_POLICY_JSON),
+    backendModelRoutingRules: parseBackendModelRoutingRules(v.BACKEND_MODEL_ROUTING_RULES_JSON),
     rateLimiter: {
       windowMs: v.RATE_LIMIT_WINDOW_SECONDS * 1000,
       maxRequestsPerUser: v.RATE_LIMIT_MAX_REQUESTS_PER_USER,
@@ -462,6 +465,191 @@ function parseRoomTriggerPolicyOverrides(raw: string): RoomTriggerPolicyOverride
   }
 
   return output;
+}
+
+const BACKEND_MODEL_ROUTE_TASK_TYPES: ReadonlySet<BackendModelRouteTaskType> = new Set([
+  "chat",
+  "workflow_run",
+  "workflow_status",
+  "autodev_run",
+  "autodev_status",
+  "autodev_stop",
+  "control_command",
+]);
+
+function parseBackendModelRoutingRules(raw: string): BackendModelRouteRule[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("BACKEND_MODEL_ROUTING_RULES_JSON must be valid JSON.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("BACKEND_MODEL_ROUTING_RULES_JSON must be a JSON array.");
+  }
+
+  return parsed.map((entry, index) => normalizeBackendModelRoutingRule(entry, index));
+}
+
+function normalizeBackendModelRoutingRule(entry: unknown, index: number): BackendModelRouteRule {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}] must be an object.`);
+  }
+
+  const payload = entry as Record<string, unknown>;
+  const rawId = typeof payload.id === "string" ? payload.id.trim() : "";
+  const id = rawId || `rule-${index + 1}`;
+  const enabled = parseOptionalBoolean(payload.enabled, true, `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].enabled`) ?? true;
+  const priority = parseOptionalInteger(payload.priority, 0, `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].priority`);
+
+  const whenRaw = payload.when;
+  if (whenRaw !== undefined && (!whenRaw || typeof whenRaw !== "object" || Array.isArray(whenRaw))) {
+    throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when must be an object.`);
+  }
+  const whenPayload = (whenRaw ?? {}) as Record<string, unknown>;
+  const roomIds = parseOptionalStringList(whenPayload.roomIds, `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.roomIds`);
+  const senderIds = parseOptionalStringList(
+    whenPayload.senderIds,
+    `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.senderIds`,
+  );
+  const taskTypes = parseOptionalTaskTypeList(
+    whenPayload.taskTypes,
+    `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.taskTypes`,
+  );
+  const textIncludes = parseOptionalStringList(
+    whenPayload.textIncludes,
+    `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.textIncludes`,
+  );
+  const textRegex = parseOptionalString(whenPayload.textRegex, `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.textRegex`);
+  const directMessage = parseOptionalBoolean(
+    whenPayload.directMessage,
+    undefined,
+    `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].when.directMessage`,
+  );
+
+  if (!payload.target || typeof payload.target !== "object" || Array.isArray(payload.target)) {
+    throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target must be an object.`);
+  }
+  const targetPayload = payload.target as Record<string, unknown>;
+  const providerRaw = targetPayload.provider;
+  let provider: "codex" | "claude" | undefined;
+  if (providerRaw !== undefined) {
+    if (providerRaw !== "codex" && providerRaw !== "claude") {
+      throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target.provider must be "codex" or "claude".`);
+    }
+    provider = providerRaw;
+  }
+
+  const modelRaw = targetPayload.model;
+  let model: string | null | undefined;
+  if (modelRaw !== undefined) {
+    if (modelRaw !== null && typeof modelRaw !== "string") {
+      throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target.model must be string or null.`);
+    }
+    const normalized = typeof modelRaw === "string" ? modelRaw.trim() : "";
+    model = normalized || null;
+  }
+
+  if (provider === undefined && model === undefined) {
+    throw new Error(
+      `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target must include provider and/or model override.`,
+    );
+  }
+
+  return {
+    id,
+    enabled,
+    priority,
+    when: {
+      roomIds,
+      senderIds,
+      taskTypes,
+      directMessage,
+      textIncludes,
+      textRegex,
+    },
+    target: {
+      provider,
+      model,
+    },
+  };
+}
+
+function parseOptionalBoolean(
+  value: unknown,
+  fallback: boolean | undefined,
+  field: string,
+): boolean | undefined {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${field} must be boolean.`);
+  }
+  return value;
+}
+
+function parseOptionalInteger(value: unknown, fallback: number, field: string): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(`${field} must be an integer.`);
+  }
+  return value;
+}
+
+function parseOptionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${field} must be string.`);
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseOptionalStringList(value: unknown, field: string): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be a string array.`);
+  }
+  const output: string[] = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const entry = value[i];
+    if (typeof entry !== "string") {
+      throw new Error(`${field}[${i}] must be string.`);
+    }
+    const normalized = entry.trim();
+    if (!normalized) {
+      continue;
+    }
+    output.push(normalized);
+  }
+  return output.length > 0 ? output : undefined;
+}
+
+function parseOptionalTaskTypeList(value: unknown, field: string): BackendModelRouteTaskType[] | undefined {
+  const list = parseOptionalStringList(value, field);
+  if (!list) {
+    return undefined;
+  }
+  const output: BackendModelRouteTaskType[] = [];
+  for (const entry of list) {
+    if (!BACKEND_MODEL_ROUTE_TASK_TYPES.has(entry as BackendModelRouteTaskType)) {
+      throw new Error(`${field} includes unsupported task type "${entry}".`);
+    }
+    output.push(entry as BackendModelRouteTaskType);
+  }
+  return output.length > 0 ? output : undefined;
 }
 
 function parseExtraArgs(raw: string): string[] {

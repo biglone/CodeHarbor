@@ -44,6 +44,7 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW",
   "GROUP_TRIGGER_ALLOW_PREFIX",
   "ROOM_TRIGGER_POLICY_JSON",
+  "BACKEND_MODEL_ROUTING_RULES_JSON",
   "RATE_LIMIT_WINDOW_SECONDS",
   "RATE_LIMIT_MAX_REQUESTS_PER_USER",
   "RATE_LIMIT_MAX_REQUESTS_PER_ROOM",
@@ -172,6 +173,7 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW: booleanStringSchema("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW"),
     GROUP_TRIGGER_ALLOW_PREFIX: booleanStringSchema("GROUP_TRIGGER_ALLOW_PREFIX"),
     ROOM_TRIGGER_POLICY_JSON: jsonObjectStringSchema("ROOM_TRIGGER_POLICY_JSON", true),
+    BACKEND_MODEL_ROUTING_RULES_JSON: jsonArrayStringSchema("BACKEND_MODEL_ROUTING_RULES_JSON", true),
     RATE_LIMIT_WINDOW_SECONDS: integerStringSchema("RATE_LIMIT_WINDOW_SECONDS", 1),
     RATE_LIMIT_MAX_REQUESTS_PER_USER: integerStringSchema("RATE_LIMIT_MAX_REQUESTS_PER_USER", 0),
     RATE_LIMIT_MAX_REQUESTS_PER_ROOM: integerStringSchema("RATE_LIMIT_MAX_REQUESTS_PER_ROOM", 0),
@@ -416,6 +418,7 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW: String(config.defaultGroupTriggerPolicy.allowActiveWindow),
     GROUP_TRIGGER_ALLOW_PREFIX: String(config.defaultGroupTriggerPolicy.allowPrefix),
     ROOM_TRIGGER_POLICY_JSON: serializeJsonObject(config.roomTriggerPolicies),
+    BACKEND_MODEL_ROUTING_RULES_JSON: serializeJsonArray(config.backendModelRoutingRules),
     RATE_LIMIT_WINDOW_SECONDS: String(Math.max(1, Math.round(config.rateLimiter.windowMs / 1000))),
     RATE_LIMIT_MAX_REQUESTS_PER_USER: String(config.rateLimiter.maxRequestsPerUser),
     RATE_LIMIT_MAX_REQUESTS_PER_ROOM: String(config.rateLimiter.maxRequestsPerRoom),
@@ -557,6 +560,10 @@ function parseIntStrict(raw: string): number {
 
 function serializeJsonObject(value: object): string {
   return Object.keys(value).length > 0 ? JSON.stringify(value) : "";
+}
+
+function serializeJsonArray<T>(value: T[]): string {
+  return value.length > 0 ? JSON.stringify(value) : "";
 }
 
 function serializeAdminTokens(tokens: AdminTokenConfig[]): string {
