@@ -8,6 +8,17 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.49] - 2026-03-19
+
+- AutoDev status observability:
+  - enhanced `/autodev status` with run window, stop-control flags, workflow run summary, recent runs, and stage trace details
+  - enhanced `/status` with current AutoDev runtime stage snapshot and detailed-progress mode visibility
+- AutoDev/Multi-Agent progress UX:
+  - enriched in-process stage notices with explicit agent identity, round, and execution stats (duration/prompt/reply chars)
+  - added `/autodev progress on|off|status` session-level switch for detailed vs concise progress replay (default `on`)
+- Command/help and compatibility updates:
+  - updated `/help` output and regression coverage for new progress toggle command and richer workflow progress behavior
+
 ## [0.1.48] - 2026-03-19
 
 - Routing engine and diagnostics (T7.5/T7.6):
