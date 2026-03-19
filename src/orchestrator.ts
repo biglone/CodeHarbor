@@ -42,7 +42,6 @@ import {
 import { RateLimiter, type RateLimitDecision, type RateLimiterOptions } from "./rate-limiter";
 import {
   BackendModelRouter,
-  type BackendModelRouteDecision,
   type BackendModelRouteInput,
   type BackendModelRouteProfile,
   type BackendModelRouteRule,
