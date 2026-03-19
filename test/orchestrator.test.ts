@@ -2342,6 +2342,73 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("handles /autodev stop in group even when active window is expired", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-stop-group-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T11.1 | first loop task | ⬜ |",
+        "| T11.2 | second loop task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new GracefulLoopWorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        sessionActiveWindowMinutes: 0,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      const runPromise = orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: false,
+          conversationId: "!room:example.com",
+          senderId: "@alice:example.com",
+          text: "!code /autodev run",
+          eventId: "$autodev-run-loop-stop-group",
+        }),
+      );
+      await waitForCondition(() => executor.isFirstReviewerPending(), 2_000);
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: false,
+          conversationId: "!room:example.com",
+          senderId: "@alice:example.com",
+          text: "/autodev stop",
+          mentionsBot: false,
+          repliesToBot: false,
+          eventId: "$autodev-loop-stop-command-group",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("当前任务执行完成后停止 AutoDev 循环"))).toBe(true);
+
+      executor.releaseFirstReviewer();
+      await runPromise;
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T11.1 | first loop task | ✅ |");
+      expect(updated).toContain("| T11.2 | second loop task | ⬜ |");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("stops /autodev run loop when loop max runs is reached", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-limit-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");

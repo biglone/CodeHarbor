@@ -1822,6 +1822,14 @@ export class Orchestrator {
       return { kind: "ignore" };
     }
 
+    const rawAutoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(incomingTrimmed) : null;
+    if (rawAutoDevCommand?.kind === "status" || rawAutoDevCommand?.kind === "stop") {
+      return {
+        kind: "execute",
+        prompt: incomingTrimmed,
+      };
+    }
+
     if (!message.isDirectMessage && !roomConfig.enabled) {
       return { kind: "ignore" };
     }
