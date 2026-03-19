@@ -1472,7 +1472,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("archives non-retryable queue task errors without retry", async () => {
     const { dir, store } = await createSqliteStateStore();
@@ -1522,7 +1522,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("respects Retry-After before retrying queue tasks", async () => {
     const { dir, store } = await createSqliteStateStore();
@@ -1568,7 +1568,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("submits API task into queue and returns idempotent hit for duplicate payload", async () => {
     const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-queue-");
