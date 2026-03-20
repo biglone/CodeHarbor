@@ -1,5 +1,4 @@
 import { Mutex } from "async-mutex";
-import fs from "node:fs/promises";
 import os from "node:os";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
@@ -12,10 +11,6 @@ import {
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
-import {
-  DEFAULT_DOCUMENT_MAX_BYTES,
-  extractDocumentText,
-} from "./document-extractor";
 import { buildDocumentContextPrompt, type DocumentContextItem } from "./document-context";
 import { Logger } from "./logger";
 import {
@@ -105,7 +100,6 @@ import {
   collectLocalAttachmentPaths,
   formatMimeAllowlist,
   mapProgressText,
-  normalizeImageMimeType,
 } from "./orchestrator/media-progress";
 import {
   isApiTaskPayloadEquivalent,
@@ -136,6 +130,11 @@ import { handleBackendCommand as runBackendCommand } from "./orchestrator/backen
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
+import {
+  prepareDocumentAttachments as runPrepareDocumentAttachments,
+  prepareImageAttachments as runPrepareImageAttachments,
+  transcribeAudioAttachments as runTranscribeAudioAttachments,
+} from "./orchestrator/attachment-processing";
 import {
   handleAutoDevLoopStopCommand as runAutoDevLoopStopCommand,
   handleAutoDevProgressCommand as runAutoDevProgressCommand,
@@ -2252,101 +2251,17 @@ export class Orchestrator {
     requestId: string,
     sessionKey: string,
   ): Promise<ImageSelectionResult> {
-    const result: ImageSelectionResult = {
-      imagePaths: [],
-      acceptedCount: 0,
-      skippedMissingPath: 0,
-      skippedUnsupportedMime: 0,
-      skippedTooLarge: 0,
-      skippedOverLimit: 0,
-      notice: null,
-    };
-
-    const rawImageAttachments = message.attachments.filter((attachment) => attachment.kind === "image");
-    if (rawImageAttachments.length === 0) {
-      return result;
-    }
-
-    const maxBytes = this.cliCompat.imageMaxBytes;
-    const maxCount = this.cliCompat.imageMaxCount;
-    const allowlist = new Set(this.cliCompat.imageAllowedMimeTypes.map((item) => item.toLowerCase()));
-    const dedup = new Set<string>();
-
-    const acceptedCandidates: string[] = [];
-    for (const attachment of rawImageAttachments) {
-      const localPath = attachment.localPath;
-      if (!localPath) {
-        if (this.cliCompat.fetchMedia) {
-          result.skippedMissingPath += 1;
-        }
-        continue;
-      }
-      if (dedup.has(localPath)) {
-        continue;
-      }
-      dedup.add(localPath);
-
-      const normalizedMimeType = normalizeImageMimeType(attachment.mimeType, localPath);
-      if (!normalizedMimeType || !allowlist.has(normalizedMimeType)) {
-        result.skippedUnsupportedMime += 1;
-        this.logger.warn("Skip image attachment due to unsupported mime type", {
-          requestId,
-          sessionKey,
-          name: attachment.name,
-          mimeType: attachment.mimeType,
-          normalizedMimeType,
-          allowlist: [...allowlist],
-        });
-        continue;
-      }
-
-      const sizeBytes = await this.resolveAttachmentSizeBytes(attachment.sizeBytes, localPath);
-      if (sizeBytes !== null && sizeBytes > maxBytes) {
-        result.skippedTooLarge += 1;
-        this.logger.warn("Skip image attachment due to oversize", {
-          requestId,
-          sessionKey,
-          name: attachment.name,
-          sizeBytes,
-          maxBytes,
-        });
-        continue;
-      }
-      acceptedCandidates.push(localPath);
-    }
-
-    result.acceptedCount = acceptedCandidates.length;
-    if (acceptedCandidates.length > maxCount) {
-      result.imagePaths = acceptedCandidates.slice(0, maxCount);
-      result.skippedOverLimit = acceptedCandidates.length - maxCount;
-    } else {
-      result.imagePaths = acceptedCandidates;
-    }
-
-    if (
-      result.skippedMissingPath > 0 ||
-      result.skippedUnsupportedMime > 0 ||
-      result.skippedTooLarge > 0 ||
-      result.skippedOverLimit > 0
-    ) {
-      const parts: string[] = [];
-      if (result.skippedMissingPath > 0) {
-        parts.push(`未下载到本地 ${result.skippedMissingPath} 张`);
-      }
-      if (result.skippedUnsupportedMime > 0) {
-        parts.push(`格式不支持 ${result.skippedUnsupportedMime} 张（允许: ${this.cliCompat.imageAllowedMimeTypes.join(", ")}）`);
-      }
-      if (result.skippedTooLarge > 0) {
-        parts.push(`超过大小限制 ${result.skippedTooLarge} 张（上限 ${formatByteSize(maxBytes)}）`);
-      }
-      if (result.skippedOverLimit > 0) {
-        parts.push(`超过数量上限 ${result.skippedOverLimit} 张（最多 ${maxCount} 张）`);
-      }
-      const acceptedText = result.imagePaths.length > 0 ? `已附带 ${result.imagePaths.length} 张图片` : "本次未附带图片";
-      result.notice = `[CodeHarbor] 图片处理提示：${acceptedText}；${parts.join("；")}。`;
-    }
-
-    return result;
+    return runPrepareImageAttachments(
+      {
+        cliCompat: this.cliCompat,
+        logger: this.logger,
+      },
+      {
+        message,
+        requestId,
+        sessionKey,
+      },
+    );
   }
 
   private async transcribeAudioAttachments(
@@ -2354,91 +2269,19 @@ export class Orchestrator {
     requestId: string,
     sessionKey: string,
   ): Promise<AudioTranscript[]> {
-    if (!this.audioTranscriber.isEnabled()) {
-      return [];
-    }
-
-    const rawAudioAttachments = message.attachments.filter(
-      (attachment) => attachment.kind === "audio" && Boolean(attachment.localPath),
+    return runTranscribeAudioAttachments(
+      {
+        audioTranscriber: this.audioTranscriber,
+        cliCompat: this.cliCompat,
+        mediaMetrics: this.mediaMetrics,
+        logger: this.logger,
+      },
+      {
+        message,
+        requestId,
+        sessionKey,
+      },
     );
-    if (rawAudioAttachments.length === 0) {
-      return [];
-    }
-
-    const maxBytes = this.cliCompat.audioTranscribeMaxBytes;
-    const audioAttachments: Array<{ name: string; mimeType: string | null; localPath: string }> = [];
-    let skippedTooLarge = 0;
-    for (const attachment of rawAudioAttachments) {
-      const localPath = attachment.localPath as string;
-      const sizeBytes = await this.resolveAttachmentSizeBytes(attachment.sizeBytes, localPath);
-      if (sizeBytes !== null && sizeBytes > maxBytes) {
-        skippedTooLarge += 1;
-        this.logger.warn("Skip audio transcription for oversized attachment", {
-          requestId,
-          sessionKey,
-          name: attachment.name,
-          sizeBytes,
-          maxBytes,
-        });
-        continue;
-      }
-      audioAttachments.push({
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        localPath,
-      });
-    }
-
-    if (audioAttachments.length === 0) {
-      if (skippedTooLarge > 0) {
-        this.mediaMetrics.recordAudioTranscription({
-          requestId,
-          sessionKey,
-          transcribedCount: 0,
-          failedCount: 0,
-          skippedTooLarge,
-        });
-      }
-      return [];
-    }
-
-    const startedAt = Date.now();
-    try {
-      const transcripts = await this.audioTranscriber.transcribeMany(audioAttachments);
-      this.mediaMetrics.recordAudioTranscription({
-        requestId,
-        sessionKey,
-        transcribedCount: transcripts.length,
-        failedCount: 0,
-        skippedTooLarge,
-      });
-      this.logger.info("Audio transcription completed", {
-        requestId,
-        sessionKey,
-        attachmentCount: audioAttachments.length,
-        transcriptCount: transcripts.length,
-        skippedTooLarge,
-        durationMs: Date.now() - startedAt,
-      });
-      return transcripts;
-    } catch (error) {
-      this.mediaMetrics.recordAudioTranscription({
-        requestId,
-        sessionKey,
-        transcribedCount: 0,
-        failedCount: audioAttachments.length,
-        skippedTooLarge,
-      });
-      this.logger.warn("Audio transcription failed, continuing without transcripts", {
-        requestId,
-        sessionKey,
-        attachmentCount: audioAttachments.length,
-        skippedTooLarge,
-        durationMs: Date.now() - startedAt,
-        error: formatError(error),
-      });
-      return [];
-    }
   }
 
   private async prepareDocumentAttachments(
@@ -2446,105 +2289,16 @@ export class Orchestrator {
     requestId: string,
     sessionKey: string,
   ): Promise<DocumentExtractionSummary> {
-    const result: DocumentExtractionSummary = {
-      documents: [],
-      notice: null,
-    };
-
-    const fileAttachments = message.attachments.filter((attachment) => attachment.kind === "file");
-    if (fileAttachments.length === 0) {
-      return result;
-    }
-
-    let skippedUnsupportedType = 0;
-    let skippedTooLarge = 0;
-    let skippedMissingLocalPath = 0;
-    let failedExtraction = 0;
-
-    for (const attachment of fileAttachments) {
-      const extraction = await extractDocumentText({
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        localPath: attachment.localPath,
-        maxBytes: DEFAULT_DOCUMENT_MAX_BYTES,
-      });
-
-      if (extraction.ok) {
-        result.documents.push({
-          name: extraction.name,
-          format: extraction.format,
-          sizeBytes: extraction.sizeBytes,
-          text: extraction.text,
-        });
-        continue;
-      }
-
-      if (extraction.reason === "unsupported_type") {
-        skippedUnsupportedType += 1;
-        continue;
-      }
-      if (extraction.reason === "file_too_large") {
-        skippedTooLarge += 1;
-        continue;
-      }
-      if (extraction.reason === "missing_local_path") {
-        skippedMissingLocalPath += 1;
-        continue;
-      }
-
-      failedExtraction += 1;
-      this.logger.warn("Failed to extract document attachment", {
+    return runPrepareDocumentAttachments(
+      {
+        logger: this.logger,
+      },
+      {
+        message,
         requestId,
         sessionKey,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        reason: extraction.reason,
-        message: extraction.message,
-      });
-    }
-
-    if (
-      skippedUnsupportedType === 0 &&
-      skippedTooLarge === 0 &&
-      skippedMissingLocalPath === 0 &&
-      failedExtraction === 0
-    ) {
-      return result;
-    }
-
-    const parts: string[] = [];
-    if (result.documents.length > 0) {
-      parts.push(`已提取 ${result.documents.length} 份文档`);
-    } else {
-      parts.push("未提取到可用文档");
-    }
-    if (skippedUnsupportedType > 0) {
-      parts.push(`类型不支持 ${skippedUnsupportedType} 份（仅支持 txt/pdf/docx）`);
-    }
-    if (skippedTooLarge > 0) {
-      parts.push(`超过大小限制 ${skippedTooLarge} 份（上限 ${formatByteSize(DEFAULT_DOCUMENT_MAX_BYTES)}）`);
-    }
-    if (skippedMissingLocalPath > 0) {
-      parts.push(`未下载到本地 ${skippedMissingLocalPath} 份`);
-    }
-    if (failedExtraction > 0) {
-      parts.push(`解析失败 ${failedExtraction} 份`);
-    }
-    result.notice = `[CodeHarbor] 文档处理提示：${parts.join("；")}。`;
-    return result;
-  }
-
-  private async resolveAttachmentSizeBytes(sizeBytes: number | null, localPath: string): Promise<number | null> {
-    if (sizeBytes !== null) {
-      return sizeBytes;
-    }
-    try {
-      const stats = await fs.stat(localPath);
-      return stats.size;
-    } catch {
-      return null;
-    }
+      },
+    );
   }
 
   private buildExecutionPrompt(
