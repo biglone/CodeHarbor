@@ -1,9 +1,7 @@
 import { Mutex } from "async-mutex";
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { type Channel } from "./channels/channel";
@@ -81,7 +79,6 @@ import {
   summarizeAutoDevTasks,
   updateAutoDevTaskStatus,
 } from "./workflow/autodev";
-import { buildAutoDevCommitMessage } from "./workflow/autodev-commit";
 import {
   WorkflowRoleSkillCatalog,
   type WorkflowRole,
@@ -106,6 +103,11 @@ import {
   parseRoleSkillDisclosureMode,
   summarizeSingleLine,
 } from "./orchestrator/helpers";
+import {
+  captureAutoDevGitBaseline,
+  tryAutoDevGitCommit,
+  type AutoDevGitCommitResult,
+} from "./orchestrator/autodev-git";
 import {
   classifyBackendTaskType,
   isSameBackendProfile,
@@ -328,16 +330,6 @@ interface AutoDevRunSnapshot {
   lastGitCommitAt: string | null;
 }
 
-interface AutoDevGitBaseline {
-  available: boolean;
-  cleanBeforeRun: boolean;
-}
-
-type AutoDevGitCommitResult =
-  | { kind: "committed"; commitHash: string; commitSubject: string; changedFiles: string[] }
-  | { kind: "skipped"; reason: string }
-  | { kind: "failed"; error: string };
-
 interface AutoDevRunContext {
   mode: "single" | "loop";
   loopRound: number;
@@ -459,7 +451,6 @@ const DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED = true;
 const DEFAULT_WORKFLOW_ROLE_SKILLS_MODE: WorkflowRoleSkillDisclosureMode = "progressive";
 const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
 const BACKEND_ROUTE_DIAG_HISTORY_MAX = 200;
-const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
 const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   maxAttempts: 4,
   initialDelayMs: 1_000,
@@ -467,8 +458,6 @@ const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   multiplier: 2,
   jitterRatio: 0.2,
 };
-
-const execFileAsync = promisify(execFile);
 
 export class Orchestrator {
   private readonly channel: Channel;
@@ -2336,7 +2325,10 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
       return;
     }
 
-    const gitBaseline = await this.captureAutoDevGitBaseline(workdir);
+    const gitBaseline = await captureAutoDevGitBaseline({
+      workdir,
+      logger: this.logger,
+    });
     const effectiveContext: AutoDevRunContext = {
       mode: activeContext.mode,
       loopRound: Math.max(1, activeContext.loopRound),
@@ -2412,7 +2404,13 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
       };
       if (result.approved) {
         finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
-        gitCommit = await this.tryAutoDevGitCommit(workdir, finalTask, gitBaseline);
+        gitCommit = await tryAutoDevGitCommit({
+          workdir,
+          task: finalTask,
+          baseline: gitBaseline,
+          autoCommit: this.autoDevAutoCommit,
+          logger: this.logger,
+        });
       }
       this.recordAutoDevGitCommit(sessionKey, finalTask.id, gitCommit);
       this.appendWorkflowDiagEvent(
@@ -2523,122 +2521,6 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
     }
   }
 
-  private async captureAutoDevGitBaseline(workdir: string): Promise<AutoDevGitBaseline> {
-    const insideRepo = await this.isGitRepository(workdir);
-    if (!insideRepo) {
-      return {
-        available: false,
-        cleanBeforeRun: false,
-      };
-    }
-    try {
-      const status = await this.runGitCommand(workdir, ["status", "--porcelain"]);
-      return {
-        available: true,
-        cleanBeforeRun: status.trim().length === 0,
-      };
-    } catch (error) {
-      this.logger.warn("Failed to capture AutoDev git baseline", {
-        workdir,
-        error: formatError(error),
-      });
-      return {
-        available: false,
-        cleanBeforeRun: false,
-      };
-    }
-  }
-
-  private async tryAutoDevGitCommit(
-    workdir: string,
-    task: AutoDevTask,
-    baseline: AutoDevGitBaseline,
-  ): Promise<AutoDevGitCommitResult> {
-    if (!this.autoDevAutoCommit) {
-      return {
-        kind: "skipped",
-        reason: "AUTODEV_AUTO_COMMIT=false",
-      };
-    }
-    if (!baseline.available) {
-      return {
-        kind: "skipped",
-        reason: "未检测到 git 仓库",
-      };
-    }
-    if (!baseline.cleanBeforeRun) {
-      return {
-        kind: "skipped",
-        reason: "运行前存在未提交改动，已跳过自动提交",
-      };
-    }
-
-    try {
-      const removedArtifacts = await this.cleanupAutoDevGitArtifacts(workdir);
-      if (removedArtifacts.length > 0) {
-        this.logger.warn("Removed AutoDev shell artifact files before git commit", {
-          workdir,
-          taskId: task.id,
-          files: removedArtifacts,
-        });
-      }
-
-      const preAddStatus = await this.runGitCommand(workdir, ["status", "--porcelain"]);
-      if (!preAddStatus.trim()) {
-        return {
-          kind: "skipped",
-          reason: "无文件改动可提交",
-        };
-      }
-
-      await this.runGitCommand(workdir, ["add", "-A"]);
-      const stagedFiles = await this.listGitStagedFiles(workdir);
-      if (stagedFiles.length === 0) {
-        return {
-          kind: "skipped",
-          reason: "无文件改动可提交",
-        };
-      }
-      const commitMessage = buildAutoDevCommitMessage(task, stagedFiles);
-      await this.runGitCommand(workdir, [
-        "-c",
-        "user.name=CodeHarbor AutoDev",
-        "-c",
-        "user.email=autodev@codeharbor.local",
-        "commit",
-        "-m",
-        commitMessage.subject,
-        "-m",
-        commitMessage.body,
-      ]);
-      const hash = (await this.runGitCommand(workdir, ["rev-parse", "--short", "HEAD"])).trim();
-      const changedFiles = await this.listGitCommitChangedFiles(workdir);
-      return {
-        kind: "committed",
-        commitHash: hash || "unknown",
-        commitSubject: commitMessage.subject,
-        changedFiles,
-      };
-    } catch (error) {
-      const message = formatError(error);
-      if (/nothing to commit|no changes added to commit/i.test(message)) {
-        return {
-          kind: "skipped",
-          reason: "无文件改动可提交",
-        };
-      }
-      this.logger.warn("AutoDev git auto-commit failed", {
-        workdir,
-        taskId: task.id,
-        error: message,
-      });
-      return {
-        kind: "failed",
-        error: message,
-      };
-    }
-  }
-
   private async applyAutoDevFailurePolicy(input: {
     workdir: string;
     task: AutoDevTask;
@@ -2699,83 +2581,6 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
   private listAutoDevGitCommitRecords(limit: number): AutoDevGitCommitRecord[] {
     const safeLimit = Math.max(1, Math.floor(limit));
     return this.autoDevGitCommitRecords.slice(Math.max(0, this.autoDevGitCommitRecords.length - safeLimit)).reverse();
-  }
-
-  private async listGitCommitChangedFiles(workdir: string): Promise<string[]> {
-    const raw = await this.runGitCommand(workdir, ["show", "--name-only", "--pretty=format:", "--no-renames", "HEAD"]);
-    return raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  }
-
-  private async listGitStagedFiles(workdir: string): Promise<string[]> {
-    const raw = await this.runGitCommand(workdir, ["diff", "--cached", "--name-only", "--no-renames"]);
-    return raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  }
-
-  private async cleanupAutoDevGitArtifacts(workdir: string): Promise<string[]> {
-    const untracked = await this.listUntrackedGitFiles(workdir);
-    const targets = untracked.filter((relativePath) => {
-      const basename = path.basename(relativePath);
-      return AUTODEV_GIT_ARTIFACT_BASENAME_REGEX.test(basename);
-    });
-    if (targets.length === 0) {
-      return [];
-    }
-
-    const removed: string[] = [];
-    for (const relativePath of targets) {
-      const absolutePath = path.join(workdir, relativePath);
-      try {
-        const stat = await fs.stat(absolutePath);
-        if (!stat.isFile() || stat.size !== 0) {
-          continue;
-        }
-        await fs.unlink(absolutePath);
-        removed.push(relativePath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          continue;
-        }
-        this.logger.debug("Failed to remove AutoDev shell artifact file", {
-          workdir,
-          file: relativePath,
-          error: formatError(error),
-        });
-      }
-    }
-    return removed;
-  }
-
-  private async listUntrackedGitFiles(workdir: string): Promise<string[]> {
-    const raw = await this.runGitCommand(workdir, ["ls-files", "--others", "--exclude-standard"]);
-    return raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  }
-
-  private async isGitRepository(workdir: string): Promise<boolean> {
-    try {
-      const output = await this.runGitCommand(workdir, ["rev-parse", "--is-inside-work-tree"]);
-      return output.trim() === "true";
-    } catch {
-      return false;
-    }
-  }
-
-  private async runGitCommand(workdir: string, args: string[]): Promise<string> {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd: workdir,
-      timeout: 20_000,
-      maxBuffer: 1024 * 1024,
-      windowsHide: true,
-    });
-    return String(stdout ?? "");
   }
 
   private async handleWorkflowRunCommand(
