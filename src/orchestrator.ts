@@ -2094,10 +2094,12 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
         autoDevAutoCommit: this.autoDevAutoCommit,
         pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
         activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+        consumePendingAutoDevLoopStopRequest: (targetSessionKey) =>
+          this.consumePendingAutoDevLoopStopRequest(targetSessionKey),
         setAutoDevSnapshot: (targetSessionKey, snapshot) => {
           this.setAutoDevSnapshot(targetSessionKey, snapshot);
         },
-        handleAutoDevLoopStopIfRequested: (input) => this.handleAutoDevLoopStopIfRequested(input),
         channelSendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
         beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
         appendWorkflowDiagEvent: (runId, kind, stage, round, eventMessage) =>
@@ -2354,75 +2356,6 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
 
     await this.channel.sendMessage(conversationId, `[CodeHarbor] AutoDev 失败: ${formatError(error)}`);
     return Date.now() - startedAt;
-  }
-
-  private async handleAutoDevLoopStopIfRequested(input: {
-    sessionKey: string;
-    conversationId: string;
-    loopStartedAt: number;
-    attemptedRuns: number;
-    completedRuns: number;
-    loopMaxRuns: number;
-    loopDeadlineAtIso: string | null;
-  }): Promise<boolean> {
-    if (this.consumePendingStopRequest(input.sessionKey)) {
-      this.autoDevMetrics.recordLoopStop("stop_requested");
-      const endedAtIso = new Date().toISOString();
-      this.setAutoDevSnapshot(input.sessionKey, {
-        state: "idle",
-        startedAt: new Date(input.loopStartedAt).toISOString(),
-        endedAt: endedAtIso,
-        taskId: null,
-        taskDescription: null,
-        approved: null,
-        repairRounds: 0,
-        error: "stopped by /stop",
-        mode: "loop",
-        loopRound: input.attemptedRuns,
-        loopCompletedRuns: input.completedRuns,
-        loopMaxRuns: input.loopMaxRuns,
-        loopDeadlineAt: input.loopDeadlineAtIso,
-        lastGitCommitSummary: null,
-        lastGitCommitAt: null,
-      });
-      await this.channel.sendNotice(
-        input.conversationId,
-        `[CodeHarbor] AutoDev 循环执行已停止。
-- completedRuns: ${input.completedRuns}`,
-      );
-      return true;
-    }
-
-    if (this.consumePendingAutoDevLoopStopRequest(input.sessionKey)) {
-      this.autoDevMetrics.recordLoopStop("stop_requested");
-      const endedAtIso = new Date().toISOString();
-      this.setAutoDevSnapshot(input.sessionKey, {
-        state: "succeeded",
-        startedAt: new Date(input.loopStartedAt).toISOString(),
-        endedAt: endedAtIso,
-        taskId: null,
-        taskDescription: null,
-        approved: null,
-        repairRounds: 0,
-        error: null,
-        mode: "loop",
-        loopRound: input.attemptedRuns,
-        loopCompletedRuns: input.completedRuns,
-        loopMaxRuns: input.loopMaxRuns,
-        loopDeadlineAt: input.loopDeadlineAtIso,
-        lastGitCommitSummary: null,
-        lastGitCommitAt: null,
-      });
-      await this.channel.sendNotice(
-        input.conversationId,
-        `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。
-- attemptedRuns: ${input.attemptedRuns}
-- completedRuns: ${input.completedRuns}`,
-      );
-      return true;
-    }
-
-    return false;
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
