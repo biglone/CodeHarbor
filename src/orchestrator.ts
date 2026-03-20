@@ -137,7 +137,10 @@ import {
   formatBackendRouteProfile,
   isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
-import { buildHelpNotice } from "./orchestrator/control-text";
+import {
+  handleControlCommand as runControlCommand,
+  type ControlCommand,
+} from "./orchestrator/control-command-handler";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
@@ -1499,73 +1502,48 @@ export class Orchestrator {
   }
 
   private async handleControlCommand(
-    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade",
+    command: ControlCommand,
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
   ): Promise<void> {
-    if (command === "stop") {
-      await this.handleStopCommand(sessionKey, message, requestId);
-      return;
-    }
+    await runControlCommand(
+      {
+        sessionActiveWindowMs: this.sessionActiveWindowMs,
+        botNoticePrefix: this.botNoticePrefix,
+        stateStore: this.stateStore,
+        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+        sessionBackendOverrides: this.sessionBackendOverrides,
+        sessionBackendProfiles: this.sessionBackendProfiles,
+        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+        skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+        workflowSnapshots: this.workflowSnapshots,
+        autoDevSnapshots: this.autoDevSnapshots,
+        autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
+        workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
+        pendingStopRequests: this.pendingStopRequests,
+        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
+        formatMultimodalHelpStatus: () => this.formatMultimodalHelpStatus(),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+        handleStatusCommand: (targetSessionKey, targetMessage) => this.sendStatusCommand(targetSessionKey, targetMessage),
+        handleStopCommand: (targetSessionKey, targetMessage, targetRequestId) =>
+          this.handleStopCommand(targetSessionKey, targetMessage, targetRequestId),
+        handleBackendCommand: (targetSessionKey, targetMessage) => this.handleBackendCommand(targetSessionKey, targetMessage),
+        handleDiagCommand: (targetMessage) => this.handleDiagCommand(targetMessage),
+        handleUpgradeCommand: (targetMessage) => this.handleUpgradeCommand(targetMessage),
+      },
+      {
+        command,
+        sessionKey,
+        message,
+        requestId,
+      },
+    );
+  }
 
-    if (command === "reset") {
-      this.stateStore.clearCodexSessionId(sessionKey);
-      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-      this.clearSessionFromAllRuntimes(sessionKey);
-      this.sessionBackendOverrides.delete(sessionKey);
-      this.sessionBackendProfiles.delete(sessionKey);
-      this.sessionLastBackendDecisions.delete(sessionKey);
-      this.skipBridgeForNextPrompt.add(sessionKey);
-      this.workflowSnapshots.delete(sessionKey);
-      this.autoDevSnapshots.delete(sessionKey);
-      this.autoDevDetailedProgressOverrides.delete(sessionKey);
-      this.workflowRoleSkillPolicyOverrides.delete(sessionKey);
-      this.pendingStopRequests.delete(sessionKey);
-      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-      this.activeAutoDevLoopSessions.delete(sessionKey);
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
-      );
-      return;
-    }
-
-    if (command === "version") {
-      const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
-      );
-      return;
-    }
-
-    if (command === "backend") {
-      await this.handleBackendCommand(sessionKey, message);
-      return;
-    }
-
-    if (command === "diag") {
-      await this.handleDiagCommand(message);
-      return;
-    }
-
-    if (command === "help") {
-      await this.channel.sendNotice(
-        message.conversationId,
-        buildHelpNotice({
-          botNoticePrefix: this.botNoticePrefix,
-          multimodalHelpStatus: this.formatMultimodalHelpStatus(),
-        }),
-      );
-      return;
-    }
-
-    if (command === "upgrade") {
-      await this.handleUpgradeCommand(message);
-      return;
-    }
-
+  private async sendStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
     await handleStatusCommand(
       {
         botNoticePrefix: this.botNoticePrefix,
