@@ -170,6 +170,12 @@ import {
   type WorkflowDiagRunStatus,
   type WorkflowDiagStorePayload,
 } from "./orchestrator/workflow-diag";
+import {
+  listRecentAutoDevGitCommitEventSummaries as runListRecentAutoDevGitCommitEventSummaries,
+  listWorkflowDiagEvents as runListWorkflowDiagEvents,
+  listWorkflowDiagRuns as runListWorkflowDiagRuns,
+  listWorkflowDiagRunsBySession as runListWorkflowDiagRunsBySession,
+} from "./orchestrator/workflow-diag-queries";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -2904,12 +2910,7 @@ export class Orchestrator {
   }
 
   private listWorkflowDiagRuns(kind: WorkflowDiagRunKind, limit: number): WorkflowDiagRunRecord[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    return this.workflowDiagStore.runs
-      .filter((run) => run.kind === kind)
-      .slice()
-      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-      .slice(0, safeLimit);
+    return runListWorkflowDiagRuns(this.workflowDiagStore, kind, limit);
   }
 
   private listWorkflowDiagRunsBySession(
@@ -2917,31 +2918,15 @@ export class Orchestrator {
     sessionKey: string,
     limit: number,
   ): WorkflowDiagRunRecord[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    return this.workflowDiagStore.runs
-      .filter((run) => run.kind === kind && run.sessionKey === sessionKey)
-      .slice()
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-      .slice(0, safeLimit);
+    return runListWorkflowDiagRunsBySession(this.workflowDiagStore, kind, sessionKey, limit);
   }
 
   private listWorkflowDiagEvents(runId: string, limit = 8): WorkflowDiagEventRecord[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    return this.workflowDiagStore.events
-      .filter((event) => event.runId === runId)
-      .slice()
-      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-      .slice(-safeLimit);
+    return runListWorkflowDiagEvents(this.workflowDiagStore, runId, limit);
   }
 
   private listRecentAutoDevGitCommitEventSummaries(limit: number): string[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    return this.workflowDiagStore.events
-      .filter((event) => event.kind === "autodev" && event.stage === "git_commit")
-      .slice()
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-      .slice(0, safeLimit)
-      .map((event) => `- at=${event.at} ${event.message}`);
+    return runListRecentAutoDevGitCommitEventSummaries(this.workflowDiagStore, limit);
   }
 }
 
