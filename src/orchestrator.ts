@@ -149,6 +149,7 @@ import {
 import { buildHelpNotice } from "./orchestrator/control-text";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
+import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import {
   buildApiTaskErrorSummary,
@@ -1017,80 +1018,78 @@ export class Orchestrator {
         });
 
         if (workflowCommand?.kind === "run") {
-          const executionStartedAt = Date.now();
-          let sendDurationMs = 0;
-          this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-          this.workflowRunner.setExecutor(backendRuntime.executor);
-          try {
-            const sendStartedAt = Date.now();
-            await this.handleWorkflowRunCommand(
-              workflowCommand.objective,
+          await executeAgentRunRequest(
+            {
+              logger: this.logger,
+              sessionActiveWindowMs: this.sessionActiveWindowMs,
+              stateStore: this.stateStore,
+              workflowRunner: this.workflowRunner,
+              recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+                this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+              persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+            },
+            {
+              kind: "workflow",
               sessionKey,
               message,
               requestId,
-              roomConfig.workdir,
-            );
-            sendDurationMs += Date.now() - sendStartedAt;
-            this.stateStore.markEventProcessed(sessionKey, message.eventId);
-            this.recordRequestMetrics("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-          } catch (error) {
-            if (!options.deferFailureHandlingToQueue) {
-              sendDurationMs += await this.sendWorkflowFailure(message.conversationId, error);
-              this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-            }
-            const status = classifyExecutionOutcome(error);
-            this.recordRequestMetrics(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-            this.logger.error("Workflow request failed", {
-              requestId,
-              sessionKey,
-              error: formatError(error),
-            });
-            if (options.deferFailureHandlingToQueue) {
-              throw error;
-            }
-          } finally {
-            rateDecision.release?.();
-            this.persistRuntimeMetricsSnapshot();
-          }
+              queueWaitMs,
+              workdir: roomConfig.workdir,
+              deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
+              executor: backendRuntime.executor,
+              run: async () => {
+                await this.handleWorkflowRunCommand(
+                  workflowCommand.objective,
+                  sessionKey,
+                  message,
+                  requestId,
+                  roomConfig.workdir,
+                );
+              },
+              sendFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
+              releaseRateLimit: () => {
+                rateDecision.release?.();
+              },
+            },
+          );
           return;
         }
 
         if (autoDevCommand?.kind === "run") {
-          const executionStartedAt = Date.now();
-          let sendDurationMs = 0;
-          this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-          this.workflowRunner.setExecutor(backendRuntime.executor);
-          try {
-            const sendStartedAt = Date.now();
-            await this.handleAutoDevRunCommand(
-              autoDevCommand.taskId,
+          await executeAgentRunRequest(
+            {
+              logger: this.logger,
+              sessionActiveWindowMs: this.sessionActiveWindowMs,
+              stateStore: this.stateStore,
+              workflowRunner: this.workflowRunner,
+              recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+                this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+              persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+            },
+            {
+              kind: "autodev",
               sessionKey,
               message,
               requestId,
-              roomConfig.workdir,
-            );
-            sendDurationMs += Date.now() - sendStartedAt;
-            this.stateStore.markEventProcessed(sessionKey, message.eventId);
-            this.recordRequestMetrics("success", queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-          } catch (error) {
-            if (!options.deferFailureHandlingToQueue) {
-              sendDurationMs += await this.sendAutoDevFailure(message.conversationId, error);
-              this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-            }
-            const status = classifyExecutionOutcome(error);
-            this.recordRequestMetrics(status, queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
-            this.logger.error("AutoDev request failed", {
-              requestId,
-              sessionKey,
-              error: formatError(error),
-            });
-            if (options.deferFailureHandlingToQueue) {
-              throw error;
-            }
-          } finally {
-            rateDecision.release?.();
-            this.persistRuntimeMetricsSnapshot();
-          }
+              queueWaitMs,
+              workdir: roomConfig.workdir,
+              deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
+              executor: backendRuntime.executor,
+              run: async () => {
+                await this.handleAutoDevRunCommand(
+                  autoDevCommand.taskId,
+                  sessionKey,
+                  message,
+                  requestId,
+                  roomConfig.workdir,
+                );
+              },
+              sendFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
+              releaseRateLimit: () => {
+                rateDecision.release?.();
+              },
+            },
+          );
           return;
         }
 
