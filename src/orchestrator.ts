@@ -9,7 +9,6 @@ import { ConfigService } from "./config-service";
 import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
 import {
   CodexExecutor,
-  type CodexExecutionHandle,
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
@@ -63,8 +62,8 @@ import { extractCommandText } from "./utils/message";
 import {
   createIdleWorkflowSnapshot,
   MultiAgentWorkflowRunner,
-  parseWorkflowCommand,
   type MultiAgentWorkflowRunResult,
+  parseWorkflowCommand,
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
 import {
@@ -82,7 +81,6 @@ import {
   type WorkflowRoleSkillPolicyOverride,
 } from "./workflow/role-skills";
 import {
-  formatCacheTtl,
   formatDurationMs,
   formatError,
   formatRunWindowDuration,
@@ -119,7 +117,6 @@ import {
   formatMimeAllowlist,
   mapProgressText,
   normalizeImageMimeType,
-  shouldRetryClaudeImageFailure,
 } from "./orchestrator/media-progress";
 import {
   isApiTaskPayloadEquivalent,
@@ -137,10 +134,7 @@ import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestra
 import {
   buildDefaultUpgradeRestartPlan,
   evaluateUpgradePostCheck,
-  formatLatestUpgradeSummary,
-  formatRecentUpgradeRunsSummary,
   formatSelfUpdateError,
-  formatUpgradeLockSummary,
   probeInstalledVersion,
   runSelfUpdateCommand,
   type SelfUpdateResult,
@@ -152,8 +146,10 @@ import {
   formatBackendRouteProfile,
   isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
-import { buildHelpNotice, buildStatusNotice } from "./orchestrator/control-text";
+import { buildHelpNotice } from "./orchestrator/control-text";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
+import { executeChatRequest } from "./orchestrator/chat-request";
+import { handleStatusCommand } from "./orchestrator/status-command";
 import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
@@ -1098,256 +1094,80 @@ export class Orchestrator {
           return;
         }
 
-        this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-        const previousCodexSessionId = this.stateStore.getCodexSessionId(sessionKey);
-        const allowBridgeContext =
-          previousCodexSessionId === null && !this.skipBridgeForNextPrompt.delete(sessionKey);
-        const bridgeContext = allowBridgeContext ? this.buildConversationBridgeContext(sessionKey) : null;
-        const audioTranscripts = await this.transcribeAudioAttachments(message, requestId, sessionKey);
-        const imageSelection = await this.prepareImageAttachments(message, requestId, sessionKey);
-        this.mediaMetrics.recordImageSelection({
-          requestId,
-          sessionKey,
-          result: imageSelection,
-        });
-        if (imageSelection.notice) {
-          await this.channel.sendNotice(message.conversationId, imageSelection.notice);
-        }
-        const documentSummary = await this.prepareDocumentAttachments(message, requestId, sessionKey);
-        if (documentSummary.notice) {
-          await this.channel.sendNotice(message.conversationId, documentSummary.notice);
-        }
-        const executionPrompt = this.buildExecutionPrompt(
-          route.prompt,
-          message,
-          audioTranscripts,
-          documentSummary.documents,
-          bridgeContext,
-        );
-        const imagePaths = imageSelection.imagePaths;
-        let lastProgressAt = 0;
-        let lastProgressText = "";
-        let progressNoticeEventId: string | null = null;
-        let progressChain: Promise<void> = Promise.resolve();
-        let executionHandle: CodexExecutionHandle | null = null;
-        let executionDurationMs = 0;
-        let sendDurationMs = 0;
-        const requestStartedAt = Date.now();
-        let cancelRequested = this.consumePendingStopRequest(sessionKey);
-
-        this.runningExecutions.set(sessionKey, {
-          requestId,
-          startedAt: requestStartedAt,
-          cancel: () => {
-            cancelRequested = true;
-            executionHandle?.cancel();
+        await executeChatRequest(
+          {
+            logger: this.logger,
+            sessionActiveWindowMs: this.sessionActiveWindowMs,
+            cliCompat: {
+              enabled: this.cliCompat.enabled,
+              passThroughEvents: this.cliCompat.passThroughEvents,
+            },
+            stateStore: this.stateStore,
+            skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+            mediaMetrics: this.mediaMetrics,
+            runningExecutions: this.runningExecutions,
+            consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+            persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+            recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+              this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+            recordCliCompatPrompt: (entry) => this.recordCliCompatPrompt(entry),
+            buildConversationBridgeContext: (targetSessionKey) => this.buildConversationBridgeContext(targetSessionKey),
+            transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+              this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
+            prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+              this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
+            prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+              this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
+            buildExecutionPrompt: (basePrompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
+              this.buildExecutionPrompt(basePrompt, targetMessage, audioTranscripts, documents, bridgeContext),
+            sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+            sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+            startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
+            handleProgress: (
+              conversationId,
+              isDirectMessage,
+              progress,
+              getLastProgressAt,
+              setLastProgressAt,
+              getLastProgressText,
+              setLastProgressText,
+              getProgressNoticeEventId,
+              setProgressNoticeEventId,
+            ) =>
+              this.handleProgress(
+                conversationId,
+                isDirectMessage,
+                progress,
+                getLastProgressAt,
+                setLastProgressAt,
+                getLastProgressText,
+                setLastProgressText,
+                getProgressNoticeEventId,
+                setProgressNoticeEventId,
+              ),
+            finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
+            formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
           },
-        });
-        this.persistRuntimeMetricsSnapshot();
-
-        await this.recordCliCompatPrompt({
-          requestId,
-          sessionKey,
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          prompt: executionPrompt,
-          imageCount: imagePaths.length,
-        });
-        this.stateStore.appendConversationMessage(sessionKey, "user", backendDecision.profile.provider, route.prompt);
-        this.logger.info("Processing message", {
-          requestId,
-          sessionKey,
-          hasCodexSession: Boolean(previousCodexSessionId),
-          backend: this.formatBackendToolLabel(backendDecision.profile),
-          backendRouteSource: backendDecision.source,
-          backendRouteReason: backendDecision.reasonCode,
-          backendRouteRuleId: backendDecision.ruleId,
-          queueWaitMs,
-          attachmentCount: message.attachments.length,
-          workdir: roomConfig.workdir,
-          roomConfigSource: roomConfig.source,
-          isDirectMessage: message.isDirectMessage,
-          mentionsBot: message.mentionsBot,
-          repliesToBot: message.repliesToBot,
-        });
-
-        const stopTyping = this.startTypingHeartbeat(message.conversationId);
-
-        try {
-          const executionStartedAt = Date.now();
-          const executeOnce = async (attemptImagePaths: string[]): Promise<{ sessionId: string; reply: string }> => {
-            executionHandle = backendRuntime.sessionRuntime.startExecution(
-              sessionKey,
-              executionPrompt,
-              previousCodexSessionId,
-              (progress) => {
-                progressChain = progressChain
-                  .then(() =>
-                    this.handleProgress(
-                      message.conversationId,
-                      message.isDirectMessage,
-                      progress,
-                      () => lastProgressAt,
-                      (next) => {
-                        lastProgressAt = next;
-                      },
-                      () => lastProgressText,
-                      (next) => {
-                        lastProgressText = next;
-                      },
-                      () => progressNoticeEventId,
-                      (next) => {
-                        progressNoticeEventId = next;
-                      },
-                    ),
-                  )
-                  .catch((progressError) => {
-                    this.logger.debug("Failed to process progress callback", { progressError });
-                  });
-              },
-              {
-                passThroughRawEvents: this.cliCompat.enabled && this.cliCompat.passThroughEvents,
-                imagePaths: attemptImagePaths,
-                workdir: roomConfig.workdir,
-              },
-            );
-            const running = this.runningExecutions.get(sessionKey);
-            if (running?.requestId === requestId) {
-              running.startedAt = executionStartedAt;
-              running.cancel = () => {
-                cancelRequested = true;
-                executionHandle?.cancel();
-              };
-            }
-            if (cancelRequested) {
-              executionHandle.cancel();
-            }
-            return executionHandle.result;
-          };
-
-          let result: { sessionId: string; reply: string };
-          try {
-            result = await executeOnce(imagePaths);
-          } catch (error) {
-            if (!shouldRetryClaudeImageFailure(backendDecision.profile.provider, imagePaths, error)) {
-              throw error;
-            }
-            const reason = summarizeSingleLine(formatError(error), 220);
-            this.mediaMetrics.recordClaudeImageFallback("triggered", {
-              requestId,
-              sessionKey,
-              detail: reason,
-            });
-            await this.channel.sendNotice(
-              message.conversationId,
-              `[CodeHarbor] 检测到 Claude 图片处理失败，已自动降级为纯文本重试。原因: ${reason}`,
-            );
-            this.logger.warn("Claude image execution failed, retrying without image inputs", {
-              requestId,
-              sessionKey,
-              imageCount: imagePaths.length,
-              reason: formatError(error),
-            });
-            try {
-              result = await executeOnce([]);
-              this.mediaMetrics.recordClaudeImageFallback("succeeded", {
-                requestId,
-                sessionKey,
-                detail: "retry_without_images_ok",
-              });
-            } catch (retryError) {
-              this.mediaMetrics.recordClaudeImageFallback("failed", {
-                requestId,
-                sessionKey,
-                detail: summarizeSingleLine(formatError(retryError), 220),
-              });
-              throw retryError;
-            }
-          }
-
-          executionDurationMs = Date.now() - executionStartedAt;
-          await progressChain;
-
-          const sendStartedAt = Date.now();
-          await this.channel.sendMessage(message.conversationId, result.reply);
-          this.stateStore.appendConversationMessage(sessionKey, "assistant", backendDecision.profile.provider, result.reply);
-          await this.finishProgress(
-            {
-              conversationId: message.conversationId,
-              isDirectMessage: message.isDirectMessage,
-              getProgressNoticeEventId: () => progressNoticeEventId,
-              setProgressNoticeEventId: (next) => {
-                progressNoticeEventId = next;
-              },
-            },
-            `处理完成（后端工具: ${this.formatBackendToolLabel(backendDecision.profile)}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
-          );
-          sendDurationMs = Date.now() - sendStartedAt;
-
-          this.stateStore.commitExecutionSuccess(sessionKey, message.eventId, result.sessionId);
-          this.recordRequestMetrics("success", queueWaitMs, executionDurationMs, sendDurationMs);
-          this.logger.info("Request completed", {
-            requestId,
-            sessionKey,
-            status: "success",
+          {
+            message,
+            receivedAt,
             queueWaitMs,
-            executionDurationMs,
-            sendDurationMs,
-            totalDurationMs: Date.now() - receivedAt,
-          });
-        } catch (error) {
-          const status = classifyExecutionOutcome(error);
-          executionDurationMs = Date.now() - requestStartedAt;
-          await progressChain;
-
-          await this.finishProgress(
-            {
-              conversationId: message.conversationId,
-              isDirectMessage: message.isDirectMessage,
-              getProgressNoticeEventId: () => progressNoticeEventId,
-              setProgressNoticeEventId: (next) => {
-                progressNoticeEventId = next;
-              },
-            },
-            buildFailureProgressSummary(status, requestStartedAt, error),
-          );
-
-          if (status !== "cancelled" && !options.deferFailureHandlingToQueue) {
-            try {
-              await this.channel.sendMessage(
-                message.conversationId,
-                `[CodeHarbor] Failed to process request: ${formatError(error)}`,
-              );
-            } catch (sendError) {
-              this.logger.error("Failed to send error reply to Matrix", sendError);
-            }
-          }
-
-          if (!options.deferFailureHandlingToQueue) {
-            this.stateStore.commitExecutionHandled(sessionKey, message.eventId);
-          }
-          this.recordRequestMetrics(status, queueWaitMs, executionDurationMs, sendDurationMs);
-          this.logger.error("Request failed", {
-            requestId,
+            routePrompt: route.prompt,
             sessionKey,
-            status,
-            queueWaitMs,
-            executionDurationMs,
-            totalDurationMs: Date.now() - receivedAt,
-            error: formatError(error),
-          });
-          if (options.deferFailureHandlingToQueue) {
-            throw error;
-          }
-        } finally {
-          const running = this.runningExecutions.get(sessionKey);
-          if (running?.requestId === requestId) {
-            this.runningExecutions.delete(sessionKey);
-          }
-          rateDecision.release?.();
-          this.persistRuntimeMetricsSnapshot();
-          await stopTyping();
-        }
+            requestId,
+            roomWorkdir: roomConfig.workdir,
+            roomConfigSource: roomConfig.source,
+            backendProfile: backendDecision.profile,
+            backendRouteSource: backendDecision.source,
+            backendRouteReason: backendDecision.reasonCode,
+            backendRouteRuleId: backendDecision.ruleId,
+            sessionRuntime: backendRuntime.sessionRuntime,
+            deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
+            releaseRateLimit: () => {
+              rateDecision.release?.();
+            },
+          },
+        );
       });
     } finally {
       if (!deferAttachmentCleanup) {
@@ -1790,105 +1610,48 @@ export class Orchestrator {
       return;
     }
 
-    const status = this.stateStore.getSessionStatus(sessionKey);
-    const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-    const scope = message.isDirectMessage
-      ? "私聊（免前缀）"
-      : this.groupDirectModeEnabled
-        ? "群聊（默认直通）"
-        : "群聊（按房间触发策略）";
-    const activeUntil = status.activeUntil ?? "未激活";
-    const metrics = this.metrics.snapshot(this.runningExecutions.size);
-    const limiter = this.rateLimiter.snapshot();
-    const runtime = this.getBackendRuntimeStats();
-    const workflow = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
-    const autoDev = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
-    const autoDevTask =
-      autoDev.taskId && autoDev.taskDescription
-        ? `${autoDev.taskId} ${autoDev.taskDescription}`.trim()
-        : autoDev.taskId
-          ? autoDev.taskId
-          : "N/A";
-    const autoDevLoopActive = this.activeAutoDevLoopSessions.has(sessionKey) ? "yes" : "no";
-    const autoDevLoopStopRequested = this.pendingAutoDevLoopStopRequests.has(sessionKey) ? "yes" : "no";
-    const autoDevStopRequested = this.pendingStopRequests.has(sessionKey) ? "yes" : "no";
-    const autoDevDetailedProgress = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
-    const autoDevDetailedProgressDefault = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
-    const autoDevRunDuration = formatRunWindowDuration(autoDev.startedAt, autoDev.endedAt);
-    const autoDevDiagRun = this.listWorkflowDiagRunsBySession("autodev", sessionKey, 1)[0] ?? null;
-    const autoDevLatestStageEvent = autoDevDiagRun ? this.listWorkflowDiagEvents(autoDevDiagRun.runId, 1)[0] ?? null : null;
-    const autoDevStageSummary = autoDevLatestStageEvent
-      ? `${autoDevLatestStageEvent.stage}#${autoDevLatestStageEvent.round}@${autoDevLatestStageEvent.at}`
-      : autoDevDiagRun?.lastStage
-        ? `${autoDevDiagRun.lastStage}@${autoDevDiagRun.updatedAt}`
-        : "N/A";
-    const autoDevStageMessage = autoDevLatestStageEvent?.message ?? autoDevDiagRun?.lastMessage ?? "N/A";
-    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
-    const packageUpdate = await this.packageUpdateChecker.getStatus();
-    const latestUpgrade = this.getLatestUpgradeRun();
-    const recentUpgrades = this.getRecentUpgradeRuns(3);
-    const upgradeStats = this.getUpgradeRunStats();
-    const upgradeLock = this.getUpgradeExecutionLockSnapshot();
-    const backendProfile = this.resolveSessionBackendStatusProfile(sessionKey);
-    const backendOverride = this.sessionBackendOverrides.get(sessionKey);
-    const backendDecision = this.sessionLastBackendDecisions.get(sessionKey);
-    const backendRouteMode = backendOverride ? "manual" : "auto";
-    const backendRouteReason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
-    const backendRouteRuleId = backendDecision?.ruleId ?? "none";
-    const backendRouteReasonDesc = describeBackendRouteReason(backendRouteReason);
-    const backendRouteFallback = isBackendRouteFallbackReason(backendRouteReason) ? "yes" : "no";
-
-    await this.channel.sendNotice(
-      message.conversationId,
-      buildStatusNotice({
+    await handleStatusCommand(
+      {
         botNoticePrefix: this.botNoticePrefix,
-        scope,
-        isActive: status.isActive,
-        activeUntil,
-        hasCodexSession: status.hasCodexSession,
-        workdir: roomConfig.workdir,
-        backendLabel: this.formatBackendToolLabel(backendProfile),
-        backendRouteMode,
-        backendRouteReason,
-        backendRouteRuleId,
-        backendRouteReasonDesc,
-        backendRouteFallback,
-        currentVersion: packageUpdate.currentVersion,
-        updateHint: formatPackageUpdateHint(packageUpdate),
-        checkedAt: packageUpdate.checkedAt,
-        updateCacheTtlText: formatCacheTtl(this.updateCheckTtlMs),
-        latestUpgradeSummary: formatLatestUpgradeSummary(latestUpgrade),
-        recentUpgradesSummary: formatRecentUpgradeRunsSummary(recentUpgrades),
-        upgradeStats,
-        upgradeLockSummary: formatUpgradeLockSummary(upgradeLock),
-        metrics,
-        limiter,
-        runtime,
+        groupDirectModeEnabled: this.groupDirectModeEnabled,
+        updateCheckTtlMs: this.updateCheckTtlMs,
         cliCompatEnabled: this.cliCompat.enabled,
         workflowEnabled: this.workflowRunner.isEnabled(),
-        workflowState: workflow.state,
-        workflowPlanBudget: formatWorkflowContextBudget(this.workflowPlanContextMaxChars),
-        workflowOutputBudget: formatWorkflowContextBudget(this.workflowOutputContextMaxChars),
-        workflowFeedbackBudget: formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars),
-        roleSkillStatus,
-        autoDevState: autoDev.state,
-        autoDevMode: autoDev.mode,
-        autoDevTask,
-        autoDevRunDuration,
-        autoDevLoopRound: autoDev.loopRound,
-        autoDevLoopMaxRuns: autoDev.loopMaxRuns,
-        autoDevLoopCompletedRuns: autoDev.loopCompletedRuns,
-        autoDevLoopDeadlineAt: autoDev.loopDeadlineAt,
-        autoDevLoopActive,
-        autoDevLoopStopRequested,
-        autoDevStopRequested,
-        autoDevDetailedProgress,
-        autoDevDetailedProgressDefault,
-        autoDevDiagRunId: autoDevDiagRun?.runId ?? "N/A",
-        autoDevDiagRunStatus: autoDevDiagRun?.status ?? "N/A",
-        autoDevStageSummary,
-        autoDevStageMessage,
-      }),
+        autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+        workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
+        workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
+        workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
+        getSessionStatus: (targetSessionKey) => this.stateStore.getSessionStatus(targetSessionKey),
+        resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
+        getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
+        getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
+        getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
+        getWorkflowSnapshot: (targetSessionKey) => this.workflowSnapshots.get(targetSessionKey) ?? null,
+        getAutoDevSnapshot: (targetSessionKey) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
+        hasActiveAutoDevLoopSession: (targetSessionKey) => this.activeAutoDevLoopSessions.has(targetSessionKey),
+        hasPendingAutoDevLoopStopRequest: (targetSessionKey) => this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
+        hasPendingStopRequest: (targetSessionKey) => this.pendingStopRequests.has(targetSessionKey),
+        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+        listWorkflowDiagRunsBySession: (kind, targetSessionKey, limit) =>
+          this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
+        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
+        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+        getPackageUpdateStatus: () => this.packageUpdateChecker.getStatus(),
+        getLatestUpgradeRun: () => this.getLatestUpgradeRun(),
+        getRecentUpgradeRuns: (limit) => this.getRecentUpgradeRuns(limit),
+        getUpgradeRunStats: () => this.getUpgradeRunStats(),
+        getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
+        resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
+        hasSessionBackendOverride: (targetSessionKey) => this.sessionBackendOverrides.has(targetSessionKey),
+        getSessionBackendDecision: (targetSessionKey) => this.sessionLastBackendDecisions.get(targetSessionKey) ?? null,
+        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+        formatWorkflowContextBudget: (value) => formatWorkflowContextBudget(value),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      {
+        sessionKey,
+        message,
+      },
     );
   }
 
