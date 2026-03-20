@@ -10,8 +10,8 @@ type RouteDecisionLike =
       command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
     };
 
-type WorkflowCommandLike = ReturnType<typeof parseWorkflowCommand>;
-type AutoDevCommandLike = ReturnType<typeof parseAutoDevCommand>;
+export type WorkflowCommandLike = ReturnType<typeof parseWorkflowCommand>;
+export type AutoDevCommandLike = ReturnType<typeof parseAutoDevCommand>;
 
 interface HandleLockedRouteCommandDeps {
   workflowEnabled: boolean;
@@ -45,7 +45,7 @@ interface HandleLockedRouteCommandInput {
   workdir: string;
 }
 
-interface HandleLockedRouteCommandResult {
+export interface HandleLockedRouteCommandResult {
   handled: boolean;
   workflowCommand: WorkflowCommandLike;
   autoDevCommand: AutoDevCommandLike;

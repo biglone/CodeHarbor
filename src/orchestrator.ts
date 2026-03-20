@@ -117,7 +117,6 @@ import {
   type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import {
-  buildRateLimitNotice,
   classifyExecutionOutcome,
 } from "./orchestrator/workflow-status";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
@@ -151,8 +150,7 @@ import {
 } from "./orchestrator/autodev-control-command";
 import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
-import { handleLockedRouteCommand } from "./orchestrator/locked-route-command";
-import { tryEnqueueQueuedInboundRequest } from "./orchestrator/queue-enqueue";
+import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import { handleWorkflowStatusCommand as runWorkflowStatusCommand } from "./orchestrator/workflow-status-command";
@@ -893,35 +891,17 @@ export class Orchestrator {
 
       const lock = this.getLock(sessionKey);
       await lock.runExclusive(async () => {
-        const queueWaitMs = Date.now() - receivedAt;
-
-        if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-          this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
-          this.logger.debug("Duplicate event ignored", { requestId, eventId: message.eventId, sessionKey, queueWaitMs });
-          return;
-        }
-
-        const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-        const route: RouteDecision =
-          options.forcedPrompt === null
-            ? this.routeMessage(message, sessionKey, roomConfig)
-            : { kind: "execute", prompt: options.forcedPrompt };
-        if (route.kind === "ignore") {
-          this.recordRequestMetrics("ignored", queueWaitMs, 0, 0);
-          this.logger.debug("Message ignored by routing policy", {
-            requestId,
-            sessionKey,
-            isDirectMessage: message.isDirectMessage,
-            mentionsBot: message.mentionsBot,
-            repliesToBot: message.repliesToBot,
-          });
-          return;
-        }
-
-        const routeCommandResult = await handleLockedRouteCommand(
+        const lockedResult = await executeLockedMessage(
           {
+            logger: this.logger,
             workflowEnabled: this.workflowRunner.isEnabled(),
+            hasProcessedEvent: (targetSessionKey, eventId) => this.stateStore.hasProcessedEvent(targetSessionKey, eventId),
             markEventProcessed: (targetSessionKey, eventId) => this.stateStore.markEventProcessed(targetSessionKey, eventId),
+            recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+              this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+            resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
+            routeMessage: (targetMessage, targetSessionKey, roomConfig) =>
+              this.routeMessage(targetMessage, targetSessionKey, roomConfig),
             handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
               this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
             handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
@@ -934,242 +914,182 @@ export class Orchestrator {
               this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
             handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
               this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
-          },
-          {
-            route,
-            sessionKey,
-            message,
-            requestId,
-            workdir: roomConfig.workdir,
-          },
-        );
-        if (routeCommandResult.handled) {
-          return;
-        }
-        if (route.kind !== "execute") {
-          return;
-        }
-        const { workflowCommand, autoDevCommand } = routeCommandResult;
-
-        const queueEnqueueResult = tryEnqueueQueuedInboundRequest(
-          {
             getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-          },
-          {
-            bypassQueue: options.bypassQueue,
-            sessionKey,
-            message,
-            requestId,
-            receivedAt,
-            routePrompt: route.prompt,
-          },
-        );
-        if (queueEnqueueResult.duplicate) {
-          this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
-          this.logger.debug("Duplicate event ignored by task queue dedupe", {
-            requestId,
-            eventId: message.eventId,
-            sessionKey,
-            queueWaitMs,
-          });
-          return;
-        }
-        if (queueEnqueueResult.queued) {
-          deferAttachmentCleanup = true;
-          queueDrainSessionKey = sessionKey;
-          this.logger.debug("Inbound request queued", {
-            requestId,
-            eventId: message.eventId,
-            sessionKey,
-            taskId: queueEnqueueResult.taskId,
-          });
-          return;
-        }
-
-        const rateDecision = this.rateLimiter.tryAcquire({
-          userId: message.senderId,
-          roomId: message.conversationId,
-        });
-        if (!rateDecision.allowed) {
-          this.recordRequestMetrics("rate_limited", queueWaitMs, 0, 0);
-          await this.channel.sendNotice(message.conversationId, buildRateLimitNotice(rateDecision));
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          this.logger.warn("Request rejected by rate limiter", {
-            requestId,
-            sessionKey,
-            reason: rateDecision.reason,
-            retryAfterMs: rateDecision.retryAfterMs ?? null,
-            queueWaitMs,
-          });
-          return;
-        }
-
-        const taskType = classifyBackendTaskType(workflowCommand, autoDevCommand);
-        const backendDecision = this.resolveSessionBackendDecision({
-          sessionKey,
-          message,
-          taskType,
-          routePrompt: route.prompt,
-        });
-        const backendRuntime = this.prepareBackendRuntimeForSession(sessionKey, backendDecision.profile);
-        this.sessionLastBackendDecisions.set(sessionKey, backendDecision);
-        this.recordBackendRouteDecision({
-          sessionKey,
-          message,
-          taskType,
-          decision: backendDecision,
-        });
-
-        if (workflowCommand?.kind === "run") {
-          await executeAgentRunRequest(
-            {
-              logger: this.logger,
-              sessionActiveWindowMs: this.sessionActiveWindowMs,
-              stateStore: this.stateStore,
-              workflowRunner: this.workflowRunner,
-              recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-                this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-              persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-            },
-            {
-              kind: "workflow",
-              sessionKey,
-              message,
-              requestId,
-              queueWaitMs,
-              workdir: roomConfig.workdir,
-              deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
-              executor: backendRuntime.executor,
-              run: async () => {
-                await this.handleWorkflowRunCommand(
-                  workflowCommand.objective,
-                  sessionKey,
-                  message,
-                  requestId,
-                  roomConfig.workdir,
-                );
-              },
-              sendFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
-              releaseRateLimit: () => {
-                rateDecision.release?.();
-              },
-            },
-          );
-          return;
-        }
-
-        if (autoDevCommand?.kind === "run") {
-          await executeAgentRunRequest(
-            {
-              logger: this.logger,
-              sessionActiveWindowMs: this.sessionActiveWindowMs,
-              stateStore: this.stateStore,
-              workflowRunner: this.workflowRunner,
-              recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-                this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-              persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-            },
-            {
-              kind: "autodev",
-              sessionKey,
-              message,
-              requestId,
-              queueWaitMs,
-              workdir: roomConfig.workdir,
-              deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
-              executor: backendRuntime.executor,
-              run: async () => {
-                await this.handleAutoDevRunCommand(
-                  autoDevCommand.taskId,
-                  sessionKey,
-                  message,
-                  requestId,
-                  roomConfig.workdir,
-                );
-              },
-              sendFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
-              releaseRateLimit: () => {
-                rateDecision.release?.();
-              },
-            },
-          );
-          return;
-        }
-
-        await executeChatRequest(
-          {
-            logger: this.logger,
-            sessionActiveWindowMs: this.sessionActiveWindowMs,
-            cliCompat: {
-              enabled: this.cliCompat.enabled,
-              passThroughEvents: this.cliCompat.passThroughEvents,
-            },
-            stateStore: this.stateStore,
-            skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
-            mediaMetrics: this.mediaMetrics,
-            runningExecutions: this.runningExecutions,
-            consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
-            persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-            recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-              this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-            recordCliCompatPrompt: (entry) => this.recordCliCompatPrompt(entry),
-            buildConversationBridgeContext: (targetSessionKey) => this.buildConversationBridgeContext(targetSessionKey),
-            transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-              this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
-            prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-              this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
-            prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-              this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
-            buildExecutionPrompt: (basePrompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
-              this.buildExecutionPrompt(basePrompt, targetMessage, audioTranscripts, documents, bridgeContext),
+            tryAcquireRateLimit: (input) => this.rateLimiter.tryAcquire(input),
             sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-            sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
-            startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
-            handleProgress: (
-              conversationId,
-              isDirectMessage,
-              progress,
-              getLastProgressAt,
-              setLastProgressAt,
-              getLastProgressText,
-              setLastProgressText,
-              getProgressNoticeEventId,
-              setProgressNoticeEventId,
-            ) =>
-              this.handleProgress(
-                conversationId,
-                isDirectMessage,
-                progress,
-                getLastProgressAt,
-                setLastProgressAt,
-                getLastProgressText,
-                setLastProgressText,
-                getProgressNoticeEventId,
-                setProgressNoticeEventId,
+            classifyBackendTaskType: (workflowCommand, autoDevCommand) =>
+              classifyBackendTaskType(workflowCommand, autoDevCommand),
+            resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
+            prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
+              this.prepareBackendRuntimeForSession(targetSessionKey, profile),
+            setSessionLastBackendDecision: (targetSessionKey, decision) =>
+              this.sessionLastBackendDecisions.set(targetSessionKey, decision),
+            recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
+            executeWorkflowRun: async (input) => {
+              await executeAgentRunRequest(
+                {
+                  logger: this.logger,
+                  sessionActiveWindowMs: this.sessionActiveWindowMs,
+                  stateStore: this.stateStore,
+                  workflowRunner: this.workflowRunner,
+                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+                },
+                {
+                  kind: "workflow",
+                  sessionKey: input.sessionKey,
+                  message: input.message,
+                  requestId: input.requestId,
+                  queueWaitMs: input.queueWaitMs,
+                  workdir: input.workdir,
+                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+                  executor: input.executor,
+                  run: async () => {
+                    await this.handleWorkflowRunCommand(
+                      input.objective,
+                      input.sessionKey,
+                      input.message,
+                      input.requestId,
+                      input.workdir,
+                    );
+                  },
+                  sendFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
+                  releaseRateLimit: () => {
+                    input.releaseRateLimit();
+                  },
+                },
+              );
+            },
+            executeAutoDevRun: async (input) => {
+              await executeAgentRunRequest(
+                {
+                  logger: this.logger,
+                  sessionActiveWindowMs: this.sessionActiveWindowMs,
+                  stateStore: this.stateStore,
+                  workflowRunner: this.workflowRunner,
+                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+                },
+                {
+                  kind: "autodev",
+                  sessionKey: input.sessionKey,
+                  message: input.message,
+                  requestId: input.requestId,
+                  queueWaitMs: input.queueWaitMs,
+                  workdir: input.workdir,
+                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+                  executor: input.executor,
+                  run: async () => {
+                    await this.handleAutoDevRunCommand(
+                      input.taskId,
+                      input.sessionKey,
+                      input.message,
+                      input.requestId,
+                      input.workdir,
+                    );
+                  },
+                  sendFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
+                  releaseRateLimit: () => {
+                    input.releaseRateLimit();
+                  },
+                },
+              );
+            },
+            executeChatRun: (input) =>
+              executeChatRequest(
+                {
+                  logger: this.logger,
+                  sessionActiveWindowMs: this.sessionActiveWindowMs,
+                  cliCompat: {
+                    enabled: this.cliCompat.enabled,
+                    passThroughEvents: this.cliCompat.passThroughEvents,
+                  },
+                  stateStore: this.stateStore,
+                  skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+                  mediaMetrics: this.mediaMetrics,
+                  runningExecutions: this.runningExecutions,
+                  consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+                  recordCliCompatPrompt: (entry) => this.recordCliCompatPrompt(entry),
+                  buildConversationBridgeContext: (targetSessionKey) => this.buildConversationBridgeContext(targetSessionKey),
+                  transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+                    this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
+                  prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+                    this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
+                  prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+                    this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
+                  buildExecutionPrompt: (basePrompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
+                    this.buildExecutionPrompt(basePrompt, targetMessage, audioTranscripts, documents, bridgeContext),
+                  sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+                  sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+                  startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
+                  handleProgress: (
+                    conversationId,
+                    isDirectMessage,
+                    progress,
+                    getLastProgressAt,
+                    setLastProgressAt,
+                    getLastProgressText,
+                    setLastProgressText,
+                    getProgressNoticeEventId,
+                    setProgressNoticeEventId,
+                  ) =>
+                    this.handleProgress(
+                      conversationId,
+                      isDirectMessage,
+                      progress,
+                      getLastProgressAt,
+                      setLastProgressAt,
+                      getLastProgressText,
+                      setLastProgressText,
+                      getProgressNoticeEventId,
+                      setProgressNoticeEventId,
+                    ),
+                  finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
+                  formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+                },
+                {
+                  message: input.message,
+                  receivedAt: input.receivedAt,
+                  queueWaitMs: input.queueWaitMs,
+                  routePrompt: input.routePrompt,
+                  sessionKey: input.sessionKey,
+                  requestId: input.requestId,
+                  roomWorkdir: input.roomWorkdir,
+                  roomConfigSource: input.roomConfigSource,
+                  backendProfile: input.backendProfile,
+                  backendRouteSource: input.backendRouteSource,
+                  backendRouteReason: input.backendRouteReason,
+                  backendRouteRuleId: input.backendRouteRuleId,
+                  sessionRuntime: input.sessionRuntime,
+                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+                  releaseRateLimit: () => {
+                    input.releaseRateLimit();
+                  },
+                },
               ),
-            finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
-            formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
           },
           {
             message,
-            receivedAt,
-            queueWaitMs,
-            routePrompt: route.prompt,
-            sessionKey,
             requestId,
-            roomWorkdir: roomConfig.workdir,
-            roomConfigSource: roomConfig.source,
-            backendProfile: backendDecision.profile,
-            backendRouteSource: backendDecision.source,
-            backendRouteReason: backendDecision.reasonCode,
-            backendRouteRuleId: backendDecision.ruleId,
-            sessionRuntime: backendRuntime.sessionRuntime,
+            sessionKey,
+            receivedAt,
+            bypassQueue: options.bypassQueue,
+            forcedPrompt: options.forcedPrompt,
             deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
-            releaseRateLimit: () => {
-              rateDecision.release?.();
-            },
           },
         );
+
+        if (lockedResult.deferAttachmentCleanup) {
+          deferAttachmentCleanup = true;
+        }
+        if (lockedResult.queueDrainSessionKey) {
+          queueDrainSessionKey = lockedResult.queueDrainSessionKey;
+        }
       });
     } finally {
       if (sessionKeyForLifecycle) {
