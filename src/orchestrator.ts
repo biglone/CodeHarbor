@@ -11,7 +11,7 @@ import {
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
-import { buildDocumentContextPrompt, type DocumentContextItem } from "./document-context";
+import { type DocumentContextItem } from "./document-context";
 import { Logger } from "./logger";
 import {
   type RequestOutcomeMetric,
@@ -53,7 +53,6 @@ import {
   type UpgradeRunStats,
 } from "./store/state-store";
 import { InboundMessage } from "./types";
-import { extractCommandText } from "./utils/message";
 import {
   MultiAgentWorkflowRunner,
   type MultiAgentWorkflowRunResult,
@@ -61,7 +60,6 @@ import {
 } from "./workflow/multi-agent-workflow";
 import {
   type AutoDevTask,
-  parseAutoDevCommand,
   updateAutoDevTaskStatus,
 } from "./workflow/autodev";
 import {
@@ -157,8 +155,10 @@ import {
   cleanupAttachmentFiles,
   formatByteSize,
   mapApiTaskStage,
-  stripLeadingBotMention,
 } from "./orchestrator/misc-utils";
+import { buildExecutionPrompt as runBuildExecutionPrompt } from "./orchestrator/execution-prompt";
+import { routeMessage as runRouteMessage, type RouteDecision } from "./orchestrator/message-routing";
+import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./orchestrator/conversation-bridge";
 import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
@@ -231,14 +231,6 @@ interface SessionLockEntry {
   mutex: Mutex;
   lastUsedAt: number;
 }
-
-type RouteDecision =
-  | { kind: "ignore" }
-  | { kind: "execute"; prompt: string }
-  | {
-      kind: "command";
-      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
-    };
 
 type RequestOutcome = RequestOutcomeMetric;
 
@@ -1357,69 +1349,22 @@ export class Orchestrator {
   }
 
   private routeMessage(message: InboundMessage, sessionKey: string, roomConfig: RoomRuntimeConfig): RouteDecision {
-    const incomingRaw = message.text;
-    const incomingTrimmed = incomingRaw.trim();
-    if (!incomingTrimmed && message.attachments.length === 0) {
-      return { kind: "ignore" };
-    }
-
-    const rawAutoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(incomingTrimmed) : null;
-    if (
-      rawAutoDevCommand?.kind === "status" ||
-      rawAutoDevCommand?.kind === "stop" ||
-      rawAutoDevCommand?.kind === "progress" ||
-      rawAutoDevCommand?.kind === "skills"
-    ) {
-      return {
-        kind: "execute",
-        prompt: incomingTrimmed,
-      };
-    }
-
-    if (!message.isDirectMessage && !roomConfig.enabled) {
-      return { kind: "ignore" };
-    }
-
-    const groupPolicy = message.isDirectMessage ? null : roomConfig.triggerPolicy;
-    const prefixAllowed = message.isDirectMessage || Boolean(groupPolicy?.allowPrefix);
-    const prefixTriggered = prefixAllowed && this.commandPrefix.length > 0;
-    const prefixedText = prefixTriggered ? extractCommandText(incomingTrimmed, this.commandPrefix) : null;
-
-    const activeSession =
-      message.isDirectMessage || groupPolicy?.allowActiveWindow
-        ? this.stateStore.isSessionActive(sessionKey)
-        : false;
-
-    const conversationalTrigger =
-      message.isDirectMessage ||
-      this.groupDirectModeEnabled ||
-      (Boolean(groupPolicy?.allowMention) && message.mentionsBot) ||
-      (Boolean(groupPolicy?.allowReply) && message.repliesToBot) ||
-      activeSession;
-
-    if (!conversationalTrigger && prefixedText === null) {
-      return { kind: "ignore" };
-    }
-
-    let normalized = prefixedText ?? (this.cliCompat.preserveWhitespace ? incomingRaw : incomingTrimmed);
-    if (prefixedText === null && message.mentionsBot && !this.cliCompat.enabled) {
-      normalized = stripLeadingBotMention(normalized, this.matrixUserId);
-    }
-    const normalizedTrimmed = normalized.trim();
-    if (!normalizedTrimmed && message.attachments.length === 0) {
-      return { kind: "ignore" };
-    }
-
-    const command = parseControlCommand(normalizedTrimmed);
-    if (command) {
-      return { kind: "command", command };
-    }
-
-    if (!this.cliCompat.preserveWhitespace || prefixedText !== null) {
-      normalized = normalizedTrimmed;
-    }
-
-    return { kind: "execute", prompt: normalized };
+    return runRouteMessage(
+      {
+        workflowEnabled: this.workflowRunner.isEnabled(),
+        commandPrefix: this.commandPrefix,
+        cliCompatEnabled: this.cliCompat.enabled,
+        cliPreserveWhitespace: this.cliCompat.preserveWhitespace,
+        groupDirectModeEnabled: this.groupDirectModeEnabled,
+        matrixUserId: this.matrixUserId,
+        isSessionActive: (targetSessionKey) => this.stateStore.isSessionActive(targetSessionKey),
+      },
+      {
+        message,
+        sessionKey,
+        roomConfig,
+      },
+    );
   }
 
   private async handleControlCommand(
@@ -2308,88 +2253,21 @@ export class Orchestrator {
     extractedDocuments: DocumentContextItem[],
     bridgeContext: string | null,
   ): string {
-    let composed: string;
-    if (message.attachments.length === 0 && audioTranscripts.length === 0 && extractedDocuments.length === 0) {
-      composed = prompt;
-    } else {
-      const attachmentSummary = message.attachments
-        .map((attachment) => {
-          const size = attachment.sizeBytes === null ? "unknown" : `${attachment.sizeBytes}`;
-          const mime = attachment.mimeType ?? "unknown";
-          const source = attachment.mxcUrl ?? "none";
-          const local = attachment.localPath ?? "none";
-          return `- kind=${attachment.kind} name=${attachment.name} mime=${mime} size=${size} source=${source} local=${local}`;
-        })
-        .join("\n");
-
-      const promptBody = prompt.trim() ? prompt : "(no text body)";
-      const sections = [promptBody];
-      if (attachmentSummary) {
-        sections.push(`[attachments]\n${attachmentSummary}\n[/attachments]`);
-      }
-
-      if (audioTranscripts.length > 0) {
-        const transcriptSummary = audioTranscripts
-          .map((transcript) => `- name=${transcript.name} text=${transcript.text.replace(/\s+/g, " ").trim()}`)
-          .join("\n");
-        sections.push(`[audio_transcripts]\n${transcriptSummary}\n[/audio_transcripts]`);
-      }
-
-      if (extractedDocuments.length > 0) {
-        const documentSummary = buildDocumentContextPrompt(extractedDocuments);
-        if (documentSummary.content) {
-          sections.push(`[documents]\n${documentSummary.content}\n[/documents]`);
-        }
-      }
-      composed = sections.join("\n\n");
-    }
-
-    if (!bridgeContext) {
-      return composed;
-    }
-    return `${bridgeContext}\n\n[current_request]\n${composed}`;
+    return runBuildExecutionPrompt({
+      prompt,
+      message,
+      audioTranscripts,
+      extractedDocuments,
+      bridgeContext,
+    });
   }
 
   private buildConversationBridgeContext(sessionKey: string): string | null {
     const messages = this.stateStore.listRecentConversationMessages(sessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT);
-    if (messages.length === 0) {
-      return null;
-    }
-
-    const lines = messages
-      .map((message) => {
-        const role = message.role === "user" ? "user" : "assistant";
-        const compact = message.content.replace(/\s+/g, " ").trim();
-        const truncated = compact.length > 1_000 ? `${compact.slice(0, 1000)}...` : compact;
-        return `- [${message.provider}] ${role}: ${truncated}`;
-      })
-      .filter((line) => line.length > 0);
-    if (lines.length === 0) {
-      return null;
-    }
-
-    const selected: string[] = [];
-    let usedChars = 0;
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const line = lines[i];
-      if (usedChars + line.length + 1 > CONTEXT_BRIDGE_MAX_CHARS) {
-        continue;
-      }
-      selected.push(line);
-      usedChars += line.length + 1;
-    }
-    if (selected.length === 0) {
-      return null;
-    }
-    selected.reverse();
-
-    return [
-      "[conversation_bridge]",
-      "The following local chat history is from the same conversation before backend switch. Use it as context.",
-      "Do not reprint full history unless user asks.",
-      ...selected,
-      "[/conversation_bridge]",
-    ].join("\n");
+    return runBuildConversationBridgeContext({
+      messages,
+      maxChars: CONTEXT_BRIDGE_MAX_CHARS,
+    });
   }
 
   private async recordCliCompatPrompt(entry: {
