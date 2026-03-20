@@ -81,7 +81,6 @@ import {
   formatDurationMs,
   formatError,
   formatWorkflowContextBudget,
-  formatWorkflowProgressNotice,
   formatWorkflowRoleSkillLoaded,
   parseCsvValues,
   parseEnvBoolean,
@@ -120,9 +119,7 @@ import {
   type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import {
-  buildFailureProgressSummary,
   buildRateLimitNotice,
-  buildWorkflowResultReply,
   classifyExecutionOutcome,
 } from "./orchestrator/workflow-status";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
@@ -147,6 +144,7 @@ import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
+import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import {
   buildApiTaskErrorSummary,
@@ -1878,135 +1876,35 @@ export class Orchestrator {
     diagRunId: string | null = null,
     diagRunKind: WorkflowDiagRunKind = "workflow",
   ): Promise<MultiAgentWorkflowRunResult | null> {
-    const normalizedObjective = objective.trim();
-    if (!normalizedObjective) {
-      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] /agents run 需要提供任务目标。");
-      return null;
-    }
-
-    const requestStartedAt = Date.now();
-    let progressNoticeEventId: string | null = null;
-    const progressCtx: SendProgressContext = {
-      conversationId: message.conversationId,
-      isDirectMessage: message.isDirectMessage,
-      getProgressNoticeEventId: () => progressNoticeEventId,
-      setProgressNoticeEventId: (next) => {
-        progressNoticeEventId = next;
+    return executeWorkflowRunRequest(
+      {
+        setWorkflowSnapshot: (targetSessionKey, snapshot) => this.setWorkflowSnapshot(targetSessionKey, snapshot),
+        beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
+        startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
+        consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+        runningExecutions: this.runningExecutions,
+        persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+        sendProgressUpdate: (ctx, text) => this.sendProgressUpdate(ctx, text),
+        appendWorkflowDiagEvent: (runId, kind, stage, round, stageMessage) =>
+          this.appendWorkflowDiagEvent(runId, kind, stage, round, stageMessage),
+        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+        resolveWorkflowRoleSkillPolicy: (targetSessionKey) => this.resolveWorkflowRoleSkillPolicy(targetSessionKey),
+        runWorkflow: (input) => this.workflowRunner.run(input),
+        sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+        finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
+        finishWorkflowDiagRun: (runId, input) => this.finishWorkflowDiagRun(runId, input),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       },
-    };
-
-    const startedAtIso = new Date().toISOString();
-    this.setWorkflowSnapshot(sessionKey, {
-      state: "running",
-      startedAt: startedAtIso,
-      endedAt: null,
-      objective: normalizedObjective,
-      approved: null,
-      repairRounds: 0,
-      error: null,
-    });
-    const workflowDiagRunId =
-      diagRunId ??
-      this.beginWorkflowDiagRun({
-        kind: diagRunKind,
+      {
+        objective,
         sessionKey,
-        conversationId: message.conversationId,
+        message,
         requestId,
-        objective: normalizedObjective,
-      });
-
-    const stopTyping = this.startTypingHeartbeat(message.conversationId);
-    let cancelWorkflow = (): void => {};
-    let cancelRequested = this.consumePendingStopRequest(sessionKey);
-    this.runningExecutions.set(sessionKey, {
-      requestId,
-      startedAt: requestStartedAt,
-      cancel: () => {
-        cancelRequested = true;
-        cancelWorkflow();
-      },
-    });
-    this.persistRuntimeMetricsSnapshot();
-
-    await this.sendProgressUpdate(progressCtx, "[CodeHarbor] Multi-Agent workflow 启动：Planner -> Executor -> Reviewer");
-    this.appendWorkflowDiagEvent(
-      workflowDiagRunId,
-      diagRunKind,
-      "workflow",
-      0,
-      "Multi-Agent workflow 启动：Planner -> Executor -> Reviewer",
-    );
-    const detailedProgressEnabled = this.isAutoDevDetailedProgressEnabled(sessionKey);
-    const roleSkillPolicy = this.resolveWorkflowRoleSkillPolicy(sessionKey);
-
-    try {
-      const result = await this.workflowRunner.run({
-        objective: normalizedObjective,
         workdir,
-        roleSkillPolicy,
-        onRegisterCancel: (cancel) => {
-          cancelWorkflow = cancel;
-          if (cancelRequested) {
-            cancelWorkflow();
-          }
-        },
-        onProgress: async (event) => {
-          this.appendWorkflowDiagEvent(workflowDiagRunId, diagRunKind, event.stage, event.round, event.message);
-          await this.sendProgressUpdate(
-            progressCtx,
-            `[CodeHarbor] ${formatWorkflowProgressNotice(event, detailedProgressEnabled)}`,
-          );
-        },
-      });
-
-      const endedAtIso = new Date().toISOString();
-      this.setWorkflowSnapshot(sessionKey, {
-        state: "succeeded",
-        startedAt: startedAtIso,
-        endedAt: endedAtIso,
-        objective: normalizedObjective,
-        approved: result.approved,
-        repairRounds: result.repairRounds,
-        error: null,
-      });
-
-      await this.channel.sendMessage(message.conversationId, buildWorkflowResultReply(result));
-      await this.finishProgress(progressCtx, `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`);
-      this.finishWorkflowDiagRun(workflowDiagRunId, {
-        status: "succeeded",
-        approved: result.approved,
-        repairRounds: result.repairRounds,
-        error: null,
-      });
-      return result;
-    } catch (error) {
-      const status = classifyExecutionOutcome(error);
-      const endedAtIso = new Date().toISOString();
-      this.setWorkflowSnapshot(sessionKey, {
-        state: status === "cancelled" ? "idle" : "failed",
-        startedAt: startedAtIso,
-        endedAt: endedAtIso,
-        objective: normalizedObjective,
-        approved: null,
-        repairRounds: 0,
-        error: formatError(error),
-      });
-      await this.finishProgress(progressCtx, buildFailureProgressSummary(status, requestStartedAt, error));
-      this.finishWorkflowDiagRun(workflowDiagRunId, {
-        status: status === "cancelled" ? "cancelled" : "failed",
-        approved: null,
-        repairRounds: 0,
-        error: formatError(error),
-      });
-      throw error;
-    } finally {
-      const running = this.runningExecutions.get(sessionKey);
-      if (running?.requestId === requestId) {
-        this.runningExecutions.delete(sessionKey);
-      }
-      this.persistRuntimeMetricsSnapshot();
-      await stopTyping();
-    }
+        diagRunId,
+        diagRunKind,
+      },
+    );
   }
 
   private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
