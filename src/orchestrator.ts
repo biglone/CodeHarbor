@@ -63,7 +63,6 @@ import {
   createIdleWorkflowSnapshot,
   MultiAgentWorkflowRunner,
   type MultiAgentWorkflowRunResult,
-  parseWorkflowCommand,
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
 import {
@@ -144,6 +143,8 @@ import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
+import { handleLockedRouteCommand } from "./orchestrator/locked-route-command";
+import { tryEnqueueQueuedInboundRequest } from "./orchestrator/queue-enqueue";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import {
@@ -908,76 +909,72 @@ export class Orchestrator {
           return;
         }
 
-        if (route.kind === "command") {
-          await this.handleControlCommand(route.command, sessionKey, message, requestId);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        const routeCommandResult = await handleLockedRouteCommand(
+          {
+            workflowEnabled: this.workflowRunner.isEnabled(),
+            markEventProcessed: (targetSessionKey, eventId) => this.stateStore.markEventProcessed(targetSessionKey, eventId),
+            handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
+              this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
+            handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
+              this.handleWorkflowStatusCommand(targetSessionKey, targetMessage),
+            handleAutoDevStatusCommand: (targetSessionKey, targetMessage, workdir) =>
+              this.handleAutoDevStatusCommand(targetSessionKey, targetMessage, workdir),
+            handleAutoDevProgressCommand: (targetSessionKey, targetMessage, mode) =>
+              this.handleAutoDevProgressCommand(targetSessionKey, targetMessage, mode),
+            handleAutoDevSkillsCommand: (targetSessionKey, targetMessage, mode) =>
+              this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
+            handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
+              this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
+          },
+          {
+            route,
+            sessionKey,
+            message,
+            requestId,
+            workdir: roomConfig.workdir,
+          },
+        );
+        if (routeCommandResult.handled) {
           return;
         }
+        if (route.kind !== "execute") {
+          return;
+        }
+        const { workflowCommand, autoDevCommand } = routeCommandResult;
 
-        const workflowCommand = this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
-        const autoDevCommand = this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
-        if (workflowCommand?.kind === "status") {
-          await this.handleWorkflowStatusCommand(sessionKey, message);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        const queueEnqueueResult = tryEnqueueQueuedInboundRequest(
+          {
+            getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+          },
+          {
+            bypassQueue: options.bypassQueue,
+            sessionKey,
+            message,
+            requestId,
+            receivedAt,
+            routePrompt: route.prompt,
+          },
+        );
+        if (queueEnqueueResult.duplicate) {
+          this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
+          this.logger.debug("Duplicate event ignored by task queue dedupe", {
+            requestId,
+            eventId: message.eventId,
+            sessionKey,
+            queueWaitMs,
+          });
           return;
         }
-        if (autoDevCommand?.kind === "status") {
-          await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
+        if (queueEnqueueResult.queued) {
+          deferAttachmentCleanup = true;
+          queueDrainSessionKey = sessionKey;
+          this.logger.debug("Inbound request queued", {
+            requestId,
+            eventId: message.eventId,
+            sessionKey,
+            taskId: queueEnqueueResult.taskId,
+          });
           return;
-        }
-        if (autoDevCommand?.kind === "progress") {
-          await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          return;
-        }
-        if (autoDevCommand?.kind === "skills") {
-          await this.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          return;
-        }
-        if (autoDevCommand?.kind === "stop") {
-          await this.handleAutoDevLoopStopCommand(sessionKey, message);
-          this.stateStore.markEventProcessed(sessionKey, message.eventId);
-          return;
-        }
-
-        if (!options.bypassQueue) {
-          const queueStore = this.getTaskQueueStateStore();
-          if (queueStore) {
-            const payload: QueuedInboundPayload = {
-              message,
-              receivedAt,
-              prompt: route.prompt,
-            };
-            const enqueueResult = queueStore.enqueueTask({
-              sessionKey,
-              eventId: message.eventId,
-              requestId,
-              payloadJson: JSON.stringify(payload),
-            } satisfies TaskQueueEnqueueInput);
-
-            if (!enqueueResult.created) {
-              this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
-              this.logger.debug("Duplicate event ignored by task queue dedupe", {
-                requestId,
-                eventId: message.eventId,
-                sessionKey,
-                queueWaitMs,
-              });
-              return;
-            }
-
-            deferAttachmentCleanup = true;
-            queueDrainSessionKey = sessionKey;
-            this.logger.debug("Inbound request queued", {
-              requestId,
-              eventId: message.eventId,
-              sessionKey,
-              taskId: enqueueResult.task.id,
-            });
-            return;
-          }
         }
 
         const rateDecision = this.rateLimiter.tryAcquire({
