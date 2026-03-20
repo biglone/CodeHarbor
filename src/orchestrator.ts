@@ -32,13 +32,10 @@ import {
   type BackendModelRouteTaskType,
 } from "./routing/backend-model-router";
 import {
-  GLOBAL_RUNTIME_HOT_CONFIG_KEY,
-  parseRuntimeHotConfigPayload,
   type RuntimeHotConfigPayload,
 } from "./runtime-hot-config";
 import {
   ARCHIVE_REASON_MAX_ATTEMPTS,
-  ARCHIVE_REASON_NON_RETRYABLE,
   createRetryPolicy,
   type RetryPolicy,
   type RetryPolicyInput,
@@ -151,7 +148,6 @@ import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
   buildSessionKey,
-  classifyQueueTaskRetry,
   cleanupAttachmentFiles,
   formatByteSize,
   mapApiTaskStage,
@@ -159,6 +155,8 @@ import {
 import { buildExecutionPrompt as runBuildExecutionPrompt } from "./orchestrator/execution-prompt";
 import { routeMessage as runRouteMessage, type RouteDecision } from "./orchestrator/message-routing";
 import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./orchestrator/conversation-bridge";
+import { drainSessionQueue as runDrainSessionQueue } from "./orchestrator/task-queue-drain";
+import { syncRuntimeHotConfig as runSyncRuntimeHotConfig } from "./orchestrator/runtime-hot-config-sync";
 import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
@@ -1181,87 +1179,19 @@ export class Orchestrator {
     if (!queueStore) {
       return;
     }
-
-    while (true) {
-      const task = queueStore.claimNextTask(sessionKey);
-      if (!task) {
-        return;
-      }
-
-      let payload: QueuedInboundPayload | null = null;
-      try {
-        payload = parseQueuedInboundPayload(task.payloadJson);
-        await this.handleMessageInternal(payload.message, payload.receivedAt, {
-          bypassQueue: true,
-          forcedPrompt: payload.prompt,
-          deferFailureHandlingToQueue: true,
-        });
-        queueStore.finishTask(task.id);
-        this.logger.debug("Queued task completed", {
-          taskId: task.id,
-          sessionKey: task.sessionKey,
-          eventId: task.eventId,
-          attempt: task.attempt,
-        });
-      } catch (error) {
-        const detail = summarizeSingleLine(formatError(error), 400);
-        const retryDecision = classifyQueueTaskRetry(this.taskQueueRetryPolicy, task.attempt, error);
-
-        if (retryDecision.shouldRetry) {
-          const delayMs = retryDecision.retryDelayMs ?? 0;
-          const nextRetryAt = Date.now() + delayMs;
-          queueStore.scheduleRetry(task.id, {
-            nextRetryAt,
-            error: detail,
-          });
-          this.logger.warn("Queued task scheduled for retry", {
-            taskId: task.id,
-            sessionKey: task.sessionKey,
-            eventId: task.eventId,
-            attempt: task.attempt,
-            retryable: retryDecision.retryable,
-            nextRetryAt,
-            nextRetryAtIso: new Date(nextRetryAt).toISOString(),
-            retryDelayMs: delayMs,
-            retryReason: retryDecision.retryReason,
-            retryAfterMs: retryDecision.retryAfterMs,
-            error: formatError(error),
-          });
-          continue;
-        }
-
-        const archiveReason = retryDecision.archiveReason ?? ARCHIVE_REASON_NON_RETRYABLE;
-        queueStore.failAndArchive(task.id, {
-          error: detail,
-          retryReason: retryDecision.retryReason,
-          archiveReason,
-          retryAfterMs: retryDecision.retryAfterMs,
-        });
-        this.stateStore.commitExecutionHandled(task.sessionKey, task.eventId);
-
-        if (payload && archiveReason !== "cancelled") {
-          await this.sendQueuedTaskFailureNotice(payload.message.conversationId, {
-            attempt: task.attempt,
-            retryReason: retryDecision.retryReason,
-            archiveReason,
-            retryAfterMs: retryDecision.retryAfterMs,
-            detail,
-          });
-        }
-
-        this.logger.error("Queued task archived after failure", {
-          taskId: task.id,
-          sessionKey: task.sessionKey,
-          eventId: task.eventId,
-          attempt: task.attempt,
-          retryable: retryDecision.retryable,
-          retryReason: retryDecision.retryReason,
-          retryAfterMs: retryDecision.retryAfterMs,
-          archiveReason,
-          error: formatError(error),
-        });
-      }
-    }
+    await runDrainSessionQueue(
+      {
+        logger: this.logger,
+        taskQueueRetryPolicy: this.taskQueueRetryPolicy,
+        handleMessageInternal: (message, receivedAt, options) => this.handleMessageInternal(message, receivedAt, options),
+        commitExecutionHandled: (targetSessionKey, eventId) => this.stateStore.commitExecutionHandled(targetSessionKey, eventId),
+        sendQueuedTaskFailureNotice: (conversationId, input) => this.sendQueuedTaskFailureNotice(conversationId, input),
+      },
+      {
+        sessionKey,
+        queueStore,
+      },
+    );
   }
 
   private reconcileSessionQueueDrain(sessionKey: string): void {
@@ -1918,64 +1848,19 @@ export class Orchestrator {
   }
 
   private syncRuntimeHotConfig(): void {
-    const runtimeStateStore = this.stateStore as StateStore & {
-      getRuntimeConfigSnapshot?: (key: string) => {
-        version: number;
-        payloadJson: string;
-        updatedAt: number;
-      } | null;
-    };
-    if (typeof runtimeStateStore.getRuntimeConfigSnapshot !== "function") {
-      return;
-    }
-
-    let record:
-      | {
-          version: number;
-          payloadJson: string;
-          updatedAt: number;
-        }
-      | null = null;
-    try {
-      record = runtimeStateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
-    } catch (error) {
-      this.logger.debug("Failed to read runtime hot config snapshot", {
-        error: formatError(error),
-      });
-      return;
-    }
-    if (!record) {
-      return;
-    }
-
-    const latestKnownVersion = Math.max(this.hotConfigVersion, this.hotConfigRejectedVersion);
-    if (record.version <= latestKnownVersion) {
-      return;
-    }
-
-    const hotConfig = parseRuntimeHotConfigPayload(record.payloadJson);
-    if (!hotConfig) {
-      this.hotConfigRejectedVersion = record.version;
-      this.logger.warn("Ignore invalid runtime hot config snapshot payload", {
-        version: record.version,
-      });
-      return;
-    }
-
-    try {
-      this.applyRuntimeHotConfig(hotConfig);
-      this.hotConfigVersion = record.version;
-      this.logger.info("Runtime hot config applied", {
-        version: record.version,
-        updatedAt: new Date(record.updatedAt).toISOString(),
-      });
-    } catch (error) {
-      this.hotConfigRejectedVersion = record.version;
-      this.logger.warn("Failed to apply runtime hot config snapshot", {
-        version: record.version,
-        error: formatError(error),
-      });
-    }
+    runSyncRuntimeHotConfig({
+      stateStore: this.stateStore,
+      hotConfigVersion: this.hotConfigVersion,
+      hotConfigRejectedVersion: this.hotConfigRejectedVersion,
+      logger: this.logger,
+      applyRuntimeHotConfig: (config) => this.applyRuntimeHotConfig(config),
+      setHotConfigVersion: (version) => {
+        this.hotConfigVersion = version;
+      },
+      setHotConfigRejectedVersion: (version) => {
+        this.hotConfigRejectedVersion = version;
+      },
+    });
   }
 
   private applyRuntimeHotConfig(config: RuntimeHotConfigPayload): void {
