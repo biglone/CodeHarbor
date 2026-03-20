@@ -70,12 +70,9 @@ import {
 } from "./workflow/multi-agent-workflow";
 import {
   type AutoDevTask,
-  buildAutoDevObjective,
   formatTaskForDisplay,
   loadAutoDevContext,
   parseAutoDevCommand,
-  selectAutoDevTask,
-  statusToSymbol,
   summarizeAutoDevTasks,
   updateAutoDevTaskStatus,
 } from "./workflow/autodev";
@@ -104,10 +101,12 @@ import {
   summarizeSingleLine,
 } from "./orchestrator/helpers";
 import {
-  captureAutoDevGitBaseline,
-  tryAutoDevGitCommit,
   type AutoDevGitCommitResult,
 } from "./orchestrator/autodev-git";
+import {
+  runAutoDevCommand,
+  type AutoDevRunContext,
+} from "./orchestrator/autodev-runner";
 import {
   classifyBackendTaskType,
   isSameBackendProfile,
@@ -154,8 +153,6 @@ import {
 } from "./orchestrator/upgrade-utils";
 import {
   describeBackendRouteReason,
-  formatAutoDevGitChangedFiles,
-  formatAutoDevGitCommitResult,
   formatAutoDevGitCommitRecords,
   formatBackendRouteDiagRecords,
   formatBackendRouteProfile,
@@ -328,14 +325,6 @@ interface AutoDevRunSnapshot {
   loopDeadlineAt: string | null;
   lastGitCommitSummary: string | null;
   lastGitCommitAt: string | null;
-}
-
-interface AutoDevRunContext {
-  mode: "single" | "loop";
-  loopRound: number;
-  loopCompletedRuns: number;
-  loopMaxRuns: number;
-  loopDeadlineAt: string | null;
 }
 
 interface AutoDevFailurePolicyResult {
@@ -2097,428 +2086,48 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
     workdir: string,
     runContext?: AutoDevRunContext,
   ): Promise<void> {
-    const requestedTaskId = taskId?.trim() || null;
-    const context = await loadAutoDevContext(workdir);
-    const activeContext: AutoDevRunContext = runContext ?? {
-      mode: requestedTaskId ? "single" : "loop",
-      loopRound: requestedTaskId ? 1 : 0,
-      loopCompletedRuns: 0,
-      loopMaxRuns: requestedTaskId ? 1 : this.autoDevLoopMaxRuns,
-      loopDeadlineAt:
-        requestedTaskId || this.autoDevLoopMaxMinutes <= 0
-          ? null
-          : new Date(Date.now() + this.autoDevLoopMaxMinutes * 60_000).toISOString(),
-    };
-    if (!context.requirementsContent) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] AutoDev 需要 ${context.requirementsPath}，请先准备需求文档。`,
-      );
-      return;
-    }
-    if (!context.taskListContent) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] AutoDev 需要 ${context.taskListPath}，请先准备任务清单。`,
-      );
-      return;
-    }
-    if (context.tasks.length === 0) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 未在 TASK_LIST.md 识别到任务（需包含任务 ID 与状态列）。",
-      );
-      return;
-    }
-
-    if (!requestedTaskId) {
-      const loopStartedAt = Date.now();
-      const loopDeadlineAtIso = activeContext.loopDeadlineAt;
-      const loopDeadlineAtMs = loopDeadlineAtIso ? Date.parse(loopDeadlineAtIso) : null;
-      let completedRuns = 0;
-      let attemptedRuns = 0;
-      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-      this.activeAutoDevLoopSessions.add(sessionKey);
-      this.setAutoDevSnapshot(sessionKey, {
-        state: "running",
-        startedAt: new Date(loopStartedAt).toISOString(),
-        endedAt: null,
-        taskId: null,
-        taskDescription: null,
-        approved: null,
-        repairRounds: 0,
-        error: null,
-        mode: "loop",
-        loopRound: 0,
-        loopCompletedRuns: 0,
-        loopMaxRuns: activeContext.loopMaxRuns,
-        loopDeadlineAt: loopDeadlineAtIso,
-        lastGitCommitSummary: null,
-        lastGitCommitAt: null,
-      });
-      try {
-        while (true) {
-          const shouldStopLoop = await this.handleAutoDevLoopStopIfRequested({
-            sessionKey,
-            conversationId: message.conversationId,
-            loopStartedAt,
-            attemptedRuns,
-            completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAtIso,
-          });
-          if (shouldStopLoop) {
-            return;
-          }
-          if (attemptedRuns >= activeContext.loopMaxRuns) {
-            this.autoDevMetrics.recordLoopStop("max_runs");
-            const endedAtIso = new Date().toISOString();
-            this.setAutoDevSnapshot(sessionKey, {
-              state: "succeeded",
-              startedAt: new Date(loopStartedAt).toISOString(),
-              endedAt: endedAtIso,
-              taskId: null,
-              taskDescription: null,
-              approved: null,
-              repairRounds: 0,
-              error: null,
-              mode: "loop",
-              loopRound: attemptedRuns,
-              loopCompletedRuns: completedRuns,
-              loopMaxRuns: activeContext.loopMaxRuns,
-              loopDeadlineAt: loopDeadlineAtIso,
-              lastGitCommitSummary: null,
-              lastGitCommitAt: null,
-            });
-            await this.channel.sendNotice(
-              message.conversationId,
-              `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
-- attemptedRuns: ${attemptedRuns}
-- completedRuns: ${completedRuns}
-- loopMaxRuns: ${activeContext.loopMaxRuns}`,
-            );
-            return;
-          }
-          if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
-            this.autoDevMetrics.recordLoopStop("deadline");
-            const endedAtIso = new Date().toISOString();
-            this.setAutoDevSnapshot(sessionKey, {
-              state: "succeeded",
-              startedAt: new Date(loopStartedAt).toISOString(),
-              endedAt: endedAtIso,
-              taskId: null,
-              taskDescription: null,
-              approved: null,
-              repairRounds: 0,
-              error: null,
-              mode: "loop",
-              loopRound: attemptedRuns,
-              loopCompletedRuns: completedRuns,
-              loopMaxRuns: activeContext.loopMaxRuns,
-              loopDeadlineAt: loopDeadlineAtIso,
-              lastGitCommitSummary: null,
-              lastGitCommitAt: null,
-            });
-            await this.channel.sendNotice(
-              message.conversationId,
-              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
-- attemptedRuns: ${attemptedRuns}
-- completedRuns: ${completedRuns}
-- loopDeadlineAt: ${loopDeadlineAtIso}`,
-            );
-            return;
-          }
-
-          const loopContext = await loadAutoDevContext(workdir);
-          const loopTask = selectAutoDevTask(loopContext.tasks);
-          if (!loopTask) {
-            this.autoDevMetrics.recordLoopStop(completedRuns === 0 ? "no_task" : "drained");
-            const endedAtIso = new Date().toISOString();
-            this.setAutoDevSnapshot(sessionKey, {
-              state: "succeeded",
-              startedAt: new Date(loopStartedAt).toISOString(),
-              endedAt: endedAtIso,
-              taskId: null,
-              taskDescription: null,
-              approved: null,
-              repairRounds: 0,
-              error: null,
-              mode: "loop",
-              loopRound: attemptedRuns,
-              loopCompletedRuns: completedRuns,
-              loopMaxRuns: activeContext.loopMaxRuns,
-              loopDeadlineAt: loopDeadlineAtIso,
-              lastGitCommitSummary: null,
-              lastGitCommitAt: null,
-            });
-            if (completedRuns === 0) {
-              await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
-              return;
-            }
-            const summary = summarizeAutoDevTasks(loopContext.tasks);
-            await this.channel.sendNotice(
-              message.conversationId,
-              `[CodeHarbor] AutoDev 循环执行完成
-- completedRuns: ${completedRuns}
-- remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-            );
-            return;
-          }
-
-          const shouldStopBeforeNextTask = await this.handleAutoDevLoopStopIfRequested({
-            sessionKey,
-            conversationId: message.conversationId,
-            loopStartedAt,
-            attemptedRuns,
-            completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAtIso,
-          });
-          if (shouldStopBeforeNextTask) {
-            return;
-          }
-
-          attemptedRuns += 1;
-          await this.handleAutoDevRunCommand(loopTask.id, sessionKey, message, requestId, workdir, {
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-          });
-
-          const refreshed = await loadAutoDevContext(workdir);
-          const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
-          if (refreshedTask?.status === "completed") {
-            completedRuns += 1;
-          }
-          if (refreshedTask && refreshedTask.status !== "completed") {
-            this.autoDevMetrics.recordLoopStop("task_incomplete");
-            await this.channel.sendNotice(
-              message.conversationId,
-              `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
-            );
-            return;
-          }
-        }
-      } finally {
-        this.activeAutoDevLoopSessions.delete(sessionKey);
-        this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-      }
-    }
-
-    const selectedTask = selectAutoDevTask(context.tasks, requestedTaskId);
-    if (!selectedTask) {
-      if (requestedTaskId) {
-        await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 未找到任务 ${requestedTaskId}。`);
-        return;
-      }
-      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
-      return;
-    }
-    if (selectedTask.status === "completed") {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已完成（✅）。`);
-      return;
-    }
-    if (selectedTask.status === "cancelled") {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已取消（❌）。`);
-      return;
-    }
-
-    const gitBaseline = await captureAutoDevGitBaseline({
-      workdir,
-      logger: this.logger,
-    });
-    const effectiveContext: AutoDevRunContext = {
-      mode: activeContext.mode,
-      loopRound: Math.max(1, activeContext.loopRound),
-      loopCompletedRuns: Math.max(0, activeContext.loopCompletedRuns),
-      loopMaxRuns: Math.max(1, activeContext.loopMaxRuns),
-      loopDeadlineAt: activeContext.loopDeadlineAt,
-    };
-    let activeTask = selectedTask;
-    let promotedToInProgress = false;
-    if (selectedTask.status === "pending") {
-      activeTask = await updateAutoDevTaskStatus(context.taskListPath, selectedTask, "in_progress");
-      promotedToInProgress = true;
-    }
-
-    const startedAtIso = new Date().toISOString();
-    this.setAutoDevSnapshot(sessionKey, {
-      state: "running",
-      startedAt: startedAtIso,
-      endedAt: null,
-      taskId: activeTask.id,
-      taskDescription: activeTask.description,
-      approved: null,
-      repairRounds: 0,
-      error: null,
-      mode: effectiveContext.mode,
-      loopRound: effectiveContext.loopRound,
-      loopCompletedRuns: effectiveContext.loopCompletedRuns,
-      loopMaxRuns: effectiveContext.loopMaxRuns,
-      loopDeadlineAt: effectiveContext.loopDeadlineAt,
-      lastGitCommitSummary: null,
-      lastGitCommitAt: null,
-    });
-    const workflowDiagRunId = this.beginWorkflowDiagRun({
-      kind: "autodev",
-      sessionKey,
-      conversationId: message.conversationId,
-      requestId,
-      objective: buildAutoDevObjective(activeTask),
-      taskId: activeTask.id,
-      taskDescription: activeTask.description,
-    });
-    this.appendWorkflowDiagEvent(
-      workflowDiagRunId,
-      "autodev",
-      "autodev",
-      0,
-      `AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
-    );
-
-    await this.channel.sendNotice(
-      message.conversationId,
-      `[CodeHarbor] AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
-    );
-
-    try {
-      const result = await this.handleWorkflowRunCommand(
-        buildAutoDevObjective(activeTask),
+    await runAutoDevCommand(
+      {
+        logger: this.logger,
+        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoDevAutoCommit: this.autoDevAutoCommit,
+        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        setAutoDevSnapshot: (targetSessionKey, snapshot) => {
+          this.setAutoDevSnapshot(targetSessionKey, snapshot);
+        },
+        handleAutoDevLoopStopIfRequested: (input) => this.handleAutoDevLoopStopIfRequested(input),
+        channelSendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+        beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
+        appendWorkflowDiagEvent: (runId, kind, stage, round, eventMessage) =>
+          this.appendWorkflowDiagEvent(runId, kind, stage, round, eventMessage),
+        runWorkflowCommand: (input) =>
+          this.handleWorkflowRunCommand(
+            input.objective,
+            input.sessionKey,
+            input.message,
+            input.requestId,
+            input.workdir,
+            input.diagRunId,
+            "autodev",
+          ),
+        recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
+          this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
+        resetAutoDevFailureStreak: (targetWorkdir, targetTaskId) =>
+          this.resetAutoDevFailureStreak(targetWorkdir, targetTaskId),
+        applyAutoDevFailurePolicy: (input) => this.applyAutoDevFailurePolicy(input),
+        autoDevMetrics: this.autoDevMetrics,
+      },
+      {
+        taskId,
         sessionKey,
         message,
         requestId,
         workdir,
-        workflowDiagRunId,
-        "autodev",
-      );
-      if (!result) {
-        return;
-      }
-
-      let finalTask = activeTask;
-      let gitCommit: AutoDevGitCommitResult = {
-        kind: "skipped",
-        reason: "reviewer 未批准，未自动提交",
-      };
-      if (result.approved) {
-        finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
-        gitCommit = await tryAutoDevGitCommit({
-          workdir,
-          task: finalTask,
-          baseline: gitBaseline,
-          autoCommit: this.autoDevAutoCommit,
-          logger: this.logger,
-        });
-      }
-      this.recordAutoDevGitCommit(sessionKey, finalTask.id, gitCommit);
-      this.appendWorkflowDiagEvent(
-        workflowDiagRunId,
-        "autodev",
-        "git_commit",
-        0,
-        `task=${finalTask.id} result=${formatAutoDevGitCommitResult(gitCommit)} files=${formatAutoDevGitChangedFiles(gitCommit)}`,
-      );
-      this.resetAutoDevFailureStreak(workdir, finalTask.id);
-      const endedAtIso = new Date().toISOString();
-      this.setAutoDevSnapshot(sessionKey, {
-        state: "succeeded",
-        startedAt: startedAtIso,
-        endedAt: endedAtIso,
-        taskId: finalTask.id,
-        taskDescription: finalTask.description,
-        approved: result.approved,
-        repairRounds: result.repairRounds,
-        error: null,
-        mode: effectiveContext.mode,
-        loopRound: effectiveContext.loopRound,
-        loopCompletedRuns: effectiveContext.loopCompletedRuns + (finalTask.status === "completed" ? 1 : 0),
-        loopMaxRuns: effectiveContext.loopMaxRuns,
-        loopDeadlineAt: effectiveContext.loopDeadlineAt,
-        lastGitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
-        lastGitCommitAt: new Date().toISOString(),
-      });
-      this.autoDevMetrics.recordRunOutcome("succeeded");
-
-      const refreshed = await loadAutoDevContext(workdir);
-      const nextTask = selectAutoDevTask(refreshed.tasks);
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] AutoDev 任务结果
-- task: ${finalTask.id}
-- reviewer approved: ${result.approved ? "yes" : "no"}
-- task status: ${statusToSymbol(finalTask.status)}
-- git commit: ${formatAutoDevGitCommitResult(gitCommit)}
-- git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
-- nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
-      );
-      this.appendWorkflowDiagEvent(
-        workflowDiagRunId,
-        "autodev",
-        "autodev",
-        0,
-        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}`,
-      );
-    } catch (error) {
-      const failurePolicy = await this.applyAutoDevFailurePolicy({
-        workdir,
-        task: activeTask,
-        taskListPath: context.taskListPath,
-      });
-      activeTask = failurePolicy.task;
-      if (promotedToInProgress && !failurePolicy.blocked) {
-        try {
-          await updateAutoDevTaskStatus(context.taskListPath, activeTask, "pending");
-        } catch (restoreError) {
-          this.logger.warn("Failed to restore AutoDev task status after failure", {
-            taskId: activeTask.id,
-            error: formatError(restoreError),
-          });
-        }
-      }
-
-      const status = classifyExecutionOutcome(error);
-      const endedAtIso = new Date().toISOString();
-      this.setAutoDevSnapshot(sessionKey, {
-        state: status === "cancelled" ? "idle" : "failed",
-        startedAt: startedAtIso,
-        endedAt: endedAtIso,
-        taskId: activeTask.id,
-        taskDescription: activeTask.description,
-        approved: null,
-        repairRounds: 0,
-        error: formatError(error),
-        mode: effectiveContext.mode,
-        loopRound: effectiveContext.loopRound,
-        loopCompletedRuns: effectiveContext.loopCompletedRuns,
-        loopMaxRuns: effectiveContext.loopMaxRuns,
-        loopDeadlineAt: effectiveContext.loopDeadlineAt,
-        lastGitCommitSummary: null,
-        lastGitCommitAt: null,
-      });
-      this.appendWorkflowDiagEvent(
-        workflowDiagRunId,
-        "autodev",
-        "autodev",
-        0,
-        `AutoDev 失败: ${formatError(error)}, streak=${failurePolicy.streak}, blocked=${
-          failurePolicy.blocked ? "yes" : "no"
-        }`,
-      );
-      if (failurePolicy.blocked) {
-        this.autoDevMetrics.recordTaskBlocked();
-        await this.channel.sendNotice(
-          message.conversationId,
-          `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
-        );
-      }
-      this.autoDevMetrics.recordRunOutcome(status === "cancelled" ? "cancelled" : "failed");
-      if (failurePolicy.blocked && effectiveContext.mode === "loop") {
-        return;
-      }
-      throw error;
-    }
+        runContext,
+      },
+    );
   }
 
   private async applyAutoDevFailurePolicy(input: {
