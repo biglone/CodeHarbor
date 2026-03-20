@@ -76,7 +76,6 @@ import {
   type WorkflowRoleSkillPolicyOverride,
 } from "./workflow/role-skills";
 import {
-  formatDurationMs,
   formatError,
   formatWorkflowContextBudget,
   formatWorkflowRoleSkillLoaded,
@@ -100,9 +99,7 @@ import {
   classifyBackendTaskType,
   isSameBackendProfile,
   normalizeBackendProfile,
-  parseBackendTarget,
   parseControlCommand,
-  parseUpgradeTarget,
 } from "./orchestrator/command-routing";
 import {
   collectLocalAttachmentPaths,
@@ -122,8 +119,6 @@ import {
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
   buildDefaultUpgradeRestartPlan,
-  evaluateUpgradePostCheck,
-  formatSelfUpdateError,
   probeInstalledVersion,
   runSelfUpdateCommand,
   type SelfUpdateResult,
@@ -131,14 +126,13 @@ import {
   type UpgradeVersionProbeResult,
 } from "./orchestrator/upgrade-utils";
 import {
-  describeBackendRouteReason,
   formatBackendRouteProfile,
-  isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
 import {
   handleControlCommand as runControlCommand,
   type ControlCommand,
 } from "./orchestrator/control-command-handler";
+import { handleBackendCommand as runBackendCommand } from "./orchestrator/backend-command";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
@@ -154,6 +148,7 @@ import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import { handleStopCommand as runStopCommand } from "./orchestrator/stop-command";
+import { handleUpgradeCommand as runUpgradeCommand } from "./orchestrator/upgrade-command";
 import { handleWorkflowStatusCommand as runWorkflowStatusCommand } from "./orchestrator/workflow-status-command";
 import {
   buildApiTaskErrorSummary,
@@ -2791,114 +2786,23 @@ export class Orchestrator {
   }
 
   private async handleUpgradeCommand(message: InboundMessage): Promise<void> {
-    const auth = this.authorizeUpgradeRequest(message);
-    if (!auth.allowed) {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] ${auth.reason}`);
-      return;
-    }
-
-    const parsed = parseUpgradeTarget(message.text);
-    if (!parsed.ok) {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] ${parsed.reason}`);
-      return;
-    }
-
-    if (this.upgradeMutex.isLocked()) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 已有升级任务在执行中，请稍后发送 /diag version 或 /version 查看结果。",
-      );
-      return;
-    }
-    const distributedLock = this.acquireUpgradeExecutionLock();
-    if (!distributedLock.acquired) {
-      const lockUntil = distributedLock.expiresAt ? new Date(distributedLock.expiresAt).toISOString() : "unknown";
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] 已有升级任务在其他实例执行中（owner=${distributedLock.owner ?? "unknown"}，lockUntil=${lockUntil}）。请稍后再试。`,
-      );
-      return;
-    }
-
-    const targetLabel = parsed.version ? parsed.version : "latest";
-    const upgradeRunId = this.createUpgradeRun(message.senderId, parsed.version);
-    const startedAt = Date.now();
-    await this.channel.sendNotice(
-      message.conversationId,
-      `${this.botNoticePrefix} 已开始升级（目标: ${targetLabel}），将安装 npm 最新包并自动重启服务。`,
+    await runUpgradeCommand(
+      {
+        logger: this.logger,
+        botNoticePrefix: this.botNoticePrefix,
+        upgradeMutex: this.upgradeMutex,
+        authorizeUpgradeRequest: (targetMessage) => this.authorizeUpgradeRequest(targetMessage),
+        acquireUpgradeExecutionLock: () => this.acquireUpgradeExecutionLock(),
+        releaseUpgradeExecutionLock: () => this.releaseUpgradeExecutionLock(),
+        createUpgradeRun: (requestedBy, targetVersion) => this.createUpgradeRun(requestedBy, targetVersion),
+        finishUpgradeRun: (runId, input) => this.finishUpgradeRun(runId, input),
+        selfUpdateRunner: (input) => this.selfUpdateRunner(input),
+        upgradeRestartPlanner: () => this.upgradeRestartPlanner(),
+        upgradeVersionProbe: () => this.upgradeVersionProbe(),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      message,
     );
-
-    try {
-      await this.upgradeMutex.runExclusive(async () => {
-        try {
-          const result = await this.selfUpdateRunner({
-            version: parsed.version,
-          });
-          const restartPlan = await this.upgradeRestartPlanner();
-          const versionProbe = await this.upgradeVersionProbe();
-          const postCheck = evaluateUpgradePostCheck({
-            targetVersion: parsed.version,
-            selfUpdateVersion: result.installedVersion,
-            versionProbe,
-          });
-          const elapsed = formatDurationMs(Date.now() - startedAt);
-          if (postCheck.ok) {
-            const installedVersion = postCheck.installedVersion ?? "unknown";
-            await this.channel.sendNotice(
-              message.conversationId,
-              `${this.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
-- 目标版本: ${targetLabel}
-- 已安装版本: ${installedVersion}
-- 升级校验: 通过（${postCheck.checkDetail}）
-- 服务重启: ${restartPlan.summary}
-- 校验建议: 稍后发送 /diag version 或 /version`,
-            );
-            this.finishUpgradeRun(upgradeRunId, {
-              status: "succeeded",
-              installedVersion,
-              error: null,
-            });
-          } else {
-            const observedVersion = postCheck.installedVersion ?? "unknown";
-            await this.channel.sendNotice(
-              message.conversationId,
-              `${this.botNoticePrefix} 升级后校验失败（耗时 ${elapsed}）
-- 目标版本: ${targetLabel}
-- 观测版本: ${observedVersion}
-- 失败原因: ${postCheck.checkDetail}
-- 服务重启: ${restartPlan.summary}
-- 恢复建议: 发送 /diag version 查看实例路径；必要时执行 codeharbor self-update --with-admin`,
-            );
-            this.finishUpgradeRun(upgradeRunId, {
-              status: "failed",
-              installedVersion: postCheck.installedVersion,
-              error: `post-check failed: ${postCheck.checkDetail}`,
-            });
-          }
-          try {
-            await restartPlan.apply();
-          } catch (restartError) {
-            this.logger.warn("Failed to apply post-upgrade restart plan", { restartError });
-          }
-        } catch (error) {
-          const errorText = formatSelfUpdateError(error);
-          const elapsed = formatDurationMs(Date.now() - startedAt);
-          await this.channel.sendNotice(
-            message.conversationId,
-            `${this.botNoticePrefix} 升级失败（耗时 ${elapsed}）
-- 错误: ${errorText}
-- 兜底命令: codeharbor self-update --with-admin`,
-          );
-          this.finishUpgradeRun(upgradeRunId, {
-            status: "failed",
-            installedVersion: null,
-            error: errorText,
-          });
-        }
-      });
-    } finally {
-      this.releaseUpgradeExecutionLock();
-    }
   }
 
   private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
@@ -3110,94 +3014,30 @@ export class Orchestrator {
   }
 
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    const target = parseBackendTarget(message.text);
-    const manualOverride = this.sessionBackendOverrides.get(sessionKey);
-    const statusProfile = this.resolveSessionBackendStatusProfile(sessionKey);
-    if (!target || target === "status") {
-      const mode = manualOverride ? "manual" : "auto";
-      const decision = this.sessionLastBackendDecisions.get(sessionKey);
-      const reason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
-      const rule = decision?.ruleId ?? "none";
-      const reasonDesc = describeBackendRouteReason(reason);
-      const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] 当前后端工具: ${this.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n原因说明: ${reasonDesc}\n命中规则: ${rule}\n是否回退: ${fallback}\n可用命令: /backend codex | /backend claude | /backend auto | /backend status`,
-      );
-      return;
-    }
-
-    if (target === "auto") {
-      if (!manualOverride) {
-        await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前已经处于自动路由模式。");
-        return;
-      }
-      if (this.runningExecutions.has(sessionKey)) {
-        await this.channel.sendNotice(
-          message.conversationId,
-          "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
-        );
-        return;
-      }
-      this.sessionBackendOverrides.delete(sessionKey);
-      this.stateStore.clearCodexSessionId(sessionKey);
-      this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-      this.clearSessionFromAllRuntimes(sessionKey);
-      this.sessionBackendProfiles.delete(sessionKey);
-      this.workflowSnapshots.delete(sessionKey);
-      this.autoDevSnapshots.delete(sessionKey);
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 已恢复自动路由模式。下一个请求会自动注入最近本地会话历史作为桥接上下文。",
-      );
-      return;
-    }
-
-    const targetProfile = this.resolveManualBackendProfile(target);
-    if (manualOverride && this.serializeBackendProfile(manualOverride.profile) === this.serializeBackendProfile(targetProfile)) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] 后端工具已是 ${this.formatBackendToolLabel(targetProfile)}（manual）。`,
-      );
-      return;
-    }
-
-    if (!this.executorFactory && !this.hasBackendRuntime(targetProfile)) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 当前运行模式不支持会话内切换后端，请修改 .env 后重启服务。",
-      );
-      return;
-    }
-    if (this.runningExecutions.has(sessionKey)) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
-      );
-      return;
-    }
-
-    this.ensureBackendRuntime(targetProfile);
-    this.sessionBackendOverrides.set(sessionKey, {
-      profile: targetProfile,
-      updatedAt: Date.now(),
-    });
-    this.sessionBackendProfiles.set(sessionKey, targetProfile);
-    this.sessionLastBackendDecisions.set(sessionKey, {
-      profile: targetProfile,
-      source: "manual_override",
-      reasonCode: "manual_override",
-      ruleId: null,
-    });
-    this.stateStore.clearCodexSessionId(sessionKey);
-    this.stateStore.activateSession(sessionKey, this.sessionActiveWindowMs);
-    this.clearSessionFromAllRuntimes(sessionKey);
-    this.workflowSnapshots.delete(sessionKey);
-    this.autoDevSnapshots.delete(sessionKey);
-
-    await this.channel.sendNotice(
-      message.conversationId,
-      `[CodeHarbor] 已切换后端工具为 ${this.formatBackendToolLabel(targetProfile)}（manual）。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
+    await runBackendCommand(
+      {
+        sessionActiveWindowMs: this.sessionActiveWindowMs,
+        canCreateBackendRuntime: Boolean(this.executorFactory),
+        sessionBackendOverrides: this.sessionBackendOverrides,
+        sessionBackendProfiles: this.sessionBackendProfiles,
+        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+        workflowSnapshots: this.workflowSnapshots,
+        autoDevSnapshots: this.autoDevSnapshots,
+        runningExecutions: this.runningExecutions,
+        stateStore: this.stateStore,
+        resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
+        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+        resolveManualBackendProfile: (provider) => this.resolveManualBackendProfile(provider),
+        serializeBackendProfile: (profile) => this.serializeBackendProfile(profile),
+        hasBackendRuntime: (profile) => this.hasBackendRuntime(profile),
+        ensureBackendRuntime: (profile) => this.ensureBackendRuntime(profile),
+        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      {
+        sessionKey,
+        message,
+      },
     );
   }
 
