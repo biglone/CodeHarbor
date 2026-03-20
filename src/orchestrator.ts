@@ -152,6 +152,7 @@ import {
   formatBackendRouteProfile,
   isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
+import { buildHelpNotice, buildStatusNotice } from "./orchestrator/control-text";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import {
   buildApiTaskErrorSummary,
@@ -1776,28 +1777,10 @@ export class Orchestrator {
     if (command === "help") {
       await this.channel.sendNotice(
         message.conversationId,
-        `${this.botNoticePrefix} 可用命令
-- /help: 查看命令帮助
-- /status: 查看会话状态（版本检查为缓存结果）
-- /version: 实时检查最新版本
-- /autodev status: 查看 AutoDev 当前任务、过程阶段与运行状态
-- /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
-- /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
-- /autodev progress [on|off|status]: 控制 AutoDev/Multi-Agent 过程回显详细模式（默认 on）
-- /autodev skills [on|off|summary|progressive|full|status]: 控制角色技能注入开关与披露模式（默认 progressive）
-- 多模态状态: ${this.formatMultimodalHelpStatus()}
-- /diag version: 查看运行实例诊断信息
-- /diag media [count]: 查看最近多模态处理诊断（count 默认 10）
-- /diag upgrade [count]: 查看最近升级任务诊断（count 默认 5）
-- /diag route [count]: 查看后端路由命中与回退原因诊断（count 默认 10）
-- /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
-- /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
-- /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
-- /backend codex|claude|auto|status: 查看/切换后端工具（auto=恢复自动路由）
-- /reset: 清空当前会话上下文
-- /stop: 停止当前执行任务
-- Matrix 客户端若拦截 / 命令，可发送 //autodev run T6.2（兼容 //agents、//diag、//upgrade）
-- help|帮助|菜单: /help 的文本别名（用于 Matrix 拦截 /help 的客户端）`,
+        buildHelpNotice({
+          botNoticePrefix: this.botNoticePrefix,
+          multimodalHelpStatus: this.formatMultimodalHelpStatus(),
+        }),
       );
       return;
     }
@@ -1857,41 +1840,55 @@ export class Orchestrator {
 
     await this.channel.sendNotice(
       message.conversationId,
-      `${this.botNoticePrefix} 当前状态
-- 会话类型: ${scope}
-- 激活中: ${status.isActive ? "是" : "否"}
-- activeUntil: ${activeUntil}
-- 已绑定会话: ${status.hasCodexSession ? "是" : "否"}
-- 当前工作目录: ${roomConfig.workdir}
-- AI CLI: ${this.formatBackendToolLabel(backendProfile)}
-- backend route: mode=${backendRouteMode}, reason=${backendRouteReason}, rule=${backendRouteRuleId}
-- backend route detail: desc=${backendRouteReasonDesc}, fallback=${backendRouteFallback}
-- 当前版本: ${packageUpdate.currentVersion}
-- 更新检查: ${formatPackageUpdateHint(packageUpdate)}
-- 更新检查时间: ${packageUpdate.checkedAt}
-- 更新来源: 缓存结果（TTL=${formatCacheTtl(this.updateCheckTtlMs)}，发送 /version 可实时刷新）
-- 最近升级: ${formatLatestUpgradeSummary(latestUpgrade)}
-- 升级记录: ${formatRecentUpgradeRunsSummary(recentUpgrades)}
-- 升级指标: total=${upgradeStats.total}, succeeded=${upgradeStats.succeeded}, failed=${upgradeStats.failed}, running=${upgradeStats.running}, avg=${upgradeStats.avgDurationMs}ms
-- 升级锁: ${formatUpgradeLockSummary(upgradeLock)}
-- 运行中任务: ${metrics.activeExecutions}
-- 指标: total=${metrics.total}, success=${metrics.success}, failed=${metrics.failed}, timeout=${metrics.timeout}, cancelled=${metrics.cancelled}, rate_limited=${metrics.rateLimited}
-- 平均耗时: queue=${metrics.avgQueueMs}ms, exec=${metrics.avgExecMs}ms, send=${metrics.avgSendMs}ms
-- 限流并发: global=${limiter.activeGlobal}, users=${limiter.activeUsers}, rooms=${limiter.activeRooms}
-- CLI runtime: workers=${runtime.workerCount}, running=${runtime.runningCount}, compat_mode=${
-        this.cliCompat.enabled ? "on" : "off"
-      }
-- Multi-Agent workflow: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${workflow.state}
-- Multi-Agent context: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
-        this.workflowOutputContextMaxChars,
-      )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
-- Multi-Agent role skills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
-- Multi-Agent role skills loaded: ${roleSkillStatus.loaded}
-- AutoDev: enabled=${this.workflowRunner.isEnabled() ? "on" : "off"}, state=${autoDev.state}, mode=${autoDev.mode}, task=${autoDevTask}, duration=${autoDevRunDuration}
-- AutoDev loop: round=${autoDev.loopRound}/${autoDev.loopMaxRuns}, completed=${autoDev.loopCompletedRuns}, deadline=${autoDev.loopDeadlineAt ?? "N/A"}, active=${autoDevLoopActive}
-- AutoDev control: loopStopRequested=${autoDevLoopStopRequested}, stopRequested=${autoDevStopRequested}, detailedProgress=${autoDevDetailedProgress} (default=${autoDevDetailedProgressDefault})
-- AutoDev stage: run=${autoDevDiagRun?.runId ?? "N/A"}, status=${autoDevDiagRun?.status ?? "N/A"}, latest=${autoDevStageSummary}
-- AutoDev stage detail: ${autoDevStageMessage}`,
+      buildStatusNotice({
+        botNoticePrefix: this.botNoticePrefix,
+        scope,
+        isActive: status.isActive,
+        activeUntil,
+        hasCodexSession: status.hasCodexSession,
+        workdir: roomConfig.workdir,
+        backendLabel: this.formatBackendToolLabel(backendProfile),
+        backendRouteMode,
+        backendRouteReason,
+        backendRouteRuleId,
+        backendRouteReasonDesc,
+        backendRouteFallback,
+        currentVersion: packageUpdate.currentVersion,
+        updateHint: formatPackageUpdateHint(packageUpdate),
+        checkedAt: packageUpdate.checkedAt,
+        updateCacheTtlText: formatCacheTtl(this.updateCheckTtlMs),
+        latestUpgradeSummary: formatLatestUpgradeSummary(latestUpgrade),
+        recentUpgradesSummary: formatRecentUpgradeRunsSummary(recentUpgrades),
+        upgradeStats,
+        upgradeLockSummary: formatUpgradeLockSummary(upgradeLock),
+        metrics,
+        limiter,
+        runtime,
+        cliCompatEnabled: this.cliCompat.enabled,
+        workflowEnabled: this.workflowRunner.isEnabled(),
+        workflowState: workflow.state,
+        workflowPlanBudget: formatWorkflowContextBudget(this.workflowPlanContextMaxChars),
+        workflowOutputBudget: formatWorkflowContextBudget(this.workflowOutputContextMaxChars),
+        workflowFeedbackBudget: formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars),
+        roleSkillStatus,
+        autoDevState: autoDev.state,
+        autoDevMode: autoDev.mode,
+        autoDevTask,
+        autoDevRunDuration,
+        autoDevLoopRound: autoDev.loopRound,
+        autoDevLoopMaxRuns: autoDev.loopMaxRuns,
+        autoDevLoopCompletedRuns: autoDev.loopCompletedRuns,
+        autoDevLoopDeadlineAt: autoDev.loopDeadlineAt,
+        autoDevLoopActive,
+        autoDevLoopStopRequested,
+        autoDevStopRequested,
+        autoDevDetailedProgress,
+        autoDevDetailedProgressDefault,
+        autoDevDiagRunId: autoDevDiagRun?.runId ?? "N/A",
+        autoDevDiagRunStatus: autoDevDiagRun?.status ?? "N/A",
+        autoDevStageSummary,
+        autoDevStageMessage,
+      }),
     );
   }
 
