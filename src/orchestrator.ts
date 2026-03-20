@@ -26,7 +26,6 @@ import {
 import { RateLimiter, type RateLimiterOptions } from "./rate-limiter";
 import {
   BackendModelRouter,
-  type BackendModelRouteInput,
   type BackendModelRouteProfile,
   type BackendModelRouteRule,
   type BackendModelRouteTaskType,
@@ -157,6 +156,7 @@ import { routeMessage as runRouteMessage, type RouteDecision } from "./orchestra
 import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./orchestrator/conversation-bridge";
 import { drainSessionQueue as runDrainSessionQueue } from "./orchestrator/task-queue-drain";
 import { syncRuntimeHotConfig as runSyncRuntimeHotConfig } from "./orchestrator/runtime-hot-config-sync";
+import { resolveSessionBackendDecision as runResolveSessionBackendDecision } from "./orchestrator/backend-decision";
 import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
@@ -1912,50 +1912,17 @@ export class Orchestrator {
     taskType: BackendModelRouteTaskType;
     routePrompt: string;
   }): SessionBackendDecision {
-    const manualOverride = this.sessionBackendOverrides.get(input.sessionKey);
-    if (manualOverride) {
-      return {
-        profile: manualOverride.profile,
-        source: "manual_override",
-        reasonCode: "manual_override",
-        ruleId: null,
-      };
-    }
-
-    const routeInput: BackendModelRouteInput = {
-      roomId: input.message.conversationId,
-      senderId: input.message.senderId,
-      taskType: input.taskType,
-      directMessage: input.message.isDirectMessage,
-      text: input.routePrompt,
-    };
-    const routed = this.backendModelRouter.resolve(routeInput, this.defaultBackendProfile);
-    if (!this.executorFactory && !this.hasBackendRuntime(routed.profile)) {
-      if (routed.profile.provider !== this.defaultBackendProfile.provider || routed.profile.model !== this.defaultBackendProfile.model) {
-        this.logger.warn("Backend/model rule matched but executorFactory is unavailable; falling back to default backend.", {
-          sessionKey: input.sessionKey,
-          matchedProvider: routed.profile.provider,
-          matchedModel: routed.profile.model,
-          defaultProvider: this.defaultBackendProfile.provider,
-          defaultModel: this.defaultBackendProfile.model,
-          ruleId: routed.ruleId,
-          taskType: input.taskType,
-        });
-      }
-      return {
-        profile: this.defaultBackendProfile,
-        source: "default",
-        reasonCode: "factory_unavailable",
-        ruleId: routed.ruleId,
-      };
-    }
-
-    return {
-      profile: routed.profile,
-      source: routed.source,
-      reasonCode: routed.reasonCode,
-      ruleId: routed.ruleId,
-    };
+    return runResolveSessionBackendDecision(
+      {
+        sessionBackendOverrides: this.sessionBackendOverrides,
+        resolveBackendRoute: (routeInput, fallback) => this.backendModelRouter.resolve(routeInput, fallback),
+        defaultBackendProfile: this.defaultBackendProfile,
+        canCreateBackendRuntime: Boolean(this.executorFactory),
+        hasBackendRuntime: (profile) => this.hasBackendRuntime(profile),
+        logger: this.logger,
+      },
+      input,
+    );
   }
 
   private prepareBackendRuntimeForSession(sessionKey: string, profile: BackendModelRouteProfile): BackendRuntimeBundle {
