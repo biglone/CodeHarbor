@@ -68,10 +68,7 @@ import {
 } from "./workflow/multi-agent-workflow";
 import {
   type AutoDevTask,
-  formatTaskForDisplay,
-  loadAutoDevContext,
   parseAutoDevCommand,
-  summarizeAutoDevTasks,
   updateAutoDevTaskStatus,
 } from "./workflow/autodev";
 import {
@@ -83,9 +80,7 @@ import {
 import {
   formatDurationMs,
   formatError,
-  formatRunWindowDuration,
   formatWorkflowContextBudget,
-  formatWorkflowDiagRunDuration,
   formatWorkflowProgressNotice,
   formatWorkflowRoleSkillLoaded,
   parseCsvValues,
@@ -150,6 +145,8 @@ import { buildHelpNotice } from "./orchestrator/control-text";
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
+import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
+import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { handleStatusCommand } from "./orchestrator/status-command";
 import {
   buildApiTaskErrorSummary,
@@ -165,8 +162,6 @@ import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
   createEmptyWorkflowDiagStorePayload,
-  formatAutoDevStatusRunSummaries,
-  formatAutoDevStatusStageTrace,
   parseWorkflowDiagStorePayload,
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunKind,
@@ -449,6 +444,7 @@ export class Orchestrator {
   private readonly logger: Logger;
   private readonly sessionLocks = new Map<string, SessionLockEntry>();
   private readonly runningExecutions = new Map<string, RunningExecution>();
+  private readonly activeSessionRequestCounts = new Map<string, number>();
   private readonly pendingStopRequests = new Set<string>();
   private readonly pendingAutoDevLoopStopRequests = new Set<string>();
   private readonly activeAutoDevLoopSessions = new Set<string>();
@@ -849,11 +845,14 @@ export class Orchestrator {
     const attachmentPaths = collectLocalAttachmentPaths(message);
     let deferAttachmentCleanup = false;
     let queueDrainSessionKey: string | null = null;
+    let sessionKeyForLifecycle: string | null = null;
 
     try {
       const requestId = message.requestId || message.eventId;
       this.syncRuntimeHotConfig();
       const sessionKey = buildSessionKey(message);
+      sessionKeyForLifecycle = sessionKey;
+      this.markSessionRequestStarted(sessionKey);
 
       const directCommand = parseControlCommand(message.text.trim());
       if (directCommand === "stop") {
@@ -1169,6 +1168,9 @@ export class Orchestrator {
         );
       });
     } finally {
+      if (sessionKeyForLifecycle) {
+        this.markSessionRequestFinished(sessionKeyForLifecycle);
+      }
       if (!deferAttachmentCleanup) {
         await cleanupAttachmentFiles(attachmentPaths);
       }
@@ -1187,73 +1189,33 @@ export class Orchestrator {
     roomConfig: RoomRuntimeConfig;
     queueWaitMs: number;
   }): Promise<boolean> {
-    const { route, sessionKey, message, requestId, roomConfig, queueWaitMs } = input;
-    const isReadOnlyControlCommand =
-      route.kind === "command" &&
-      (route.command === "status" || route.command === "version" || route.command === "help" || route.command === "diag");
-    const workflowCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseWorkflowCommand(route.prompt) : null;
-    const autoDevCommand = route.kind === "execute" && this.workflowRunner.isEnabled() ? parseAutoDevCommand(route.prompt) : null;
-    const isWorkflowStatus = workflowCommand?.kind === "status";
-    const isAutoDevStatus = autoDevCommand?.kind === "status";
-    const isAutoDevProgress = autoDevCommand?.kind === "progress";
-    const isAutoDevSkills = autoDevCommand?.kind === "skills";
-    const isAutoDevStop = autoDevCommand?.kind === "stop";
-
-    if (
-      !isReadOnlyControlCommand &&
-      !isWorkflowStatus &&
-      !isAutoDevStatus &&
-      !isAutoDevProgress &&
-      !isAutoDevSkills &&
-      !isAutoDevStop
-    ) {
-      return false;
-    }
-
-    if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-      this.recordRequestMetrics("duplicate", queueWaitMs, 0, 0);
-      this.logger.debug("Duplicate non-blocking status command ignored", {
-        requestId,
-        eventId: message.eventId,
-        sessionKey,
-        queueWaitMs,
-      });
-      return true;
-    }
-
-    if (isReadOnlyControlCommand) {
-      await this.handleControlCommand(route.command, sessionKey, message, requestId);
-    } else if (isWorkflowStatus) {
-      await this.handleWorkflowStatusCommand(sessionKey, message);
-    } else if (isAutoDevProgress) {
-      await this.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
-    } else if (isAutoDevSkills) {
-      await this.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
-    } else if (isAutoDevStop) {
-      await this.handleAutoDevLoopStopCommand(sessionKey, message);
-    } else {
-      await this.handleAutoDevStatusCommand(sessionKey, message, roomConfig.workdir);
-    }
-    this.stateStore.markEventProcessed(sessionKey, message.eventId);
-    this.logger.debug("Handled non-blocking status command without waiting for session lock", {
-      requestId,
-      eventId: message.eventId,
-      sessionKey,
-      route:
-        route.kind === "command"
-          ? route.command
-          : isWorkflowStatus
-          ? "workflow.status"
-            : isAutoDevProgress
-              ? "autodev.progress"
-            : isAutoDevSkills
-              ? "autodev.skills"
-            : isAutoDevStop
-              ? "autodev.stop"
-              : "autodev.status",
-      queueWaitMs,
-    });
-    return true;
+    return runNonBlockingStatusRoute(
+      {
+        logger: this.logger,
+        workflowEnabled: this.workflowRunner.isEnabled(),
+        hasProcessedEvent: (sessionKey, eventId) => this.stateStore.hasProcessedEvent(sessionKey, eventId),
+        markEventProcessed: (sessionKey, eventId) => this.stateStore.markEventProcessed(sessionKey, eventId),
+        recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+          this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+        handleControlCommand: (command, sessionKey, message, requestId) =>
+          this.handleControlCommand(command, sessionKey, message, requestId),
+        handleWorkflowStatusCommand: (sessionKey, message) => this.handleWorkflowStatusCommand(sessionKey, message),
+        handleAutoDevStatusCommand: (sessionKey, message, workdir) =>
+          this.handleAutoDevStatusCommand(sessionKey, message, workdir),
+        handleAutoDevProgressCommand: (sessionKey, message, mode) =>
+          this.handleAutoDevProgressCommand(sessionKey, message, mode),
+        handleAutoDevSkillsCommand: (sessionKey, message, mode) => this.handleAutoDevSkillsCommand(sessionKey, message, mode),
+        handleAutoDevLoopStopCommand: (sessionKey, message) => this.handleAutoDevLoopStopCommand(sessionKey, message),
+      },
+      {
+        route: input.route,
+        sessionKey: input.sessionKey,
+        message: input.message,
+        requestId: input.requestId,
+        workdir: input.roomConfig.workdir,
+        queueWaitMs: input.queueWaitMs,
+      },
+    );
   }
 
   private startSessionQueueDrain(sessionKey: string): void {
@@ -1680,68 +1642,30 @@ export class Orchestrator {
     message: InboundMessage,
     workdir: string,
   ): Promise<void> {
-    const snapshot = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
-    try {
-      const context = await loadAutoDevContext(workdir);
-      const summary = summarizeAutoDevTasks(context.tasks);
-      const inProgressTask = context.tasks.find((task) => task.status === "in_progress") ?? null;
-      const runDuration = formatRunWindowDuration(snapshot.startedAt, snapshot.endedAt);
-      const loopActive = this.activeAutoDevLoopSessions.has(sessionKey) ? "yes" : "no";
-      const loopStopRequested = this.pendingAutoDevLoopStopRequests.has(sessionKey) ? "yes" : "no";
-      const stopRequested = this.pendingStopRequests.has(sessionKey) ? "yes" : "no";
-      const detailedProgress = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
-      const detailedProgressDefault = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
-      const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
-      const recentRuns = this.listWorkflowDiagRunsBySession("autodev", sessionKey, 3);
-      const latestRun = recentRuns[0] ?? null;
-      const stageEvents = latestRun ? this.listWorkflowDiagEvents(latestRun.runId, 12) : [];
-      const latestStageEvent = stageEvents.length > 0 ? stageEvents[stageEvents.length - 1] : null;
-      const latestStageSummary = latestStageEvent
-        ? `stage=${latestStageEvent.stage}, round=${latestStageEvent.round}, at=${latestStageEvent.at}, message=${latestStageEvent.message}`
-        : "N/A";
-      const latestRunLastStage = latestRun?.lastStage
-        ? `${latestRun.lastStage}${latestRun.lastMessage ? `(${latestRun.lastMessage})` : ""}`
-        : "N/A";
-      const currentTask =
-        snapshot.taskId && snapshot.taskDescription
-          ? `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
-          : snapshot.taskId
-            ? snapshot.taskId
-            : inProgressTask
-              ? formatTaskForDisplay(inProgressTask)
-              : "N/A";
-
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] AutoDev 状态
-- workdir: ${workdir}
-- REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
-- TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
-- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
-- roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
-- roleSkillsLoaded: ${roleSkillStatus.loaded}
-- runState: ${snapshot.state}
-- currentTask: ${currentTask}
-- runWindow: startedAt=${snapshot.startedAt ?? "N/A"}, endedAt=${snapshot.endedAt ?? "N/A"}, duration=${runDuration}
-- runMode: ${snapshot.mode}
-- runLoop: round=${snapshot.loopRound}, completed=${snapshot.loopCompletedRuns}/${snapshot.loopMaxRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
-- runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
-- runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
-- runError: ${snapshot.error ?? "N/A"}
-- runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
-- runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
-- workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
-- workflowDiagLastStage: ${latestRunLastStage}
-- workflowStage: ${latestStageSummary}
-- recentRuns:
-${formatAutoDevStatusRunSummaries(recentRuns)}
-- stageTrace:
-${formatAutoDevStatusStageTrace(stageEvents)}`,
-      );
-    } catch (error) {
-      await this.channel.sendNotice(message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
-    }
+    await runAutoDevStatusCommand(
+      {
+        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+        getAutoDevSnapshot: (targetSessionKey) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
+        hasActiveAutoDevLoopSession: (targetSessionKey) => this.activeAutoDevLoopSessions.has(targetSessionKey),
+        hasPendingAutoDevLoopStopRequest: (targetSessionKey) => this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
+        hasPendingStopRequest: (targetSessionKey) => this.pendingStopRequests.has(targetSessionKey),
+        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+        listWorkflowDiagRunsBySession: (kind, targetSessionKey, limit) =>
+          this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
+        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      {
+        sessionKey,
+        message,
+        workdir,
+      },
+    );
   }
 
   private async handleAutoDevProgressCommand(
@@ -2148,7 +2072,7 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
     }
 
     const lockEntry = this.sessionLocks.get(sessionKey);
-    if (lockEntry?.mutex.isLocked()) {
+    if (lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(sessionKey)) {
       this.pendingStopRequests.add(sessionKey);
       this.pendingAutoDevLoopStopRequests.delete(sessionKey);
       await this.channel.sendNotice(
@@ -2168,6 +2092,24 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
       message.conversationId,
       "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
     );
+  }
+
+  private markSessionRequestStarted(sessionKey: string): void {
+    const current = this.activeSessionRequestCounts.get(sessionKey) ?? 0;
+    this.activeSessionRequestCounts.set(sessionKey, current + 1);
+  }
+
+  private markSessionRequestFinished(sessionKey: string): void {
+    const current = this.activeSessionRequestCounts.get(sessionKey) ?? 0;
+    if (current <= 1) {
+      this.activeSessionRequestCounts.delete(sessionKey);
+      return;
+    }
+    this.activeSessionRequestCounts.set(sessionKey, current - 1);
+  }
+
+  private hasConcurrentSessionRequest(sessionKey: string): boolean {
+    return (this.activeSessionRequestCounts.get(sessionKey) ?? 0) > 1;
   }
 
   private consumePendingStopRequest(sessionKey: string): boolean {
