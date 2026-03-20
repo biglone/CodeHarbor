@@ -75,7 +75,6 @@ import {
   parseOptionalCsvValues,
   parseRoleSkillAssignments,
   parseRoleSkillDisclosureMode,
-  summarizeSingleLine,
 } from "./orchestrator/helpers";
 import {
   type AutoDevGitCommitResult,
@@ -158,6 +157,13 @@ import { drainSessionQueue as runDrainSessionQueue } from "./orchestrator/task-q
 import { syncRuntimeHotConfig as runSyncRuntimeHotConfig } from "./orchestrator/runtime-hot-config-sync";
 import { resolveSessionBackendDecision as runResolveSessionBackendDecision } from "./orchestrator/backend-decision";
 import {
+  clearSessionQueueRetryTimer as runClearSessionQueueRetryTimer,
+  reconcileSessionQueueDrain as runReconcileSessionQueueDrain,
+  scheduleSessionQueueDrain as runScheduleSessionQueueDrain,
+  scheduleSessionQueueDrainAtNextRetry as runScheduleSessionQueueDrainAtNextRetry,
+  startSessionQueueDrain as runStartSessionQueueDrain,
+} from "./orchestrator/task-queue-drain-scheduler";
+import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
   createEmptyWorkflowDiagStorePayload,
@@ -174,6 +180,11 @@ import {
   listWorkflowDiagRuns as runListWorkflowDiagRuns,
   listWorkflowDiagRunsBySession as runListWorkflowDiagRunsBySession,
 } from "./orchestrator/workflow-diag-queries";
+import {
+  appendWorkflowDiagEvent as runAppendWorkflowDiagEvent,
+  beginWorkflowDiagRun as runBeginWorkflowDiagRun,
+  finishWorkflowDiagRun as runFinishWorkflowDiagRun,
+} from "./orchestrator/workflow-diag-mutations";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -1134,44 +1145,19 @@ export class Orchestrator {
   }
 
   private startSessionQueueDrain(sessionKey: string): void {
-    if (this.sessionQueueDrains.has(sessionKey)) {
-      return;
-    }
-    this.clearSessionQueueRetryTimer(sessionKey);
-
-    const queueStore = this.getTaskQueueStateStore();
-    if (!queueStore) {
-      return;
-    }
-    try {
-      if (!queueStore.hasReadyTask(sessionKey)) {
-        this.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
-        return;
-      }
-    } catch (error) {
-      this.logger.warn("Failed to inspect ready queued task before drain", {
-        sessionKey,
-        error: formatError(error),
-      });
-      return;
-    }
-
-    const drainPromise = this.drainSessionQueue(sessionKey)
-      .catch((error) => {
-        this.logger.error("Session task queue drain failed", {
-          sessionKey,
-          error: formatError(error),
-        });
-      })
-      .finally(() => {
-        const current = this.sessionQueueDrains.get(sessionKey);
-        if (current === drainPromise) {
-          this.sessionQueueDrains.delete(sessionKey);
-        }
-        this.reconcileSessionQueueDrain(sessionKey);
-      });
-
-    this.sessionQueueDrains.set(sessionKey, drainPromise);
+    runStartSessionQueueDrain(
+      {
+        sessionQueueDrains: this.sessionQueueDrains,
+        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+        clearSessionQueueRetryTimer: (targetSessionKey) => this.clearSessionQueueRetryTimer(targetSessionKey),
+        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore) =>
+          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore),
+        drainSessionQueue: (targetSessionKey) => this.drainSessionQueue(targetSessionKey),
+        reconcileSessionQueueDrain: (targetSessionKey) => this.reconcileSessionQueueDrain(targetSessionKey),
+        logger: this.logger,
+      },
+      sessionKey,
+    );
   }
 
   private async drainSessionQueue(sessionKey: string): Promise<void> {
@@ -1195,65 +1181,47 @@ export class Orchestrator {
   }
 
   private reconcileSessionQueueDrain(sessionKey: string): void {
-    const queueStore = this.getTaskQueueStateStore();
-    if (!queueStore) {
-      return;
-    }
-    try {
-      if (queueStore.hasReadyTask(sessionKey)) {
-        this.startSessionQueueDrain(sessionKey);
-        return;
-      }
-      this.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
-    } catch (error) {
-      this.logger.warn("Failed to reconcile session queue drain state", {
-        sessionKey,
-        error: formatError(error),
-      });
-    }
+    runReconcileSessionQueueDrain(
+      {
+        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+        startSessionQueueDrain: (targetSessionKey) => this.startSessionQueueDrain(targetSessionKey),
+        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore) =>
+          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore),
+        logger: this.logger,
+      },
+      sessionKey,
+    );
   }
 
-  private scheduleSessionQueueDrainAtNextRetry(sessionKey: string, queueStore: TaskQueueStateStore): void {
-    const nextRetryAt = queueStore.getNextPendingRetryAt(sessionKey);
-    if (nextRetryAt === null) {
-      return;
-    }
-    this.scheduleSessionQueueDrain(sessionKey, nextRetryAt);
+  private scheduleSessionQueueDrainAtNextRetry(
+    sessionKey: string,
+    queueStore: Pick<TaskQueueStateStore, "getNextPendingRetryAt">,
+  ): void {
+    runScheduleSessionQueueDrainAtNextRetry(
+      (targetSessionKey, nextRetryAt) => this.scheduleSessionQueueDrain(targetSessionKey, nextRetryAt),
+      sessionKey,
+      queueStore,
+    );
   }
 
   private scheduleSessionQueueDrain(sessionKey: string, nextRetryAt: number): void {
-    this.clearSessionQueueRetryTimer(sessionKey);
-    const safeNextRetryAt = Math.max(Date.now(), Math.floor(nextRetryAt));
-    const delayMs = Math.max(0, safeNextRetryAt - Date.now());
-    if (delayMs <= 0) {
-      this.startSessionQueueDrain(sessionKey);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      const current = this.sessionQueueRetryTimers.get(sessionKey);
-      if (current === timer) {
-        this.sessionQueueRetryTimers.delete(sessionKey);
-      }
-      this.startSessionQueueDrain(sessionKey);
-    }, delayMs);
-    timer.unref?.();
-    this.sessionQueueRetryTimers.set(sessionKey, timer);
-    this.logger.debug("Session queue drain scheduled for next retry", {
+    runScheduleSessionQueueDrain(
+      {
+        sessionQueueRetryTimers: this.sessionQueueRetryTimers,
+        clearSessionQueueRetryTimer: (targetSessionKey) => this.clearSessionQueueRetryTimer(targetSessionKey),
+        startSessionQueueDrain: (targetSessionKey) => this.startSessionQueueDrain(targetSessionKey),
+        logger: this.logger,
+      },
       sessionKey,
-      nextRetryAt: safeNextRetryAt,
-      nextRetryAtIso: new Date(safeNextRetryAt).toISOString(),
-      delayMs,
-    });
+      nextRetryAt,
+    );
   }
 
   private clearSessionQueueRetryTimer(sessionKey: string): void {
-    const timer = this.sessionQueueRetryTimers.get(sessionKey);
-    if (!timer) {
-      return;
-    }
-    clearTimeout(timer);
-    this.sessionQueueRetryTimers.delete(sessionKey);
+    runClearSessionQueueRetryTimer({
+      sessionQueueRetryTimers: this.sessionQueueRetryTimers,
+      sessionKey,
+    });
   }
 
   private async sendQueuedTaskFailureNotice(
@@ -2667,37 +2635,17 @@ export class Orchestrator {
     taskId?: string | null;
     taskDescription?: string | null;
   }): string {
-    const nowIso = new Date().toISOString();
-    const runId = `${nowIso}-${Math.random().toString(36).slice(2, 8)}`;
-    this.workflowDiagStore.runs.push({
-      runId,
+    const runId = runBeginWorkflowDiagRun({
+      store: this.workflowDiagStore,
+      maxRuns: WORKFLOW_DIAG_MAX_RUNS,
       kind: input.kind,
       sessionKey: input.sessionKey,
       conversationId: input.conversationId,
       requestId: input.requestId,
-      objective: summarizeSingleLine(input.objective, 800),
-      taskId: input.taskId?.trim() || null,
-      taskDescription: input.taskDescription?.trim() || null,
-      status: "running",
-      startedAt: nowIso,
-      endedAt: null,
-      durationMs: null,
-      approved: null,
-      repairRounds: 0,
-      error: null,
-      lastStage: null,
-      lastMessage: null,
-      updatedAt: nowIso,
+      objective: input.objective,
+      taskId: input.taskId,
+      taskDescription: input.taskDescription,
     });
-    if (this.workflowDiagStore.runs.length > WORKFLOW_DIAG_MAX_RUNS) {
-      const overflow = this.workflowDiagStore.runs.length - WORKFLOW_DIAG_MAX_RUNS;
-      const removedIds = new Set(this.workflowDiagStore.runs.slice(0, overflow).map((run) => run.runId));
-      this.workflowDiagStore.runs.splice(0, overflow);
-      if (removedIds.size > 0) {
-        this.workflowDiagStore.events = this.workflowDiagStore.events.filter((event) => !removedIds.has(event.runId));
-      }
-    }
-    this.workflowDiagStore.updatedAt = nowIso;
     this.persistWorkflowDiagStore();
     return runId;
   }
@@ -2709,28 +2657,15 @@ export class Orchestrator {
     round: number,
     message: string,
   ): void {
-    const run = this.workflowDiagStore.runs.find((item) => item.runId === runId);
-    if (!run) {
-      return;
-    }
-    const nowIso = new Date().toISOString();
-    const normalizedStage = stage.trim() || "unknown";
-    const normalizedMessage = summarizeSingleLine(message || "n/a", 600);
-    this.workflowDiagStore.events.push({
+    runAppendWorkflowDiagEvent({
+      store: this.workflowDiagStore,
+      maxEvents: WORKFLOW_DIAG_MAX_EVENTS,
       runId,
       kind,
-      stage: normalizedStage,
-      round: Math.max(0, Math.floor(round)),
-      message: normalizedMessage,
-      at: nowIso,
+      stage,
+      round,
+      message,
     });
-    if (this.workflowDiagStore.events.length > WORKFLOW_DIAG_MAX_EVENTS) {
-      this.workflowDiagStore.events.splice(0, this.workflowDiagStore.events.length - WORKFLOW_DIAG_MAX_EVENTS);
-    }
-    run.lastStage = normalizedStage;
-    run.lastMessage = normalizedMessage;
-    run.updatedAt = nowIso;
-    this.workflowDiagStore.updatedAt = nowIso;
     this.persistWorkflowDiagStore();
   }
 
@@ -2743,21 +2678,14 @@ export class Orchestrator {
       error: string | null;
     },
   ): void {
-    const run = this.workflowDiagStore.runs.find((item) => item.runId === runId);
-    if (!run) {
-      return;
-    }
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    const startedAtMs = Date.parse(run.startedAt);
-    run.status = input.status;
-    run.endedAt = nowIso;
-    run.durationMs = Number.isFinite(startedAtMs) ? Math.max(0, now - startedAtMs) : null;
-    run.approved = input.approved;
-    run.repairRounds = Math.max(0, Math.floor(input.repairRounds));
-    run.error = input.error ? summarizeSingleLine(input.error, 1_000) : null;
-    run.updatedAt = nowIso;
-    this.workflowDiagStore.updatedAt = nowIso;
+    runFinishWorkflowDiagRun({
+      store: this.workflowDiagStore,
+      runId,
+      status: input.status,
+      approved: input.approved,
+      repairRounds: input.repairRounds,
+      error: input.error,
+    });
     this.persistWorkflowDiagStore();
   }
 
