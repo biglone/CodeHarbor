@@ -1,6 +1,5 @@
 import { Mutex } from "async-mutex";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -49,9 +48,7 @@ import {
 import {
   ARCHIVE_REASON_MAX_ATTEMPTS,
   ARCHIVE_REASON_NON_RETRYABLE,
-  classifyRetryDecision,
   createRetryPolicy,
-  type RetryDecision,
   type RetryPolicy,
   type RetryPolicyInput,
 } from "./reliability/retry-policy";
@@ -165,6 +162,16 @@ import {
   isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
 import {
+  buildApiTaskErrorSummary,
+  buildApiTaskEventId,
+  buildSessionKey,
+  classifyQueueTaskRetry,
+  cleanupAttachmentFiles,
+  formatByteSize,
+  mapApiTaskStage,
+  stripLeadingBotMention,
+} from "./orchestrator/misc-utils";
+import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
   createEmptyWorkflowDiagStorePayload,
@@ -178,6 +185,8 @@ import {
   type WorkflowDiagRunStatus,
   type WorkflowDiagStorePayload,
 } from "./orchestrator/workflow-diag";
+
+export { buildApiTaskEventId, buildSessionKey };
 
 interface OrchestratorOptions {
   lockTtlMs?: number;
@@ -4881,86 +4890,4 @@ function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
     lastGitCommitSummary: null,
     lastGitCommitAt: null,
   };
-}
-
-export function buildApiTaskEventId(idempotencyKey: string): string {
-  const normalized = idempotencyKey.trim();
-  if (!normalized) {
-    throw new Error("Idempotency-Key is required.");
-  }
-  const digest = createHash("sha256").update(normalized).digest("hex");
-  return `$api-${digest}`;
-}
-
-export function buildSessionKey(message: InboundMessage): string {
-  return `${message.channel}:${message.conversationId}:${message.senderId}`;
-}
-
-function mapApiTaskStage(task: TaskQueueRecord): ApiTaskStage {
-  if (task.status === "pending") {
-    return task.nextRetryAt === null ? "queued" : "retrying";
-  }
-  if (task.status === "running") {
-    return "executing";
-  }
-  if (task.status === "succeeded") {
-    return "completed";
-  }
-  return "failed";
-}
-
-function buildApiTaskErrorSummary(task: TaskQueueRecord): string | null {
-  const source =
-    task.status === "failed"
-      ? task.error ?? task.lastError
-      : task.status === "pending" && task.nextRetryAt !== null
-        ? task.lastError
-        : null;
-  if (!source) {
-    return null;
-  }
-  return summarizeSingleLine(source, 240);
-}
-
-async function cleanupAttachmentFiles(attachmentPaths: string[]): Promise<void> {
-  await Promise.all(
-    attachmentPaths.map(async (attachmentPath) => {
-      try {
-        await fs.unlink(attachmentPath);
-      } catch {
-        // Ignore cleanup failure: temp files are best-effort.
-      }
-    }),
-  );
-}
-
-function stripLeadingBotMention(text: string, matrixUserId: string): string {
-  if (!matrixUserId) {
-    return text;
-  }
-  const escapedUserId = escapeRegex(matrixUserId);
-  const mentionPattern = new RegExp(`^\\s*(?:<)?${escapedUserId}(?:>)?[\\s,:，：-]*`, "i");
-  return text.replace(mentionPattern, "").trim();
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function formatByteSize(sizeBytes: number): string {
-  if (sizeBytes < 1024) {
-    return `${sizeBytes}B`;
-  }
-  if (sizeBytes < 1024 * 1024) {
-    return `${(sizeBytes / 1024).toFixed(1)}KB`;
-  }
-  return `${(sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-function classifyQueueTaskRetry(policy: RetryPolicy, attempt: number, error: unknown): RetryDecision {
-  return classifyRetryDecision({
-    policy,
-    attempt,
-    error,
-  });
 }
