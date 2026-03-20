@@ -1,7 +1,6 @@
 import { Mutex } from "async-mutex";
 import fs from "node:fs/promises";
 import os from "node:os";
-import path from "node:path";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { type Channel } from "./channels/channel";
@@ -113,12 +112,10 @@ import {
   normalizeBackendProfile,
   parseBackendTarget,
   parseControlCommand,
-  parseDiagTarget,
   parseUpgradeTarget,
 } from "./orchestrator/command-routing";
 import {
   collectLocalAttachmentPaths,
-  formatMediaDiagEvents,
   formatMimeAllowlist,
   mapProgressText,
   normalizeImageMimeType,
@@ -143,7 +140,6 @@ import {
   formatLatestUpgradeSummary,
   formatRecentUpgradeRunsSummary,
   formatSelfUpdateError,
-  formatUpgradeDiagRecords,
   formatUpgradeLockSummary,
   probeInstalledVersion,
   runSelfUpdateCommand,
@@ -153,13 +149,10 @@ import {
 } from "./orchestrator/upgrade-utils";
 import {
   describeBackendRouteReason,
-  formatAutoDevGitCommitRecords,
-  formatBackendRouteDiagRecords,
   formatBackendRouteProfile,
-  formatQueueFailureArchive,
-  formatQueuePendingSessions,
   isBackendRouteFallbackReason,
 } from "./orchestrator/diagnostic-formatters";
+import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
@@ -174,7 +167,6 @@ import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
   createEmptyWorkflowDiagStorePayload,
-  formatAutoDevDiagRuns,
   formatAutoDevStatusRunSummaries,
   formatAutoDevStatusStageTrace,
   parseWorkflowDiagStorePayload,
@@ -3788,167 +3780,46 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
   }
 
   private async handleDiagCommand(message: InboundMessage): Promise<void> {
-    const target = parseDiagTarget(message.text);
-    if (!target || target.kind === "help") {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count]",
-      );
-      return;
-    }
-    if (target.kind === "version") {
-      const packageUpdate = await this.packageUpdateChecker.getStatus({ forceRefresh: true });
-      const cliScriptPath = process.argv[1] ? path.resolve(process.argv[1]) : "unknown";
-      const uptimeMs = Math.max(0, Math.floor(process.uptime() * 1_000));
-
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 诊断信息（version）
-- pid: ${process.pid}
-- startedAt: ${this.processStartedAtIso}
-- uptime: ${formatDurationMs(uptimeMs)}
-- node: ${process.version}
-- nodeExecPath: ${process.execPath}
-- cliScriptPath: ${cliScriptPath}
-- cwd: ${process.cwd()}
-- backend: ${this.formatBackendToolLabel()}
-- currentVersion: ${packageUpdate.currentVersion}
-- latestHint: ${formatPackageUpdateHint(packageUpdate)}
-- checkedAt: ${packageUpdate.checkedAt}`,
-      );
-      return;
-    }
-    if (target.kind === "media") {
-      const snapshot = this.mediaMetrics.snapshot(target.limit);
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 诊断信息（media）
-- backend: ${this.formatBackendToolLabel()}
-- imagePolicy: enabled=${this.cliCompat.fetchMedia ? "on" : "off"}, maxCount=${this.cliCompat.imageMaxCount}, maxBytes=${formatByteSize(this.cliCompat.imageMaxBytes)}, allow=${this.cliCompat.imageAllowedMimeTypes.join(",")}
-- audioPolicy: enabled=${this.audioTranscriber.isEnabled() ? "on" : "off"}, maxBytes=${formatByteSize(this.cliCompat.audioTranscribeMaxBytes)}, model=${this.cliCompat.audioTranscribeModel}
-- counters: image.accepted=${snapshot.counters.imageAccepted}, image.skipped_missing=${snapshot.counters.imageSkippedMissingPath}, image.skipped_mime=${snapshot.counters.imageSkippedUnsupportedMime}, image.skipped_size=${snapshot.counters.imageSkippedTooLarge}, image.skipped_limit=${snapshot.counters.imageSkippedOverLimit}
-- counters: audio.transcribed=${snapshot.counters.audioTranscribed}, audio.failed=${snapshot.counters.audioFailed}, audio.skipped_size=${snapshot.counters.audioSkippedTooLarge}
-- counters: claude.fallback_triggered=${snapshot.counters.claudeImageFallbackTriggered}, claude.fallback_ok=${snapshot.counters.claudeImageFallbackSucceeded}, claude.fallback_failed=${snapshot.counters.claudeImageFallbackFailed}
-- records:
-${formatMediaDiagEvents(snapshot.recentEvents)}`,
-      );
-      return;
-    }
-    if (target.kind === "autodev") {
-      const runs = this.listWorkflowDiagRuns("autodev", target.limit);
-      const counts = runs.reduce(
-        (acc, run) => {
-          if (run.status === "running") {
-            acc.running += 1;
-          } else if (run.status === "succeeded") {
-            acc.succeeded += 1;
-          } else if (run.status === "cancelled") {
-            acc.cancelled += 1;
-          } else {
-            acc.failed += 1;
-          }
-          return acc;
+    await runDiagCommand(
+      {
+        botNoticePrefix: this.botNoticePrefix,
+        processStartedAtIso: this.processStartedAtIso,
+        defaultBackendProfile: this.defaultBackendProfile,
+        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        runningExecutionsSize: this.runningExecutions.size,
+        cliCompat: {
+          fetchMedia: this.cliCompat.fetchMedia,
+          imageMaxCount: this.cliCompat.imageMaxCount,
+          imageMaxBytes: this.cliCompat.imageMaxBytes,
+          imageAllowedMimeTypes: this.cliCompat.imageAllowedMimeTypes,
+          audioTranscribeMaxBytes: this.cliCompat.audioTranscribeMaxBytes,
+          audioTranscribeModel: this.cliCompat.audioTranscribeModel,
         },
-        { running: 0, succeeded: 0, failed: 0, cancelled: 0 },
-      );
-      const sessionKey = buildSessionKey(message);
-      const snapshot = this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot();
-      const commitRecords = this.listAutoDevGitCommitRecords(target.limit);
-      const commitText =
-        commitRecords.length > 0
-          ? formatAutoDevGitCommitRecords(commitRecords)
-          : this.listRecentAutoDevGitCommitEventSummaries(target.limit).join("\n") || "- (empty)";
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 诊断信息（autodev）
-- recentCount: ${runs.length}
-- status: running=${counts.running}, succeeded=${counts.succeeded}, failed=${counts.failed}, cancelled=${counts.cancelled}
-- live: state=${snapshot.state}, mode=${snapshot.mode}, loop=${snapshot.loopRound}/${snapshot.loopMaxRuns}, completed=${snapshot.loopCompletedRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
-- config: loopMaxRuns=${this.autoDevLoopMaxRuns}, loopMaxMinutes=${this.autoDevLoopMaxMinutes}, autoCommit=${this.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${this.autoDevMaxConsecutiveFailures}
-- recentGitCommits:
-${commitText}
-- records:
-${formatAutoDevDiagRuns(runs, (runId) => this.listWorkflowDiagEvents(runId, 5))}`,
-      );
-      return;
-    }
-    if (target.kind === "route") {
-      const sessionKey = buildSessionKey(message);
-      const backendProfile = this.resolveSessionBackendStatusProfile(sessionKey);
-      const backendOverride = this.sessionBackendOverrides.get(sessionKey);
-      const backendDecision = this.sessionLastBackendDecisions.get(sessionKey);
-      const mode = backendOverride ? "manual" : "auto";
-      const source = backendOverride ? "manual_override" : backendDecision?.source ?? "default";
-      const reason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
-      const rule = backendDecision?.ruleId ?? "none";
-      const reasonDesc = describeBackendRouteReason(reason);
-      const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
-      const ruleStats = this.backendModelRouter.getStats();
-      const records = this.listBackendRouteDiagRecords(target.limit, sessionKey);
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 诊断信息（route）
-- current: backend=${this.formatBackendToolLabel(backendProfile)}, mode=${mode}
-- defaultBackend: ${this.formatBackendToolLabel(this.defaultBackendProfile)}
-- rules: total=${ruleStats.total}, enabled=${ruleStats.enabled}
-- lastDecision: source=${source}, reason=${reason}, rule=${rule}
-- reasonDesc: ${reasonDesc}
-- fallback: ${fallback}
-- records:
-${formatBackendRouteDiagRecords(records)}`,
-      );
-      return;
-    }
-    if (target.kind === "queue") {
-      const queueStore = this.getTaskQueueStateStore();
-      if (!queueStore) {
-        await this.channel.sendNotice(
-          message.conversationId,
-          `${this.botNoticePrefix} 诊断信息（queue）
-- status: unavailable
-- reason: 当前实例未启用可恢复任务队列能力`,
-        );
-        return;
-      }
-      const counts = queueStore.getTaskQueueStatusCounts();
-      const sessions = queueStore.listPendingTaskSessions(target.limit, 0);
-      let earliestRetryAt: number | null = null;
-      for (const session of sessions) {
-        const nextRetryAt = queueStore.getNextPendingRetryAt(session.sessionKey);
-        if (nextRetryAt === null) {
-          continue;
-        }
-        if (earliestRetryAt === null || nextRetryAt < earliestRetryAt) {
-          earliestRetryAt = nextRetryAt;
-        }
-      }
-      const archive = this.listTaskQueueFailureArchive(target.limit);
-      await this.channel.sendNotice(
-        message.conversationId,
-        `${this.botNoticePrefix} 诊断信息（queue）
-- activeExecutions: ${this.runningExecutions.size}
-- counts: pending=${counts.pending}, running=${counts.running}, succeeded=${counts.succeeded}, failed=${counts.failed}
-- pendingSessions: ${sessions.length}
-- earliestRetryAt: ${earliestRetryAt === null ? "N/A" : new Date(earliestRetryAt).toISOString()}
-- sessions:
-${formatQueuePendingSessions(sessions)}
-- archive:
-${formatQueueFailureArchive(archive)}`,
-      );
-      return;
-    }
-
-    const runs = this.getRecentUpgradeRuns(target.limit);
-    const lock = this.getUpgradeExecutionLockSnapshot();
-    const stats = this.getUpgradeRunStats();
-    await this.channel.sendNotice(
-      message.conversationId,
-      `${this.botNoticePrefix} 诊断信息（upgrade）
-- recentCount: ${runs.length}
-- lock: ${formatUpgradeLockSummary(lock)}
-- stats: total=${stats.total}, succeeded=${stats.succeeded}, failed=${stats.failed}, running=${stats.running}, avg=${stats.avgDurationMs}ms
-- records:
-${formatUpgradeDiagRecords(runs)}`,
+        isAudioTranscriberEnabled: () => this.audioTranscriber.isEnabled(),
+        getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
+        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+        mediaMetrics: this.mediaMetrics,
+        listWorkflowDiagRuns: (kind, limit) => this.listWorkflowDiagRuns(kind, limit),
+        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
+        getAutoDevSnapshot: (sessionKey) => this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot(),
+        listAutoDevGitCommitRecords: (limit) => this.listAutoDevGitCommitRecords(limit),
+        listRecentAutoDevGitCommitEventSummaries: (limit) => this.listRecentAutoDevGitCommitEventSummaries(limit),
+        resolveSessionBackendStatusProfile: (sessionKey) => this.resolveSessionBackendStatusProfile(sessionKey),
+        getSessionBackendOverride: (sessionKey) => this.sessionBackendOverrides.get(sessionKey),
+        getSessionBackendDecision: (sessionKey) => this.sessionLastBackendDecisions.get(sessionKey),
+        getBackendModelRouterStats: () => this.backendModelRouter.getStats(),
+        listBackendRouteDiagRecords: (limit, sessionKey) => this.listBackendRouteDiagRecords(limit, sessionKey),
+        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+        listTaskQueueFailureArchive: (limit) => this.listTaskQueueFailureArchive(limit),
+        getRecentUpgradeRuns: (limit) => this.getRecentUpgradeRuns(limit),
+        getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
+        getUpgradeRunStats: () => this.getUpgradeRunStats(),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      message,
     );
   }
 
