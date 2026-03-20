@@ -153,6 +153,7 @@ import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
+import { handleStopCommand as runStopCommand } from "./orchestrator/stop-command";
 import { handleWorkflowStatusCommand as runWorkflowStatusCommand } from "./orchestrator/workflow-status-command";
 import {
   buildApiTaskErrorSummary,
@@ -1800,63 +1801,31 @@ export class Orchestrator {
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
-    this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-    this.activeAutoDevLoopSessions.delete(sessionKey);
-    this.autoDevDetailedProgressOverrides.delete(sessionKey);
-    this.stateStore.deactivateSession(sessionKey);
-    this.stateStore.clearCodexSessionId(sessionKey);
-    this.clearSessionFromAllRuntimes(sessionKey);
-    this.sessionBackendProfiles.delete(sessionKey);
-    this.skipBridgeForNextPrompt.add(sessionKey);
-
-    const queueStore = this.getTaskQueueStateStore();
-    const cancelledPending = queueStore ? queueStore.clearPendingTasks(sessionKey).cancelledPending : 0;
-    if (cancelledPending > 0) {
-      this.logger.info("Stop command cleared pending queued tasks", {
-        requestId,
+    await runStopCommand(
+      {
+        logger: this.logger,
+        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
+        stateStore: this.stateStore,
+        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+        sessionBackendProfiles: this.sessionBackendProfiles,
+        skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+        runningExecutions: this.runningExecutions,
+        pendingStopRequests: this.pendingStopRequests,
+        cancelRunningExecutionInAllRuntimes: (targetSessionKey) => this.cancelRunningExecutionInAllRuntimes(targetSessionKey),
+        isSessionBusy: (targetSessionKey) => {
+          const lockEntry = this.sessionLocks.get(targetSessionKey);
+          return Boolean(lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(targetSessionKey));
+        },
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      {
         sessionKey,
-        cancelledPending,
-      });
-    }
-
-    const running = this.runningExecutions.get(sessionKey);
-    if (running) {
-      this.pendingStopRequests.delete(sessionKey);
-      this.cancelRunningExecutionInAllRuntimes(sessionKey);
-      running.cancel();
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 已请求停止当前任务，并已清理会话上下文。",
-      );
-      this.logger.info("Stop command cancelled running execution", {
+        message,
         requestId,
-        sessionKey,
-        targetRequestId: running.requestId,
-        runningForMs: Date.now() - running.startedAt,
-      });
-      return;
-    }
-
-    const lockEntry = this.sessionLocks.get(sessionKey);
-    if (lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(sessionKey)) {
-      this.pendingStopRequests.add(sessionKey);
-      this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 已请求停止当前任务，并已清理会话上下文。",
-      );
-      this.logger.info("Stop command queued for pending execution", {
-        requestId,
-        sessionKey,
-      });
-      return;
-    }
-
-    this.pendingStopRequests.delete(sessionKey);
-    this.pendingAutoDevLoopStopRequests.delete(sessionKey);
-    await this.channel.sendNotice(
-      message.conversationId,
-      "[CodeHarbor] 会话已停止。后续在群聊中请提及/回复我，或在私聊直接发送消息。",
+      },
     );
   }
 
