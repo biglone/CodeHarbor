@@ -60,7 +60,6 @@ import {
 import { InboundMessage } from "./types";
 import { extractCommandText } from "./utils/message";
 import {
-  createIdleWorkflowSnapshot,
   MultiAgentWorkflowRunner,
   type MultiAgentWorkflowRunResult,
   type WorkflowRunSnapshot,
@@ -144,12 +143,19 @@ import {
 import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
+import {
+  handleAutoDevLoopStopCommand as runAutoDevLoopStopCommand,
+  handleAutoDevProgressCommand as runAutoDevProgressCommand,
+  handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
+  type AutoDevControlCommandDeps,
+} from "./orchestrator/autodev-control-command";
 import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { handleLockedRouteCommand } from "./orchestrator/locked-route-command";
 import { tryEnqueueQueuedInboundRequest } from "./orchestrator/queue-enqueue";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
 import { handleStatusCommand } from "./orchestrator/status-command";
+import { handleWorkflowStatusCommand as runWorkflowStatusCommand } from "./orchestrator/workflow-status-command";
 import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
@@ -1590,23 +1596,20 @@ export class Orchestrator {
   }
 
   private async handleWorkflowStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    const snapshot = this.workflowSnapshots.get(sessionKey) ?? createIdleWorkflowSnapshot();
-    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
-    await this.channel.sendNotice(
-      message.conversationId,
-      `[CodeHarbor] Multi-Agent 工作流状态
-- state: ${snapshot.state}
-- startedAt: ${snapshot.startedAt ?? "N/A"}
-- endedAt: ${snapshot.endedAt ?? "N/A"}
-- objective: ${snapshot.objective ?? "N/A"}
-- approved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
-- repairRounds: ${snapshot.repairRounds}
-- contextBudget: plan=${formatWorkflowContextBudget(this.workflowPlanContextMaxChars)}, output=${formatWorkflowContextBudget(
-        this.workflowOutputContextMaxChars,
-      )}, feedback=${formatWorkflowContextBudget(this.workflowFeedbackContextMaxChars)}
-- roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
-- roleSkillsLoaded: ${roleSkillStatus.loaded}
-- error: ${snapshot.error ?? "N/A"}`,
+    await runWorkflowStatusCommand(
+      {
+        workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
+        workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
+        workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
+        getWorkflowSnapshot: (targetSessionKey) => this.workflowSnapshots.get(targetSessionKey) ?? null,
+        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+        formatWorkflowContextBudget: (value) => formatWorkflowContextBudget(value),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      {
+        sessionKey,
+        message,
+      },
     );
   }
 
@@ -1646,27 +1649,13 @@ export class Orchestrator {
     message: InboundMessage,
     mode: "status" | "on" | "off",
   ): Promise<void> {
-    const current = this.isAutoDevDetailedProgressEnabled(sessionKey) ? "on" : "off";
-    const defaultMode = this.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
-    if (mode === "status") {
-      await this.channel.sendNotice(
-        message.conversationId,
-        `[CodeHarbor] AutoDev 过程回显设置
-- detailedProgress: ${current}
-- default: ${defaultMode}
-- usage: /autodev progress on|off|status`,
-      );
-      return;
-    }
-
-    const enabled = mode === "on";
-    this.setAutoDevDetailedProgressEnabled(sessionKey, enabled);
-    await this.channel.sendNotice(
-      message.conversationId,
-      `[CodeHarbor] AutoDev 过程回显已更新
-- detailedProgress: ${enabled ? "on" : "off"}
-- default: ${defaultMode}
-- session: ${sessionKey}`,
+    await runAutoDevProgressCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        mode,
+      },
     );
   }
 
@@ -1675,55 +1664,39 @@ export class Orchestrator {
     message: InboundMessage,
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ): Promise<void> {
-    if (mode !== "status") {
-      if (mode === "on") {
-        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
-          enabled: true,
-        });
-      } else if (mode === "off") {
-        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
-          enabled: false,
-        });
-      } else {
-        this.setWorkflowRoleSkillPolicyOverride(sessionKey, {
-          enabled: true,
-          mode,
-        });
-      }
-    }
-
-    const roleSkillStatus = this.buildWorkflowRoleSkillStatus(sessionKey);
-    await this.channel.sendNotice(
-      message.conversationId,
-      `[CodeHarbor] AutoDev 角色技能设置
-- enabled: ${roleSkillStatus.enabled ? "on" : "off"}
-- mode: ${roleSkillStatus.mode}
-- maxChars: ${roleSkillStatus.maxChars}
-- roots: ${roleSkillStatus.roots}
-- override: ${roleSkillStatus.override}
-- loaded: ${roleSkillStatus.loaded}
-- usage: /autodev skills on|off|summary|progressive|full|status`,
+    await runAutoDevSkillsCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        mode,
+      },
     );
   }
 
   private async handleAutoDevLoopStopCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    if (!this.activeAutoDevLoopSessions.has(sessionKey)) {
-      await this.channel.sendNotice(message.conversationId, "[CodeHarbor] 当前没有运行中的 AutoDev 循环任务。");
-      return;
-    }
-    if (this.pendingAutoDevLoopStopRequests.has(sessionKey)) {
-      await this.channel.sendNotice(
-        message.conversationId,
-        "[CodeHarbor] 已收到停止请求：当前任务完成后会停止循环，不会启动下一任务。",
-      );
-      return;
-    }
-
-    this.pendingAutoDevLoopStopRequests.add(sessionKey);
-    await this.channel.sendNotice(
-      message.conversationId,
-      "[CodeHarbor] 已收到停止请求：将等待当前任务执行完成后停止 AutoDev 循环。",
+    await runAutoDevLoopStopCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+      },
     );
+  }
+
+  private buildAutoDevControlCommandDeps(): AutoDevControlCommandDeps {
+    return {
+      autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+      isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+      setAutoDevDetailedProgressEnabled: (targetSessionKey, enabled) =>
+        this.setAutoDevDetailedProgressEnabled(targetSessionKey, enabled),
+      setWorkflowRoleSkillPolicyOverride: (targetSessionKey, next) =>
+        this.setWorkflowRoleSkillPolicyOverride(targetSessionKey, next),
+      buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private async handleAutoDevRunCommand(
