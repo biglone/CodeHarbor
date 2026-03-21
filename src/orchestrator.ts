@@ -146,6 +146,7 @@ import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchConte
 import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
 import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContext as runBuildControlCommandDispatchContext } from "./orchestrator/control-command-context";
+import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1475,7 +1476,7 @@ export class Orchestrator {
   }
 
   private buildStopCommandDispatchContext(): Parameters<typeof runSendStopCommand>[0] {
-    return {
+    return runBuildStopCommandDispatchContext({
       logger: this.logger,
       pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
@@ -1493,7 +1494,7 @@ export class Orchestrator {
         return Boolean(lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(targetSessionKey));
       },
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private markSessionRequestStarted(sessionKey: string): void {
