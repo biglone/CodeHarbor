@@ -474,6 +474,37 @@ export class Orchestrator {
       throw new Error("Task queue is unavailable.");
     }
 
+    const { message, sessionKey, payload } = this.buildApiTaskPayload(input);
+
+    const result = queueStore.enqueueTask({
+      sessionKey,
+      eventId: message.eventId,
+      requestId: message.requestId,
+      payloadJson: JSON.stringify(payload),
+    } satisfies TaskQueueEnqueueInput);
+
+    if (!result.created) {
+      const existing = parseQueuedInboundPayload(result.task.payloadJson);
+      if (!isApiTaskPayloadEquivalent(existing.message, message)) {
+        throw new ApiTaskIdempotencyConflictError(sessionKey, message.eventId);
+      }
+    }
+
+    this.startSessionQueueDrain(sessionKey);
+    return {
+      created: result.created,
+      task: result.task,
+      sessionKey,
+      eventId: result.task.eventId,
+      requestId: result.task.requestId,
+    };
+  }
+
+  private buildApiTaskPayload(input: ApiTaskSubmitInput): {
+    message: InboundMessage;
+    sessionKey: string;
+    payload: QueuedInboundPayload;
+  } {
     const normalizedConversationId = input.conversationId.trim();
     const normalizedSenderId = input.senderId.trim();
     const normalizedText = input.text.trim();
@@ -491,34 +522,14 @@ export class Orchestrator {
       mentionsBot: input.mentionsBot ?? false,
       repliesToBot: input.repliesToBot ?? false,
     };
-    const sessionKey = buildSessionKey(message);
-    const payload: QueuedInboundPayload = {
-      message,
-      receivedAt: Date.now(),
-      prompt: message.text,
-    };
-
-    const result = queueStore.enqueueTask({
-      sessionKey,
-      eventId: message.eventId,
-      requestId: message.requestId,
-      payloadJson: JSON.stringify(payload),
-    } satisfies TaskQueueEnqueueInput);
-
-    if (!result.created) {
-      const existing = parseQueuedInboundPayload(result.task.payloadJson);
-      if (!isApiTaskPayloadEquivalent(existing.message, message)) {
-        throw new ApiTaskIdempotencyConflictError(sessionKey, eventId);
-      }
-    }
-
-    this.startSessionQueueDrain(sessionKey);
     return {
-      created: result.created,
-      task: result.task,
-      sessionKey,
-      eventId: result.task.eventId,
-      requestId: result.task.requestId,
+      message,
+      sessionKey: buildSessionKey(message),
+      payload: {
+        message,
+        receivedAt: Date.now(),
+        prompt: message.text,
+      },
     };
   }
 
