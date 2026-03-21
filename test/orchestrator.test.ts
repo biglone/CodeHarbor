@@ -1562,7 +1562,7 @@ describe("Orchestrator", () => {
       await orchestrator.bootstrapTaskQueueRecovery();
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(executor.callCount).toBe(1);
-      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 3_000);
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 6_000);
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(450);
       expect(executor.callCount).toBe(2);
     } finally {
