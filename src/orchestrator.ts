@@ -184,6 +184,11 @@ import {
   persistWorkflowDiagStore as runPersistWorkflowDiagStore,
   restoreWorkflowDiagStore as runRestoreWorkflowDiagStore,
 } from "./orchestrator/workflow-diag-store";
+import {
+  listBackendRouteDiagRecords as runListBackendRouteDiagRecords,
+  recordBackendRouteDecision as runRecordBackendRouteDecision,
+  type BackendRouteDiagRecord,
+} from "./orchestrator/backend-route-diag";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -324,18 +329,6 @@ interface AutoDevGitCommitRecord {
   sessionKey: string;
   taskId: string;
   result: AutoDevGitCommitResult;
-}
-
-interface BackendRouteDiagRecord {
-  at: string;
-  sessionKey: string;
-  conversationId: string;
-  senderId: string;
-  taskType: BackendModelRouteTaskType;
-  source: SessionBackendDecision["source"];
-  reasonCode: SessionBackendDecision["reasonCode"];
-  ruleId: string | null;
-  profile: BackendModelRouteProfile;
 }
 
 export interface ApiTaskSubmitInput {
@@ -1939,29 +1932,11 @@ export class Orchestrator {
     taskType: BackendModelRouteTaskType;
     decision: SessionBackendDecision;
   }): void {
-    this.backendRouteDiagRecords.push({
-      at: new Date().toISOString(),
-      sessionKey: input.sessionKey,
-      conversationId: input.message.conversationId,
-      senderId: input.message.senderId,
-      taskType: input.taskType,
-      source: input.decision.source,
-      reasonCode: input.decision.reasonCode,
-      ruleId: input.decision.ruleId,
-      profile: input.decision.profile,
-    });
-    if (this.backendRouteDiagRecords.length > BACKEND_ROUTE_DIAG_HISTORY_MAX) {
-      this.backendRouteDiagRecords.splice(
-        0,
-        this.backendRouteDiagRecords.length - BACKEND_ROUTE_DIAG_HISTORY_MAX,
-      );
-    }
+    runRecordBackendRouteDecision(this.backendRouteDiagRecords, input, BACKEND_ROUTE_DIAG_HISTORY_MAX);
   }
 
   private listBackendRouteDiagRecords(limit: number, sessionKey: string): BackendRouteDiagRecord[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    const scoped = this.backendRouteDiagRecords.filter((record) => record.sessionKey === sessionKey);
-    return scoped.slice(Math.max(0, scoped.length - safeLimit)).reverse();
+    return runListBackendRouteDiagRecords(this.backendRouteDiagRecords, limit, sessionKey);
   }
 
   private async prepareImageAttachments(
