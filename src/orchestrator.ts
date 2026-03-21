@@ -76,11 +76,7 @@ import {
   formatError,
   parseCsvValues,
   parseEnvBoolean,
-  parseEnvOptionalPositiveInt,
   parseEnvPositiveInt,
-  parseOptionalCsvValues,
-  parseRoleSkillAssignments,
-  parseRoleSkillDisclosureMode,
 } from "./orchestrator/helpers";
 import {
   buildWorkflowRoleSkillStatus as runBuildWorkflowRoleSkillStatus,
@@ -164,6 +160,7 @@ import {
   probeInstalledVersion,
   runSelfUpdateCommand,
 } from "./orchestrator/upgrade-utils";
+import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from "./orchestrator/workflow-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -476,55 +473,17 @@ export class Orchestrator {
         maxConcurrentPerRoom: 4,
       },
     );
-    const workflowPlanContextMaxChars =
-      options?.multiAgentWorkflow?.planContextMaxChars ??
-      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS);
-    const workflowOutputContextMaxChars =
-      options?.multiAgentWorkflow?.outputContextMaxChars ??
-      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS);
-    const workflowFeedbackContextMaxChars =
-      options?.multiAgentWorkflow?.feedbackContextMaxChars ??
-      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS);
-    const workflowRoleSkillsEnabled =
-      options?.multiAgentWorkflow?.roleSkills?.enabled ??
-      parseEnvBoolean(process.env.AGENT_WORKFLOW_ROLE_SKILLS_ENABLED, DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED);
-    const workflowRoleSkillsMode = parseRoleSkillDisclosureMode(
-      options?.multiAgentWorkflow?.roleSkills?.mode ?? process.env.AGENT_WORKFLOW_ROLE_SKILLS_MODE,
-      DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
-    );
-    const workflowRoleSkillsMaxChars =
-      options?.multiAgentWorkflow?.roleSkills?.maxChars ??
-      parseEnvOptionalPositiveInt(process.env.AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS) ??
-      undefined;
-    const workflowRoleSkillsRoots = options?.multiAgentWorkflow?.roleSkills?.roots ?? parseOptionalCsvValues(
-      process.env.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS,
-    );
-    const workflowRoleSkillAssignments =
-      options?.multiAgentWorkflow?.roleSkills?.roleAssignments ??
-      parseRoleSkillAssignments(process.env.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON);
-    this.workflowRoleSkillCatalog = new WorkflowRoleSkillCatalog({
-      enabled: workflowRoleSkillsEnabled,
-      mode: workflowRoleSkillsMode,
-      maxChars: workflowRoleSkillsMaxChars,
-      roots: workflowRoleSkillsRoots,
-      roleAssignments: workflowRoleSkillAssignments,
+    const workflowRuntimeConfig = runResolveWorkflowRuntimeConfig({
+      options,
+      executor,
+      logger: this.logger,
     });
-    this.workflowRoleSkillDefaultPolicy = {
-      enabled: workflowRoleSkillsEnabled,
-      mode: workflowRoleSkillsMode,
-    };
-    this.workflowPlanContextMaxChars = workflowPlanContextMaxChars;
-    this.workflowOutputContextMaxChars = workflowOutputContextMaxChars;
-    this.workflowFeedbackContextMaxChars = workflowFeedbackContextMaxChars;
-    this.workflowRunner = new MultiAgentWorkflowRunner(executor, this.logger, {
-      enabled: options?.multiAgentWorkflow?.enabled ?? false,
-      autoRepairMaxRounds: options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
-      executionTimeoutMs: options?.multiAgentWorkflow?.executionTimeoutMs,
-      planContextMaxChars: workflowPlanContextMaxChars,
-      outputContextMaxChars: workflowOutputContextMaxChars,
-      feedbackContextMaxChars: workflowFeedbackContextMaxChars,
-      roleSkillCatalog: this.workflowRoleSkillCatalog,
-    });
+    this.workflowRoleSkillCatalog = workflowRuntimeConfig.workflowRoleSkillCatalog;
+    this.workflowRoleSkillDefaultPolicy = workflowRuntimeConfig.workflowRoleSkillDefaultPolicy;
+    this.workflowPlanContextMaxChars = workflowRuntimeConfig.workflowPlanContextMaxChars;
+    this.workflowOutputContextMaxChars = workflowRuntimeConfig.workflowOutputContextMaxChars;
+    this.workflowFeedbackContextMaxChars = workflowRuntimeConfig.workflowFeedbackContextMaxChars;
+    this.workflowRunner = workflowRuntimeConfig.workflowRunner;
     this.autoDevLoopMaxRuns = Math.max(
       1,
       options?.autoDevLoopMaxRuns ??
