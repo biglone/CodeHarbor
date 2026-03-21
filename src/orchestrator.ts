@@ -153,6 +153,7 @@ import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from ".
 import { buildChatRequestDispatchContext as runBuildChatRequestDispatchContext } from "./orchestrator/chat-request-context";
 import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
 import { buildLockedMessageDispatchContext as runBuildLockedMessageDispatchContext } from "./orchestrator/locked-message-context";
+import { buildNonBlockingStatusRouteContext as runBuildNonBlockingStatusRouteContext } from "./orchestrator/non-blocking-status-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -928,7 +929,7 @@ export class Orchestrator {
     queueWaitMs: number;
   }): Promise<boolean> {
     return runNonBlockingStatusRoute(
-      {
+      runBuildNonBlockingStatusRouteContext({
         logger: this.logger,
         workflowEnabled: this.workflowRunner.isEnabled(),
         hasProcessedEvent: (sessionKey, eventId) => this.stateStore.hasProcessedEvent(sessionKey, eventId),
@@ -944,7 +945,7 @@ export class Orchestrator {
           this.handleAutoDevProgressCommand(sessionKey, message, mode),
         handleAutoDevSkillsCommand: (sessionKey, message, mode) => this.handleAutoDevSkillsCommand(sessionKey, message, mode),
         handleAutoDevLoopStopCommand: (sessionKey, message) => this.handleAutoDevLoopStopCommand(sessionKey, message),
-      },
+      }),
       {
         route: input.route,
         sessionKey: input.sessionKey,
