@@ -110,11 +110,10 @@ import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
 import {
-  handleControlCommand as runControlCommand,
   type ControlCommand,
 } from "./orchestrator/control-command-handler";
+import { sendControlCommand as runSendControlCommand } from "./orchestrator/control-command-dispatch";
 import { handleBackendCommand as runBackendCommand } from "./orchestrator/backend-command";
-import { handleDiagCommand as runDiagCommand } from "./orchestrator/diag-command";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import {
@@ -206,6 +205,7 @@ import {
   sendStatusCommand as runSendStatusCommand,
   sendWorkflowStatusCommand as runSendWorkflowStatusCommand,
 } from "./orchestrator/status-command-dispatch";
+import { sendDiagCommand as runSendDiagCommand } from "./orchestrator/diag-command-dispatch";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -1280,33 +1280,8 @@ export class Orchestrator {
     message: InboundMessage,
     requestId: string,
   ): Promise<void> {
-    await runControlCommand(
-      {
-        sessionActiveWindowMs: this.sessionActiveWindowMs,
-        botNoticePrefix: this.botNoticePrefix,
-        stateStore: this.stateStore,
-        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
-        sessionBackendOverrides: this.sessionBackendOverrides,
-        sessionBackendProfiles: this.sessionBackendProfiles,
-        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-        skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
-        workflowSnapshots: this.workflowSnapshots,
-        autoDevSnapshots: this.autoDevSnapshots,
-        autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
-        workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
-        pendingStopRequests: this.pendingStopRequests,
-        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
-        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-        getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
-        formatMultimodalHelpStatus: () => this.formatMultimodalHelpStatus(),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-        handleStatusCommand: (targetSessionKey, targetMessage) => this.sendStatusCommand(targetSessionKey, targetMessage),
-        handleStopCommand: (targetSessionKey, targetMessage, targetRequestId) =>
-          this.handleStopCommand(targetSessionKey, targetMessage, targetRequestId),
-        handleBackendCommand: (targetSessionKey, targetMessage) => this.handleBackendCommand(targetSessionKey, targetMessage),
-        handleDiagCommand: (targetMessage) => this.handleDiagCommand(targetMessage),
-        handleUpgradeCommand: (targetMessage) => this.handleUpgradeCommand(targetMessage),
-      },
+    await runSendControlCommand(
+      this.buildControlCommandDispatchContext(),
       {
         command,
         sessionKey,
@@ -1314,6 +1289,35 @@ export class Orchestrator {
         requestId,
       },
     );
+  }
+
+  private buildControlCommandDispatchContext(): Parameters<typeof runSendControlCommand>[0] {
+    return {
+      sessionActiveWindowMs: this.sessionActiveWindowMs,
+      botNoticePrefix: this.botNoticePrefix,
+      stateStore: this.stateStore,
+      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionBackendProfiles: this.sessionBackendProfiles,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+      skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+      workflowSnapshots: this.workflowSnapshots,
+      autoDevSnapshots: this.autoDevSnapshots,
+      autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
+      workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
+      pendingStopRequests: this.pendingStopRequests,
+      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+      getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
+      formatMultimodalHelpStatus: () => this.formatMultimodalHelpStatus(),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      handleStatusCommand: (targetSessionKey, targetMessage) => this.sendStatusCommand(targetSessionKey, targetMessage),
+      handleStopCommand: (targetSessionKey, targetMessage, targetRequestId) =>
+        this.handleStopCommand(targetSessionKey, targetMessage, targetRequestId),
+      handleBackendCommand: (targetSessionKey, targetMessage) => this.handleBackendCommand(targetSessionKey, targetMessage),
+      handleDiagCommand: (targetMessage) => this.handleDiagCommand(targetMessage),
+      handleUpgradeCommand: (targetMessage) => this.handleUpgradeCommand(targetMessage),
+    };
   }
 
   private async sendStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
@@ -2322,47 +2326,48 @@ export class Orchestrator {
   }
 
   private async handleDiagCommand(message: InboundMessage): Promise<void> {
-    await runDiagCommand(
-      {
-        botNoticePrefix: this.botNoticePrefix,
-        processStartedAtIso: this.processStartedAtIso,
-        defaultBackendProfile: this.defaultBackendProfile,
-        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-        autoDevAutoCommit: this.autoDevAutoCommit,
-        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-        runningExecutionsSize: this.runningExecutions.size,
-        cliCompat: {
-          fetchMedia: this.cliCompat.fetchMedia,
-          imageMaxCount: this.cliCompat.imageMaxCount,
-          imageMaxBytes: this.cliCompat.imageMaxBytes,
-          imageAllowedMimeTypes: this.cliCompat.imageAllowedMimeTypes,
-          audioTranscribeMaxBytes: this.cliCompat.audioTranscribeMaxBytes,
-          audioTranscribeModel: this.cliCompat.audioTranscribeModel,
-        },
-        isAudioTranscriberEnabled: () => this.audioTranscriber.isEnabled(),
-        getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
-        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
-        mediaMetrics: this.mediaMetrics,
-        listWorkflowDiagRuns: (kind, limit) => this.listWorkflowDiagRuns(kind, limit),
-        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
-        getAutoDevSnapshot: (sessionKey) => this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot(),
-        listAutoDevGitCommitRecords: (limit) => this.listAutoDevGitCommitRecords(limit),
-        listRecentAutoDevGitCommitEventSummaries: (limit) => this.listRecentAutoDevGitCommitEventSummaries(limit),
-        resolveSessionBackendStatusProfile: (sessionKey) => this.resolveSessionBackendStatusProfile(sessionKey),
-        getSessionBackendOverride: (sessionKey) => this.sessionBackendOverrides.get(sessionKey),
-        getSessionBackendDecision: (sessionKey) => this.sessionLastBackendDecisions.get(sessionKey),
-        getBackendModelRouterStats: () => this.backendModelRouter.getStats(),
-        listBackendRouteDiagRecords: (limit, sessionKey) => this.listBackendRouteDiagRecords(limit, sessionKey),
-        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-        listTaskQueueFailureArchive: (limit) => this.listTaskQueueFailureArchive(limit),
-        getRecentUpgradeRuns: (limit) => this.getRecentUpgradeRuns(limit),
-        getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
-        getUpgradeRunStats: () => this.getUpgradeRunStats(),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    await runSendDiagCommand(this.buildDiagCommandDispatchContext(), message);
+  }
+
+  private buildDiagCommandDispatchContext(): Parameters<typeof runSendDiagCommand>[0] {
+    return {
+      botNoticePrefix: this.botNoticePrefix,
+      processStartedAtIso: this.processStartedAtIso,
+      defaultBackendProfile: this.defaultBackendProfile,
+      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+      autoDevAutoCommit: this.autoDevAutoCommit,
+      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+      runningExecutionsSize: this.runningExecutions.size,
+      cliCompat: {
+        fetchMedia: this.cliCompat.fetchMedia,
+        imageMaxCount: this.cliCompat.imageMaxCount,
+        imageMaxBytes: this.cliCompat.imageMaxBytes,
+        imageAllowedMimeTypes: this.cliCompat.imageAllowedMimeTypes,
+        audioTranscribeMaxBytes: this.cliCompat.audioTranscribeMaxBytes,
+        audioTranscribeModel: this.cliCompat.audioTranscribeModel,
       },
-      message,
-    );
+      isAudioTranscriberEnabled: () => this.audioTranscriber.isEnabled(),
+      getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
+      formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+      mediaMetrics: this.mediaMetrics,
+      listWorkflowDiagRuns: (kind: "workflow" | "autodev", limit: number) => this.listWorkflowDiagRuns(kind, limit),
+      listWorkflowDiagEvents: (runId: string, limit?: number) => this.listWorkflowDiagEvents(runId, limit),
+      getAutoDevSnapshot: (sessionKey: string) => this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot(),
+      listAutoDevGitCommitRecords: (limit: number) => this.listAutoDevGitCommitRecords(limit),
+      listRecentAutoDevGitCommitEventSummaries: (limit: number) => this.listRecentAutoDevGitCommitEventSummaries(limit),
+      resolveSessionBackendStatusProfile: (sessionKey: string) => this.resolveSessionBackendStatusProfile(sessionKey),
+      getSessionBackendOverride: (sessionKey: string) => this.sessionBackendOverrides.get(sessionKey),
+      getSessionBackendDecision: (sessionKey: string) => this.sessionLastBackendDecisions.get(sessionKey),
+      getBackendModelRouterStats: () => this.backendModelRouter.getStats(),
+      listBackendRouteDiagRecords: (limit: number, sessionKey: string) => this.listBackendRouteDiagRecords(limit, sessionKey),
+      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+      listTaskQueueFailureArchive: (limit: number) => this.listTaskQueueFailureArchive(limit),
+      getRecentUpgradeRuns: (limit: number) => this.getRecentUpgradeRuns(limit),
+      getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
+      getUpgradeRunStats: () => this.getUpgradeRunStats(),
+      sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   getRuntimeMetricsSnapshot(now = Date.now()): RuntimeMetricsSnapshot {
