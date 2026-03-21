@@ -44,7 +44,6 @@ import {
 import {
   StateStore,
   type TaskFailureArchiveRecord,
-  type TaskQueueEnqueueInput,
   type UpgradeExecutionLockRecord,
   type UpgradeRunRecord,
   type UpgradeRunStats,
@@ -112,8 +111,6 @@ import {
   type SendProgressContext,
 } from "./orchestrator/progress-dispatch";
 import {
-  isApiTaskPayloadEquivalent,
-  parseQueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
@@ -145,8 +142,8 @@ import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from ".
 import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
 import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
 import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
-import { buildApiTaskPayload as runBuildApiTaskPayload } from "./orchestrator/api-task-payload";
 import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./orchestrator/execute-message-with-lock";
+import { submitApiTask as runSubmitApiTask } from "./orchestrator/api-task-submission";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -214,9 +211,6 @@ import type {
   ApiTaskQueryResult,
   ApiTaskSubmitInput,
   ApiTaskSubmitResult,
-} from "./orchestrator/orchestrator-api-types";
-import {
-  ApiTaskIdempotencyConflictError,
 } from "./orchestrator/orchestrator-api-types";
 import type {
   BackendRuntimeBundle,
@@ -474,30 +468,13 @@ export class Orchestrator {
       throw new Error("Task queue is unavailable.");
     }
 
-    const { message, sessionKey, payload } = runBuildApiTaskPayload(input);
-
-    const result = queueStore.enqueueTask({
-      sessionKey,
-      eventId: message.eventId,
-      requestId: message.requestId,
-      payloadJson: JSON.stringify(payload),
-    } satisfies TaskQueueEnqueueInput);
-
-    if (!result.created) {
-      const existing = parseQueuedInboundPayload(result.task.payloadJson);
-      if (!isApiTaskPayloadEquivalent(existing.message, message)) {
-        throw new ApiTaskIdempotencyConflictError(sessionKey, message.eventId);
-      }
-    }
-
-    this.startSessionQueueDrain(sessionKey);
-    return {
-      created: result.created,
-      task: result.task,
-      sessionKey,
-      eventId: result.task.eventId,
-      requestId: result.task.requestId,
-    };
+    return runSubmitApiTask(
+      {
+        startSessionQueueDrain: (sessionKey) => this.startSessionQueueDrain(sessionKey),
+      },
+      queueStore,
+      input,
+    );
   }
 
   getApiTaskById(taskId: number): ApiTaskQueryResult | null {
