@@ -33,3 +33,35 @@ export function buildNonBlockingStatusRouteContext(
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
   };
 }
+
+interface NonBlockingStatusRuntimeContextInput {
+  logger: NonBlockingStatusRouteContext["logger"];
+  workflowEnabled: boolean;
+  hasProcessedEvent: NonBlockingStatusRouteContext["hasProcessedEvent"];
+  markEventProcessed: NonBlockingStatusRouteContext["markEventProcessed"];
+  recordRequestMetrics: NonBlockingStatusRouteContext["recordRequestMetrics"];
+  handleControlCommand: NonBlockingStatusRouteContext["handleControlCommand"];
+  handleWorkflowStatusCommand: NonBlockingStatusRouteContext["handleWorkflowStatusCommand"];
+  handleAutoDevStatusCommand: NonBlockingStatusRouteContext["handleAutoDevStatusCommand"];
+  handleAutoDevProgressCommand: NonBlockingStatusRouteContext["handleAutoDevProgressCommand"];
+  handleAutoDevSkillsCommand: NonBlockingStatusRouteContext["handleAutoDevSkillsCommand"];
+  handleAutoDevLoopStopCommand: NonBlockingStatusRouteContext["handleAutoDevLoopStopCommand"];
+}
+
+export function buildNonBlockingStatusRouteContextFromRuntime(
+  input: NonBlockingStatusRuntimeContextInput,
+): NonBlockingStatusRouteContext {
+  return buildNonBlockingStatusRouteContext({
+    logger: input.logger,
+    workflowEnabled: input.workflowEnabled,
+    hasProcessedEvent: input.hasProcessedEvent,
+    markEventProcessed: input.markEventProcessed,
+    recordRequestMetrics: input.recordRequestMetrics,
+    handleControlCommand: input.handleControlCommand,
+    handleWorkflowStatusCommand: input.handleWorkflowStatusCommand,
+    handleAutoDevStatusCommand: input.handleAutoDevStatusCommand,
+    handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
+    handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
+    handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+  });
+}
