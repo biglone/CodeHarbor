@@ -162,7 +162,6 @@ import {
   WORKFLOW_DIAG_MAX_EVENTS,
   WORKFLOW_DIAG_MAX_RUNS,
   createEmptyWorkflowDiagStorePayload,
-  parseWorkflowDiagStorePayload,
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunKind,
   type WorkflowDiagRunRecord,
@@ -181,6 +180,10 @@ import {
   finishWorkflowDiagRun as runFinishWorkflowDiagRun,
 } from "./orchestrator/workflow-diag-mutations";
 import { handleAutoDevRunCommand as runHandleAutoDevRunCommand } from "./orchestrator/autodev-run-dispatch";
+import {
+  persistWorkflowDiagStore as runPersistWorkflowDiagStore,
+  restoreWorkflowDiagStore as runRestoreWorkflowDiagStore,
+} from "./orchestrator/workflow-diag-store";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -2537,37 +2540,11 @@ export class Orchestrator {
   }
 
   private restoreWorkflowDiagStore(): WorkflowDiagStorePayload {
-    const stateStore = this.stateStore as StateStore & {
-      getRuntimeMetricsSnapshot?: (key: string) => { payloadJson: string } | null;
-    };
-    if (typeof stateStore.getRuntimeMetricsSnapshot !== "function") {
-      return createEmptyWorkflowDiagStorePayload();
-    }
-    try {
-      const record = stateStore.getRuntimeMetricsSnapshot(WORKFLOW_DIAG_SNAPSHOT_KEY);
-      return parseWorkflowDiagStorePayload(record?.payloadJson ?? null);
-    } catch (error) {
-      this.logger.debug("Failed to restore workflow diag store", {
-        error: formatError(error),
-      });
-      return createEmptyWorkflowDiagStorePayload();
-    }
+    return runRestoreWorkflowDiagStore(this.stateStore, WORKFLOW_DIAG_SNAPSHOT_KEY, this.logger);
   }
 
   private persistWorkflowDiagStore(): void {
-    const stateStore = this.stateStore as StateStore & {
-      upsertRuntimeMetricsSnapshot?: (key: string, payloadJson: string) => void;
-    };
-    if (typeof stateStore.upsertRuntimeMetricsSnapshot !== "function") {
-      return;
-    }
-    try {
-      stateStore.upsertRuntimeMetricsSnapshot(WORKFLOW_DIAG_SNAPSHOT_KEY, JSON.stringify(this.workflowDiagStore));
-    } catch (error) {
-      this.logger.debug("Failed to persist workflow diag store", {
-        error: formatError(error),
-      });
-    }
+    runPersistWorkflowDiagStore(this.stateStore, WORKFLOW_DIAG_SNAPSHOT_KEY, this.workflowDiagStore, this.logger);
   }
 
   private beginWorkflowDiagRun(input: {
