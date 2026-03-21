@@ -151,6 +151,7 @@ import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchCon
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
 import { buildChatRequestDispatchContext as runBuildChatRequestDispatchContext } from "./orchestrator/chat-request-context";
+import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1424,7 +1425,7 @@ export class Orchestrator {
   }
 
   private buildWorkflowRunDispatchContext(): Parameters<typeof runSendWorkflowRunRequest>[0] {
-    return {
+    return runBuildWorkflowRunCommandDispatchContext({
       setWorkflowSnapshot: (targetSessionKey, snapshot) => this.setWorkflowSnapshot(targetSessionKey, snapshot),
       beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
@@ -1441,7 +1442,7 @@ export class Orchestrator {
       finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
       finishWorkflowDiagRun: (runId, input) => this.finishWorkflowDiagRun(runId, input),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
