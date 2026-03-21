@@ -136,11 +136,13 @@ import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from ".
 import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
 import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
 import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
-import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./orchestrator/execute-message-with-lock";
 import { submitApiTask as runSubmitApiTask } from "./orchestrator/api-task-submission";
 import { bootstrapTaskQueueRecovery as runBootstrapTaskQueueRecovery } from "./orchestrator/task-queue-recovery";
 import { sendQueuedTaskFailureNotice as runSendQueuedTaskFailureNotice } from "./orchestrator/queue-failure-notice";
-import { handleMessageInternal as runHandleMessageInternal } from "./orchestrator/message-handler";
+import {
+  buildHandleMessageInternalDepsFromRuntime as runBuildHandleMessageInternalDepsFromRuntime,
+  handleMessageInternal as runHandleMessageInternal,
+} from "./orchestrator/message-handler";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -515,25 +517,17 @@ export class Orchestrator {
     },
   ): Promise<void> {
     await runHandleMessageInternal(
-      {
-        syncRuntimeHotConfig: () => this.syncRuntimeHotConfig(),
-        buildSessionKey: (targetMessage) => buildSessionKey(targetMessage),
-        markSessionRequestStarted: (sessionKey) => this.markSessionRequestStarted(sessionKey),
-        markSessionRequestFinished: (sessionKey) => this.markSessionRequestFinished(sessionKey),
-        tryHandleDirectStopCommand: (input) => this.tryHandleDirectStopCommand(input),
-        tryHandleUnlockedStatusCommand: (input) => this.tryHandleUnlockedStatusCommand(input),
-        executeMessageWithinSessionLock: (input) =>
-          runExecuteMessageWithinSessionLock({
-            getLock: (targetSessionKey) => this.getLock(targetSessionKey),
-            buildLockedMessageDispatchContext: () => this.buildLockedMessageDispatchContext(),
-            message: input.message,
-            requestId: input.requestId,
-            sessionKey: input.sessionKey,
-            receivedAt: input.receivedAt,
-            options: input.options,
-          }),
-        startSessionQueueDrain: (sessionKey) => this.startSessionQueueDrain(sessionKey),
-      },
+      runBuildHandleMessageInternalDepsFromRuntime({
+        syncRuntimeHotConfig: this.syncRuntimeHotConfig.bind(this),
+        buildSessionKey,
+        markSessionRequestStarted: this.markSessionRequestStarted.bind(this),
+        markSessionRequestFinished: this.markSessionRequestFinished.bind(this),
+        tryHandleDirectStopCommand: this.tryHandleDirectStopCommand.bind(this),
+        tryHandleUnlockedStatusCommand: this.tryHandleUnlockedStatusCommand.bind(this),
+        getLock: this.getLock.bind(this),
+        buildLockedMessageDispatchContext: this.buildLockedMessageDispatchContext.bind(this),
+        startSessionQueueDrain: this.startSessionQueueDrain.bind(this),
+      }),
       {
         message,
         receivedAt,

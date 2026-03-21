@@ -2,6 +2,7 @@ import type { InboundMessage } from "../types";
 import { collectLocalAttachmentPaths } from "./media-progress";
 import { cleanupAttachmentFiles } from "./misc-utils";
 import type { ExecuteLockedMessageResult } from "./locked-message-execution";
+import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./execute-message-with-lock";
 
 interface HandleMessageInternalInput {
   message: InboundMessage;
@@ -45,6 +46,37 @@ interface HandleMessageInternalDeps {
     };
   }) => Promise<ExecuteLockedMessageResult>;
   startSessionQueueDrain: (sessionKey: string) => void;
+}
+
+interface HandleMessageInternalRuntimeDepsInput extends Omit<HandleMessageInternalDeps, "executeMessageWithinSessionLock"> {
+  getLock: Parameters<typeof runExecuteMessageWithinSessionLock>[0]["getLock"];
+  buildLockedMessageDispatchContext: Parameters<
+    typeof runExecuteMessageWithinSessionLock
+  >[0]["buildLockedMessageDispatchContext"];
+}
+
+export function buildHandleMessageInternalDepsFromRuntime(
+  input: HandleMessageInternalRuntimeDepsInput,
+): HandleMessageInternalDeps {
+  return {
+    syncRuntimeHotConfig: input.syncRuntimeHotConfig,
+    buildSessionKey: input.buildSessionKey,
+    markSessionRequestStarted: input.markSessionRequestStarted,
+    markSessionRequestFinished: input.markSessionRequestFinished,
+    tryHandleDirectStopCommand: input.tryHandleDirectStopCommand,
+    tryHandleUnlockedStatusCommand: input.tryHandleUnlockedStatusCommand,
+    executeMessageWithinSessionLock: (executionInput) =>
+      runExecuteMessageWithinSessionLock({
+        getLock: input.getLock,
+        buildLockedMessageDispatchContext: input.buildLockedMessageDispatchContext,
+        message: executionInput.message,
+        requestId: executionInput.requestId,
+        sessionKey: executionInput.sessionKey,
+        receivedAt: executionInput.receivedAt,
+        options: executionInput.options,
+      }),
+    startSessionQueueDrain: input.startSessionQueueDrain,
+  };
 }
 
 export async function handleMessageInternal(
