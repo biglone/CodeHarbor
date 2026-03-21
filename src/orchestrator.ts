@@ -641,28 +641,15 @@ export class Orchestrator {
         }
       }
 
-      const lock = this.getLock(sessionKey);
-      await lock.runExclusive(async () => {
-        const lockedResult = await executeLockedMessage(
-          this.buildLockedMessageDispatchContext(),
-          {
-            message,
-            requestId,
-            sessionKey,
-            receivedAt,
-            bypassQueue: options.bypassQueue,
-            forcedPrompt: options.forcedPrompt,
-            deferFailureHandlingToQueue: options.deferFailureHandlingToQueue,
-          },
-        );
-
-        if (lockedResult.deferAttachmentCleanup) {
-          deferAttachmentCleanup = true;
-        }
-        if (lockedResult.queueDrainSessionKey) {
-          queueDrainSessionKey = lockedResult.queueDrainSessionKey;
-        }
+      const lockedResult = await this.executeMessageWithinSessionLock({
+        message,
+        requestId,
+        sessionKey,
+        receivedAt,
+        options,
       });
+      deferAttachmentCleanup = lockedResult.deferAttachmentCleanup;
+      queueDrainSessionKey = lockedResult.queueDrainSessionKey;
     } finally {
       if (sessionKeyForLifecycle) {
         this.markSessionRequestFinished(sessionKeyForLifecycle);
@@ -675,6 +662,45 @@ export class Orchestrator {
     if (queueDrainSessionKey) {
       this.startSessionQueueDrain(queueDrainSessionKey);
     }
+  }
+
+  private async executeMessageWithinSessionLock(input: {
+    message: InboundMessage;
+    requestId: string;
+    sessionKey: string;
+    receivedAt: number;
+    options: {
+      bypassQueue: boolean;
+      forcedPrompt: string | null;
+      deferFailureHandlingToQueue: boolean;
+    };
+  }): Promise<{
+    deferAttachmentCleanup: boolean;
+    queueDrainSessionKey: string | null;
+  }> {
+    const lock = this.getLock(input.sessionKey);
+    let lockedResult: {
+      deferAttachmentCleanup: boolean;
+      queueDrainSessionKey: string | null;
+    } = {
+      deferAttachmentCleanup: false,
+      queueDrainSessionKey: null,
+    };
+    await lock.runExclusive(async () => {
+      lockedResult = await executeLockedMessage(
+        this.buildLockedMessageDispatchContext(),
+        {
+          message: input.message,
+          requestId: input.requestId,
+          sessionKey: input.sessionKey,
+          receivedAt: input.receivedAt,
+          bypassQueue: input.options.bypassQueue,
+          forcedPrompt: input.options.forcedPrompt,
+          deferFailureHandlingToQueue: input.options.deferFailureHandlingToQueue,
+        },
+      );
+    });
+    return lockedResult;
   }
 
   private buildLockedMessageDispatchContext(): Parameters<typeof executeLockedMessage>[0] {
