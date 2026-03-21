@@ -119,6 +119,7 @@ import {
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
+import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
   buildDefaultUpgradeRestartPlan,
@@ -2242,22 +2243,7 @@ export class Orchestrator {
   }
 
   private persistRuntimeMetricsSnapshot(): void {
-    const stateStore = this.stateStore as StateStore & {
-      upsertRuntimeMetricsSnapshot?: (key: string, payloadJson: string) => void;
-    };
-    if (typeof stateStore.upsertRuntimeMetricsSnapshot !== "function") {
-      return;
-    }
-    try {
-      stateStore.upsertRuntimeMetricsSnapshot(
-        "orchestrator",
-        JSON.stringify(this.getRuntimeMetricsSnapshot()),
-      );
-    } catch (error) {
-      this.logger.debug("Failed to persist runtime metrics snapshot", {
-        error: formatError(error),
-      });
-    }
+    runPersistRuntimeMetricsSnapshot(this.stateStore, this.logger, "orchestrator", this.getRuntimeMetricsSnapshot());
   }
 
   private restoreWorkflowDiagStore(): WorkflowDiagStorePayload {
