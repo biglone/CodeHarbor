@@ -83,6 +83,7 @@ import {
   type AutoDevGitCommitResult,
 } from "./orchestrator/autodev-git";
 import {
+  type AutoDevRunSnapshot,
   type AutoDevRunContext,
 } from "./orchestrator/autodev-runner";
 import { createIdleAutoDevSnapshot } from "./orchestrator/autodev-snapshot";
@@ -329,24 +330,6 @@ interface ImageSelectionResult {
 interface DocumentExtractionSummary {
   documents: DocumentContextItem[];
   notice: string | null;
-}
-
-interface AutoDevRunSnapshot {
-  state: "idle" | "running" | "succeeded" | "failed";
-  startedAt: string | null;
-  endedAt: string | null;
-  taskId: string | null;
-  taskDescription: string | null;
-  approved: boolean | null;
-  repairRounds: number;
-  error: string | null;
-  mode: "idle" | "single" | "loop";
-  loopRound: number;
-  loopCompletedRuns: number;
-  loopMaxRuns: number;
-  loopDeadlineAt: string | null;
-  lastGitCommitSummary: string | null;
-  lastGitCommitAt: string | null;
 }
 
 export interface ApiTaskSubmitInput {
