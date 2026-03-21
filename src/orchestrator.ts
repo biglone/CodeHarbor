@@ -63,7 +63,6 @@ import {
   resolveWorkflowRoleSkillPolicy as runResolveWorkflowRoleSkillPolicy,
   setWorkflowRoleSkillPolicyOverride as runSetWorkflowRoleSkillPolicyOverride,
 } from "./orchestrator/workflow-role-skill-policy";
-import { recordCliCompatPrompt as runRecordCliCompatPrompt } from "./orchestrator/cli-compat-prompt-recorder";
 import {
   listAutoDevGitCommitRecords as runListAutoDevGitCommitRecords,
   recordAutoDevGitCommit as runRecordAutoDevGitCommit,
@@ -122,7 +121,7 @@ import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext }
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
-import { buildChatRequestDispatchContext as runBuildChatRequestDispatchContext } from "./orchestrator/chat-request-context";
+import { buildChatRequestDispatchContextFromRuntime as runBuildChatRequestDispatchContextFromRuntime } from "./orchestrator/chat-request-context";
 import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
 import { buildLockedMessageDispatchContext as runBuildLockedMessageDispatchContext } from "./orchestrator/locked-message-context";
 import { buildNonBlockingStatusRouteContext as runBuildNonBlockingStatusRouteContext } from "./orchestrator/non-blocking-status-context";
@@ -182,9 +181,7 @@ import {
   formatByteSize,
   mapApiTaskStage,
 } from "./orchestrator/misc-utils";
-import { buildExecutionPrompt as runBuildExecutionPrompt } from "./orchestrator/execution-prompt";
 import { routeMessage as runRouteMessage, type RouteDecision } from "./orchestrator/message-routing";
-import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./orchestrator/conversation-bridge";
 import { drainSessionQueue as runDrainSessionQueue } from "./orchestrator/task-queue-drain";
 import { syncRuntimeHotConfig as runSyncRuntimeHotConfig } from "./orchestrator/runtime-hot-config-sync";
 import { resolveSessionBackendDecision as runResolveSessionBackendDecision } from "./orchestrator/backend-decision";
@@ -1066,13 +1063,11 @@ export class Orchestrator {
   }
 
   private buildChatRequestDispatchContext(): Parameters<typeof executeChatRequest>[0] {
-    return runBuildChatRequestDispatchContext({
+    return runBuildChatRequestDispatchContextFromRuntime({
       logger: this.logger,
       sessionActiveWindowMs: this.sessionActiveWindowMs,
-      cliCompat: {
-        enabled: this.cliCompat.enabled,
-        passThroughEvents: this.cliCompat.passThroughEvents,
-      },
+      cliCompatEnabled: this.cliCompat.enabled,
+      cliCompatPassThroughEvents: this.cliCompat.passThroughEvents,
       stateStore: this.stateStore,
       skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
       mediaMetrics: this.mediaMetrics,
@@ -1081,26 +1076,15 @@ export class Orchestrator {
       persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
       recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
         this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-      recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(this.cliCompatRecorder, this.logger, entry),
-      buildConversationBridgeContext: (targetSessionKey) =>
-        runBuildConversationBridgeContext({
-          messages: this.stateStore.listRecentConversationMessages(targetSessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT),
-          maxChars: CONTEXT_BRIDGE_MAX_CHARS,
-        }),
+      cliCompatRecorder: this.cliCompatRecorder,
+      contextBridgeHistoryLimit: CONTEXT_BRIDGE_HISTORY_LIMIT,
+      contextBridgeMaxChars: CONTEXT_BRIDGE_MAX_CHARS,
       transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
       prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
       prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
-      buildExecutionPrompt: (prompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
-        runBuildExecutionPrompt({
-          prompt,
-          message: targetMessage,
-          audioTranscripts,
-          extractedDocuments: documents,
-          bridgeContext,
-        }),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
