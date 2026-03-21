@@ -87,6 +87,13 @@ import {
 } from "./orchestrator/autodev-runner";
 import { createIdleAutoDevSnapshot } from "./orchestrator/autodev-snapshot";
 import {
+  cancelRunningExecutionInAllRuntimes as runCancelRunningExecutionInAllRuntimes,
+  clearSessionFromAllRuntimes as runClearSessionFromAllRuntimes,
+  getBackendRuntimeStats as runGetBackendRuntimeStats,
+  hasBackendRuntime as runHasBackendRuntime,
+  serializeBackendProfile as runSerializeBackendProfile,
+} from "./orchestrator/backend-runtime-registry";
+import {
   classifyBackendTaskType,
   isSameBackendProfile,
   normalizeBackendProfile,
@@ -1780,39 +1787,23 @@ export class Orchestrator {
   }
 
   private hasBackendRuntime(profile: BackendModelRouteProfile): boolean {
-    const key = this.serializeBackendProfile(profile);
-    return this.backendRuntimes.has(key);
+    return runHasBackendRuntime(this.backendRuntimes, profile);
   }
 
   private serializeBackendProfile(profile: BackendModelRouteProfile): string {
-    const normalized = normalizeBackendProfile(profile);
-    return `${normalized.provider}::${normalized.model ?? ""}`;
+    return runSerializeBackendProfile(profile);
   }
 
   private clearSessionFromAllRuntimes(sessionKey: string): void {
-    for (const runtime of this.backendRuntimes.values()) {
-      runtime.sessionRuntime.clearSession(sessionKey);
-    }
+    runClearSessionFromAllRuntimes(this.backendRuntimes, sessionKey);
   }
 
   private cancelRunningExecutionInAllRuntimes(sessionKey: string): void {
-    for (const runtime of this.backendRuntimes.values()) {
-      runtime.sessionRuntime.cancelRunningExecution(sessionKey);
-    }
+    runCancelRunningExecutionInAllRuntimes(this.backendRuntimes, sessionKey);
   }
 
   private getBackendRuntimeStats(): { workerCount: number; runningCount: number } {
-    let workerCount = 0;
-    let runningCount = 0;
-    for (const runtime of this.backendRuntimes.values()) {
-      const stats = runtime.sessionRuntime.getRuntimeStats();
-      workerCount += stats.workerCount;
-      runningCount += stats.runningCount;
-    }
-    return {
-      workerCount,
-      runningCount,
-    };
+    return runGetBackendRuntimeStats(this.backendRuntimes);
   }
 
   private recordBackendRouteDecision(input: {
