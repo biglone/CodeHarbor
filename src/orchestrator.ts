@@ -62,7 +62,6 @@ import {
 } from "./workflow/role-skills";
 import {
   formatError,
-  formatWorkflowContextBudget,
   formatWorkflowRoleSkillLoaded,
   parseCsvValues,
   parseEnvBoolean,
@@ -129,14 +128,11 @@ import {
   handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
   type AutoDevControlCommandDeps,
 } from "./orchestrator/autodev-control-command";
-import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./orchestrator/autodev-status-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
-import { handleStatusCommand } from "./orchestrator/status-command";
 import { handleStopCommand as runStopCommand } from "./orchestrator/stop-command";
 import { handleUpgradeCommand as runUpgradeCommand } from "./orchestrator/upgrade-command";
-import { handleWorkflowStatusCommand as runWorkflowStatusCommand } from "./orchestrator/workflow-status-command";
 import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
@@ -200,6 +196,16 @@ import {
   getUpgradeRunStats as runGetUpgradeRunStats,
   releaseUpgradeExecutionLock as runReleaseUpgradeExecutionLock,
 } from "./orchestrator/upgrade-state-access";
+import {
+  getTaskQueueStateStore as runGetTaskQueueStateStore,
+  getUpgradeStateStore as runGetUpgradeStateStore,
+  listTaskQueueFailureArchive as runListTaskQueueFailureArchive,
+} from "./orchestrator/state-store-access";
+import {
+  sendAutoDevStatusCommand as runSendAutoDevStatusCommand,
+  sendStatusCommand as runSendStatusCommand,
+  sendWorkflowStatusCommand as runSendWorkflowStatusCommand,
+} from "./orchestrator/status-command-dispatch";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -1311,44 +1317,8 @@ export class Orchestrator {
   }
 
   private async sendStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    await handleStatusCommand(
-      {
-        botNoticePrefix: this.botNoticePrefix,
-        groupDirectModeEnabled: this.groupDirectModeEnabled,
-        updateCheckTtlMs: this.updateCheckTtlMs,
-        cliCompatEnabled: this.cliCompat.enabled,
-        workflowEnabled: this.workflowRunner.isEnabled(),
-        autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
-        workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
-        workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
-        workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
-        getSessionStatus: (targetSessionKey) => this.stateStore.getSessionStatus(targetSessionKey),
-        resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
-        getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
-        getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
-        getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
-        getWorkflowSnapshot: (targetSessionKey) => this.workflowSnapshots.get(targetSessionKey) ?? null,
-        getAutoDevSnapshot: (targetSessionKey) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
-        hasActiveAutoDevLoopSession: (targetSessionKey) => this.activeAutoDevLoopSessions.has(targetSessionKey),
-        hasPendingAutoDevLoopStopRequest: (targetSessionKey) => this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
-        hasPendingStopRequest: (targetSessionKey) => this.pendingStopRequests.has(targetSessionKey),
-        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
-        listWorkflowDiagRunsBySession: (kind, targetSessionKey, limit) =>
-          this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
-        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
-        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
-        getPackageUpdateStatus: () => this.packageUpdateChecker.getStatus(),
-        getLatestUpgradeRun: () => this.getLatestUpgradeRun(),
-        getRecentUpgradeRuns: (limit) => this.getRecentUpgradeRuns(limit),
-        getUpgradeRunStats: () => this.getUpgradeRunStats(),
-        getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
-        resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-        hasSessionBackendOverride: (targetSessionKey) => this.sessionBackendOverrides.has(targetSessionKey),
-        getSessionBackendDecision: (targetSessionKey) => this.sessionLastBackendDecisions.get(targetSessionKey) ?? null,
-        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
-        formatWorkflowContextBudget: (value) => formatWorkflowContextBudget(value),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    await runSendStatusCommand(
+      this.buildStatusCommandDispatchContext(),
       {
         sessionKey,
         message,
@@ -1357,16 +1327,8 @@ export class Orchestrator {
   }
 
   private async handleWorkflowStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    await runWorkflowStatusCommand(
-      {
-        workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
-        workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
-        workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
-        getWorkflowSnapshot: (targetSessionKey) => this.workflowSnapshots.get(targetSessionKey) ?? null,
-        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
-        formatWorkflowContextBudget: (value) => formatWorkflowContextBudget(value),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    await runSendWorkflowStatusCommand(
+      this.buildStatusCommandDispatchContext(),
       {
         sessionKey,
         message,
@@ -1379,30 +1341,58 @@ export class Orchestrator {
     message: InboundMessage,
     workdir: string,
   ): Promise<void> {
-    await runAutoDevStatusCommand(
-      {
-        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-        autoDevAutoCommit: this.autoDevAutoCommit,
-        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-        autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
-        getAutoDevSnapshot: (targetSessionKey) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
-        hasActiveAutoDevLoopSession: (targetSessionKey) => this.activeAutoDevLoopSessions.has(targetSessionKey),
-        hasPendingAutoDevLoopStopRequest: (targetSessionKey) => this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
-        hasPendingStopRequest: (targetSessionKey) => this.pendingStopRequests.has(targetSessionKey),
-        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
-        buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
-        listWorkflowDiagRunsBySession: (kind, targetSessionKey, limit) =>
-          this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
-        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    await runSendAutoDevStatusCommand(
+      this.buildStatusCommandDispatchContext(),
       {
         sessionKey,
         message,
         workdir,
       },
     );
+  }
+
+  private buildStatusCommandDispatchContext() {
+    return {
+      botNoticePrefix: this.botNoticePrefix,
+      groupDirectModeEnabled: this.groupDirectModeEnabled,
+      updateCheckTtlMs: this.updateCheckTtlMs,
+      cliCompatEnabled: this.cliCompat.enabled,
+      workflowEnabled: this.workflowRunner.isEnabled(),
+      autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+      workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
+      workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
+      workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
+      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+      autoDevAutoCommit: this.autoDevAutoCommit,
+      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+      getSessionStatus: (targetSessionKey: string) => this.stateStore.getSessionStatus(targetSessionKey),
+      resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
+      getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
+      getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
+      getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
+      getWorkflowSnapshot: (targetSessionKey: string) => this.workflowSnapshots.get(targetSessionKey) ?? null,
+      getAutoDevSnapshot: (targetSessionKey: string) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
+      hasActiveAutoDevLoopSession: (targetSessionKey: string) => this.activeAutoDevLoopSessions.has(targetSessionKey),
+      hasPendingAutoDevLoopStopRequest: (targetSessionKey: string) =>
+        this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
+      hasPendingStopRequest: (targetSessionKey: string) => this.pendingStopRequests.has(targetSessionKey),
+      isAutoDevDetailedProgressEnabled: (targetSessionKey: string) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+      listWorkflowDiagRunsBySession: (kind: "autodev", targetSessionKey: string, limit: number) =>
+        this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
+      listWorkflowDiagEvents: (runId: string, limit?: number) => this.listWorkflowDiagEvents(runId, limit),
+      buildWorkflowRoleSkillStatus: (targetSessionKey: string) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+      getPackageUpdateStatus: () => this.packageUpdateChecker.getStatus(),
+      getLatestUpgradeRun: () => this.getLatestUpgradeRun(),
+      getRecentUpgradeRuns: (limit: number) => this.getRecentUpgradeRuns(limit),
+      getUpgradeRunStats: () => this.getUpgradeRunStats(),
+      getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
+      resolveSessionBackendStatusProfile: (targetSessionKey: string) => this.resolveSessionBackendStatusProfile(targetSessionKey),
+      hasSessionBackendOverride: (targetSessionKey: string) => this.sessionBackendOverrides.has(targetSessionKey),
+      getSessionBackendDecision: (targetSessionKey: string) => this.sessionLastBackendDecisions.get(targetSessionKey) ?? null,
+      formatBackendToolLabel: (profile: BackendModelRouteProfile) => this.formatBackendToolLabel(profile),
+      sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private async handleAutoDevProgressCommand(
@@ -2278,52 +2268,15 @@ export class Orchestrator {
   }
 
   private getTaskQueueStateStore(): TaskQueueStateStore | null {
-    const maybeStore = this.stateStore as unknown as Partial<TaskQueueStateStore>;
-    if (
-      typeof maybeStore.enqueueTask !== "function" ||
-      typeof maybeStore.claimNextTask !== "function" ||
-      typeof maybeStore.getTaskById !== "function" ||
-      typeof maybeStore.hasPendingTask !== "function" ||
-      typeof maybeStore.clearPendingTasks !== "function" ||
-      typeof maybeStore.listPendingTaskSessions !== "function" ||
-      typeof maybeStore.finishTask !== "function" ||
-      typeof maybeStore.failTask !== "function" ||
-      typeof maybeStore.recoverTasks !== "function" ||
-      typeof maybeStore.getTaskQueueStatusCounts !== "function"
-    ) {
-      return null;
-    }
-    return maybeStore as TaskQueueStateStore;
+    return runGetTaskQueueStateStore(this.stateStore) as TaskQueueStateStore | null;
   }
 
   private listTaskQueueFailureArchive(limit: number): TaskFailureArchiveRecord[] {
-    const stateStore = this.stateStore as StateStore & {
-      listTaskFailureArchive?: (limit?: number) => TaskFailureArchiveRecord[];
-    };
-    if (typeof stateStore.listTaskFailureArchive !== "function") {
-      return [];
-    }
-    try {
-      return stateStore.listTaskFailureArchive(limit);
-    } catch (error) {
-      this.logger.warn("Failed to load task queue failure archive", {
-        error: formatError(error),
-        limit,
-      });
-      return [];
-    }
+    return runListTaskQueueFailureArchive(this.stateStore, this.logger, limit);
   }
 
   private getUpgradeStateStore(): UpgradeStateStore | null {
-    const maybeStore = this.stateStore as unknown as Partial<UpgradeStateStore>;
-    if (
-      typeof maybeStore.createUpgradeRun !== "function" ||
-      typeof maybeStore.finishUpgradeRun !== "function" ||
-      typeof maybeStore.getLatestUpgradeRun !== "function"
-    ) {
-      return null;
-    }
-    return maybeStore as UpgradeStateStore;
+    return runGetUpgradeStateStore(this.stateStore) as UpgradeStateStore | null;
   }
 
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
