@@ -1,6 +1,6 @@
 import { Mutex } from "async-mutex";
 
-import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
+import { type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { type Channel } from "./channels/channel";
 import { CliCompatRecorder } from "./compat/cli-compat-recorder";
 import { ConfigService } from "./config-service";
@@ -154,6 +154,7 @@ import {
 } from "./orchestrator/locked-message-run-executors";
 import { resolveUpgradeRuntimeConfig as runResolveUpgradeRuntimeConfig } from "./orchestrator/upgrade-runtime-config";
 import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from "./orchestrator/workflow-runtime-config";
+import { resolveInputRuntimeConfig as runResolveInputRuntimeConfig } from "./orchestrator/input-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -404,44 +405,12 @@ export class Orchestrator {
     this.lockTtlMs = options?.lockTtlMs ?? 30 * 60 * 1000;
     this.lockPruneIntervalMs = options?.lockPruneIntervalMs ?? 5 * 60 * 1000;
     this.progressUpdatesEnabled = options?.progressUpdatesEnabled ?? false;
-    this.cliCompat = options?.cliCompat ?? {
-      enabled: false,
-      passThroughEvents: false,
-      preserveWhitespace: false,
-      disableReplyChunkSplit: false,
-      progressThrottleMs: 300,
-      fetchMedia: false,
-      imageMaxBytes: 10_485_760,
-      imageMaxCount: 4,
-      imageAllowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-      transcribeAudio: false,
-      audioTranscribeModel: "gpt-4o-mini-transcribe",
-      audioTranscribeTimeoutMs: 120_000,
-      audioTranscribeMaxChars: 6_000,
-      audioTranscribeMaxRetries: 1,
-      audioTranscribeRetryDelayMs: 800,
-      audioTranscribeMaxBytes: 26_214_400,
-      audioLocalWhisperCommand: null,
-      audioLocalWhisperTimeoutMs: 180_000,
-      recordPath: null,
-    };
-    this.cliCompatRecorder = this.cliCompat.recordPath ? new CliCompatRecorder(this.cliCompat.recordPath) : null;
-    this.audioTranscriber =
-      options?.audioTranscriber ??
-      new AudioTranscriber({
-        enabled: this.cliCompat.transcribeAudio,
-        apiKey: process.env.OPENAI_API_KEY?.trim() || null,
-        model: this.cliCompat.audioTranscribeModel,
-        timeoutMs: this.cliCompat.audioTranscribeTimeoutMs,
-        maxChars: this.cliCompat.audioTranscribeMaxChars,
-        maxRetries: this.cliCompat.audioTranscribeMaxRetries,
-        retryDelayMs: this.cliCompat.audioTranscribeRetryDelayMs,
-        localWhisperCommand: this.cliCompat.audioLocalWhisperCommand,
-        localWhisperTimeoutMs: this.cliCompat.audioLocalWhisperTimeoutMs,
-      });
-    const defaultProgressInterval = options?.progressMinIntervalMs ?? 2_500;
-    this.progressMinIntervalMs = this.cliCompat.enabled ? this.cliCompat.progressThrottleMs : defaultProgressInterval;
-    this.typingTimeoutMs = options?.typingTimeoutMs ?? 10_000;
+    const inputRuntimeConfig = runResolveInputRuntimeConfig({ options });
+    this.cliCompat = inputRuntimeConfig.cliCompat;
+    this.cliCompatRecorder = inputRuntimeConfig.cliCompatRecorder;
+    this.audioTranscriber = inputRuntimeConfig.audioTranscriber;
+    this.progressMinIntervalMs = inputRuntimeConfig.progressMinIntervalMs;
+    this.typingTimeoutMs = inputRuntimeConfig.typingTimeoutMs;
     this.commandPrefix = (options?.commandPrefix ?? "").trim();
     this.matrixUserId = options?.matrixUserId ?? "";
     const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
