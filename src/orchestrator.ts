@@ -9,7 +9,6 @@ import {
   CodexExecutor,
   type CodexProgressEvent,
 } from "./executor/codex-executor";
-import { CodexSessionRuntime } from "./executor/codex-session-runtime";
 import { Logger } from "./logger";
 import {
   type RuntimeMetricsSnapshot,
@@ -146,6 +145,7 @@ import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from 
 import { resolveInputRuntimeConfig as runResolveInputRuntimeConfig } from "./orchestrator/input-runtime-config";
 import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from "./orchestrator/autodev-runtime-config";
 import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
+import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -450,18 +450,14 @@ export class Orchestrator {
     this.taskQueueRecoveryEnabled = serviceRuntimeConfig.taskQueueRecoveryEnabled;
     this.taskQueueRecoveryBatchLimit = serviceRuntimeConfig.taskQueueRecoveryBatchLimit;
     this.taskQueueRetryPolicy = serviceRuntimeConfig.taskQueueRetryPolicy;
-    this.executorFactory = options?.executorFactory ?? null;
-    this.defaultBackendProfile = {
-      provider: options?.aiCliProvider ?? "codex",
-      model: options?.aiCliModel?.trim() || null,
-    };
-    this.backendModelRouter = new BackendModelRouter(options?.backendModelRoutingRules ?? []);
-    const defaultBackendProfileKey = this.serializeBackendProfile(this.defaultBackendProfile);
-    this.backendRuntimes.set(defaultBackendProfileKey, {
-      profile: this.defaultBackendProfile,
+    const backendRuntimeConfig = runResolveBackendRuntimeConfig({
+      options,
       executor,
-      sessionRuntime: new CodexSessionRuntime(executor),
     });
+    this.executorFactory = backendRuntimeConfig.executorFactory;
+    this.defaultBackendProfile = backendRuntimeConfig.defaultBackendProfile;
+    this.backendModelRouter = backendRuntimeConfig.backendModelRouter;
+    this.backendRuntimes.set(backendRuntimeConfig.defaultBackendRuntimeKey, backendRuntimeConfig.defaultBackendRuntimeBundle);
     const upgradeRuntimeConfig = runResolveUpgradeRuntimeConfig({
       options,
       logger: this.logger,
