@@ -141,7 +141,7 @@ import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapsh
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
 import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
-import { resolveGroupPolicy as runResolveGroupPolicy, resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
+import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
   buildDefaultUpgradeRestartPlan,
@@ -1610,10 +1610,6 @@ export class Orchestrator {
     this.defaultGroupTriggerPolicy.allowReply = config.defaultGroupTriggerPolicy.allowReply;
     this.defaultGroupTriggerPolicy.allowActiveWindow = config.defaultGroupTriggerPolicy.allowActiveWindow;
     this.defaultGroupTriggerPolicy.allowPrefix = config.defaultGroupTriggerPolicy.allowPrefix;
-  }
-
-  private resolveGroupPolicy(conversationId: string): TriggerPolicy {
-    return runResolveGroupPolicy(conversationId, this.roomTriggerPolicies, this.defaultGroupTriggerPolicy);
   }
 
   private resolveRoomRuntimeConfig(conversationId: string): RoomRuntimeConfig {
