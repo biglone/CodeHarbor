@@ -26,7 +26,6 @@ import {
   type RuntimeHotConfigPayload,
 } from "./runtime-hot-config";
 import {
-  ARCHIVE_REASON_MAX_ATTEMPTS,
   type RetryPolicy,
 } from "./reliability/retry-policy";
 import {
@@ -59,9 +58,6 @@ import {
   type WorkflowRoleSkillDisclosureMode,
   type WorkflowRoleSkillPolicyOverride,
 } from "./workflow/role-skills";
-import {
-  formatError,
-} from "./orchestrator/helpers";
 import {
   buildWorkflowRoleSkillStatus as runBuildWorkflowRoleSkillStatus,
   resolveWorkflowRoleSkillPolicy as runResolveWorkflowRoleSkillPolicy,
@@ -145,6 +141,7 @@ import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from ".
 import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./orchestrator/execute-message-with-lock";
 import { submitApiTask as runSubmitApiTask } from "./orchestrator/api-task-submission";
 import { bootstrapTaskQueueRecovery as runBootstrapTaskQueueRecovery } from "./orchestrator/task-queue-recovery";
+import { sendQueuedTaskFailureNotice as runSendQueuedTaskFailureNotice } from "./orchestrator/queue-failure-notice";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -790,22 +787,15 @@ export class Orchestrator {
       detail: string;
     },
   ): Promise<void> {
-    const reasonText =
-      input.archiveReason === ARCHIVE_REASON_MAX_ATTEMPTS
-        ? `达到最大重试次数(${this.taskQueueRetryPolicy.maxAttempts})`
-        : `不可重试错误(${input.archiveReason})`;
-    const retryAfterText = input.retryAfterMs === null ? "n/a" : `${input.retryAfterMs}ms`;
-    try {
-      await this.channel.sendMessage(
-        conversationId,
-        `[CodeHarbor] 请求处理失败并已归档（attempt=${input.attempt}，retryReason=${input.retryReason}，archiveReason=${input.archiveReason}，retryAfterMs=${retryAfterText}，原因: ${reasonText}）：${input.detail}`,
-      );
-    } catch (error) {
-      this.logger.error("Failed to send queued task failure notice", {
-        conversationId,
-        error: formatError(error),
-      });
-    }
+    await runSendQueuedTaskFailureNotice(
+      {
+        taskQueueRetryMaxAttempts: this.taskQueueRetryPolicy.maxAttempts,
+        sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
+        logger: this.logger,
+      },
+      conversationId,
+      input,
+    );
   }
 
   private routeMessage(message: InboundMessage, sessionKey: string, roomConfig: RoomRuntimeConfig): RouteDecision {
