@@ -189,6 +189,17 @@ import {
   recordBackendRouteDecision as runRecordBackendRouteDecision,
   type BackendRouteDiagRecord,
 } from "./orchestrator/backend-route-diag";
+import {
+  acquireUpgradeExecutionLock as runAcquireUpgradeExecutionLock,
+  authorizeUpgradeRequest as runAuthorizeUpgradeRequest,
+  createUpgradeRun as runCreateUpgradeRun,
+  finishUpgradeRun as runFinishUpgradeRun,
+  getLatestUpgradeRun as runGetLatestUpgradeRun,
+  getRecentUpgradeRuns as runGetRecentUpgradeRuns,
+  getUpgradeExecutionLockSnapshot as runGetUpgradeExecutionLockSnapshot,
+  getUpgradeRunStats as runGetUpgradeRunStats,
+  releaseUpgradeExecutionLock as runReleaseUpgradeExecutionLock,
+} from "./orchestrator/upgrade-state-access";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -2186,162 +2197,84 @@ export class Orchestrator {
   }
 
   private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
-    if (!message.isDirectMessage) {
-      return {
-        allowed: false,
-        reason: "为保证安全，/upgrade 仅支持私聊中执行。",
-      };
-    }
-    if (this.upgradeAllowedUsers.size > 0) {
-      if (this.upgradeAllowedUsers.has(message.senderId)) {
-        return { allowed: true };
-      }
-      return {
-        allowed: false,
-        reason: "当前账号无执行 /upgrade 权限，请联系管理员添加 MATRIX_UPGRADE_ALLOWED_USERS 白名单。",
-      };
-    }
-    if (this.matrixAdminUsers.size === 0 || this.matrixAdminUsers.has(message.senderId)) {
-      return { allowed: true };
-    }
-    return {
-      allowed: false,
-      reason: "当前账号不是 Matrix 管理员（MATRIX_ADMIN_USERS），无法执行 /upgrade。",
-    };
+    return runAuthorizeUpgradeRequest(message, this.upgradeAllowedUsers, this.matrixAdminUsers);
   }
 
   private createUpgradeRun(requestedBy: string, targetVersion: string | null): number | null {
-    const store = this.getUpgradeStateStore();
-    if (!store) {
-      return null;
-    }
-    try {
-      return store.createUpgradeRun({
-        requestedBy,
-        targetVersion,
-      });
-    } catch (error) {
-      this.logger.warn("Failed to create upgrade run record", { error });
-      return null;
-    }
+    return runCreateUpgradeRun(
+      {
+        getUpgradeStateStore: () => this.getUpgradeStateStore(),
+        logger: this.logger,
+      },
+      requestedBy,
+      targetVersion,
+    );
   }
 
   private finishUpgradeRun(
     runId: number | null,
     input: { status: "succeeded" | "failed"; installedVersion: string | null; error: string | null },
   ): void {
-    if (runId === null) {
-      return;
-    }
-    const store = this.getUpgradeStateStore();
-    if (!store) {
-      return;
-    }
-    try {
-      store.finishUpgradeRun(runId, input);
-    } catch (error) {
-      this.logger.warn("Failed to finalize upgrade run record", { runId, error });
-    }
+    runFinishUpgradeRun(
+      {
+        getUpgradeStateStore: () => this.getUpgradeStateStore(),
+        logger: this.logger,
+      },
+      runId,
+      input,
+    );
   }
 
   private getLatestUpgradeRun(): UpgradeRunRecord | null {
-    const store = this.getUpgradeStateStore();
-    if (!store) {
-      return null;
-    }
-    try {
-      return store.getLatestUpgradeRun();
-    } catch (error) {
-      this.logger.warn("Failed to fetch latest upgrade run record", { error });
-      return null;
-    }
+    return runGetLatestUpgradeRun({
+      getUpgradeStateStore: () => this.getUpgradeStateStore(),
+      logger: this.logger,
+    });
   }
 
   private getRecentUpgradeRuns(limit: number): UpgradeRunRecord[] {
-    const store = this.getUpgradeStateStore();
-    if (!store || typeof store.listRecentUpgradeRuns !== "function") {
-      return [];
-    }
-    try {
-      return store.listRecentUpgradeRuns(limit);
-    } catch (error) {
-      this.logger.warn("Failed to fetch recent upgrade run records", { error, limit });
-      return [];
-    }
+    return runGetRecentUpgradeRuns(
+      {
+        getUpgradeStateStore: () => this.getUpgradeStateStore(),
+        logger: this.logger,
+      },
+      limit,
+    );
   }
 
   private getUpgradeRunStats(): UpgradeRunStats {
-    const store = this.getUpgradeStateStore();
-    if (!store || typeof store.getUpgradeRunStats !== "function") {
-      return {
-        total: 0,
-        succeeded: 0,
-        failed: 0,
-        running: 0,
-        avgDurationMs: 0,
-      };
-    }
-    try {
-      return store.getUpgradeRunStats();
-    } catch (error) {
-      this.logger.warn("Failed to fetch upgrade run stats", { error });
-      return {
-        total: 0,
-        succeeded: 0,
-        failed: 0,
-        running: 0,
-        avgDurationMs: 0,
-      };
-    }
+    return runGetUpgradeRunStats({
+      getUpgradeStateStore: () => this.getUpgradeStateStore(),
+      logger: this.logger,
+    });
   }
 
   private getUpgradeExecutionLockSnapshot(): UpgradeExecutionLockRecord | null {
-    const store = this.getUpgradeStateStore();
-    if (!store || typeof store.getUpgradeExecutionLock !== "function") {
-      return null;
-    }
-    try {
-      return store.getUpgradeExecutionLock();
-    } catch (error) {
-      this.logger.warn("Failed to fetch distributed upgrade lock state", { error });
-      return null;
-    }
+    return runGetUpgradeExecutionLockSnapshot({
+      getUpgradeStateStore: () => this.getUpgradeStateStore(),
+      logger: this.logger,
+    });
   }
 
   private acquireUpgradeExecutionLock(): { acquired: boolean; owner: string | null; expiresAt: number | null } {
-    const store = this.getUpgradeStateStore();
-    if (!store || typeof store.acquireUpgradeExecutionLock !== "function") {
-      return {
-        acquired: true,
-        owner: this.upgradeLockOwner,
-        expiresAt: null,
-      };
-    }
-    try {
-      return store.acquireUpgradeExecutionLock({
-        owner: this.upgradeLockOwner,
-        ttlMs: DEFAULT_UPGRADE_LOCK_TTL_MS,
-      });
-    } catch (error) {
-      this.logger.warn("Failed to acquire distributed upgrade lock", { error });
-      return {
-        acquired: false,
-        owner: null,
-        expiresAt: null,
-      };
-    }
+    return runAcquireUpgradeExecutionLock(
+      {
+        getUpgradeStateStore: () => this.getUpgradeStateStore(),
+        logger: this.logger,
+      },
+      this.upgradeLockOwner,
+      DEFAULT_UPGRADE_LOCK_TTL_MS,
+    );
   }
 
   private releaseUpgradeExecutionLock(): void {
-    const store = this.getUpgradeStateStore();
-    if (!store || typeof store.releaseUpgradeExecutionLock !== "function") {
-      return;
-    }
-    try {
-      store.releaseUpgradeExecutionLock(this.upgradeLockOwner);
-    } catch (error) {
-      this.logger.warn("Failed to release distributed upgrade lock", { error });
-    }
+    runReleaseUpgradeExecutionLock(
+      {
+        getUpgradeStateStore: () => this.getUpgradeStateStore(),
+        logger: this.logger,
+      },
+      this.upgradeLockOwner,
+    );
   }
 
   private getTaskQueueStateStore(): TaskQueueStateStore | null {
