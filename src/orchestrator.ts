@@ -527,33 +527,26 @@ export class Orchestrator {
       sessionKeyForLifecycle = sessionKey;
       this.markSessionRequestStarted(sessionKey);
 
-      const directCommand = parseControlCommand(message.text.trim());
-      if (directCommand === "stop") {
-        if (this.stateStore.hasProcessedEvent(sessionKey, message.eventId)) {
-          this.recordRequestMetrics("duplicate", 0, 0, 0);
-          this.logger.debug("Duplicate stop command ignored", { requestId, eventId: message.eventId, sessionKey });
-          return;
-        }
-        await this.handleStopCommand(sessionKey, message, requestId);
-        this.stateStore.markEventProcessed(sessionKey, message.eventId);
+      if (
+        await this.tryHandleDirectStopCommand({
+          message,
+          requestId,
+          sessionKey,
+        })
+      ) {
         return;
       }
 
-      if (!options.bypassQueue && options.forcedPrompt === null) {
-        const queueWaitMs = Date.now() - receivedAt;
-        const roomConfig = this.resolveRoomRuntimeConfig(message.conversationId);
-        const route = this.routeMessage(message, sessionKey, roomConfig);
-        const handledWithoutLock = await this.tryHandleNonBlockingStatusRoute({
-          route,
-          sessionKey,
+      if (
+        await this.tryHandleUnlockedStatusCommand({
           message,
           requestId,
-          roomConfig,
-          queueWaitMs,
-        });
-        if (handledWithoutLock) {
-          return;
-        }
+          sessionKey,
+          receivedAt,
+          options,
+        })
+      ) {
+        return;
       }
 
       const lockedResult = await runExecuteMessageWithinSessionLock({
@@ -579,6 +572,55 @@ export class Orchestrator {
     if (queueDrainSessionKey) {
       this.startSessionQueueDrain(queueDrainSessionKey);
     }
+  }
+
+  private async tryHandleDirectStopCommand(input: {
+    message: InboundMessage;
+    requestId: string;
+    sessionKey: string;
+  }): Promise<boolean> {
+    const directCommand = parseControlCommand(input.message.text.trim());
+    if (directCommand !== "stop") {
+      return false;
+    }
+    if (this.stateStore.hasProcessedEvent(input.sessionKey, input.message.eventId)) {
+      this.recordRequestMetrics("duplicate", 0, 0, 0);
+      this.logger.debug("Duplicate stop command ignored", {
+        requestId: input.requestId,
+        eventId: input.message.eventId,
+        sessionKey: input.sessionKey,
+      });
+      return true;
+    }
+    await this.handleStopCommand(input.sessionKey, input.message, input.requestId);
+    this.stateStore.markEventProcessed(input.sessionKey, input.message.eventId);
+    return true;
+  }
+
+  private async tryHandleUnlockedStatusCommand(input: {
+    message: InboundMessage;
+    requestId: string;
+    sessionKey: string;
+    receivedAt: number;
+    options: {
+      bypassQueue: boolean;
+      forcedPrompt: string | null;
+    };
+  }): Promise<boolean> {
+    if (input.options.bypassQueue || input.options.forcedPrompt !== null) {
+      return false;
+    }
+    const queueWaitMs = Date.now() - input.receivedAt;
+    const roomConfig = this.resolveRoomRuntimeConfig(input.message.conversationId);
+    const route = this.routeMessage(input.message, input.sessionKey, roomConfig);
+    return this.tryHandleNonBlockingStatusRoute({
+      route,
+      sessionKey: input.sessionKey,
+      message: input.message,
+      requestId: input.requestId,
+      roomConfig,
+      queueWaitMs,
+    });
   }
 
   private buildLockedMessageDispatchContext(): Parameters<typeof executeLockedMessage>[0] {
