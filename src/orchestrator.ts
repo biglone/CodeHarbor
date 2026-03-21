@@ -110,6 +110,10 @@ import {
   prepareBackendRuntimeForSession as runPrepareBackendRuntimeForSession,
 } from "./orchestrator/backend-runtime-management";
 import {
+  resolveManualBackendProfile as runResolveManualBackendProfile,
+  resolveSessionBackendStatusProfile as runResolveSessionBackendStatusProfile,
+} from "./orchestrator/backend-profile-selection";
+import {
   cancelRunningExecutionInAllRuntimes as runCancelRunningExecutionInAllRuntimes,
   clearSessionFromAllRuntimes as runClearSessionFromAllRuntimes,
   getBackendRuntimeStats as runGetBackendRuntimeStats,
@@ -1742,19 +1746,16 @@ export class Orchestrator {
   }
 
   private resolveSessionBackendStatusProfile(sessionKey: string): BackendModelRouteProfile {
-    const override = this.sessionBackendOverrides.get(sessionKey);
-    if (override) {
-      return override.profile;
-    }
-    return this.sessionBackendProfiles.get(sessionKey) ?? this.defaultBackendProfile;
+    return runResolveSessionBackendStatusProfile({
+      sessionKey,
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionBackendProfiles: this.sessionBackendProfiles,
+      defaultBackendProfile: this.defaultBackendProfile,
+    });
   }
 
   private resolveManualBackendProfile(provider: "codex" | "claude"): BackendModelRouteProfile {
-    const model = provider === this.defaultBackendProfile.provider ? this.defaultBackendProfile.model : null;
-    return {
-      provider,
-      model,
-    };
+    return runResolveManualBackendProfile(provider, this.defaultBackendProfile);
   }
 
   private ensureBackendRuntime(profile: BackendModelRouteProfile): BackendRuntimeBundle {
