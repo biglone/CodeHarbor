@@ -1,0 +1,68 @@
+import type { AudioTranscriberLike } from "../audio-transcriber";
+import type { CliCompatConfig, TriggerPolicy, RoomTriggerPolicyOverrides } from "../config";
+import type { ConfigService } from "../config-service";
+import type { CodexExecutor } from "../executor/codex-executor";
+import type { PackageUpdateChecker } from "../package-update-checker";
+import type { RateLimiterOptions } from "../rate-limiter";
+import type { RetryPolicyInput } from "../reliability/retry-policy";
+import type { BackendModelRouteRule } from "../routing/backend-model-router";
+import type { WorkflowRole, WorkflowRoleSkillDisclosureMode } from "../workflow/role-skills";
+import type { SelfUpdateResult, UpgradeRestartPlan, UpgradeVersionProbeResult } from "./upgrade-utils";
+
+export type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
+export type UpgradeRestartPlanner = () => Promise<UpgradeRestartPlan>;
+export type UpgradeVersionProbe = () => Promise<UpgradeVersionProbeResult>;
+
+export interface OrchestratorOptions {
+  lockTtlMs?: number;
+  lockPruneIntervalMs?: number;
+  progressUpdatesEnabled?: boolean;
+  progressMinIntervalMs?: number;
+  typingTimeoutMs?: number;
+  commandPrefix?: string;
+  matrixUserId?: string;
+  sessionActiveWindowMinutes?: number;
+  groupDirectModeEnabled?: boolean;
+  defaultGroupTriggerPolicy?: TriggerPolicy;
+  roomTriggerPolicies?: RoomTriggerPolicyOverrides;
+  rateLimiterOptions?: RateLimiterOptions;
+  cliCompat?: CliCompatConfig;
+  multiAgentWorkflow?: {
+    enabled: boolean;
+    autoRepairMaxRounds: number;
+    executionTimeoutMs?: number;
+    planContextMaxChars?: number | null;
+    outputContextMaxChars?: number | null;
+    feedbackContextMaxChars?: number | null;
+    roleSkills?: {
+      enabled?: boolean;
+      mode?: WorkflowRoleSkillDisclosureMode;
+      maxChars?: number;
+      roots?: string[];
+      roleAssignments?: Partial<Record<WorkflowRole, string[]>>;
+    };
+  };
+  packageUpdateChecker?: PackageUpdateChecker;
+  updateCheckTtlMs?: number;
+  audioTranscriber?: AudioTranscriberLike;
+  configService?: ConfigService;
+  defaultCodexWorkdir?: string;
+  aiCliProvider?: "codex" | "claude";
+  aiCliModel?: string | null;
+  backendModelRoutingRules?: BackendModelRouteRule[];
+  matrixAdminUsers?: string[];
+  executorFactory?: (provider: "codex" | "claude", model?: string | null) => CodexExecutor;
+  upgradeAllowedUsers?: string[];
+  selfUpdateTimeoutMs?: number;
+  selfUpdateRunner?: SelfUpdateRunner;
+  upgradeRestartPlanner?: UpgradeRestartPlanner;
+  upgradeVersionProbe?: UpgradeVersionProbe;
+  taskQueueRecoveryEnabled?: boolean;
+  taskQueueRecoveryBatchLimit?: number;
+  taskQueueRetryPolicy?: RetryPolicyInput;
+  autoDevLoopMaxRuns?: number;
+  autoDevLoopMaxMinutes?: number;
+  autoDevAutoCommit?: boolean;
+  autoDevMaxConsecutiveFailures?: number;
+  autoDevDetailedProgressEnabled?: boolean;
+}

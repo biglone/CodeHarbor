@@ -20,11 +20,10 @@ import {
   type PackageUpdateChecker,
   resolvePackageVersion,
 } from "./package-update-checker";
-import { RateLimiter, type RateLimiterOptions } from "./rate-limiter";
+import { RateLimiter } from "./rate-limiter";
 import {
   BackendModelRouter,
   type BackendModelRouteProfile,
-  type BackendModelRouteRule,
   type BackendModelRouteTaskType,
 } from "./routing/backend-model-router";
 import {
@@ -34,7 +33,6 @@ import {
   ARCHIVE_REASON_MAX_ATTEMPTS,
   createRetryPolicy,
   type RetryPolicy,
-  type RetryPolicyInput,
 } from "./reliability/retry-policy";
 import {
   AUTODEV_GIT_COMMIT_HISTORY_MAX,
@@ -71,7 +69,6 @@ import {
 } from "./workflow/multi-agent-workflow";
 import {
   WorkflowRoleSkillCatalog,
-  type WorkflowRole,
   type WorkflowRoleSkillDisclosureMode,
   type WorkflowRoleSkillPolicyOverride,
 } from "./workflow/role-skills";
@@ -149,13 +146,16 @@ import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
   runSelfUpdateCommand,
-  type SelfUpdateResult,
-  type UpgradeRestartPlan,
-  type UpgradeVersionProbeResult,
 } from "./orchestrator/upgrade-utils";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
+import type {
+  OrchestratorOptions,
+  SelfUpdateRunner,
+  UpgradeRestartPlanner,
+  UpgradeVersionProbe,
+} from "./orchestrator/orchestrator-config-types";
 import {
   type ControlCommand,
 } from "./orchestrator/control-command-handler";
@@ -277,63 +277,6 @@ export { buildApiTaskEventId, buildSessionKey };
 export type { ApiTaskQueryResult, ApiTaskSubmitInput, ApiTaskSubmitResult, ApiTaskStage } from "./orchestrator/orchestrator-api-types";
 export { ApiTaskIdempotencyConflictError } from "./orchestrator/orchestrator-api-types";
 
-interface OrchestratorOptions {
-  lockTtlMs?: number;
-  lockPruneIntervalMs?: number;
-  progressUpdatesEnabled?: boolean;
-  progressMinIntervalMs?: number;
-  typingTimeoutMs?: number;
-  commandPrefix?: string;
-  matrixUserId?: string;
-  sessionActiveWindowMinutes?: number;
-  groupDirectModeEnabled?: boolean;
-  defaultGroupTriggerPolicy?: TriggerPolicy;
-  roomTriggerPolicies?: RoomTriggerPolicyOverrides;
-  rateLimiterOptions?: RateLimiterOptions;
-  cliCompat?: CliCompatConfig;
-  multiAgentWorkflow?: {
-    enabled: boolean;
-    autoRepairMaxRounds: number;
-    executionTimeoutMs?: number;
-    planContextMaxChars?: number | null;
-    outputContextMaxChars?: number | null;
-    feedbackContextMaxChars?: number | null;
-    roleSkills?: {
-      enabled?: boolean;
-      mode?: WorkflowRoleSkillDisclosureMode;
-      maxChars?: number;
-      roots?: string[];
-      roleAssignments?: Partial<Record<WorkflowRole, string[]>>;
-    };
-  };
-  packageUpdateChecker?: PackageUpdateChecker;
-  updateCheckTtlMs?: number;
-  audioTranscriber?: AudioTranscriberLike;
-  configService?: ConfigService;
-  defaultCodexWorkdir?: string;
-  aiCliProvider?: "codex" | "claude";
-  aiCliModel?: string | null;
-  backendModelRoutingRules?: BackendModelRouteRule[];
-  matrixAdminUsers?: string[];
-  executorFactory?: (provider: "codex" | "claude", model?: string | null) => CodexExecutor;
-  upgradeAllowedUsers?: string[];
-  selfUpdateTimeoutMs?: number;
-  selfUpdateRunner?: SelfUpdateRunner;
-  upgradeRestartPlanner?: UpgradeRestartPlanner;
-  upgradeVersionProbe?: UpgradeVersionProbe;
-  taskQueueRecoveryEnabled?: boolean;
-  taskQueueRecoveryBatchLimit?: number;
-  taskQueueRetryPolicy?: RetryPolicyInput;
-  autoDevLoopMaxRuns?: number;
-  autoDevLoopMaxMinutes?: number;
-  autoDevAutoCommit?: boolean;
-  autoDevMaxConsecutiveFailures?: number;
-  autoDevDetailedProgressEnabled?: boolean;
-}
-
-type SelfUpdateRunner = (input: { version: string | null }) => Promise<SelfUpdateResult>;
-type UpgradeRestartPlanner = () => Promise<UpgradeRestartPlan>;
-type UpgradeVersionProbe = () => Promise<UpgradeVersionProbeResult>;
 type UpgradeStateStore = Pick<
   StateStore,
   | "createUpgradeRun"
