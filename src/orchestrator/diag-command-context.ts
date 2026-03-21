@@ -45,6 +45,40 @@ interface DiagCommandContextInput {
   sendNotice: DiagCommandDispatchContext["sendNotice"];
 }
 
+interface DiagCommandRuntimeContextInput {
+  botNoticePrefix: string;
+  processStartedAtIso: string;
+  defaultBackendProfile: BackendModelRouteProfile;
+  autoDevConfig: {
+    loopMaxRuns: number;
+    loopMaxMinutes: number;
+    autoCommit: boolean;
+    maxConsecutiveFailures: number;
+  };
+  runningExecutions: { size: number };
+  cliCompat: DiagCommandContextInput["cliCompat"];
+  audioTranscriber: { isEnabled: DiagCommandContextInput["isAudioTranscriberEnabled"] };
+  packageUpdateChecker: { getStatus: DiagCommandContextInput["getPackageUpdateStatus"] };
+  formatBackendToolLabel: DiagCommandContextInput["formatBackendToolLabel"];
+  mediaMetrics: DiagCommandContextInput["mediaMetrics"];
+  listWorkflowDiagRuns: DiagCommandContextInput["listWorkflowDiagRuns"];
+  listWorkflowDiagEvents: DiagCommandContextInput["listWorkflowDiagEvents"];
+  autoDevSnapshots: Map<string, AutoDevRunSnapshot>;
+  listAutoDevGitCommitRecords: DiagCommandContextInput["listAutoDevGitCommitRecords"];
+  listRecentAutoDevGitCommitEventSummaries: DiagCommandContextInput["listRecentAutoDevGitCommitEventSummaries"];
+  resolveSessionBackendStatusProfile: DiagCommandContextInput["resolveSessionBackendStatusProfile"];
+  sessionBackendOverrides: Map<string, SessionBackendOverride>;
+  sessionLastBackendDecisions: Map<string, SessionBackendDecision>;
+  backendModelRouter: { getStats: DiagCommandContextInput["getBackendModelRouterStats"] };
+  listBackendRouteDiagRecords: DiagCommandContextInput["listBackendRouteDiagRecords"];
+  getTaskQueueStateStore: DiagCommandContextInput["getTaskQueueStateStore"];
+  listTaskQueueFailureArchive: DiagCommandContextInput["listTaskQueueFailureArchive"];
+  getRecentUpgradeRuns: DiagCommandContextInput["getRecentUpgradeRuns"];
+  getUpgradeExecutionLockSnapshot: DiagCommandContextInput["getUpgradeExecutionLockSnapshot"];
+  getUpgradeRunStats: DiagCommandContextInput["getUpgradeRunStats"];
+  sendNotice: DiagCommandContextInput["sendNotice"];
+}
+
 export function buildDiagCommandDispatchContext(input: DiagCommandContextInput): DiagCommandDispatchContext {
   return {
     botNoticePrefix: input.botNoticePrefix,
@@ -77,4 +111,40 @@ export function buildDiagCommandDispatchContext(input: DiagCommandContextInput):
     getUpgradeRunStats: () => input.getUpgradeRunStats(),
     sendNotice: (conversationId, text) => input.sendNotice(conversationId, text),
   };
+}
+
+export function buildDiagCommandDispatchContextFromRuntime(
+  input: DiagCommandRuntimeContextInput,
+): DiagCommandDispatchContext {
+  return buildDiagCommandDispatchContext({
+    botNoticePrefix: input.botNoticePrefix,
+    processStartedAtIso: input.processStartedAtIso,
+    defaultBackendProfile: input.defaultBackendProfile,
+    autoDevLoopMaxRuns: input.autoDevConfig.loopMaxRuns,
+    autoDevLoopMaxMinutes: input.autoDevConfig.loopMaxMinutes,
+    autoDevAutoCommit: input.autoDevConfig.autoCommit,
+    autoDevMaxConsecutiveFailures: input.autoDevConfig.maxConsecutiveFailures,
+    runningExecutionsSize: input.runningExecutions.size,
+    cliCompat: input.cliCompat,
+    isAudioTranscriberEnabled: () => input.audioTranscriber.isEnabled(),
+    getPackageUpdateStatus: (query) => input.packageUpdateChecker.getStatus(query),
+    formatBackendToolLabel: input.formatBackendToolLabel,
+    mediaMetrics: input.mediaMetrics,
+    listWorkflowDiagRuns: input.listWorkflowDiagRuns,
+    listWorkflowDiagEvents: input.listWorkflowDiagEvents,
+    autoDevSnapshots: input.autoDevSnapshots,
+    listAutoDevGitCommitRecords: input.listAutoDevGitCommitRecords,
+    listRecentAutoDevGitCommitEventSummaries: input.listRecentAutoDevGitCommitEventSummaries,
+    resolveSessionBackendStatusProfile: input.resolveSessionBackendStatusProfile,
+    sessionBackendOverrides: input.sessionBackendOverrides,
+    sessionLastBackendDecisions: input.sessionLastBackendDecisions,
+    getBackendModelRouterStats: () => input.backendModelRouter.getStats(),
+    listBackendRouteDiagRecords: input.listBackendRouteDiagRecords,
+    getTaskQueueStateStore: input.getTaskQueueStateStore,
+    listTaskQueueFailureArchive: input.listTaskQueueFailureArchive,
+    getRecentUpgradeRuns: input.getRecentUpgradeRuns,
+    getUpgradeExecutionLockSnapshot: input.getUpgradeExecutionLockSnapshot,
+    getUpgradeRunStats: input.getUpgradeRunStats,
+    sendNotice: input.sendNotice,
+  });
 }

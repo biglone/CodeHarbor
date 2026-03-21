@@ -113,7 +113,7 @@ import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } fro
 import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
-import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
+import { buildDiagCommandDispatchContextFromRuntime as runBuildDiagCommandDispatchContextFromRuntime } from "./orchestrator/diag-command-context";
 import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContextFromRuntime as runBuildControlCommandDispatchContextFromRuntime } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
@@ -1749,43 +1749,38 @@ export class Orchestrator {
   }
 
   private buildDiagCommandDispatchContext(): Parameters<typeof runSendDiagCommand>[0] {
-    return runBuildDiagCommandDispatchContext({
+    return runBuildDiagCommandDispatchContextFromRuntime({
       botNoticePrefix: this.botNoticePrefix,
       processStartedAtIso: this.processStartedAtIso,
       defaultBackendProfile: this.defaultBackendProfile,
-      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-      autoDevAutoCommit: this.autoDevAutoCommit,
-      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-      runningExecutionsSize: this.runningExecutions.size,
-      cliCompat: {
-        fetchMedia: this.cliCompat.fetchMedia,
-        imageMaxCount: this.cliCompat.imageMaxCount,
-        imageMaxBytes: this.cliCompat.imageMaxBytes,
-        imageAllowedMimeTypes: this.cliCompat.imageAllowedMimeTypes,
-        audioTranscribeMaxBytes: this.cliCompat.audioTranscribeMaxBytes,
-        audioTranscribeModel: this.cliCompat.audioTranscribeModel,
+      autoDevConfig: {
+        loopMaxRuns: this.autoDevLoopMaxRuns,
+        loopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoCommit: this.autoDevAutoCommit,
+        maxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
       },
-      isAudioTranscriberEnabled: () => this.audioTranscriber.isEnabled(),
-      getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
-      formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+      runningExecutions: this.runningExecutions,
+      cliCompat: this.cliCompat,
+      audioTranscriber: this.audioTranscriber,
+      packageUpdateChecker: this.packageUpdateChecker,
+      formatBackendToolLabel: this.formatBackendToolLabel.bind(this),
       mediaMetrics: this.mediaMetrics,
-      listWorkflowDiagRuns: (kind: "workflow" | "autodev", limit: number) => this.listWorkflowDiagRuns(kind, limit),
-      listWorkflowDiagEvents: (runId: string, limit?: number) => this.listWorkflowDiagEvents(runId, limit),
+      listWorkflowDiagRuns: this.listWorkflowDiagRuns.bind(this),
+      listWorkflowDiagEvents: this.listWorkflowDiagEvents.bind(this),
       autoDevSnapshots: this.autoDevSnapshots,
-      listAutoDevGitCommitRecords: (limit: number) => this.listAutoDevGitCommitRecords(limit),
-      listRecentAutoDevGitCommitEventSummaries: (limit: number) => this.listRecentAutoDevGitCommitEventSummaries(limit),
-      resolveSessionBackendStatusProfile: (sessionKey: string) => this.resolveSessionBackendStatusProfile(sessionKey),
+      listAutoDevGitCommitRecords: this.listAutoDevGitCommitRecords.bind(this),
+      listRecentAutoDevGitCommitEventSummaries: this.listRecentAutoDevGitCommitEventSummaries.bind(this),
+      resolveSessionBackendStatusProfile: this.resolveSessionBackendStatusProfile.bind(this),
       sessionBackendOverrides: this.sessionBackendOverrides,
       sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-      getBackendModelRouterStats: () => this.backendModelRouter.getStats(),
-      listBackendRouteDiagRecords: (limit: number, sessionKey: string) => this.listBackendRouteDiagRecords(limit, sessionKey),
-      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-      listTaskQueueFailureArchive: (limit: number) => this.listTaskQueueFailureArchive(limit),
-      getRecentUpgradeRuns: (limit: number) => this.getRecentUpgradeRuns(limit),
-      getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
-      getUpgradeRunStats: () => this.getUpgradeRunStats(),
-      sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
+      backendModelRouter: this.backendModelRouter,
+      listBackendRouteDiagRecords: this.listBackendRouteDiagRecords.bind(this),
+      getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
+      listTaskQueueFailureArchive: this.listTaskQueueFailureArchive.bind(this),
+      getRecentUpgradeRuns: this.getRecentUpgradeRuns.bind(this),
+      getUpgradeExecutionLockSnapshot: this.getUpgradeExecutionLockSnapshot.bind(this),
+      getUpgradeRunStats: this.getUpgradeRunStats.bind(this),
+      sendNotice: this.channel.sendNotice.bind(this.channel),
     });
   }
 
