@@ -601,6 +601,26 @@ export class Orchestrator {
       resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
       routeMessage: (targetMessage, targetSessionKey, roomConfig) =>
         this.routeMessage(targetMessage, targetSessionKey, roomConfig),
+      ...this.buildLockedMessageControlHandlers(),
+      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+      rateLimiter: {
+        tryAcquire: (request) => this.rateLimiter.tryAcquire(request),
+      },
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      ...this.buildLockedMessageBackendHandlers(),
+    });
+  }
+
+  private buildLockedMessageControlHandlers(): Pick<
+    Parameters<typeof runBuildLockedMessageDispatchContextFromRuntime>[0],
+    | "handleControlCommand"
+    | "handleWorkflowStatusCommand"
+    | "handleAutoDevStatusCommand"
+    | "handleAutoDevProgressCommand"
+    | "handleAutoDevSkillsCommand"
+    | "handleAutoDevLoopStopCommand"
+  > {
+    return {
       handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
         this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
       handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
@@ -613,11 +633,21 @@ export class Orchestrator {
         this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
       handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
         this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
-      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-      rateLimiter: {
-        tryAcquire: (request) => this.rateLimiter.tryAcquire(request),
-      },
-      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
+  }
+
+  private buildLockedMessageBackendHandlers(): Pick<
+    Parameters<typeof runBuildLockedMessageDispatchContextFromRuntime>[0],
+    | "classifyBackendTaskType"
+    | "resolveSessionBackendDecision"
+    | "prepareBackendRuntimeForSession"
+    | "sessionLastBackendDecisions"
+    | "recordBackendRouteDecision"
+    | "executeWorkflowRun"
+    | "executeAutoDevRun"
+    | "executeChatRun"
+  > {
+    return {
       classifyBackendTaskType: (workflowCommand, autoDevCommand) => classifyBackendTaskType(workflowCommand, autoDevCommand),
       resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
       prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
@@ -627,7 +657,7 @@ export class Orchestrator {
       executeWorkflowRun: (input) => this.executeLockedWorkflowRun(input),
       executeAutoDevRun: (input) => this.executeLockedAutoDevRun(input),
       executeChatRun: (input) => this.executeLockedChatRun(input),
-    });
+    };
   }
 
   private async executeLockedWorkflowRun(input: Parameters<typeof runExecuteLockedWorkflowRun>[1]): Promise<void> {
