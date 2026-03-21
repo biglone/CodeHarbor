@@ -38,10 +38,6 @@ import {
   BACKEND_ROUTE_DIAG_HISTORY_MAX,
   CONTEXT_BRIDGE_HISTORY_LIMIT,
   CONTEXT_BRIDGE_MAX_CHARS,
-  DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
-  DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
-  DEFAULT_AUTODEV_LOOP_MAX_RUNS,
-  DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
   DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT,
   DEFAULT_TASK_QUEUE_RETRY_POLICY,
   DEFAULT_UPGRADE_LOCK_TTL_MS,
@@ -72,8 +68,6 @@ import {
 } from "./workflow/role-skills";
 import {
   formatError,
-  parseEnvBoolean,
-  parseEnvPositiveInt,
 } from "./orchestrator/helpers";
 import {
   buildWorkflowRoleSkillStatus as runBuildWorkflowRoleSkillStatus,
@@ -155,6 +149,7 @@ import {
 import { resolveUpgradeRuntimeConfig as runResolveUpgradeRuntimeConfig } from "./orchestrator/upgrade-runtime-config";
 import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from "./orchestrator/workflow-runtime-config";
 import { resolveInputRuntimeConfig as runResolveInputRuntimeConfig } from "./orchestrator/input-runtime-config";
+import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from "./orchestrator/autodev-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -446,24 +441,12 @@ export class Orchestrator {
     this.workflowOutputContextMaxChars = workflowRuntimeConfig.workflowOutputContextMaxChars;
     this.workflowFeedbackContextMaxChars = workflowRuntimeConfig.workflowFeedbackContextMaxChars;
     this.workflowRunner = workflowRuntimeConfig.workflowRunner;
-    this.autoDevLoopMaxRuns = Math.max(
-      1,
-      options?.autoDevLoopMaxRuns ??
-        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, DEFAULT_AUTODEV_LOOP_MAX_RUNS),
-    );
-    this.autoDevLoopMaxMinutes = Math.max(
-      1,
-      options?.autoDevLoopMaxMinutes ??
-        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, DEFAULT_AUTODEV_LOOP_MAX_MINUTES),
-    );
-    this.autoDevAutoCommit = options?.autoDevAutoCommit ?? parseEnvBoolean(process.env.AUTODEV_AUTO_COMMIT, true);
-    this.autoDevMaxConsecutiveFailures = Math.max(
-      1,
-      options?.autoDevMaxConsecutiveFailures ??
-        parseEnvPositiveInt(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES),
-    );
-    this.autoDevDetailedProgressDefaultEnabled =
-      options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED;
+    const autoDevRuntimeConfig = runResolveAutoDevRuntimeConfig(options);
+    this.autoDevLoopMaxRuns = autoDevRuntimeConfig.autoDevLoopMaxRuns;
+    this.autoDevLoopMaxMinutes = autoDevRuntimeConfig.autoDevLoopMaxMinutes;
+    this.autoDevAutoCommit = autoDevRuntimeConfig.autoDevAutoCommit;
+    this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
+    this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
     const currentVersion = resolvePackageVersion();
     this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
     this.packageUpdateChecker =
