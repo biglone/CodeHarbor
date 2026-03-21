@@ -8,6 +8,22 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.52] - 2026-03-21
+
+- AutoDev big-feature auto-release flow:
+  - add task-to-version release mapping support from `TASK_LIST.md` (`大功能任务 -> 完成后目标版本`)
+  - after reviewer-approved task auto-commit, AutoDev can generate release commit `release: vX.Y.Z [publish-npm]`
+  - release step updates `package.json` / `package-lock.json` and ensures `CHANGELOG.md` version section exists
+  - support optional release auto-push via `AUTODEV_AUTO_RELEASE_PUSH`
+- AutoDev observability and runtime config:
+  - add release-related runtime flags (`AUTODEV_AUTO_RELEASE_ENABLED`, `AUTODEV_AUTO_RELEASE_PUSH`)
+  - `/autodev status` and `/diag autodev` now include release config and release result summary
+- Release pipeline resilience:
+  - when npm version already exists, CI now skips publish and prints suggested next patch version
+- Task planning cleanup:
+  - remove stage-9 planning block from `TASK_LIST.md` after feature landing
+  - trim temporary roadmap staging notes from requirement docs
+
 ## [0.1.51] - 2026-03-21
 
 - Orchestrator modular refactor (maintainability):
