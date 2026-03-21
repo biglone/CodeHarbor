@@ -147,6 +147,7 @@ import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext }
 import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContext as runBuildControlCommandDispatchContext } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
+import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1985,7 +1986,7 @@ export class Orchestrator {
   }
 
   private buildBackendCommandDispatchContext(): Parameters<typeof runSendBackendCommand>[0] {
-    return {
+    return runBuildBackendCommandDispatchContext({
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       canCreateBackendRuntime: Boolean(this.executorFactory),
       sessionBackendOverrides: this.sessionBackendOverrides,
@@ -2003,7 +2004,7 @@ export class Orchestrator {
       ensureBackendRuntime: (profile) => this.ensureBackendRuntime(profile),
       clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private formatBackendToolLabel(profile: BackendModelRouteProfile = this.defaultBackendProfile): string {
