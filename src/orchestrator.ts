@@ -114,7 +114,7 @@ import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orche
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
 import { buildDiagCommandDispatchContextFromRuntime as runBuildDiagCommandDispatchContextFromRuntime } from "./orchestrator/diag-command-context";
-import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
+import { buildAutoDevRunCommandDispatchContextFromRuntime as runBuildAutoDevRunCommandDispatchContextFromRuntime } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContextFromRuntime as runBuildControlCommandDispatchContextFromRuntime } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
@@ -123,7 +123,7 @@ import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from ".
 import { buildChatRequestDispatchContextFromRuntime as runBuildChatRequestDispatchContextFromRuntime } from "./orchestrator/chat-request-context";
 import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
 import { buildLockedMessageDispatchContextFromRuntime as runBuildLockedMessageDispatchContextFromRuntime } from "./orchestrator/locked-message-context";
-import { buildNonBlockingStatusRouteContextFromRuntime as runBuildNonBlockingStatusRouteContextFromRuntime } from "./orchestrator/non-blocking-status-context";
+import { executeNonBlockingStatusRouteFromRuntime as runExecuteNonBlockingStatusRouteFromRuntime } from "./orchestrator/non-blocking-status-context";
 import {
   executeLockedAutoDevRun as runExecuteLockedAutoDevRun,
   executeLockedChatRun as runExecuteLockedChatRun,
@@ -170,7 +170,6 @@ import {
   handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
   type AutoDevControlCommandDeps,
 } from "./orchestrator/autodev-control-command";
-import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./orchestrator/workflow-run-dispatch";
 import { sendStopCommand as runSendStopCommand } from "./orchestrator/stop-command-dispatch";
@@ -670,24 +669,20 @@ export class Orchestrator {
     roomConfig: RoomRuntimeConfig;
     queueWaitMs: number;
   }): Promise<boolean> {
-    return runNonBlockingStatusRoute(
-      runBuildNonBlockingStatusRouteContextFromRuntime({
+    return runExecuteNonBlockingStatusRouteFromRuntime(
+      {
         logger: this.logger,
         workflowEnabled: this.workflowRunner.isEnabled(),
-        hasProcessedEvent: (sessionKey, eventId) => this.stateStore.hasProcessedEvent(sessionKey, eventId),
-        markEventProcessed: (sessionKey, eventId) => this.stateStore.markEventProcessed(sessionKey, eventId),
-        recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-          this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-        handleControlCommand: (command, sessionKey, message, requestId) =>
-          this.handleControlCommand(command, sessionKey, message, requestId),
-        handleWorkflowStatusCommand: (sessionKey, message) => this.handleWorkflowStatusCommand(sessionKey, message),
-        handleAutoDevStatusCommand: (sessionKey, message, workdir) =>
-          this.handleAutoDevStatusCommand(sessionKey, message, workdir),
-        handleAutoDevProgressCommand: (sessionKey, message, mode) =>
-          this.handleAutoDevProgressCommand(sessionKey, message, mode),
-        handleAutoDevSkillsCommand: (sessionKey, message, mode) => this.handleAutoDevSkillsCommand(sessionKey, message, mode),
-        handleAutoDevLoopStopCommand: (sessionKey, message) => this.handleAutoDevLoopStopCommand(sessionKey, message),
-      }),
+        hasProcessedEvent: this.stateStore.hasProcessedEvent.bind(this.stateStore),
+        markEventProcessed: this.stateStore.markEventProcessed.bind(this.stateStore),
+        recordRequestMetrics: this.recordRequestMetrics.bind(this),
+        handleControlCommand: this.handleControlCommand.bind(this),
+        handleWorkflowStatusCommand: this.handleWorkflowStatusCommand.bind(this),
+        handleAutoDevStatusCommand: this.handleAutoDevStatusCommand.bind(this),
+        handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
+        handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
+        handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
+      },
       {
         route: input.route,
         sessionKey: input.sessionKey,
@@ -1021,37 +1016,38 @@ export class Orchestrator {
   }
 
   private buildAutoDevRunCommandDispatchContext(): Parameters<typeof runHandleAutoDevRunCommand>[0] {
-    return runBuildAutoDevRunCommandDispatchContext({
+    return runBuildAutoDevRunCommandDispatchContextFromRuntime({
       logger: this.logger,
-      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-      autoDevAutoCommit: this.autoDevAutoCommit,
-      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
-      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-      autoDevFailureStreaks: this.autoDevFailureStreaks,
-      consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
-      consumePendingAutoDevLoopStopRequest: (targetSessionKey) =>
-        this.consumePendingAutoDevLoopStopRequest(targetSessionKey),
-      setAutoDevSnapshot: (targetSessionKey, snapshot) => {
-        this.setAutoDevSnapshot(targetSessionKey, snapshot);
+      config: {
+        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
       },
-      channelSendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
-      appendWorkflowDiagEvent: (runId, kind, stage, round, eventMessage) =>
-        this.appendWorkflowDiagEvent(runId, kind, stage, round, eventMessage),
-      runWorkflowCommand: (input) =>
-        this.handleWorkflowRunCommand(
-          input.objective,
-          input.sessionKey,
-          input.message,
-          input.requestId,
-          input.workdir,
-          input.diagRunId,
-          "autodev",
-        ),
-      recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
-        this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
+      state: {
+        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        autoDevFailureStreaks: this.autoDevFailureStreaks,
+      },
+      hooks: {
+        consumePendingStopRequest: this.consumePendingStopRequest.bind(this),
+        consumePendingAutoDevLoopStopRequest: this.consumePendingAutoDevLoopStopRequest.bind(this),
+        setAutoDevSnapshot: this.setAutoDevSnapshot.bind(this),
+        channelSendNotice: this.channel.sendNotice.bind(this.channel),
+        beginWorkflowDiagRun: this.beginWorkflowDiagRun.bind(this),
+        appendWorkflowDiagEvent: this.appendWorkflowDiagEvent.bind(this),
+        runWorkflowCommand: (input) =>
+          this.handleWorkflowRunCommand(
+            input.objective,
+            input.sessionKey,
+            input.message,
+            input.requestId,
+            input.workdir,
+            input.diagRunId,
+            "autodev",
+          ),
+        recordAutoDevGitCommit: this.recordAutoDevGitCommit.bind(this),
+      },
       autoDevMetrics: this.autoDevMetrics,
     });
   }

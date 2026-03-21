@@ -22,6 +22,32 @@ interface AutoDevRunCommandContextInput {
   autoDevMetrics: AutoDevRunCommandDispatchContext["autoDevMetrics"];
 }
 
+interface AutoDevRunCommandRuntimeContextInput {
+  logger: AutoDevRunCommandDispatchContext["logger"];
+  config: {
+    autoDevLoopMaxRuns: number;
+    autoDevLoopMaxMinutes: number;
+    autoDevAutoCommit: boolean;
+    autoDevMaxConsecutiveFailures: number;
+  };
+  state: {
+    pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
+    activeAutoDevLoopSessions: AutoDevRunCommandDispatchContext["activeAutoDevLoopSessions"];
+    autoDevFailureStreaks: AutoDevRunCommandDispatchContext["autoDevFailureStreaks"];
+  };
+  hooks: {
+    consumePendingStopRequest: AutoDevRunCommandDispatchContext["consumePendingStopRequest"];
+    consumePendingAutoDevLoopStopRequest: AutoDevRunCommandDispatchContext["consumePendingAutoDevLoopStopRequest"];
+    setAutoDevSnapshot: AutoDevRunCommandDispatchContext["setAutoDevSnapshot"];
+    channelSendNotice: AutoDevRunCommandDispatchContext["channelSendNotice"];
+    beginWorkflowDiagRun: AutoDevRunCommandDispatchContext["beginWorkflowDiagRun"];
+    appendWorkflowDiagEvent: AutoDevRunCommandDispatchContext["appendWorkflowDiagEvent"];
+    runWorkflowCommand: AutoDevRunCommandDispatchContext["runWorkflowCommand"];
+    recordAutoDevGitCommit: AutoDevRunCommandDispatchContext["recordAutoDevGitCommit"];
+  };
+  autoDevMetrics: AutoDevRunCommandDispatchContext["autoDevMetrics"];
+}
+
 export function buildAutoDevRunCommandDispatchContext(
   input: AutoDevRunCommandContextInput,
 ): AutoDevRunCommandDispatchContext {
@@ -44,4 +70,28 @@ export function buildAutoDevRunCommandDispatchContext(
     recordAutoDevGitCommit: input.recordAutoDevGitCommit,
     autoDevMetrics: input.autoDevMetrics,
   };
+}
+
+export function buildAutoDevRunCommandDispatchContextFromRuntime(
+  input: AutoDevRunCommandRuntimeContextInput,
+): AutoDevRunCommandDispatchContext {
+  return buildAutoDevRunCommandDispatchContext({
+    logger: input.logger,
+    autoDevLoopMaxRuns: input.config.autoDevLoopMaxRuns,
+    autoDevLoopMaxMinutes: input.config.autoDevLoopMaxMinutes,
+    autoDevAutoCommit: input.config.autoDevAutoCommit,
+    autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
+    pendingAutoDevLoopStopRequests: input.state.pendingAutoDevLoopStopRequests,
+    activeAutoDevLoopSessions: input.state.activeAutoDevLoopSessions,
+    autoDevFailureStreaks: input.state.autoDevFailureStreaks,
+    consumePendingStopRequest: input.hooks.consumePendingStopRequest,
+    consumePendingAutoDevLoopStopRequest: input.hooks.consumePendingAutoDevLoopStopRequest,
+    setAutoDevSnapshot: input.hooks.setAutoDevSnapshot,
+    channelSendNotice: input.hooks.channelSendNotice,
+    beginWorkflowDiagRun: input.hooks.beginWorkflowDiagRun,
+    appendWorkflowDiagEvent: input.hooks.appendWorkflowDiagEvent,
+    runWorkflowCommand: input.hooks.runWorkflowCommand,
+    recordAutoDevGitCommit: input.hooks.recordAutoDevGitCommit,
+    autoDevMetrics: input.autoDevMetrics,
+  });
 }

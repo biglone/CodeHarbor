@@ -65,3 +65,31 @@ export function buildNonBlockingStatusRouteContextFromRuntime(
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
   });
 }
+
+type NonBlockingStatusRouteInput = Parameters<typeof runNonBlockingStatusRoute>[1];
+
+interface NonBlockingStatusRouteRuntimeExecutionInput {
+  route: NonBlockingStatusRouteInput["route"];
+  sessionKey: string;
+  message: NonBlockingStatusRouteInput["message"];
+  requestId: string;
+  workdir: string;
+  queueWaitMs: number;
+}
+
+export async function executeNonBlockingStatusRouteFromRuntime(
+  deps: NonBlockingStatusRuntimeContextInput,
+  input: NonBlockingStatusRouteRuntimeExecutionInput,
+): Promise<boolean> {
+  return runNonBlockingStatusRoute(
+    buildNonBlockingStatusRouteContextFromRuntime(deps),
+    {
+      route: input.route,
+      sessionKey: input.sessionKey,
+      message: input.message,
+      requestId: input.requestId,
+      workdir: input.workdir,
+      queueWaitMs: input.queueWaitMs,
+    },
+  );
+}
