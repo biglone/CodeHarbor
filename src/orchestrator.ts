@@ -117,7 +117,7 @@ import {
   type ControlCommand,
 } from "./orchestrator/control-command-handler";
 import { sendControlCommand as runSendControlCommand } from "./orchestrator/control-command-dispatch";
-import { handleBackendCommand as runBackendCommand } from "./orchestrator/backend-command";
+import { sendBackendCommand as runSendBackendCommand } from "./orchestrator/backend-command-dispatch";
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import {
@@ -2228,31 +2228,35 @@ export class Orchestrator {
   }
 
   private async handleBackendCommand(sessionKey: string, message: InboundMessage): Promise<void> {
-    await runBackendCommand(
-      {
-        sessionActiveWindowMs: this.sessionActiveWindowMs,
-        canCreateBackendRuntime: Boolean(this.executorFactory),
-        sessionBackendOverrides: this.sessionBackendOverrides,
-        sessionBackendProfiles: this.sessionBackendProfiles,
-        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-        workflowSnapshots: this.workflowSnapshots,
-        autoDevSnapshots: this.autoDevSnapshots,
-        runningExecutions: this.runningExecutions,
-        stateStore: this.stateStore,
-        resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-        formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
-        resolveManualBackendProfile: (provider) => this.resolveManualBackendProfile(provider),
-        serializeBackendProfile: (profile) => this.serializeBackendProfile(profile),
-        hasBackendRuntime: (profile) => this.hasBackendRuntime(profile),
-        ensureBackendRuntime: (profile) => this.ensureBackendRuntime(profile),
-        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    await runSendBackendCommand(
+      this.buildBackendCommandDispatchContext(),
       {
         sessionKey,
         message,
       },
     );
+  }
+
+  private buildBackendCommandDispatchContext(): Parameters<typeof runSendBackendCommand>[0] {
+    return {
+      sessionActiveWindowMs: this.sessionActiveWindowMs,
+      canCreateBackendRuntime: Boolean(this.executorFactory),
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionBackendProfiles: this.sessionBackendProfiles,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+      workflowSnapshots: this.workflowSnapshots,
+      autoDevSnapshots: this.autoDevSnapshots,
+      runningExecutions: this.runningExecutions,
+      stateStore: this.stateStore,
+      resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
+      formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
+      resolveManualBackendProfile: (provider) => this.resolveManualBackendProfile(provider),
+      serializeBackendProfile: (profile) => this.serializeBackendProfile(profile),
+      hasBackendRuntime: (profile) => this.hasBackendRuntime(profile),
+      ensureBackendRuntime: (profile) => this.ensureBackendRuntime(profile),
+      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private formatBackendToolLabel(profile: BackendModelRouteProfile = this.defaultBackendProfile): string {
