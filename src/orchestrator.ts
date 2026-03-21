@@ -908,29 +908,6 @@ export class Orchestrator {
 
   private buildStatusCommandDispatchContext() {
     return runBuildStatusCommandDispatchContext({
-      ...this.buildStatusCommandConfigInput(),
-      ...this.buildStatusCommandSnapshotInput(),
-      ...this.buildStatusCommandActionInput(),
-    });
-  }
-
-  private buildStatusCommandConfigInput(): Pick<
-    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
-    | "botNoticePrefix"
-    | "groupDirectModeEnabled"
-    | "updateCheckTtlMs"
-    | "cliCompatEnabled"
-    | "workflowEnabled"
-    | "autoDevDetailedProgressDefaultEnabled"
-    | "workflowPlanContextMaxChars"
-    | "workflowOutputContextMaxChars"
-    | "workflowFeedbackContextMaxChars"
-    | "autoDevLoopMaxRuns"
-    | "autoDevLoopMaxMinutes"
-    | "autoDevAutoCommit"
-    | "autoDevMaxConsecutiveFailures"
-  > {
-    return {
       botNoticePrefix: this.botNoticePrefix,
       groupDirectModeEnabled: this.groupDirectModeEnabled,
       updateCheckTtlMs: this.updateCheckTtlMs,
@@ -944,21 +921,6 @@ export class Orchestrator {
       autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
       autoDevAutoCommit: this.autoDevAutoCommit,
       autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-    };
-  }
-
-  private buildStatusCommandSnapshotInput(): Pick<
-    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
-    | "stateStore"
-    | "workflowSnapshots"
-    | "autoDevSnapshots"
-    | "activeAutoDevLoopSessions"
-    | "pendingAutoDevLoopStopRequests"
-    | "pendingStopRequests"
-    | "sessionBackendOverrides"
-    | "sessionLastBackendDecisions"
-  > {
-    return {
       stateStore: this.stateStore,
       workflowSnapshots: this.workflowSnapshots,
       autoDevSnapshots: this.autoDevSnapshots,
@@ -967,29 +929,6 @@ export class Orchestrator {
       pendingStopRequests: this.pendingStopRequests,
       sessionBackendOverrides: this.sessionBackendOverrides,
       sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-    };
-  }
-
-  private buildStatusCommandActionInput(): Pick<
-    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
-    | "resolveRoomRuntimeConfig"
-    | "getRuntimeMetricsSnapshot"
-    | "getRateLimiterSnapshot"
-    | "getBackendRuntimeStats"
-    | "isAutoDevDetailedProgressEnabled"
-    | "listWorkflowDiagRunsBySession"
-    | "listWorkflowDiagEvents"
-    | "buildWorkflowRoleSkillStatus"
-    | "getPackageUpdateStatus"
-    | "getLatestUpgradeRun"
-    | "getRecentUpgradeRuns"
-    | "getUpgradeRunStats"
-    | "getUpgradeExecutionLockSnapshot"
-    | "resolveSessionBackendStatusProfile"
-    | "formatBackendToolLabel"
-    | "sendNotice"
-  > {
-    return {
       resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
       getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
       getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
@@ -1007,7 +946,7 @@ export class Orchestrator {
       resolveSessionBackendStatusProfile: (targetSessionKey: string) => this.resolveSessionBackendStatusProfile(targetSessionKey),
       formatBackendToolLabel: (profile: BackendModelRouteProfile) => this.formatBackendToolLabel(profile),
       sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private async handleAutoDevProgressCommand(
