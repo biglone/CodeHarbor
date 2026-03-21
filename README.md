@@ -666,6 +666,7 @@ AutoDev (`/autodev`) conventions:
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.
+- AutoDev commit intent uses a hybrid strategy: prefer reviewer `SUMMARY` (role-skill output) when it is valid English; otherwise fall back to deterministic template inference.
 - AutoDev commit body includes `Task-ID`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
 - If `TASK_LIST.md` has a release mapping row like `| T8.1 | v0.1.52 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).

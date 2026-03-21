@@ -5,14 +5,24 @@ interface AutoDevCommitMessage {
   body: string;
 }
 
+interface AutoDevCommitMessageOptions {
+  workflowReview?: string | null;
+}
+
 type AutoDevCommitType = "feat" | "fix" | "docs" | "test" | "chore";
 
-export function buildAutoDevCommitMessage(task: AutoDevTask, changedFiles: string[]): AutoDevCommitMessage {
+export function buildAutoDevCommitMessage(
+  task: AutoDevTask,
+  changedFiles: string[],
+  options: AutoDevCommitMessageOptions = {},
+): AutoDevCommitMessage {
   const detail = task.description.trim();
   const normalizedFiles = normalizeAutoDevCommitFiles(changedFiles);
   const type = inferAutoDevCommitType(detail, normalizedFiles);
   const scope = inferAutoDevCommitScope(detail, normalizedFiles, type);
-  const subject = `${type}(${scope}): ${buildAutoDevCommitHeadline(task.id, detail, normalizedFiles, scope, type, 58)}`;
+  const skillIntent = extractSkillCommitIntentFromReview(options.workflowReview ?? null, 58);
+  const inferredIntent = inferAutoDevCommitIntent(detail, normalizedFiles, scope, type);
+  const subject = `${type}(${scope}): ${buildAutoDevCommitHeadline(task.id, skillIntent ?? inferredIntent, 58)}`;
   const bodyLines = [
     `Task-ID: ${task.id}`,
     `Changed-files: ${summarizeAutoDevCommitFiles(normalizedFiles)}`,
@@ -102,16 +112,8 @@ function summarizeAutoDevCommitFiles(files: string[]): string {
   return `${preview}, ... (+${files.length - 8})`;
 }
 
-function buildAutoDevCommitHeadline(
-  taskId: string,
-  description: string,
-  changedFiles: string[],
-  scope: string,
-  type: AutoDevCommitType,
-  maxLen: number,
-): string {
+function buildAutoDevCommitHeadline(taskId: string, intent: string, maxLen: number): string {
   const normalizedTaskId = normalizeTaskIdFragment(taskId);
-  const intent = inferAutoDevCommitIntent(description, changedFiles, scope, type);
   const base = `${intent} (${normalizedTaskId})`;
   if (base.length <= maxLen) {
     return base;
@@ -124,6 +126,60 @@ function buildAutoDevCommitHeadline(
   }
   const sliced = intent.slice(0, available).trim().replace(/[^\w)\]]+$/g, "");
   return `${sliced}${suffix}`;
+}
+
+function extractSkillCommitIntentFromReview(review: string | null, maxLen: number): string | null {
+  if (typeof review !== "string" || !review.trim()) {
+    return null;
+  }
+  const lines = review
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const summaryLine = lines.find((line) => /^summary\s*:/i.test(line));
+  if (!summaryLine) {
+    return null;
+  }
+  const rawSummary = summaryLine.replace(/^summary\s*:/i, "").trim();
+  return normalizeSkillCommitIntent(rawSummary, maxLen);
+}
+
+function normalizeSkillCommitIntent(raw: string, maxLen: number): string | null {
+  let candidate = raw
+    .replace(/\s+/g, " ")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\bT\d+(?:\.\d+)?\b/gi, "")
+    .replace(/[.,;:!?\- ]+$/g, "")
+    .trim();
+  if (!candidate) {
+    return null;
+  }
+  if (/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(candidate)) {
+    return null;
+  }
+  if (!/^[\x20-\x7E]+$/.test(candidate)) {
+    return null;
+  }
+  if (!/[a-z]/i.test(candidate)) {
+    return null;
+  }
+  candidate = candidate.toLowerCase();
+  if (candidate.length < 8 || candidate === "ok" || candidate === "passed" || candidate === "approved") {
+    return null;
+  }
+  if (
+    !/^(add|align|build|deliver|enable|enhance|ensure|expand|extend|fix|harden|implement|improve|optimize|prevent|reduce|refactor|simplify|stabilize|standardize|streamline|support|update)\b/.test(
+      candidate,
+    )
+  ) {
+    candidate = `improve ${candidate}`;
+  }
+  if (candidate.length <= maxLen) {
+    return candidate;
+  }
+  const sliced = candidate.slice(0, maxLen).trim().replace(/[^\w)\]]+$/g, "");
+  return sliced.length >= 8 ? sliced : null;
 }
 
 function inferAutoDevCommitIntent(

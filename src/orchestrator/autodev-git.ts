@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type { Logger } from "../logger";
+import type { MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
 import type { AutoDevTask } from "../workflow/autodev";
 import { buildAutoDevCommitMessage } from "../workflow/autodev-commit";
 import { formatError } from "./helpers";
@@ -54,6 +55,7 @@ export async function tryAutoDevGitCommit(input: {
   workdir: string;
   task: AutoDevTask;
   baseline: AutoDevGitBaseline;
+  workflowResult?: MultiAgentWorkflowRunResult | null;
   autoCommit: boolean;
   logger: Logger;
 }): Promise<AutoDevGitCommitResult> {
@@ -103,7 +105,9 @@ export async function tryAutoDevGitCommit(input: {
       };
     }
 
-    const commitMessage = buildAutoDevCommitMessage(input.task, stagedFiles);
+    const commitMessage = buildAutoDevCommitMessage(input.task, stagedFiles, {
+      workflowReview: input.workflowResult?.review ?? null,
+    });
     await runGitCommand(input.workdir, [
       "-c",
       "user.name=CodeHarbor AutoDev",

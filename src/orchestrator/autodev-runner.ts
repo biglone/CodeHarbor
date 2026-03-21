@@ -458,6 +458,7 @@ export async function runAutoDevCommand(
         workdir: input.workdir,
         task: finalTask,
         baseline: gitBaseline,
+        workflowResult: result,
         autoCommit: deps.autoDevAutoCommit,
         logger: deps.logger,
       });
