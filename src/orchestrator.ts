@@ -18,7 +18,6 @@ import {
   type RuntimeMetricsSnapshot,
 } from "./metrics";
 import {
-  formatPackageUpdateHint,
   NpmRegistryUpdateChecker,
   type PackageUpdateChecker,
   resolvePackageVersion,
@@ -86,8 +85,14 @@ import {
 import {
   collectLocalAttachmentPaths,
   formatMimeAllowlist,
-  mapProgressText,
 } from "./orchestrator/media-progress";
+import {
+  finishProgress as runFinishProgress,
+  handleProgress as runHandleProgress,
+  sendProgressUpdate as runSendProgressUpdate,
+  startTypingHeartbeat as runStartTypingHeartbeat,
+  type SendProgressContext,
+} from "./orchestrator/progress-dispatch";
 import {
   isApiTaskPayloadEquivalent,
   normalizeApiTaskRequestId,
@@ -274,13 +279,6 @@ interface RunningExecution {
   requestId: string;
   startedAt: number;
   cancel: () => void;
-}
-
-interface SendProgressContext {
-  conversationId: string;
-  isDirectMessage: boolean;
-  getProgressNoticeEventId: () => string | null;
-  setProgressNoticeEventId: (next: string) => void;
 }
 
 interface RoomRuntimeConfig {
@@ -1652,34 +1650,7 @@ export class Orchestrator {
   }
 
   private startTypingHeartbeat(conversationId: string): () => Promise<void> {
-    let stopped = false;
-    const refreshIntervalMs = Math.max(1_000, Math.floor(this.typingTimeoutMs / 2));
-
-    const sendTyping = async (isTyping: boolean): Promise<void> => {
-      try {
-        await this.channel.setTyping(conversationId, isTyping, isTyping ? this.typingTimeoutMs : 0);
-      } catch (error) {
-        this.logger.debug("Failed to update typing state", { conversationId, isTyping, error });
-      }
-    };
-
-    void sendTyping(true);
-    const timer = setInterval(() => {
-      if (stopped) {
-        return;
-      }
-      void sendTyping(true);
-    }, refreshIntervalMs);
-    timer.unref?.();
-
-    return async () => {
-      if (stopped) {
-        return;
-      }
-      stopped = true;
-      clearInterval(timer);
-      await sendTyping(false);
-    };
+    return runStartTypingHeartbeat(this.buildProgressDispatchContext(), conversationId);
   }
 
   private async handleProgress(
@@ -1693,71 +1664,38 @@ export class Orchestrator {
     getProgressNoticeEventId: () => string | null,
     setProgressNoticeEventId: (next: string) => void,
   ): Promise<void> {
-    if (!this.progressUpdatesEnabled) {
-      return;
-    }
-
-    const progressText = mapProgressText(progress, this.cliCompat.enabled);
-    if (!progressText) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - getLastProgressAt() < this.progressMinIntervalMs && progress.stage !== "turn_started") {
-      return;
-    }
-    if (progressText === getLastProgressText()) {
-      return;
-    }
-
-    setLastProgressAt(now);
-    setLastProgressText(progressText);
-
-    await this.sendProgressUpdate(
-      {
-        conversationId,
-        isDirectMessage,
-        getProgressNoticeEventId,
-        setProgressNoticeEventId,
-      },
-      `${this.botNoticePrefix} ${progressText}`,
-    );
+    await runHandleProgress(this.buildProgressDispatchContext(), {
+      conversationId,
+      isDirectMessage,
+      progress,
+      getLastProgressAt,
+      setLastProgressAt,
+      getLastProgressText,
+      setLastProgressText,
+      getProgressNoticeEventId,
+      setProgressNoticeEventId,
+    });
   }
 
   private async finishProgress(ctx: SendProgressContext, summary: string): Promise<void> {
-    if (!this.progressUpdatesEnabled) {
-      return;
-    }
-    let updateHint = "";
-    try {
-      const packageUpdate = await this.packageUpdateChecker.getStatus();
-      updateHint = `；${formatPackageUpdateHint(packageUpdate)}`;
-    } catch (error) {
-      this.logger.debug("Failed to resolve package update status for progress summary", { error });
-    }
-    await this.sendProgressUpdate(ctx, `${this.botNoticePrefix} ${summary}${updateHint}`);
+    await runFinishProgress(this.buildProgressDispatchContext(), ctx, summary);
   }
 
   private async sendProgressUpdate(ctx: SendProgressContext, text: string): Promise<void> {
-    try {
-      if (ctx.isDirectMessage) {
-        await this.channel.sendNotice(ctx.conversationId, text);
-        return;
-      }
+    await runSendProgressUpdate(this.buildProgressDispatchContext(), ctx, text);
+  }
 
-      const eventId = await this.channel.upsertProgressNotice(
-        ctx.conversationId,
-        text,
-        ctx.getProgressNoticeEventId(),
-      );
-      ctx.setProgressNoticeEventId(eventId);
-    } catch (error) {
-      this.logger.debug("Failed to send progress update", {
-        conversationId: ctx.conversationId,
-        text,
-        error,
-      });
-    }
+  private buildProgressDispatchContext(): Parameters<typeof runHandleProgress>[0] {
+    return {
+      progressUpdatesEnabled: this.progressUpdatesEnabled,
+      progressMinIntervalMs: this.progressMinIntervalMs,
+      typingTimeoutMs: this.typingTimeoutMs,
+      cliCompatEnabled: this.cliCompat.enabled,
+      botNoticePrefix: this.botNoticePrefix,
+      packageUpdateChecker: this.packageUpdateChecker,
+      channel: this.channel,
+      logger: this.logger,
+    };
   }
 
   private syncRuntimeHotConfig(): void {
