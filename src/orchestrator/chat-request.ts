@@ -2,6 +2,7 @@ import type { Logger } from "../logger";
 import type { RequestOutcomeMetric } from "../metrics";
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { InboundMessage } from "../types";
+import type { OutboundMultimodalSummary, SendMessageOptions } from "../channels/channel";
 import type { DocumentContextItem } from "../document-context";
 import type { AudioTranscript } from "../audio-transcriber";
 import type { CodexExecutionHandle, CodexProgressEvent } from "../executor/codex-executor";
@@ -102,7 +103,7 @@ interface ExecuteChatRequestDeps {
     bridgeContext: string | null,
   ) => string;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
-  sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendMessage: (conversationId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   startTypingHeartbeat: (conversationId: string) => () => Promise<void>;
   handleProgress: (
     conversationId: string,
@@ -269,8 +270,10 @@ export async function executeChatRequest(
     };
 
     let result: { sessionId: string; reply: string };
+    let successfulImagePaths = [...imagePaths];
     try {
       result = await executeOnce(imagePaths);
+      successfulImagePaths = [...imagePaths];
     } catch (error) {
       if (!shouldRetryClaudeImageFailure(input.backendProfile.provider, imagePaths, error)) {
         throw error;
@@ -293,6 +296,7 @@ export async function executeChatRequest(
       });
       try {
         result = await executeOnce([]);
+        successfulImagePaths = [];
         deps.mediaMetrics.recordClaudeImageFallback("succeeded", {
           requestId: input.requestId,
           sessionKey: input.sessionKey,
@@ -312,7 +316,10 @@ export async function executeChatRequest(
     await progressChain;
 
     const sendStartedAt = Date.now();
-    await deps.sendMessage(input.message.conversationId, result.reply);
+    const messageOptions: SendMessageOptions = {
+      multimodalSummary: buildMultimodalSummary(input.message, successfulImagePaths, audioTranscripts),
+    };
+    await deps.sendMessage(input.message.conversationId, result.reply, messageOptions);
     deps.stateStore.appendConversationMessage(input.sessionKey, "assistant", input.backendProfile.provider, result.reply);
     await deps.finishProgress(
       {
@@ -388,4 +395,75 @@ export async function executeChatRequest(
     deps.persistRuntimeMetricsSnapshot();
     await stopTyping();
   }
+}
+
+function buildMultimodalSummary(
+  message: InboundMessage,
+  successfulImagePaths: string[],
+  audioTranscripts: AudioTranscript[],
+): OutboundMultimodalSummary | null {
+  const imageSummary = buildImageSummary(message, successfulImagePaths);
+  const audioSummary = buildAudioSummary(message, audioTranscripts);
+  if (!imageSummary && !audioSummary) {
+    return null;
+  }
+  return {
+    images: imageSummary,
+    audio: audioSummary,
+  };
+}
+
+function buildImageSummary(
+  message: InboundMessage,
+  successfulImagePaths: string[],
+): OutboundMultimodalSummary["images"] {
+  const imageAttachments = message.attachments.filter((attachment) => attachment.kind === "image");
+  if (imageAttachments.length === 0) {
+    return null;
+  }
+
+  const includedNames: string[] = [];
+  for (const localPath of successfulImagePaths) {
+    const matched = imageAttachments.find((attachment) => attachment.localPath === localPath);
+    const name = matched?.name?.trim();
+    if (!name) {
+      continue;
+    }
+    if (!includedNames.includes(name)) {
+      includedNames.push(name);
+    }
+    if (includedNames.length >= 6) {
+      break;
+    }
+  }
+
+  return {
+    total: imageAttachments.length,
+    included: successfulImagePaths.length,
+    names: includedNames,
+  };
+}
+
+function buildAudioSummary(
+  message: InboundMessage,
+  audioTranscripts: AudioTranscript[],
+): OutboundMultimodalSummary["audio"] {
+  const audioAttachments = message.attachments.filter((attachment) => attachment.kind === "audio");
+  if (audioAttachments.length === 0) {
+    return null;
+  }
+
+  const items = audioTranscripts
+    .map((transcript) => ({
+      name: transcript.name.trim(),
+      summary: summarizeSingleLine(transcript.text, 140),
+    }))
+    .filter((item) => item.name.length > 0 && item.summary.length > 0)
+    .slice(0, 4);
+
+  return {
+    total: audioAttachments.length,
+    transcribed: audioTranscripts.length,
+    items,
+  };
 }

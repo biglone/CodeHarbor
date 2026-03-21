@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type Channel, type InboundHandler } from "../src/channels/channel";
+import { type Channel, type InboundHandler, type SendMessageOptions } from "../src/channels/channel";
 import { DEFAULT_DOCUMENT_MAX_BYTES } from "../src/document-extractor";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { ApiTaskIdempotencyConflictError, Orchestrator, buildSessionKey } from "../src/orchestrator";
@@ -16,15 +16,15 @@ import { StateStore } from "../src/store/state-store";
 import { InboundMessage } from "../src/types";
 
 class FakeChannel implements Channel {
-  sent: Array<{ conversationId: string; text: string }> = [];
+  sent: Array<{ conversationId: string; text: string; options?: SendMessageOptions }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
   typing: Array<{ conversationId: string; isTyping: boolean; timeoutMs: number }> = [];
   upserts: Array<{ conversationId: string; text: string; replaceEventId: string | null }> = [];
 
   async start(_handler: InboundHandler): Promise<void> {}
 
-  async sendMessage(conversationId: string, text: string): Promise<void> {
-    this.sent.push({ conversationId, text });
+  async sendMessage(conversationId: string, text: string, options?: SendMessageOptions): Promise<void> {
+    this.sent.push({ conversationId, text, options });
   }
 
   async sendNotice(conversationId: string, text: string): Promise<void> {
@@ -1881,6 +1881,165 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("injects multimodal summary metadata for Matrix rendering", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-multimodal-summary-"));
+    const imagePath = path.join(tempRoot, "diagram.png");
+    const audioPath = path.join(tempRoot, "voice.m4a");
+    await fs.writeFile(imagePath, "image", "utf8");
+    await fs.writeFile(audioPath, "audio", "utf8");
+
+    const transcriber = {
+      isEnabled: () => true,
+      transcribeMany: vi.fn(async () => [{ name: "voice.m4a", text: "请先修复 P0，再推进发布流程。" }]),
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        audioTranscriber: transcriber as never,
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请结合图片和语音给出结论",
+          eventId: "$multimodal-summary",
+          attachments: [
+            {
+              kind: "image",
+              name: "diagram.png",
+              mxcUrl: "mxc://example.com/image",
+              mimeType: "image/png",
+              sizeBytes: 64,
+              localPath: imagePath,
+            },
+            {
+              kind: "audio",
+              name: "voice.m4a",
+              mxcUrl: "mxc://example.com/audio",
+              mimeType: "audio/mp4",
+              sizeBytes: 64,
+              localPath: audioPath,
+            },
+          ],
+        }),
+      );
+
+      expect(channel.sent).toHaveLength(1);
+      expect(channel.sent[0]?.options?.multimodalSummary).toEqual({
+        images: {
+          total: 1,
+          included: 1,
+          names: ["diagram.png"],
+        },
+        audio: {
+          total: 1,
+          transcribed: 1,
+          items: [
+            {
+              name: "voice.m4a",
+              summary: "请先修复 P0，再推进发布流程。",
+            },
+          ],
+        },
+      });
+      await expect(fs.access(imagePath)).rejects.toBeDefined();
+      await expect(fs.access(audioPath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("aligns multimodal image summary with claude image fallback retry", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-claude-image-fallback-"));
+    const imagePath = path.join(tempRoot, "diagram.png");
+    await fs.writeFile(imagePath, "image", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new SequencedExecutor([
+        {
+          kind: "error",
+          error: new Error("unsupported image extension"),
+        },
+        {
+          kind: "success",
+          reply: "ok:retry-without-images",
+        },
+      ]);
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        aiCliProvider: "claude",
+        aiCliModel: "claude-sonnet-4-5",
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "请分析图片",
+          eventId: "$claude-image-fallback-summary",
+          attachments: [
+            {
+              kind: "image",
+              name: "diagram.png",
+              mxcUrl: "mxc://example.com/image",
+              mimeType: "image/png",
+              sizeBytes: 64,
+              localPath: imagePath,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.callCount).toBe(2);
+      expect(executor.calls[0]?.imagePaths).toEqual([imagePath]);
+      expect(executor.calls[1]?.imagePaths).toEqual([]);
+      expect(channel.notices.some((entry) => entry.text.includes("已自动降级为纯文本重试"))).toBe(true);
+      expect(channel.sent).toHaveLength(1);
+      expect(channel.sent[0]?.options?.multimodalSummary).toEqual({
+        images: {
+          total: 1,
+          included: 0,
+          names: [],
+        },
+        audio: null,
+      });
+      await expect(fs.access(imagePath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not inject multimodal summary metadata for plain text requests", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "普通文本请求",
+        eventId: "$plain-no-multimodal",
+      }),
+    );
+
+    expect(channel.sent).toHaveLength(1);
+    expect(channel.sent[0]?.options?.multimodalSummary).toBeNull();
   });
 
   it("skips audio transcription for oversized attachments", async () => {

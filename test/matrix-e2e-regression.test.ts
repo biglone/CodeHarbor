@@ -4,20 +4,20 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type Channel, type InboundHandler } from "../src/channels/channel";
+import { type Channel, type InboundHandler, type SendMessageOptions } from "../src/channels/channel";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
 import { Orchestrator } from "../src/orchestrator";
 import { InboundMessage } from "../src/types";
 
 class FakeChannel implements Channel {
-  sent: Array<{ conversationId: string; text: string }> = [];
+  sent: Array<{ conversationId: string; text: string; options?: SendMessageOptions }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
   upserts: Array<{ conversationId: string; text: string; replaceEventId: string | null }> = [];
 
   async start(_handler: InboundHandler): Promise<void> {}
 
-  async sendMessage(conversationId: string, text: string): Promise<void> {
-    this.sent.push({ conversationId, text });
+  async sendMessage(conversationId: string, text: string, options?: SendMessageOptions): Promise<void> {
+    this.sent.push({ conversationId, text, options });
   }
 
   async sendNotice(conversationId: string, text: string): Promise<void> {
@@ -696,8 +696,8 @@ describe("Matrix e2e regression", () => {
 
     expect(channel.sent).toEqual(
       expect.arrayContaining([
-        { conversationId: "!room-a:example.com", text: "ok:task a" },
-        { conversationId: "!room-b:example.com", text: "ok:task b" },
+        expect.objectContaining({ conversationId: "!room-a:example.com", text: "ok:task a" }),
+        expect.objectContaining({ conversationId: "!room-b:example.com", text: "ok:task b" }),
       ]),
     );
   });

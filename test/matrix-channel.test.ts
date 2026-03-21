@@ -590,4 +590,88 @@ describe("MatrixChannel", () => {
 
     await channel.stop();
   });
+
+  it("renders multimodal summary blocks for image and audio replies", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendMessage(
+      "!room:example.com",
+      "已完成分析，请看结论。",
+      {
+        multimodalSummary: {
+          images: {
+            total: 3,
+            included: 2,
+            names: ["diagram.png", "overview.jpg"],
+          },
+          audio: {
+            total: 1,
+            transcribed: 1,
+            items: [
+              {
+                name: "voice.m4a",
+                summary: "会议主要结论是本周先修复高优先级问题。",
+              },
+            ],
+          },
+        },
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(String(payload.body ?? "")).toContain("[CodeHarbor 多模态摘要]");
+    expect(String(payload.body ?? "")).toContain("图片：共 3 张，已附带 2 张，跳过 1 张");
+    expect(String(payload.body ?? "")).toContain("语音：共 1 条，已转写 1 条");
+
+    const formatted = String(payload.formatted_body ?? "");
+    expect(formatted).toContain("多模态摘要");
+    expect(formatted).toContain("<b>图片</b>");
+    expect(formatted).toContain("diagram.png");
+    expect(formatted).toContain("<b>语音</b>");
+    expect(formatted).toContain("voice.m4a");
+    expect(formatted).toContain("<b>结论</b>");
+    expect(formatted).toContain("已完成分析，请看结论");
+
+    await channel.stop();
+  });
+
+  it("falls back to default rendering when multimodal summary is invalid", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendMessage("!room:example.com", "普通文本回复", {
+      multimodalSummary: {
+        images: {
+          total: -1,
+          included: 1,
+          names: ["bad.png"],
+        },
+        audio: null,
+      } as never,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(payload.body).toBe("普通文本回复");
+    expect(String(payload.formatted_body ?? "")).not.toContain("多模态摘要");
+    expect(String(payload.formatted_body ?? "")).toContain("普通文本回复");
+
+    await channel.stop();
+  });
 });

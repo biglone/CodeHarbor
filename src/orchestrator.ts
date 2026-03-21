@@ -1090,7 +1090,7 @@ export class Orchestrator {
       prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+      sendMessage: (conversationId, text, options) => this.channel.sendMessage(conversationId, text, options),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
       handleProgress: (...args) => this.forwardChatRequestProgress(...args),
       finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),

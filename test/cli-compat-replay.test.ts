@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type Channel, type InboundHandler } from "../src/channels/channel";
+import { type Channel, type InboundHandler, type SendMessageOptions } from "../src/channels/channel";
 import { Orchestrator } from "../src/orchestrator";
 import { InboundAttachment, InboundMessage } from "../src/types";
 
 class FakeChannel implements Channel {
-  sent: Array<{ conversationId: string; text: string }> = [];
+  sent: Array<{ conversationId: string; text: string; options?: SendMessageOptions }> = [];
   notices: Array<{ conversationId: string; text: string }> = [];
 
   async start(_handler: InboundHandler): Promise<void> {}
 
-  async sendMessage(conversationId: string, text: string): Promise<void> {
-    this.sent.push({ conversationId, text });
+  async sendMessage(conversationId: string, text: string, options?: SendMessageOptions): Promise<void> {
+    this.sent.push({ conversationId, text, options });
   }
 
   async sendNotice(conversationId: string, text: string): Promise<void> {

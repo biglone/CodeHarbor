@@ -26,7 +26,13 @@ import {
 import { DEFAULT_DOCUMENT_MAX_BYTES, isSupportedDocumentAttachment } from "../document-extractor";
 import { InboundAttachment, InboundMessage } from "../types";
 import { splitText } from "../utils/message";
-import { Channel, type InboundHandler } from "./channel";
+import {
+  Channel,
+  type InboundHandler,
+  type OutboundMultimodalAudioSummary,
+  type OutboundMultimodalSummary,
+  type SendMessageOptions,
+} from "./channel";
 
 export type { InboundHandler } from "./channel";
 const LOCAL_TXN_PREFIX = "codeharbor-";
@@ -80,14 +86,21 @@ export class MatrixChannel implements Channel {
     this.logger.info("Matrix channel ready.");
   }
 
-  async sendMessage(conversationId: string, text: string): Promise<void> {
+  async sendMessage(conversationId: string, text: string, options?: SendMessageOptions): Promise<void> {
     if (!this.started) {
       throw new Error("Matrix channel not started.");
     }
 
+    const multimodalSummary = normalizeMultimodalSummary(options?.multimodalSummary ?? null);
     const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
-    for (const chunk of chunks) {
-      await this.sendRichText(conversationId, chunk, "m.text");
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index] ?? "";
+      await this.sendRichText(
+        conversationId,
+        chunk,
+        "m.text",
+        index === 0 ? multimodalSummary : null,
+      );
     }
   }
 
@@ -313,8 +326,9 @@ export class MatrixChannel implements Channel {
     conversationId: string,
     text: string,
     msgtype: "m.text" | "m.notice",
+    multimodalSummary: OutboundMultimodalSummary | null = null,
   ): Promise<void> {
-    const payload = buildMatrixRichMessageContent(text, msgtype);
+    const payload = buildMatrixRichMessageContent(text, msgtype, multimodalSummary);
     await this.sendRawEvent(conversationId, payload);
   }
 
@@ -715,17 +729,46 @@ function normalizeMimeType(value: string | null): string | null {
 function buildMatrixRichMessageContent(
   body: string,
   msgtype: "m.text" | "m.notice",
+  multimodalSummary: OutboundMultimodalSummary | null = null,
 ): Record<string, unknown> {
+  const plainBody = buildMatrixPlainBody(body, multimodalSummary);
   return {
     msgtype,
-    body,
+    body: plainBody,
     format: "org.matrix.custom.html",
-    formatted_body: renderMatrixHtml(body, msgtype),
+    formatted_body: renderMatrixHtml(body, msgtype, multimodalSummary),
   };
 }
 
-function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string {
+function renderMatrixHtml(
+  body: string,
+  msgtype: "m.text" | "m.notice",
+  multimodalSummary: OutboundMultimodalSummary | null = null,
+): string {
   const normalized = body.replace(/\r\n/g, "\n");
+  const sections: string[] = [];
+  const normalizedSummary = normalizeMultimodalSummary(multimodalSummary);
+  if (normalizedSummary) {
+    sections.push(renderMultimodalSummaryHtml(normalizedSummary));
+    sections.push(`<p><font color="#3558d1"><b>结论</b></font></p>`);
+  }
+
+  const renderedBodySections = renderMarkdownAndCodeSections(normalized);
+  if (renderedBodySections.length === 0) {
+    sections.push(normalizedSummary ? "<p>（未返回文本结论）</p>" : "<p>(空消息)</p>");
+  } else {
+    sections.push(...renderedBodySections);
+  }
+
+  const badge =
+    msgtype === "m.notice"
+      ? `<p><font color="#8a5a00"><b>CodeHarbor 提示</b></font></p>`
+      : `<p><font color="#1f7a5a"><b>CodeHarbor AI 回复</b></font></p>`;
+
+  return `<div>${badge}${sections.join("")}</div>`;
+}
+
+function renderMarkdownAndCodeSections(normalized: string): string[] {
   const sections: string[] = [];
   const codeFencePattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
   let cursor = 0;
@@ -741,9 +784,7 @@ function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string 
     const language = escapeHtml(match[1]?.trim() || "text");
     const code = escapeHtml(match[2].replace(/\n$/, ""));
     const label = language && language !== "text" ? `代码 (${language})` : "代码";
-    sections.push(
-      `<p><font color="#3558d1"><b>${label}</b></font></p><pre><code>${code}</code></pre>`,
-    );
+    sections.push(`<p><font color="#3558d1"><b>${label}</b></font></p><pre><code>${code}</code></pre>`);
 
     cursor = match.index + match[0].length;
   }
@@ -753,17 +794,164 @@ function renderMatrixHtml(body: string, msgtype: "m.text" | "m.notice"): string 
   if (renderedTail) {
     sections.push(renderedTail);
   }
+  return sections;
+}
 
-  if (sections.length === 0) {
-    sections.push("<p>(空消息)</p>");
+function buildMatrixPlainBody(body: string, multimodalSummary: OutboundMultimodalSummary | null): string {
+  const normalizedSummary = normalizeMultimodalSummary(multimodalSummary);
+  if (!normalizedSummary) {
+    return body;
+  }
+  const summaryText = buildMultimodalSummaryText(normalizedSummary);
+  if (!summaryText) {
+    return body;
+  }
+  if (!body.trim()) {
+    return summaryText;
+  }
+  return `${summaryText}\n\n${body}`;
+}
+
+function buildMultimodalSummaryText(summary: OutboundMultimodalSummary): string {
+  const lines: string[] = ["[CodeHarbor 多模态摘要]"];
+  if (summary.images) {
+    const skipped = Math.max(0, summary.images.total - summary.images.included);
+    const imageLine =
+      skipped > 0
+        ? `图片：共 ${summary.images.total} 张，已附带 ${summary.images.included} 张，跳过 ${skipped} 张`
+        : `图片：共 ${summary.images.total} 张，已附带 ${summary.images.included} 张`;
+    lines.push(imageLine);
+    for (const name of summary.images.names) {
+      lines.push(`- ${name}`);
+    }
+  }
+  if (summary.audio) {
+    const missing = Math.max(0, summary.audio.total - summary.audio.transcribed);
+    const audioLine =
+      missing > 0
+        ? `语音：共 ${summary.audio.total} 条，已转写 ${summary.audio.transcribed} 条，未转写 ${missing} 条`
+        : `语音：共 ${summary.audio.total} 条，已转写 ${summary.audio.transcribed} 条`;
+    lines.push(audioLine);
+    for (const item of summary.audio.items) {
+      lines.push(`- ${item.name}: ${item.summary}`);
+    }
+  }
+  lines.push("[/CodeHarbor 多模态摘要]");
+  return lines.join("\n");
+}
+
+function renderMultimodalSummaryHtml(summary: OutboundMultimodalSummary): string {
+  const blocks: string[] = [];
+  blocks.push(`<p><font color="#805200"><b>多模态摘要</b></font></p>`);
+
+  if (summary.images) {
+    const skipped = Math.max(0, summary.images.total - summary.images.included);
+    const imageText =
+      skipped > 0
+        ? `共 ${summary.images.total} 张，已附带 ${summary.images.included} 张，跳过 ${skipped} 张`
+        : `共 ${summary.images.total} 张，已附带 ${summary.images.included} 张`;
+    blocks.push(`<p><b>图片</b>：${escapeHtml(imageText)}</p>`);
+    if (summary.images.names.length > 0) {
+      blocks.push(`<ul>${summary.images.names.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>`);
+    }
   }
 
-  const badge =
-    msgtype === "m.notice"
-      ? `<p><font color="#8a5a00"><b>CodeHarbor 提示</b></font></p>`
-      : `<p><font color="#1f7a5a"><b>CodeHarbor AI 回复</b></font></p>`;
+  if (summary.audio) {
+    const missing = Math.max(0, summary.audio.total - summary.audio.transcribed);
+    const audioText =
+      missing > 0
+        ? `共 ${summary.audio.total} 条，已转写 ${summary.audio.transcribed} 条，未转写 ${missing} 条`
+        : `共 ${summary.audio.total} 条，已转写 ${summary.audio.transcribed} 条`;
+    blocks.push(`<p><b>语音</b>：${escapeHtml(audioText)}</p>`);
+    if (summary.audio.items.length > 0) {
+      blocks.push(
+        `<ul>${summary.audio.items.map((item) => `<li>${escapeHtml(item.name)}：${escapeHtml(item.summary)}</li>`).join("")}</ul>`,
+      );
+    }
+  }
 
-  return `<div>${badge}${sections.join("")}</div>`;
+  return blocks.join("");
+}
+
+function normalizeMultimodalSummary(summary: OutboundMultimodalSummary | null): OutboundMultimodalSummary | null {
+  if (!summary || typeof summary !== "object") {
+    return null;
+  }
+
+  const images = normalizeImageSummary(summary.images);
+  const audio = normalizeAudioSummary(summary.audio);
+  if (!images && !audio) {
+    return null;
+  }
+  return { images, audio };
+}
+
+function normalizeImageSummary(
+  summary: OutboundMultimodalSummary["images"],
+): OutboundMultimodalSummary["images"] {
+  if (!summary || typeof summary !== "object") {
+    return null;
+  }
+  const total = normalizeCount(summary.total);
+  const included = normalizeCount(summary.included);
+  if (total === null || included === null) {
+    return null;
+  }
+  const names = Array.isArray(summary.names)
+    ? summary.names
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+        .slice(0, 6)
+    : [];
+  return {
+    total,
+    included: Math.min(total, included),
+    names,
+  };
+}
+
+function normalizeAudioSummary(
+  summary: OutboundMultimodalSummary["audio"],
+): OutboundMultimodalSummary["audio"] {
+  if (!summary || typeof summary !== "object") {
+    return null;
+  }
+  const total = normalizeCount(summary.total);
+  const transcribed = normalizeCount(summary.transcribed);
+  if (total === null || transcribed === null) {
+    return null;
+  }
+  const items: OutboundMultimodalAudioSummary["items"] = Array.isArray(summary.items)
+    ? summary.items
+        .filter((item): item is OutboundMultimodalAudioSummary["items"][number] => {
+          return Boolean(
+            item &&
+              typeof item === "object" &&
+              typeof item.name === "string" &&
+              item.name.trim() &&
+              typeof item.summary === "string" &&
+              item.summary.trim(),
+          );
+        })
+        .map((item) => ({
+          name: item.name.trim(),
+          summary: item.summary.trim(),
+        }))
+        .slice(0, 4)
+    : [];
+  return {
+    total,
+    transcribed: Math.min(total, transcribed),
+    items,
+  };
+}
+
+function normalizeCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return Math.floor(value);
 }
 
 function renderMarkdownSection(raw: string): string {
