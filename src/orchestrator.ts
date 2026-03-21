@@ -141,6 +141,7 @@ import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapsh
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
 import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
+import { resolveGroupPolicy as runResolveGroupPolicy, resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
   buildDefaultUpgradeRestartPlan,
@@ -1612,27 +1613,17 @@ export class Orchestrator {
   }
 
   private resolveGroupPolicy(conversationId: string): TriggerPolicy {
-    const override = this.roomTriggerPolicies[conversationId] ?? {};
-    return {
-      allowMention: override.allowMention ?? this.defaultGroupTriggerPolicy.allowMention,
-      allowReply: override.allowReply ?? this.defaultGroupTriggerPolicy.allowReply,
-      allowActiveWindow: override.allowActiveWindow ?? this.defaultGroupTriggerPolicy.allowActiveWindow,
-      allowPrefix: override.allowPrefix ?? this.defaultGroupTriggerPolicy.allowPrefix,
-    };
+    return runResolveGroupPolicy(conversationId, this.roomTriggerPolicies, this.defaultGroupTriggerPolicy);
   }
 
   private resolveRoomRuntimeConfig(conversationId: string): RoomRuntimeConfig {
-    const fallbackPolicy = this.resolveGroupPolicy(conversationId);
-    if (!this.configService) {
-      return {
-        source: "default",
-        enabled: true,
-        triggerPolicy: fallbackPolicy,
-        workdir: this.defaultCodexWorkdir,
-      };
-    }
-
-    return this.configService.resolveRoomConfig(conversationId, fallbackPolicy);
+    return runResolveRoomRuntimeConfig({
+      conversationId,
+      configService: this.configService,
+      roomTriggerPolicies: this.roomTriggerPolicies,
+      defaultGroupTriggerPolicy: this.defaultGroupTriggerPolicy,
+      defaultCodexWorkdir: this.defaultCodexWorkdir,
+    });
   }
 
   private resolveSessionBackendDecision(input: {
