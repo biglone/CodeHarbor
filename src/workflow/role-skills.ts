@@ -62,6 +62,32 @@ const DEFAULT_ROLE_ASSIGNMENTS: Record<WorkflowRole, string[]> = {
 
 const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
   {
+    id: "task-planner",
+    title: "Task Planner",
+    source: "builtin",
+    summary: "围绕需求目标拆解步骤，先给执行顺序、依赖关系与里程碑。",
+    content: [
+      "你是任务拆解技能：",
+      "1) 先明确范围内与范围外。",
+      "2) 输出有序步骤，并标注每步输入、输出、验收标准。",
+      "3) 优先处理关键路径与高风险步骤。",
+      "4) 给出可并行部分与阻塞项。",
+    ].join("\n"),
+  },
+  {
+    id: "requirements-doc",
+    title: "Requirements Doc",
+    source: "builtin",
+    summary: "从 REQUIREMENTS/TASK_LIST 读取约束，避免偏离需求边界。",
+    content: [
+      "你是需求约束技能：",
+      "1) 优先读取 REQUIREMENTS.md 与 TASK_LIST.md。",
+      "2) 抽取关键约束（兼容性、发布策略、边界条件）。",
+      "3) 若实现与需求冲突，优先满足需求并说明取舍。",
+      "4) 交付内容需可映射回需求条目。",
+    ].join("\n"),
+  },
+  {
     id: "builtin-planner-core",
     title: "Planner Core",
     source: "builtin",
@@ -75,6 +101,45 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
     ].join("\n"),
   },
   {
+    id: "autonomous-dev",
+    title: "Autonomous Dev",
+    source: "builtin",
+    summary: "以最小闭环优先，独立推进实现、验证与收口，减少中断。",
+    content: [
+      "你是自主执行技能：",
+      "1) 默认直接执行，不做无意义等待。",
+      "2) 小步提交：每轮都产生可验证增量。",
+      "3) 优先完成主路径，再补齐边界与文档。",
+      "4) 遇到失败优先定位根因并给修复路径。",
+    ].join("\n"),
+  },
+  {
+    id: "bug-finder",
+    title: "Bug Finder",
+    source: "builtin",
+    summary: "定位失败根因，避免反复试错，优先给最小修复方案。",
+    content: [
+      "你是问题定位技能：",
+      "1) 用日志、测试和调用路径定位首个异常点。",
+      "2) 区分症状与根因，先修根因。",
+      "3) 修复后补最小回归测试防止复发。",
+      "4) 说明风险与可能副作用。",
+    ].join("\n"),
+  },
+  {
+    id: "test-generator",
+    title: "Test Generator",
+    source: "builtin",
+    summary: "为新增行为补充回归测试，覆盖正常流、边界流与失败流。",
+    content: [
+      "你是测试补全技能：",
+      "1) 先覆盖最关键行为与回归风险。",
+      "2) 至少包含成功路径和失败路径。",
+      "3) 测试命名表达业务意图，断言可读。",
+      "4) 尽量最小化夹具，保证稳定性。",
+    ].join("\n"),
+  },
+  {
     id: "builtin-executor-core",
     title: "Executor Core",
     source: "builtin",
@@ -85,6 +150,32 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) 按既有代码风格修改，不引入无关改动。",
       "3) 每轮至少给出一个可验证产物。",
       "4) 失败时定位根因并修复，不重复尝试同一路径。",
+    ].join("\n"),
+  },
+  {
+    id: "code-reviewer",
+    title: "Code Reviewer",
+    source: "builtin",
+    summary: "从需求达成、代码质量、可维护性三个维度审查交付结果。",
+    content: [
+      "你是代码审查技能：",
+      "1) 检查实现是否真正满足任务目标。",
+      "2) 审查可读性、重复代码和复杂度。",
+      "3) 识别潜在回归与行为不一致。",
+      "4) 对问题给出可执行修复建议。",
+    ].join("\n"),
+  },
+  {
+    id: "security-audit",
+    title: "Security Audit",
+    source: "builtin",
+    summary: "关注输入校验、权限边界、命令执行与敏感数据处理风险。",
+    content: [
+      "你是安全审查技能：",
+      "1) 检查外部输入的校验与转义。",
+      "2) 检查权限控制和越权风险。",
+      "3) 检查命令执行与文件操作的安全边界。",
+      "4) 检查日志是否泄露敏感信息。",
     ].join("\n"),
   },
   {

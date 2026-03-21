@@ -172,6 +172,7 @@ codeharbor admin serve
 - `AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS`：角色 SKILL 注入块最大字符数（默认 2400）
 - `AGENT_WORKFLOW_ROLE_SKILLS_ROOTS`：可选，SKILL 根目录列表（逗号分隔，默认 `~/.codex/skills`）
 - `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`：可选，角色到 SKILL 列表映射（JSON）
+  - 默认映射已内置可开箱即用的基础 SKILL；若本地存在同名 SKILL，会自动覆盖内置版本
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）

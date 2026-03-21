@@ -642,6 +642,7 @@ Backend/model rule routing:
   - optional comma-separated local skill roots (default `~/.codex/skills`)
 - `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`
   - optional role-to-skill mapping override JSON (`planner`/`executor`/`reviewer` -> `string[]`)
+  - defaults map to install-ready builtin fallback skills; local skills with the same id override builtin entries automatically
 - `AUTODEV_LOOP_MAX_RUNS`
   - max task attempts for one `/autodev run` loop execution (default `20`)
 - `AUTODEV_LOOP_MAX_MINUTES`
