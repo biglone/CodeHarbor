@@ -11,10 +11,9 @@ import {
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
-import { type DocumentContextItem } from "./document-context";
+import type { DocumentContextItem } from "./document-context";
 import { Logger } from "./logger";
 import {
-  type RequestOutcomeMetric,
   type RuntimeMetricsSnapshot,
 } from "./metrics";
 import {
@@ -179,6 +178,17 @@ import {
   type WorkflowDiagRunStatus,
   type WorkflowDiagStorePayload,
 } from "./orchestrator/workflow-diag";
+import type {
+  BackendRuntimeBundle,
+  DocumentExtractionSummary,
+  ImageSelectionResult,
+  RequestOutcome,
+  RoomRuntimeConfig,
+  RunningExecution,
+  SessionBackendDecision,
+  SessionBackendOverride,
+  SessionLockEntry,
+} from "./orchestrator/orchestrator-types";
 import {
   listRecentAutoDevGitCommitEventSummaries as runListRecentAutoDevGitCommitEventSummaries,
   listWorkflowDiagEvents as runListWorkflowDiagEvents,
@@ -277,59 +287,6 @@ interface OrchestratorOptions {
   autoDevAutoCommit?: boolean;
   autoDevMaxConsecutiveFailures?: number;
   autoDevDetailedProgressEnabled?: boolean;
-}
-
-interface SessionLockEntry {
-  mutex: Mutex;
-  lastUsedAt: number;
-}
-
-type RequestOutcome = RequestOutcomeMetric;
-
-interface RunningExecution {
-  requestId: string;
-  startedAt: number;
-  cancel: () => void;
-}
-
-interface RoomRuntimeConfig {
-  source: "default" | "room";
-  enabled: boolean;
-  triggerPolicy: TriggerPolicy;
-  workdir: string;
-}
-
-interface SessionBackendOverride {
-  profile: BackendModelRouteProfile;
-  updatedAt: number;
-}
-
-interface SessionBackendDecision {
-  profile: BackendModelRouteProfile;
-  source: "manual_override" | "rule" | "default";
-  reasonCode: "manual_override" | "rule_match" | "default_fallback" | "factory_unavailable";
-  ruleId: string | null;
-}
-
-interface BackendRuntimeBundle {
-  profile: BackendModelRouteProfile;
-  executor: CodexExecutor;
-  sessionRuntime: CodexSessionRuntime;
-}
-
-interface ImageSelectionResult {
-  imagePaths: string[];
-  acceptedCount: number;
-  skippedMissingPath: number;
-  skippedUnsupportedMime: number;
-  skippedTooLarge: number;
-  skippedOverLimit: number;
-  notice: string | null;
-}
-
-interface DocumentExtractionSummary {
-  documents: DocumentContextItem[];
-  notice: string | null;
 }
 
 export interface ApiTaskSubmitInput {
