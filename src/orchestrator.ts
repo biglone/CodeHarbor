@@ -1,5 +1,4 @@
 import { Mutex } from "async-mutex";
-import os from "node:os";
 
 import { AudioTranscriber, type AudioTranscriberLike, type AudioTranscript } from "./audio-transcriber";
 import { type Channel } from "./channels/channel";
@@ -43,7 +42,6 @@ import {
   DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
   DEFAULT_AUTODEV_LOOP_MAX_RUNS,
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
-  DEFAULT_SELF_UPDATE_TIMEOUT_MS,
   DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT,
   DEFAULT_TASK_QUEUE_RETRY_POLICY,
   DEFAULT_UPGRADE_LOCK_TTL_MS,
@@ -74,7 +72,6 @@ import {
 } from "./workflow/role-skills";
 import {
   formatError,
-  parseCsvValues,
   parseEnvBoolean,
   parseEnvPositiveInt,
 } from "./orchestrator/helpers";
@@ -155,11 +152,7 @@ import {
   executeLockedChatRun as runExecuteLockedChatRun,
   executeLockedWorkflowRun as runExecuteLockedWorkflowRun,
 } from "./orchestrator/locked-message-run-executors";
-import {
-  buildDefaultUpgradeRestartPlan,
-  probeInstalledVersion,
-  runSelfUpdateCommand,
-} from "./orchestrator/upgrade-utils";
+import { resolveUpgradeRuntimeConfig as runResolveUpgradeRuntimeConfig } from "./orchestrator/upgrade-runtime-config";
 import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from "./orchestrator/workflow-runtime-config";
 import {
   formatBackendRouteProfile,
@@ -532,32 +525,16 @@ export class Orchestrator {
       executor,
       sessionRuntime: new CodexSessionRuntime(executor),
     });
-    this.matrixAdminUsers = new Set(
-      (options?.matrixAdminUsers ?? parseCsvValues(process.env.MATRIX_ADMIN_USERS ?? ""))
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
-    );
-    this.upgradeAllowedUsers = new Set(
-      (options?.upgradeAllowedUsers ?? parseCsvValues(process.env.MATRIX_UPGRADE_ALLOWED_USERS ?? ""))
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
-    );
-    this.upgradeLockOwner = `pid:${process.pid}@${os.hostname()}`;
-    const selfUpdateTimeoutMs = Math.max(1_000, options?.selfUpdateTimeoutMs ?? DEFAULT_SELF_UPDATE_TIMEOUT_MS);
-    this.selfUpdateRunner =
-      options?.selfUpdateRunner ??
-      ((input) =>
-        runSelfUpdateCommand({
-          version: input.version,
-          timeoutMs: selfUpdateTimeoutMs,
-        }));
-    this.upgradeRestartPlanner =
-      options?.upgradeRestartPlanner ??
-      (() =>
-        buildDefaultUpgradeRestartPlan({
-          logger: this.logger,
-        }));
-    this.upgradeVersionProbe = options?.upgradeVersionProbe ?? (() => probeInstalledVersion(selfUpdateTimeoutMs));
+    const upgradeRuntimeConfig = runResolveUpgradeRuntimeConfig({
+      options,
+      logger: this.logger,
+    });
+    this.matrixAdminUsers = upgradeRuntimeConfig.matrixAdminUsers;
+    this.upgradeAllowedUsers = upgradeRuntimeConfig.upgradeAllowedUsers;
+    this.upgradeLockOwner = upgradeRuntimeConfig.upgradeLockOwner;
+    this.selfUpdateRunner = upgradeRuntimeConfig.selfUpdateRunner;
+    this.upgradeRestartPlanner = upgradeRuntimeConfig.upgradeRestartPlanner;
+    this.upgradeVersionProbe = upgradeRuntimeConfig.upgradeVersionProbe;
     this.processStartedAtIso = new Date(Date.now() - process.uptime() * 1_000).toISOString();
     this.workflowDiagStore = this.restoreWorkflowDiagStore();
     this.persistRuntimeMetricsSnapshot();
