@@ -135,7 +135,7 @@ import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./orchestrator/workflow-run-dispatch";
 import { sendStopCommand as runSendStopCommand } from "./orchestrator/stop-command-dispatch";
-import { handleUpgradeCommand as runUpgradeCommand } from "./orchestrator/upgrade-command";
+import { sendUpgradeCommand as runSendUpgradeCommand } from "./orchestrator/upgrade-command-dispatch";
 import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
@@ -2115,23 +2115,24 @@ export class Orchestrator {
   }
 
   private async handleUpgradeCommand(message: InboundMessage): Promise<void> {
-    await runUpgradeCommand(
-      {
-        logger: this.logger,
-        botNoticePrefix: this.botNoticePrefix,
-        upgradeMutex: this.upgradeMutex,
-        authorizeUpgradeRequest: (targetMessage) => this.authorizeUpgradeRequest(targetMessage),
-        acquireUpgradeExecutionLock: () => this.acquireUpgradeExecutionLock(),
-        releaseUpgradeExecutionLock: () => this.releaseUpgradeExecutionLock(),
-        createUpgradeRun: (requestedBy, targetVersion) => this.createUpgradeRun(requestedBy, targetVersion),
-        finishUpgradeRun: (runId, input) => this.finishUpgradeRun(runId, input),
-        selfUpdateRunner: (input) => this.selfUpdateRunner(input),
-        upgradeRestartPlanner: () => this.upgradeRestartPlanner(),
-        upgradeVersionProbe: () => this.upgradeVersionProbe(),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
-      message,
-    );
+    await runSendUpgradeCommand(this.buildUpgradeCommandDispatchContext(), message);
+  }
+
+  private buildUpgradeCommandDispatchContext(): Parameters<typeof runSendUpgradeCommand>[0] {
+    return {
+      logger: this.logger,
+      botNoticePrefix: this.botNoticePrefix,
+      upgradeMutex: this.upgradeMutex,
+      authorizeUpgradeRequest: (targetMessage) => this.authorizeUpgradeRequest(targetMessage),
+      acquireUpgradeExecutionLock: () => this.acquireUpgradeExecutionLock(),
+      releaseUpgradeExecutionLock: () => this.releaseUpgradeExecutionLock(),
+      createUpgradeRun: (requestedBy, targetVersion) => this.createUpgradeRun(requestedBy, targetVersion),
+      finishUpgradeRun: (runId, input) => this.finishUpgradeRun(runId, input),
+      selfUpdateRunner: (input) => this.selfUpdateRunner(input),
+      upgradeRestartPlanner: () => this.upgradeRestartPlanner(),
+      upgradeVersionProbe: () => this.upgradeVersionProbe(),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
