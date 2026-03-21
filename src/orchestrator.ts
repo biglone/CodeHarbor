@@ -144,6 +144,7 @@ import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orche
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
 import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
+import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1350,7 +1351,7 @@ export class Orchestrator {
   }
 
   private buildAutoDevRunCommandDispatchContext(): Parameters<typeof runHandleAutoDevRunCommand>[0] {
-    return {
+    return runBuildAutoDevRunCommandDispatchContext({
       logger: this.logger,
       autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
       autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
@@ -1382,7 +1383,7 @@ export class Orchestrator {
       recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
         this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
       autoDevMetrics: this.autoDevMetrics,
-    };
+    });
   }
 
   private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
