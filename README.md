@@ -643,6 +643,7 @@ Backend/model rule routing:
 - `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`
   - optional role-to-skill mapping override JSON (`planner`/`executor`/`reviewer` -> `string[]`)
   - defaults map to install-ready builtin fallback skills; local skills with the same id override builtin entries automatically
+  - builtin fallback skill prompts are maintained in English for consistent global defaults
 - `AUTODEV_LOOP_MAX_RUNS`
   - max task attempts for one `/autodev run` loop execution (default `20`)
 - `AUTODEV_LOOP_MAX_MINUTES`

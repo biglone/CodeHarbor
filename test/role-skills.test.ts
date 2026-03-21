@@ -25,7 +25,7 @@ describe("WorkflowRoleSkillCatalog", () => {
     expect(round0.enabled).toBe(true);
     expect(round0.disclosure).toBe("summary");
     expect(round0.text).toContain('disclosure="summary"');
-    expect(round0.text).toContain("先对目标做范围划分");
+    expect(round0.text).toContain("Scope the objective, map dependencies");
 
     const round1 = catalog.buildPrompt({
       role: "planner",
@@ -34,7 +34,7 @@ describe("WorkflowRoleSkillCatalog", () => {
     });
     expect(round1.disclosure).toBe("full");
     expect(round1.text).toContain('disclosure="full"');
-    expect(round1.text).toContain("你负责规划阶段");
+    expect(round1.text).toContain("You own the planning stage");
   });
 
   it("supports per-run disable override", () => {
