@@ -99,9 +99,7 @@ import {
   parseQueuedInboundPayload,
   type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
-import {
-  classifyExecutionOutcome,
-} from "./orchestrator/workflow-status";
+import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
   buildDefaultUpgradeRestartPlan,
@@ -1563,27 +1561,27 @@ export class Orchestrator {
   }
 
   private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
-    const startedAt = Date.now();
-    const status = classifyExecutionOutcome(error);
-    if (status === "cancelled") {
-      await this.channel.sendNotice(conversationId, "[CodeHarbor] Multi-Agent workflow 已取消。");
-      return Date.now() - startedAt;
-    }
-
-    await this.channel.sendMessage(conversationId, `[CodeHarbor] Multi-Agent workflow 失败: ${formatError(error)}`);
-    return Date.now() - startedAt;
+    return runSendFailureNotice(
+      {
+        sendNotice: (targetConversationId, text) => this.channel.sendNotice(targetConversationId, text),
+        sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
+      },
+      conversationId,
+      error,
+      "workflow",
+    );
   }
 
   private async sendAutoDevFailure(conversationId: string, error: unknown): Promise<number> {
-    const startedAt = Date.now();
-    const status = classifyExecutionOutcome(error);
-    if (status === "cancelled") {
-      await this.channel.sendNotice(conversationId, "[CodeHarbor] AutoDev 已取消。");
-      return Date.now() - startedAt;
-    }
-
-    await this.channel.sendMessage(conversationId, `[CodeHarbor] AutoDev 失败: ${formatError(error)}`);
-    return Date.now() - startedAt;
+    return runSendFailureNotice(
+      {
+        sendNotice: (targetConversationId, text) => this.channel.sendNotice(targetConversationId, text),
+        sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
+      },
+      conversationId,
+      error,
+      "autodev",
+    );
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
