@@ -61,7 +61,6 @@ import {
 } from "./workflow/role-skills";
 import {
   formatError,
-  formatWorkflowRoleSkillLoaded,
   parseCsvValues,
   parseEnvBoolean,
   parseEnvOptionalPositiveInt,
@@ -70,6 +69,11 @@ import {
   parseRoleSkillAssignments,
   parseRoleSkillDisclosureMode,
 } from "./orchestrator/helpers";
+import {
+  buildWorkflowRoleSkillStatus as runBuildWorkflowRoleSkillStatus,
+  resolveWorkflowRoleSkillPolicy as runResolveWorkflowRoleSkillPolicy,
+  setWorkflowRoleSkillPolicyOverride as runSetWorkflowRoleSkillPolicyOverride,
+} from "./orchestrator/workflow-role-skill-policy";
 import {
   type AutoDevGitCommitResult,
 } from "./orchestrator/autodev-git";
@@ -2024,29 +2028,23 @@ export class Orchestrator {
   }
 
   private resolveWorkflowRoleSkillPolicy(sessionKey: string): { enabled: boolean; mode: WorkflowRoleSkillDisclosureMode } {
-    const override = this.workflowRoleSkillPolicyOverrides.get(sessionKey);
-    return {
-      enabled: override?.enabled ?? this.workflowRoleSkillDefaultPolicy.enabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
-      mode: override?.mode ?? this.workflowRoleSkillDefaultPolicy.mode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
-    };
+    return runResolveWorkflowRoleSkillPolicy({
+      sessionKey,
+      workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
+      workflowRoleSkillDefaultPolicy: this.workflowRoleSkillDefaultPolicy,
+      defaultEnabled: DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
+      defaultMode: DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
+    });
   }
 
   private setWorkflowRoleSkillPolicyOverride(sessionKey: string, next: WorkflowRoleSkillPolicyOverride): void {
-    const current = this.workflowRoleSkillPolicyOverrides.get(sessionKey) ?? {};
-    const mergedEnabled = next.enabled ?? current.enabled ?? this.workflowRoleSkillDefaultPolicy.enabled;
-    const mergedMode = next.mode ?? current.mode ?? this.workflowRoleSkillDefaultPolicy.mode;
-    const enabled = mergedEnabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED;
-    const mode = mergedMode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE;
-    const sameAsDefault =
-      enabled === (this.workflowRoleSkillDefaultPolicy.enabled ?? DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED) &&
-      mode === (this.workflowRoleSkillDefaultPolicy.mode ?? DEFAULT_WORKFLOW_ROLE_SKILLS_MODE);
-    if (sameAsDefault) {
-      this.workflowRoleSkillPolicyOverrides.delete(sessionKey);
-      return;
-    }
-    this.workflowRoleSkillPolicyOverrides.set(sessionKey, {
-      enabled,
-      mode,
+    runSetWorkflowRoleSkillPolicyOverride({
+      sessionKey,
+      next,
+      workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
+      workflowRoleSkillDefaultPolicy: this.workflowRoleSkillDefaultPolicy,
+      defaultEnabled: DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
+      defaultMode: DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
     });
   }
 
@@ -2058,17 +2056,12 @@ export class Orchestrator {
     loaded: string;
     override: string;
   } {
-    const policy = this.resolveWorkflowRoleSkillPolicy(sessionKey);
-    const snapshot = this.workflowRoleSkillCatalog.getStatusSnapshot();
-    const override = this.workflowRoleSkillPolicyOverrides.get(sessionKey);
-    return {
-      enabled: policy.enabled,
-      mode: policy.mode,
-      maxChars: snapshot.maxChars,
-      roots: snapshot.roots.length > 0 ? snapshot.roots.join(", ") : "(default)",
-      loaded: formatWorkflowRoleSkillLoaded(snapshot),
-      override: override ? `enabled=${override.enabled ? "on" : "off"}, mode=${override.mode}` : "none",
-    };
+    return runBuildWorkflowRoleSkillStatus({
+      sessionKey,
+      workflowRoleSkillCatalog: this.workflowRoleSkillCatalog,
+      workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
+      workflowRoleSkillPolicy: this.resolveWorkflowRoleSkillPolicy(sessionKey),
+    });
   }
 
   private pruneRunSnapshots(now: number): void {
