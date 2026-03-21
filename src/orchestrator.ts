@@ -908,6 +908,29 @@ export class Orchestrator {
 
   private buildStatusCommandDispatchContext() {
     return runBuildStatusCommandDispatchContext({
+      ...this.buildStatusCommandConfigInput(),
+      ...this.buildStatusCommandSnapshotInput(),
+      ...this.buildStatusCommandActionInput(),
+    });
+  }
+
+  private buildStatusCommandConfigInput(): Pick<
+    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
+    | "botNoticePrefix"
+    | "groupDirectModeEnabled"
+    | "updateCheckTtlMs"
+    | "cliCompatEnabled"
+    | "workflowEnabled"
+    | "autoDevDetailedProgressDefaultEnabled"
+    | "workflowPlanContextMaxChars"
+    | "workflowOutputContextMaxChars"
+    | "workflowFeedbackContextMaxChars"
+    | "autoDevLoopMaxRuns"
+    | "autoDevLoopMaxMinutes"
+    | "autoDevAutoCommit"
+    | "autoDevMaxConsecutiveFailures"
+  > {
+    return {
       botNoticePrefix: this.botNoticePrefix,
       groupDirectModeEnabled: this.groupDirectModeEnabled,
       updateCheckTtlMs: this.updateCheckTtlMs,
@@ -921,16 +944,56 @@ export class Orchestrator {
       autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
       autoDevAutoCommit: this.autoDevAutoCommit,
       autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+    };
+  }
+
+  private buildStatusCommandSnapshotInput(): Pick<
+    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
+    | "stateStore"
+    | "workflowSnapshots"
+    | "autoDevSnapshots"
+    | "activeAutoDevLoopSessions"
+    | "pendingAutoDevLoopStopRequests"
+    | "pendingStopRequests"
+    | "sessionBackendOverrides"
+    | "sessionLastBackendDecisions"
+  > {
+    return {
       stateStore: this.stateStore,
-      resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
-      getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
-      getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
-      getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
       workflowSnapshots: this.workflowSnapshots,
       autoDevSnapshots: this.autoDevSnapshots,
       activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
       pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
       pendingStopRequests: this.pendingStopRequests,
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+    };
+  }
+
+  private buildStatusCommandActionInput(): Pick<
+    Parameters<typeof runBuildStatusCommandDispatchContext>[0],
+    | "resolveRoomRuntimeConfig"
+    | "getRuntimeMetricsSnapshot"
+    | "getRateLimiterSnapshot"
+    | "getBackendRuntimeStats"
+    | "isAutoDevDetailedProgressEnabled"
+    | "listWorkflowDiagRunsBySession"
+    | "listWorkflowDiagEvents"
+    | "buildWorkflowRoleSkillStatus"
+    | "getPackageUpdateStatus"
+    | "getLatestUpgradeRun"
+    | "getRecentUpgradeRuns"
+    | "getUpgradeRunStats"
+    | "getUpgradeExecutionLockSnapshot"
+    | "resolveSessionBackendStatusProfile"
+    | "formatBackendToolLabel"
+    | "sendNotice"
+  > {
+    return {
+      resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
+      getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
+      getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
+      getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
       isAutoDevDetailedProgressEnabled: (targetSessionKey: string) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
       listWorkflowDiagRunsBySession: (kind: "autodev", targetSessionKey: string, limit: number) =>
         this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
@@ -942,11 +1005,9 @@ export class Orchestrator {
       getUpgradeRunStats: () => this.getUpgradeRunStats(),
       getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
       resolveSessionBackendStatusProfile: (targetSessionKey: string) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-      sessionBackendOverrides: this.sessionBackendOverrides,
-      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
       formatBackendToolLabel: (profile: BackendModelRouteProfile) => this.formatBackendToolLabel(profile),
       sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
-    });
+    };
   }
 
   private async handleAutoDevProgressCommand(
