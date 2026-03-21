@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.51] - 2026-03-21
+
+- Orchestrator modular refactor (maintainability):
+  - extracted runtime adapter wiring for message handling, non-blocking status route execution, and AutoDev run dispatch setup
+  - split control/backend/status/diag dispatch context wiring into dedicated context modules with clearer `config/state/actions` boundaries
+  - reduced `src/orchestrator.ts` orchestration surface by moving repeated context construction into focused helper modules
+
 ## [0.1.50] - 2026-03-19
 
 - Agent role skill system (Planner/Executor/Reviewer):
