@@ -5,8 +5,11 @@ interface AutoDevCommitMessage {
   body: string;
 }
 
+export type AutoDevCommitLanguage = "en" | "zh";
+
 interface AutoDevCommitMessageOptions {
   workflowReview?: string | null;
+  preferredLanguage?: AutoDevCommitLanguage;
 }
 
 type AutoDevCommitType = "feat" | "fix" | "docs" | "test" | "chore";
@@ -16,18 +19,16 @@ export function buildAutoDevCommitMessage(
   changedFiles: string[],
   options: AutoDevCommitMessageOptions = {},
 ): AutoDevCommitMessage {
+  const preferredLanguage = options.preferredLanguage ?? "en";
   const detail = task.description.trim();
   const normalizedFiles = normalizeAutoDevCommitFiles(changedFiles);
   const type = inferAutoDevCommitType(detail, normalizedFiles);
   const scope = inferAutoDevCommitScope(detail, normalizedFiles, type);
-  const skillIntent = extractSkillCommitIntentFromReview(options.workflowReview ?? null, 58);
-  const inferredIntent = inferAutoDevCommitIntent(detail, normalizedFiles, scope, type);
-  const subject = `${type}(${scope}): ${buildAutoDevCommitHeadline(task.id, skillIntent ?? inferredIntent, 58)}`;
-  const bodyLines = [
-    `Task-ID: ${task.id}`,
-    `Changed-files: ${summarizeAutoDevCommitFiles(normalizedFiles)}`,
-    "Generated-by: CodeHarbor AutoDev",
-  ];
+  const changedFilesSummary = summarizeAutoDevCommitFiles(normalizedFiles);
+  const skillIntent = extractSkillCommitIntentFromReview(options.workflowReview ?? null, 58, preferredLanguage);
+  const inferredIntent = inferAutoDevCommitIntent(detail, normalizedFiles, scope, type, preferredLanguage);
+  const subject = `${type}(${scope}): ${buildAutoDevCommitHeadline(task.id, skillIntent ?? inferredIntent, 58, preferredLanguage)}`;
+  const bodyLines = buildAutoDevCommitBodyLines(task.id, changedFilesSummary, preferredLanguage);
 
   return {
     subject,
@@ -112,7 +113,12 @@ function summarizeAutoDevCommitFiles(files: string[]): string {
   return `${preview}, ... (+${files.length - 8})`;
 }
 
-function buildAutoDevCommitHeadline(taskId: string, intent: string, maxLen: number): string {
+function buildAutoDevCommitHeadline(
+  taskId: string,
+  intent: string,
+  maxLen: number,
+  language: AutoDevCommitLanguage,
+): string {
   const normalizedTaskId = normalizeTaskIdFragment(taskId);
   const base = `${intent} (${normalizedTaskId})`;
   if (base.length <= maxLen) {
@@ -122,13 +128,17 @@ function buildAutoDevCommitHeadline(taskId: string, intent: string, maxLen: numb
   const suffix = ` (${normalizedTaskId})`;
   const available = maxLen - suffix.length;
   if (available <= minimumRoomForIntent) {
-    return `update task ${suffix.trim()}`;
+    return language === "zh" ? `更新任务 ${suffix.trim()}` : `update task ${suffix.trim()}`;
   }
-  const sliced = intent.slice(0, available).trim().replace(/[^\w)\]]+$/g, "");
+  const sliced = trimCommitIntentSuffix(intent.slice(0, available).trim(), language);
   return `${sliced}${suffix}`;
 }
 
-function extractSkillCommitIntentFromReview(review: string | null, maxLen: number): string | null {
+function extractSkillCommitIntentFromReview(
+  review: string | null,
+  maxLen: number,
+  language: AutoDevCommitLanguage,
+): string | null {
   if (typeof review !== "string" || !review.trim()) {
     return null;
   }
@@ -141,10 +151,10 @@ function extractSkillCommitIntentFromReview(review: string | null, maxLen: numbe
     return null;
   }
   const rawSummary = summaryLine.replace(/^summary\s*:/i, "").trim();
-  return normalizeSkillCommitIntent(rawSummary, maxLen);
+  return normalizeSkillCommitIntent(rawSummary, maxLen, language);
 }
 
-function normalizeSkillCommitIntent(raw: string, maxLen: number): string | null {
+function normalizeSkillCommitIntent(raw: string, maxLen: number, language: AutoDevCommitLanguage): string | null {
   let candidate = raw
     .replace(/\s+/g, " ")
     .replace(/^[-*]\s+/, "")
@@ -155,34 +165,61 @@ function normalizeSkillCommitIntent(raw: string, maxLen: number): string | null 
   if (!candidate) {
     return null;
   }
-  if (/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(candidate)) {
+  if (language === "en") {
+    if (/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(candidate)) {
+      return null;
+    }
+    if (!/^[\x20-\x7E]+$/.test(candidate)) {
+      return null;
+    }
+    if (!/[a-z]/i.test(candidate)) {
+      return null;
+    }
+    candidate = candidate.toLowerCase();
+    if (candidate.length < 8 || candidate === "ok" || candidate === "passed" || candidate === "approved") {
+      return null;
+    }
+    if (
+      !/^(add|align|build|deliver|enable|enhance|ensure|expand|extend|fix|harden|implement|improve|optimize|prevent|reduce|refactor|simplify|stabilize|standardize|streamline|support|update)\b/.test(
+        candidate,
+      )
+    ) {
+      candidate = `improve ${candidate}`;
+    }
+    if (candidate.length <= maxLen) {
+      return candidate;
+    }
+    const sliced = trimCommitIntentSuffix(candidate.slice(0, maxLen).trim(), language);
+    return sliced.length >= 8 ? sliced : null;
+  }
+
+  if (!/[\u3400-\u9fff\uf900-\ufaff]/.test(candidate)) {
     return null;
   }
-  if (!/^[\x20-\x7E]+$/.test(candidate)) {
+  if (candidate.length < 4 || candidate === "通过" || candidate === "已通过" || candidate === "批准") {
     return null;
-  }
-  if (!/[a-z]/i.test(candidate)) {
-    return null;
-  }
-  candidate = candidate.toLowerCase();
-  if (candidate.length < 8 || candidate === "ok" || candidate === "passed" || candidate === "approved") {
-    return null;
-  }
-  if (
-    !/^(add|align|build|deliver|enable|enhance|ensure|expand|extend|fix|harden|implement|improve|optimize|prevent|reduce|refactor|simplify|stabilize|standardize|streamline|support|update)\b/.test(
-      candidate,
-    )
-  ) {
-    candidate = `improve ${candidate}`;
   }
   if (candidate.length <= maxLen) {
     return candidate;
   }
-  const sliced = candidate.slice(0, maxLen).trim().replace(/[^\w)\]]+$/g, "");
-  return sliced.length >= 8 ? sliced : null;
+  const sliced = trimCommitIntentSuffix(candidate.slice(0, maxLen).trim(), language);
+  return sliced.length >= 4 ? sliced : null;
 }
 
 function inferAutoDevCommitIntent(
+  description: string,
+  changedFiles: string[],
+  scope: string,
+  type: AutoDevCommitType,
+  language: AutoDevCommitLanguage,
+): string {
+  if (language === "zh") {
+    return inferAutoDevCommitIntentZh(description, changedFiles, scope, type);
+  }
+  return inferAutoDevCommitIntentEn(description, changedFiles, scope, type);
+}
+
+function inferAutoDevCommitIntentEn(
   description: string,
   changedFiles: string[],
   scope: string,
@@ -208,7 +245,7 @@ function inferAutoDevCommitIntent(
     return "expand regression coverage";
   }
 
-  const target = normalizeCommitIntentTarget(scope);
+  const target = normalizeCommitIntentTarget(scope, "en");
   if (type === "fix") {
     return `fix ${target}`;
   }
@@ -216,6 +253,42 @@ function inferAutoDevCommitIntent(
     return `maintain ${target}`;
   }
   return `enhance ${target}`;
+}
+
+function inferAutoDevCommitIntentZh(
+  description: string,
+  changedFiles: string[],
+  scope: string,
+  type: AutoDevCommitType,
+): string {
+  const text = description.toLowerCase();
+  if (includesAnyKeyword(text, ["upgrade", "install", "restart", "恢复", "升级", "安装"])) {
+    return "优化安装与升级流程";
+  }
+  if (includesAnyKeyword(text, ["backend", "route", "routing", "model", "桥接", "会话", "context", "bridge"])) {
+    return "优化后端路由与上下文桥接";
+  }
+  if (includesAnyKeyword(text, ["history", "retention", "export", "历史", "导出"])) {
+    return "增强历史导出与保留策略";
+  }
+  if (includesAnyKeyword(text, ["release", "publish", "版本", "发布", "changelog"])) {
+    return "完善发布自动化流程";
+  }
+  if (type === "docs" || changedFiles.every((file) => isAutoDevDocFile(file))) {
+    return "更新文档说明";
+  }
+  if (type === "test" || changedFiles.every((file) => isAutoDevTestFile(file))) {
+    return "补充回归测试覆盖";
+  }
+
+  const target = normalizeCommitIntentTarget(scope, "zh");
+  if (type === "fix") {
+    return `修复${target}`;
+  }
+  if (type === "chore") {
+    return `维护${target}`;
+  }
+  return `优化${target}`;
 }
 
 function includesAnyKeyword(text: string, keywords: string[]): boolean {
@@ -252,10 +325,30 @@ function normalizeTaskIdFragment(raw: string): string {
   return normalized || "TASK";
 }
 
-function normalizeCommitIntentTarget(scope: string): string {
+function normalizeCommitIntentTarget(scope: string, language: AutoDevCommitLanguage): string {
   const normalizedScope = normalizeCommitScopeFragment(scope);
+  if (language === "zh") {
+    if (!normalizedScope || normalizedScope === "core") {
+      return "核心流程";
+    }
+    return `${normalizedScope.replace(/-/g, " ")}流程`;
+  }
   if (!normalizedScope || normalizedScope === "core") {
     return "core workflow";
   }
   return `${normalizedScope.replace(/-/g, " ")} workflow`;
+}
+
+function buildAutoDevCommitBodyLines(taskId: string, changedFilesSummary: string, language: AutoDevCommitLanguage): string[] {
+  if (language === "zh") {
+    return [`任务ID: ${taskId}`, `变更文件: ${changedFilesSummary}`, "生成方式: CodeHarbor AutoDev"];
+  }
+  return [`Task-ID: ${taskId}`, `Changed-files: ${changedFilesSummary}`, "Generated-by: CodeHarbor AutoDev"];
+}
+
+function trimCommitIntentSuffix(value: string, language: AutoDevCommitLanguage): string {
+  if (language === "zh") {
+    return value.replace(/[，。；：！？、\s-]+$/g, "");
+  }
+  return value.replace(/[^\w)\]]+$/g, "");
 }

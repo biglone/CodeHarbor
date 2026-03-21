@@ -182,7 +182,8 @@ codeharbor admin serve
 - `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <business-summary> (<taskId>)`（按任务目标与改动文件自动推断）
-  - 标题摘要采用混合策略：优先使用 Reviewer `SUMMARY`（来自角色 SKILL 输出）；若不满足英文规范则自动回退到模板推断
+  - 标题摘要采用混合策略：优先使用 Reviewer `SUMMARY`（来自角色 SKILL 输出）；若与当前目标语言不匹配则自动回退到模板推断
+  - 日志语言策略：新项目首条 AutoDev 提交默认英文；已有项目会跟随仓库近期提交日志的主语言
   - 提交正文固定包含：`Task-ID`、`Changed-files`、`Generated-by`
 - AutoDev 结果消息会固定输出 `git commit` 与 `git changed files`
 - 若运行前仓库已存在未提交改动，或当前目录不是 Git 仓库，会跳过自动提交并在结果消息提示原因

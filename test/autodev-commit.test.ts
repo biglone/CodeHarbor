@@ -54,4 +54,42 @@ describe("buildAutoDevCommitMessage", () => {
     const message = buildAutoDevCommitMessage(createTask("自动开发任务"), ["src/app.ts"]);
     expect(message.subject).toMatch(/^(feat|fix|docs|test|chore)\((?!autodev\))/);
   });
+
+  it("uses chinese reviewer summary when preferred language is zh", () => {
+    const message = buildAutoDevCommitMessage(
+      createTask("后端工具生态：扩展 backend 工具接入与会话切换体验"),
+      ["src/orchestrator/backend-command.ts", "src/orchestrator/conversation-bridge.ts"],
+      {
+        preferredLanguage: "zh",
+        workflowReview: [
+          "VERDICT: APPROVED",
+          "SUMMARY: 优化后端路由与上下文桥接体验",
+          "ISSUES:",
+          "- 无",
+        ].join("\n"),
+      },
+    );
+
+    expect(message.subject).toBe("feat(routing): 优化后端路由与上下文桥接体验 (T8.3)");
+    expect(message.body).toContain("任务ID: T8.3");
+    expect(message.body).toContain("变更文件:");
+  });
+
+  it("falls back to chinese template when preferred language is zh and summary is english", () => {
+    const message = buildAutoDevCommitMessage(
+      createTask("后端工具生态：扩展 backend 工具接入与会话切换体验"),
+      ["src/orchestrator/backend-command.ts", "src/orchestrator/conversation-bridge.ts"],
+      {
+        preferredLanguage: "zh",
+        workflowReview: [
+          "VERDICT: APPROVED",
+          "SUMMARY: improve backend routing and context bridge behavior",
+          "ISSUES:",
+          "- none",
+        ].join("\n"),
+      },
+    );
+
+    expect(message.subject).toBe("feat(routing): 优化后端路由与上下文桥接 (T8.3)");
+  });
 });

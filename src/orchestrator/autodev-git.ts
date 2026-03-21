@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import type { Logger } from "../logger";
 import type { MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
 import type { AutoDevTask } from "../workflow/autodev";
-import { buildAutoDevCommitMessage } from "../workflow/autodev-commit";
+import { buildAutoDevCommitMessage, type AutoDevCommitLanguage } from "../workflow/autodev-commit";
 import { formatError } from "./helpers";
 
 const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
@@ -107,6 +107,7 @@ export async function tryAutoDevGitCommit(input: {
 
     const commitMessage = buildAutoDevCommitMessage(input.task, stagedFiles, {
       workflowReview: input.workflowResult?.review ?? null,
+      preferredLanguage: await inferAutoDevCommitLanguage(input.workdir),
     });
     await runGitCommand(input.workdir, [
       "-c",
@@ -145,6 +146,58 @@ export async function tryAutoDevGitCommit(input: {
       error: message,
     };
   }
+}
+
+export async function inferAutoDevCommitLanguage(workdir: string): Promise<AutoDevCommitLanguage> {
+  try {
+    const raw = await runGitCommand(workdir, ["log", "--pretty=%s", "-n", "20"]);
+    const subjects = raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    if (subjects.length === 0) {
+      return "en";
+    }
+
+    const classified = subjects
+      .map((subject) => classifyCommitSubjectLanguage(subject))
+      .filter((value): value is AutoDevCommitLanguage => Boolean(value));
+    if (classified.length === 0) {
+      return "en";
+    }
+
+    const zhCount = classified.filter((value) => value === "zh").length;
+    const enCount = classified.length - zhCount;
+    if (zhCount / classified.length >= 0.6) {
+      return "zh";
+    }
+    if (enCount / classified.length >= 0.6) {
+      return "en";
+    }
+
+    const recentWindow = classified.slice(0, 5);
+    const recentZh = recentWindow.filter((value) => value === "zh").length;
+    const recentEn = recentWindow.length - recentZh;
+    if (recentZh > recentEn) {
+      return "zh";
+    }
+    if (recentEn > recentZh) {
+      return "en";
+    }
+    return recentWindow[0] ?? "en";
+  } catch {
+    return "en";
+  }
+}
+
+function classifyCommitSubjectLanguage(subject: string): AutoDevCommitLanguage | null {
+  if (/[\u3400-\u9fff\uf900-\ufaff]/.test(subject)) {
+    return "zh";
+  }
+  if (/[A-Za-z]/.test(subject)) {
+    return "en";
+  }
+  return null;
 }
 
 async function listGitCommitChangedFiles(workdir: string): Promise<string[]> {
