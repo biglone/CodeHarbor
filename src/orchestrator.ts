@@ -740,23 +740,7 @@ export class Orchestrator {
     queueWaitMs: number;
   }): Promise<boolean> {
     return runNonBlockingStatusRoute(
-      runBuildNonBlockingStatusRouteContext({
-        logger: this.logger,
-        workflowEnabled: this.workflowRunner.isEnabled(),
-        hasProcessedEvent: (sessionKey, eventId) => this.stateStore.hasProcessedEvent(sessionKey, eventId),
-        markEventProcessed: (sessionKey, eventId) => this.stateStore.markEventProcessed(sessionKey, eventId),
-        recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-          this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-        handleControlCommand: (command, sessionKey, message, requestId) =>
-          this.handleControlCommand(command, sessionKey, message, requestId),
-        handleWorkflowStatusCommand: (sessionKey, message) => this.handleWorkflowStatusCommand(sessionKey, message),
-        handleAutoDevStatusCommand: (sessionKey, message, workdir) =>
-          this.handleAutoDevStatusCommand(sessionKey, message, workdir),
-        handleAutoDevProgressCommand: (sessionKey, message, mode) =>
-          this.handleAutoDevProgressCommand(sessionKey, message, mode),
-        handleAutoDevSkillsCommand: (sessionKey, message, mode) => this.handleAutoDevSkillsCommand(sessionKey, message, mode),
-        handleAutoDevLoopStopCommand: (sessionKey, message) => this.handleAutoDevLoopStopCommand(sessionKey, message),
-      }),
+      this.buildNonBlockingStatusRouteContext(),
       {
         route: input.route,
         sessionKey: input.sessionKey,
@@ -766,6 +750,26 @@ export class Orchestrator {
         queueWaitMs: input.queueWaitMs,
       },
     );
+  }
+
+  private buildNonBlockingStatusRouteContext(): Parameters<typeof runNonBlockingStatusRoute>[0] {
+    return runBuildNonBlockingStatusRouteContext({
+      logger: this.logger,
+      workflowEnabled: this.workflowRunner.isEnabled(),
+      hasProcessedEvent: (sessionKey, eventId) => this.stateStore.hasProcessedEvent(sessionKey, eventId),
+      markEventProcessed: (sessionKey, eventId) => this.stateStore.markEventProcessed(sessionKey, eventId),
+      recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+        this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+      handleControlCommand: (command, sessionKey, message, requestId) =>
+        this.handleControlCommand(command, sessionKey, message, requestId),
+      handleWorkflowStatusCommand: (sessionKey, message) => this.handleWorkflowStatusCommand(sessionKey, message),
+      handleAutoDevStatusCommand: (sessionKey, message, workdir) =>
+        this.handleAutoDevStatusCommand(sessionKey, message, workdir),
+      handleAutoDevProgressCommand: (sessionKey, message, mode) =>
+        this.handleAutoDevProgressCommand(sessionKey, message, mode),
+      handleAutoDevSkillsCommand: (sessionKey, message, mode) => this.handleAutoDevSkillsCommand(sessionKey, message, mode),
+      handleAutoDevLoopStopCommand: (sessionKey, message) => this.handleAutoDevLoopStopCommand(sessionKey, message),
+    });
   }
 
   private startSessionQueueDrain(sessionKey: string): void {
