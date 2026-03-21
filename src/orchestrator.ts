@@ -133,7 +133,7 @@ import {
 } from "./orchestrator/autodev-control-command";
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
-import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
+import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./orchestrator/workflow-run-dispatch";
 import { sendStopCommand as runSendStopCommand } from "./orchestrator/stop-command-dispatch";
 import { handleUpgradeCommand as runUpgradeCommand } from "./orchestrator/upgrade-command";
 import {
@@ -1460,39 +1460,7 @@ export class Orchestrator {
     runContext?: AutoDevRunContext,
   ): Promise<void> {
     await runHandleAutoDevRunCommand(
-      {
-        logger: this.logger,
-        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-        autoDevAutoCommit: this.autoDevAutoCommit,
-        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
-        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-        autoDevFailureStreaks: this.autoDevFailureStreaks,
-        consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
-        consumePendingAutoDevLoopStopRequest: (targetSessionKey) =>
-          this.consumePendingAutoDevLoopStopRequest(targetSessionKey),
-        setAutoDevSnapshot: (targetSessionKey, snapshot) => {
-          this.setAutoDevSnapshot(targetSessionKey, snapshot);
-        },
-        channelSendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-        beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
-        appendWorkflowDiagEvent: (runId, kind, stage, round, eventMessage) =>
-          this.appendWorkflowDiagEvent(runId, kind, stage, round, eventMessage),
-        runWorkflowCommand: (input) =>
-          this.handleWorkflowRunCommand(
-            input.objective,
-            input.sessionKey,
-            input.message,
-            input.requestId,
-            input.workdir,
-            input.diagRunId,
-            "autodev",
-          ),
-        recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
-          this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
-        autoDevMetrics: this.autoDevMetrics,
-      },
+      this.buildAutoDevRunCommandDispatchContext(),
       {
         taskId,
         sessionKey,
@@ -1502,6 +1470,42 @@ export class Orchestrator {
         runContext,
       },
     );
+  }
+
+  private buildAutoDevRunCommandDispatchContext(): Parameters<typeof runHandleAutoDevRunCommand>[0] {
+    return {
+      logger: this.logger,
+      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+      autoDevAutoCommit: this.autoDevAutoCommit,
+      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+      autoDevFailureStreaks: this.autoDevFailureStreaks,
+      consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+      consumePendingAutoDevLoopStopRequest: (targetSessionKey) =>
+        this.consumePendingAutoDevLoopStopRequest(targetSessionKey),
+      setAutoDevSnapshot: (targetSessionKey, snapshot) => {
+        this.setAutoDevSnapshot(targetSessionKey, snapshot);
+      },
+      channelSendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
+      appendWorkflowDiagEvent: (runId, kind, stage, round, eventMessage) =>
+        this.appendWorkflowDiagEvent(runId, kind, stage, round, eventMessage),
+      runWorkflowCommand: (input) =>
+        this.handleWorkflowRunCommand(
+          input.objective,
+          input.sessionKey,
+          input.message,
+          input.requestId,
+          input.workdir,
+          input.diagRunId,
+          "autodev",
+        ),
+      recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
+        this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
+      autoDevMetrics: this.autoDevMetrics,
+    };
   }
 
   private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
@@ -1530,25 +1534,8 @@ export class Orchestrator {
     diagRunId: string | null = null,
     diagRunKind: WorkflowDiagRunKind = "workflow",
   ): Promise<MultiAgentWorkflowRunResult | null> {
-    return executeWorkflowRunRequest(
-      {
-        setWorkflowSnapshot: (targetSessionKey, snapshot) => this.setWorkflowSnapshot(targetSessionKey, snapshot),
-        beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
-        startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
-        consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
-        runningExecutions: this.runningExecutions,
-        persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-        sendProgressUpdate: (ctx, text) => this.sendProgressUpdate(ctx, text),
-        appendWorkflowDiagEvent: (runId, kind, stage, round, stageMessage) =>
-          this.appendWorkflowDiagEvent(runId, kind, stage, round, stageMessage),
-        isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
-        resolveWorkflowRoleSkillPolicy: (targetSessionKey) => this.resolveWorkflowRoleSkillPolicy(targetSessionKey),
-        runWorkflow: (input) => this.workflowRunner.run(input),
-        sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
-        finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
-        finishWorkflowDiagRun: (runId, input) => this.finishWorkflowDiagRun(runId, input),
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    return runSendWorkflowRunRequest(
+      this.buildWorkflowRunDispatchContext(),
       {
         objective,
         sessionKey,
@@ -1559,6 +1546,27 @@ export class Orchestrator {
         diagRunKind,
       },
     );
+  }
+
+  private buildWorkflowRunDispatchContext(): Parameters<typeof runSendWorkflowRunRequest>[0] {
+    return {
+      setWorkflowSnapshot: (targetSessionKey, snapshot) => this.setWorkflowSnapshot(targetSessionKey, snapshot),
+      beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
+      startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
+      consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+      runningExecutions: this.runningExecutions,
+      persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+      sendProgressUpdate: (ctx, text) => this.sendProgressUpdate(ctx, text),
+      appendWorkflowDiagEvent: (runId, kind, stage, round, stageMessage) =>
+        this.appendWorkflowDiagEvent(runId, kind, stage, round, stageMessage),
+      isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+      resolveWorkflowRoleSkillPolicy: (targetSessionKey) => this.resolveWorkflowRoleSkillPolicy(targetSessionKey),
+      runWorkflow: (input) => this.workflowRunner.run(input),
+      sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+      finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
+      finishWorkflowDiagRun: (runId, input) => this.finishWorkflowDiagRun(runId, input),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
