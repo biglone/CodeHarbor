@@ -150,6 +150,7 @@ import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext }
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
+import { buildChatRequestDispatchContext as runBuildChatRequestDispatchContext } from "./orchestrator/chat-request-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -859,69 +860,7 @@ export class Orchestrator {
             },
             executeChatRun: (input) =>
               executeChatRequest(
-                {
-                  logger: this.logger,
-                  sessionActiveWindowMs: this.sessionActiveWindowMs,
-                  cliCompat: {
-                    enabled: this.cliCompat.enabled,
-                    passThroughEvents: this.cliCompat.passThroughEvents,
-                  },
-                  stateStore: this.stateStore,
-                  skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
-                  mediaMetrics: this.mediaMetrics,
-                  runningExecutions: this.runningExecutions,
-                  consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
-                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-                  recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(this.cliCompatRecorder, this.logger, entry),
-                  buildConversationBridgeContext: (targetSessionKey) =>
-                    runBuildConversationBridgeContext({
-                      messages: this.stateStore.listRecentConversationMessages(targetSessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT),
-                      maxChars: CONTEXT_BRIDGE_MAX_CHARS,
-                    }),
-                  transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-                    this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
-                  prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-                    this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
-                  prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
-                    this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
-                  buildExecutionPrompt: (prompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
-                    runBuildExecutionPrompt({
-                      prompt,
-                      message: targetMessage,
-                      audioTranscripts,
-                      extractedDocuments: documents,
-                      bridgeContext,
-                    }),
-                  sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-                  sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
-                  startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
-                  handleProgress: (
-                    conversationId,
-                    isDirectMessage,
-                    progress,
-                    getLastProgressAt,
-                    setLastProgressAt,
-                    getLastProgressText,
-                    setLastProgressText,
-                    getProgressNoticeEventId,
-                    setProgressNoticeEventId,
-                  ) =>
-                    this.handleProgress(
-                      conversationId,
-                      isDirectMessage,
-                      progress,
-                      getLastProgressAt,
-                      setLastProgressAt,
-                      getLastProgressText,
-                      setLastProgressText,
-                      getProgressNoticeEventId,
-                      setProgressNoticeEventId,
-                    ),
-                  finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
-                  formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
-                },
+                this.buildChatRequestDispatchContext(),
                 {
                   message: input.message,
                   receivedAt: input.receivedAt,
@@ -1384,6 +1323,72 @@ export class Orchestrator {
       recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
         this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
       persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+    });
+  }
+
+  private buildChatRequestDispatchContext(): Parameters<typeof executeChatRequest>[0] {
+    return runBuildChatRequestDispatchContext({
+      logger: this.logger,
+      sessionActiveWindowMs: this.sessionActiveWindowMs,
+      cliCompat: {
+        enabled: this.cliCompat.enabled,
+        passThroughEvents: this.cliCompat.passThroughEvents,
+      },
+      stateStore: this.stateStore,
+      skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+      mediaMetrics: this.mediaMetrics,
+      runningExecutions: this.runningExecutions,
+      consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
+      persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
+      recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+        this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+      recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(this.cliCompatRecorder, this.logger, entry),
+      buildConversationBridgeContext: (targetSessionKey) =>
+        runBuildConversationBridgeContext({
+          messages: this.stateStore.listRecentConversationMessages(targetSessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT),
+          maxChars: CONTEXT_BRIDGE_MAX_CHARS,
+        }),
+      transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+        this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
+      prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+        this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
+      prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
+        this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
+      buildExecutionPrompt: (prompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
+        runBuildExecutionPrompt({
+          prompt,
+          message: targetMessage,
+          audioTranscripts,
+          extractedDocuments: documents,
+          bridgeContext,
+        }),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
+      startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
+      handleProgress: (
+        conversationId,
+        isDirectMessage,
+        progress,
+        getLastProgressAt,
+        setLastProgressAt,
+        getLastProgressText,
+        setLastProgressText,
+        getProgressNoticeEventId,
+        setProgressNoticeEventId,
+      ) =>
+        this.handleProgress(
+          conversationId,
+          isDirectMessage,
+          progress,
+          getLastProgressAt,
+          setLastProgressAt,
+          getLastProgressText,
+          setLastProgressText,
+          getProgressNoticeEventId,
+          setProgressNoticeEventId,
+        ),
+      finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
+      formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
     });
   }
 
