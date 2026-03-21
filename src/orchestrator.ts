@@ -100,7 +100,6 @@ import {
   type AutoDevRunSnapshot,
   type AutoDevRunContext,
 } from "./orchestrator/autodev-runner";
-import { createIdleAutoDevSnapshot } from "./orchestrator/autodev-snapshot";
 import {
   ensureBackendRuntime as runEnsureBackendRuntime,
   prepareBackendRuntimeForSession as runPrepareBackendRuntimeForSession,
@@ -144,6 +143,7 @@ import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } fro
 import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
+import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -2022,7 +2022,7 @@ export class Orchestrator {
   }
 
   private buildDiagCommandDispatchContext(): Parameters<typeof runSendDiagCommand>[0] {
-    return {
+    return runBuildDiagCommandDispatchContext({
       botNoticePrefix: this.botNoticePrefix,
       processStartedAtIso: this.processStartedAtIso,
       defaultBackendProfile: this.defaultBackendProfile,
@@ -2045,12 +2045,12 @@ export class Orchestrator {
       mediaMetrics: this.mediaMetrics,
       listWorkflowDiagRuns: (kind: "workflow" | "autodev", limit: number) => this.listWorkflowDiagRuns(kind, limit),
       listWorkflowDiagEvents: (runId: string, limit?: number) => this.listWorkflowDiagEvents(runId, limit),
-      getAutoDevSnapshot: (sessionKey: string) => this.autoDevSnapshots.get(sessionKey) ?? createIdleAutoDevSnapshot(),
+      autoDevSnapshots: this.autoDevSnapshots,
       listAutoDevGitCommitRecords: (limit: number) => this.listAutoDevGitCommitRecords(limit),
       listRecentAutoDevGitCommitEventSummaries: (limit: number) => this.listRecentAutoDevGitCommitEventSummaries(limit),
       resolveSessionBackendStatusProfile: (sessionKey: string) => this.resolveSessionBackendStatusProfile(sessionKey),
-      getSessionBackendOverride: (sessionKey: string) => this.sessionBackendOverrides.get(sessionKey),
-      getSessionBackendDecision: (sessionKey: string) => this.sessionLastBackendDecisions.get(sessionKey),
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
       getBackendModelRouterStats: () => this.backendModelRouter.getStats(),
       listBackendRouteDiagRecords: (limit: number, sessionKey: string) => this.listBackendRouteDiagRecords(limit, sessionKey),
       getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
@@ -2059,7 +2059,7 @@ export class Orchestrator {
       getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
       getUpgradeRunStats: () => this.getUpgradeRunStats(),
       sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   getRuntimeMetricsSnapshot(now = Date.now()): RuntimeMetricsSnapshot {
