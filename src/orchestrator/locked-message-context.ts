@@ -70,25 +70,32 @@ interface LockedMessageRuntimeContextInput {
   recordRequestMetrics: LockedMessageDispatchContext["recordRequestMetrics"];
   resolveRoomRuntimeConfig: LockedMessageDispatchContext["resolveRoomRuntimeConfig"];
   routeMessage: LockedMessageDispatchContext["routeMessage"];
-  handleControlCommand: LockedMessageDispatchContext["handleControlCommand"];
-  handleWorkflowStatusCommand: LockedMessageDispatchContext["handleWorkflowStatusCommand"];
-  handleAutoDevStatusCommand: LockedMessageDispatchContext["handleAutoDevStatusCommand"];
-  handleAutoDevProgressCommand: LockedMessageDispatchContext["handleAutoDevProgressCommand"];
-  handleAutoDevSkillsCommand: LockedMessageDispatchContext["handleAutoDevSkillsCommand"];
-  handleAutoDevLoopStopCommand: LockedMessageDispatchContext["handleAutoDevLoopStopCommand"];
+  controlHandlers: Pick<
+    LockedMessageDispatchContext,
+    | "handleControlCommand"
+    | "handleWorkflowStatusCommand"
+    | "handleAutoDevStatusCommand"
+    | "handleAutoDevProgressCommand"
+    | "handleAutoDevSkillsCommand"
+    | "handleAutoDevLoopStopCommand"
+  >;
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   rateLimiter: {
     tryAcquire: LockedMessageDispatchContext["tryAcquireRateLimit"];
   };
   sendNotice: LockedMessageDispatchContext["sendNotice"];
-  classifyBackendTaskType: LockedMessageDispatchContext["classifyBackendTaskType"];
-  resolveSessionBackendDecision: LockedMessageDispatchContext["resolveSessionBackendDecision"];
-  prepareBackendRuntimeForSession: LockedMessageDispatchContext["prepareBackendRuntimeForSession"];
-  sessionLastBackendDecisions: Map<string, Parameters<LockedMessageDispatchContext["setSessionLastBackendDecision"]>[1]>;
-  recordBackendRouteDecision: LockedMessageDispatchContext["recordBackendRouteDecision"];
-  executeWorkflowRun: LockedMessageDispatchContext["executeWorkflowRun"];
-  executeAutoDevRun: LockedMessageDispatchContext["executeAutoDevRun"];
-  executeChatRun: LockedMessageDispatchContext["executeChatRun"];
+  backendHandlers: Pick<
+    LockedMessageDispatchContext,
+    | "classifyBackendTaskType"
+    | "resolveSessionBackendDecision"
+    | "prepareBackendRuntimeForSession"
+    | "recordBackendRouteDecision"
+    | "executeWorkflowRun"
+    | "executeAutoDevRun"
+    | "executeChatRun"
+  > & {
+    sessionLastBackendDecisions: Map<string, Parameters<LockedMessageDispatchContext["setSessionLastBackendDecision"]>[1]>;
+  };
 }
 
 export function buildLockedMessageDispatchContextFromRuntime(
@@ -102,22 +109,23 @@ export function buildLockedMessageDispatchContextFromRuntime(
     recordRequestMetrics: input.recordRequestMetrics,
     resolveRoomRuntimeConfig: input.resolveRoomRuntimeConfig,
     routeMessage: input.routeMessage,
-    handleControlCommand: input.handleControlCommand,
-    handleWorkflowStatusCommand: input.handleWorkflowStatusCommand,
-    handleAutoDevStatusCommand: input.handleAutoDevStatusCommand,
-    handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
-    handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
-    handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+    handleControlCommand: input.controlHandlers.handleControlCommand,
+    handleWorkflowStatusCommand: input.controlHandlers.handleWorkflowStatusCommand,
+    handleAutoDevStatusCommand: input.controlHandlers.handleAutoDevStatusCommand,
+    handleAutoDevProgressCommand: input.controlHandlers.handleAutoDevProgressCommand,
+    handleAutoDevSkillsCommand: input.controlHandlers.handleAutoDevSkillsCommand,
+    handleAutoDevLoopStopCommand: input.controlHandlers.handleAutoDevLoopStopCommand,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: (request) => input.rateLimiter.tryAcquire(request),
     sendNotice: input.sendNotice,
-    classifyBackendTaskType: input.classifyBackendTaskType,
-    resolveSessionBackendDecision: input.resolveSessionBackendDecision,
-    prepareBackendRuntimeForSession: input.prepareBackendRuntimeForSession,
-    setSessionLastBackendDecision: (sessionKey, decision) => input.sessionLastBackendDecisions.set(sessionKey, decision),
-    recordBackendRouteDecision: input.recordBackendRouteDecision,
-    executeWorkflowRun: input.executeWorkflowRun,
-    executeAutoDevRun: input.executeAutoDevRun,
-    executeChatRun: input.executeChatRun,
+    classifyBackendTaskType: input.backendHandlers.classifyBackendTaskType,
+    resolveSessionBackendDecision: input.backendHandlers.resolveSessionBackendDecision,
+    prepareBackendRuntimeForSession: input.backendHandlers.prepareBackendRuntimeForSession,
+    setSessionLastBackendDecision: (sessionKey, decision) =>
+      input.backendHandlers.sessionLastBackendDecisions.set(sessionKey, decision),
+    recordBackendRouteDecision: input.backendHandlers.recordBackendRouteDecision,
+    executeWorkflowRun: input.backendHandlers.executeWorkflowRun,
+    executeAutoDevRun: input.backendHandlers.executeAutoDevRun,
+    executeChatRun: input.backendHandlers.executeChatRun,
   });
 }
