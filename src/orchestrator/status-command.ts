@@ -5,6 +5,7 @@ import type { UpgradeExecutionLockRecord, UpgradeRunRecord, UpgradeRunStats } fr
 import type { InboundMessage } from "../types";
 import { createIdleWorkflowSnapshot, type WorkflowRunSnapshot } from "../workflow/multi-agent-workflow";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
+import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
 import {
   describeBackendRouteReason,
   isBackendRouteFallbackReason,
@@ -199,24 +200,4 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       autoDevStageMessage,
     }),
   );
-}
-
-function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
-  return {
-    state: "idle",
-    startedAt: null,
-    endedAt: null,
-    taskId: null,
-    taskDescription: null,
-    approved: null,
-    repairRounds: 0,
-    error: null,
-    mode: "idle",
-    loopRound: 0,
-    loopCompletedRuns: 0,
-    loopMaxRuns: 0,
-    loopDeadlineAt: null,
-    lastGitCommitSummary: null,
-    lastGitCommitAt: null,
-  };
 }

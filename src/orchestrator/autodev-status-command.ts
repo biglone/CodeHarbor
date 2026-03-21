@@ -1,6 +1,7 @@
 import type { InboundMessage } from "../types";
 import { formatTaskForDisplay, loadAutoDevContext, summarizeAutoDevTasks } from "../workflow/autodev";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
+import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
 import { formatError, formatRunWindowDuration, formatWorkflowDiagRunDuration } from "./helpers";
 import {
   formatAutoDevStatusRunSummaries,
@@ -106,24 +107,4 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
   } catch (error) {
     await deps.sendNotice(input.message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
   }
-}
-
-function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
-  return {
-    state: "idle",
-    startedAt: null,
-    endedAt: null,
-    taskId: null,
-    taskDescription: null,
-    approved: null,
-    repairRounds: 0,
-    error: null,
-    mode: "idle",
-    loopRound: 0,
-    loopCompletedRuns: 0,
-    loopMaxRuns: 0,
-    loopDeadlineAt: null,
-    lastGitCommitSummary: null,
-    lastGitCommitAt: null,
-  };
 }
