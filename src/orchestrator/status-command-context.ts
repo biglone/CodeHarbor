@@ -77,6 +77,59 @@ interface StatusCommandContextInput {
   sendNotice: (conversationId: string, text: string) => Promise<void>;
 }
 
+interface StatusCommandRuntimeConfigInput {
+  botNoticePrefix: string;
+  groupDirectModeEnabled: boolean;
+  updateCheckTtlMs: number;
+  cliCompat: { enabled: boolean };
+  workflowRunner: { isEnabled: () => boolean };
+  autoDevDetailedProgressDefaultEnabled: boolean;
+  workflowPlanContextMaxChars: number | null;
+  workflowOutputContextMaxChars: number | null;
+  workflowFeedbackContextMaxChars: number | null;
+  autoDevLoopMaxRuns: number;
+  autoDevLoopMaxMinutes: number;
+  autoDevAutoCommit: boolean;
+  autoDevMaxConsecutiveFailures: number;
+}
+
+interface StatusCommandRuntimeSnapshotInput {
+  stateStore: StatusCommandContextInput["stateStore"];
+  workflowSnapshots: Map<string, WorkflowRunSnapshot>;
+  autoDevSnapshots: Map<string, AutoDevRunSnapshot>;
+  activeAutoDevLoopSessions: Set<string>;
+  pendingAutoDevLoopStopRequests: Set<string>;
+  pendingStopRequests: Set<string>;
+  sessionBackendOverrides: Map<string, SessionBackendOverride>;
+  sessionLastBackendDecisions: Map<string, SessionBackendDecision>;
+}
+
+interface StatusCommandRuntimeActionInput {
+  resolveRoomRuntimeConfig: StatusCommandContextInput["resolveRoomRuntimeConfig"];
+  metrics: { snapshot: (activeExecutions: number) => ReturnType<StatusCommandContextInput["getRuntimeMetricsSnapshot"]> };
+  runningExecutions: { size: number };
+  rateLimiter: { snapshot: () => RateLimiterSnapshot };
+  getBackendRuntimeStats: StatusCommandContextInput["getBackendRuntimeStats"];
+  isAutoDevDetailedProgressEnabled: StatusCommandContextInput["isAutoDevDetailedProgressEnabled"];
+  listWorkflowDiagRunsBySession: StatusCommandContextInput["listWorkflowDiagRunsBySession"];
+  listWorkflowDiagEvents: StatusCommandContextInput["listWorkflowDiagEvents"];
+  buildWorkflowRoleSkillStatus: StatusCommandContextInput["buildWorkflowRoleSkillStatus"];
+  packageUpdateChecker: { getStatus: () => Promise<PackageUpdateStatus> };
+  getLatestUpgradeRun: StatusCommandContextInput["getLatestUpgradeRun"];
+  getRecentUpgradeRuns: StatusCommandContextInput["getRecentUpgradeRuns"];
+  getUpgradeRunStats: StatusCommandContextInput["getUpgradeRunStats"];
+  getUpgradeExecutionLockSnapshot: StatusCommandContextInput["getUpgradeExecutionLockSnapshot"];
+  resolveSessionBackendStatusProfile: StatusCommandContextInput["resolveSessionBackendStatusProfile"];
+  formatBackendToolLabel: StatusCommandContextInput["formatBackendToolLabel"];
+  sendNotice: StatusCommandContextInput["sendNotice"];
+}
+
+interface StatusCommandRuntimeContextInput {
+  config: StatusCommandRuntimeConfigInput;
+  snapshots: StatusCommandRuntimeSnapshotInput;
+  actions: StatusCommandRuntimeActionInput;
+}
+
 export function buildStatusCommandDispatchContext(input: StatusCommandContextInput): StatusCommandDispatchContext {
   return {
     botNoticePrefix: input.botNoticePrefix,
@@ -118,4 +171,48 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     formatBackendToolLabel: (profile: BackendModelRouteProfile) => input.formatBackendToolLabel(profile),
     sendNotice: (conversationId: string, text: string) => input.sendNotice(conversationId, text),
   };
+}
+
+export function buildStatusCommandDispatchContextFromRuntime(
+  input: StatusCommandRuntimeContextInput,
+): StatusCommandDispatchContext {
+  return buildStatusCommandDispatchContext({
+    botNoticePrefix: input.config.botNoticePrefix,
+    groupDirectModeEnabled: input.config.groupDirectModeEnabled,
+    updateCheckTtlMs: input.config.updateCheckTtlMs,
+    cliCompatEnabled: input.config.cliCompat.enabled,
+    workflowEnabled: input.config.workflowRunner.isEnabled(),
+    autoDevDetailedProgressDefaultEnabled: input.config.autoDevDetailedProgressDefaultEnabled,
+    workflowPlanContextMaxChars: input.config.workflowPlanContextMaxChars,
+    workflowOutputContextMaxChars: input.config.workflowOutputContextMaxChars,
+    workflowFeedbackContextMaxChars: input.config.workflowFeedbackContextMaxChars,
+    autoDevLoopMaxRuns: input.config.autoDevLoopMaxRuns,
+    autoDevLoopMaxMinutes: input.config.autoDevLoopMaxMinutes,
+    autoDevAutoCommit: input.config.autoDevAutoCommit,
+    autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
+    stateStore: input.snapshots.stateStore,
+    workflowSnapshots: input.snapshots.workflowSnapshots,
+    autoDevSnapshots: input.snapshots.autoDevSnapshots,
+    activeAutoDevLoopSessions: input.snapshots.activeAutoDevLoopSessions,
+    pendingAutoDevLoopStopRequests: input.snapshots.pendingAutoDevLoopStopRequests,
+    pendingStopRequests: input.snapshots.pendingStopRequests,
+    sessionBackendOverrides: input.snapshots.sessionBackendOverrides,
+    sessionLastBackendDecisions: input.snapshots.sessionLastBackendDecisions,
+    resolveRoomRuntimeConfig: input.actions.resolveRoomRuntimeConfig,
+    getRuntimeMetricsSnapshot: () => input.actions.metrics.snapshot(input.actions.runningExecutions.size),
+    getRateLimiterSnapshot: () => input.actions.rateLimiter.snapshot(),
+    getBackendRuntimeStats: input.actions.getBackendRuntimeStats,
+    isAutoDevDetailedProgressEnabled: input.actions.isAutoDevDetailedProgressEnabled,
+    listWorkflowDiagRunsBySession: input.actions.listWorkflowDiagRunsBySession,
+    listWorkflowDiagEvents: input.actions.listWorkflowDiagEvents,
+    buildWorkflowRoleSkillStatus: input.actions.buildWorkflowRoleSkillStatus,
+    getPackageUpdateStatus: () => input.actions.packageUpdateChecker.getStatus(),
+    getLatestUpgradeRun: input.actions.getLatestUpgradeRun,
+    getRecentUpgradeRuns: input.actions.getRecentUpgradeRuns,
+    getUpgradeRunStats: input.actions.getUpgradeRunStats,
+    getUpgradeExecutionLockSnapshot: input.actions.getUpgradeExecutionLockSnapshot,
+    resolveSessionBackendStatusProfile: input.actions.resolveSessionBackendStatusProfile,
+    formatBackendToolLabel: input.actions.formatBackendToolLabel,
+    sendNotice: input.actions.sendNotice,
+  });
 }

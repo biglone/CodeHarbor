@@ -112,7 +112,7 @@ import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failur
 import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
 import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
-import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
+import { buildStatusCommandDispatchContextFromRuntime as runBuildStatusCommandDispatchContextFromRuntime } from "./orchestrator/status-command-context";
 import { buildDiagCommandDispatchContextFromRuntime as runBuildDiagCommandDispatchContextFromRuntime } from "./orchestrator/diag-command-context";
 import { buildAutoDevRunCommandDispatchContextFromRuntime as runBuildAutoDevRunCommandDispatchContextFromRuntime } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContextFromRuntime as runBuildControlCommandDispatchContextFromRuntime } from "./orchestrator/control-command-context";
@@ -589,41 +589,29 @@ export class Orchestrator {
       logger: this.logger,
       workflowEnabled: this.workflowRunner.isEnabled(),
       stateStore: this.stateStore,
-      recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-        this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-      resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
-      routeMessage: (targetMessage, targetSessionKey, roomConfig) =>
-        this.routeMessage(targetMessage, targetSessionKey, roomConfig),
+      recordRequestMetrics: this.recordRequestMetrics.bind(this),
+      resolveRoomRuntimeConfig: this.resolveRoomRuntimeConfig.bind(this),
+      routeMessage: this.routeMessage.bind(this),
       controlHandlers: {
-        handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
-          this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
-        handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
-          this.handleWorkflowStatusCommand(targetSessionKey, targetMessage),
-        handleAutoDevStatusCommand: (targetSessionKey, targetMessage, workdir) =>
-          this.handleAutoDevStatusCommand(targetSessionKey, targetMessage, workdir),
-        handleAutoDevProgressCommand: (targetSessionKey, targetMessage, mode) =>
-          this.handleAutoDevProgressCommand(targetSessionKey, targetMessage, mode),
-        handleAutoDevSkillsCommand: (targetSessionKey, targetMessage, mode) =>
-          this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
-        handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
-          this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
+        handleControlCommand: this.handleControlCommand.bind(this),
+        handleWorkflowStatusCommand: this.handleWorkflowStatusCommand.bind(this),
+        handleAutoDevStatusCommand: this.handleAutoDevStatusCommand.bind(this),
+        handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
+        handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
+        handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
       },
-      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-      rateLimiter: {
-        tryAcquire: (request) => this.rateLimiter.tryAcquire(request),
-      },
-      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
+      rateLimiter: this.rateLimiter,
+      sendNotice: this.channel.sendNotice.bind(this.channel),
       backendHandlers: {
-        classifyBackendTaskType: (workflowCommand, autoDevCommand) =>
-          classifyBackendTaskType(workflowCommand, autoDevCommand),
-        resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
-        prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
-          this.prepareBackendRuntimeForSession(targetSessionKey, profile),
+        classifyBackendTaskType,
+        resolveSessionBackendDecision: this.resolveSessionBackendDecision.bind(this),
+        prepareBackendRuntimeForSession: this.prepareBackendRuntimeForSession.bind(this),
         sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-        recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
-        executeWorkflowRun: (input) => this.executeLockedWorkflowRun(input),
-        executeAutoDevRun: (input) => this.executeLockedAutoDevRun(input),
-        executeChatRun: (input) => this.executeLockedChatRun(input),
+        recordBackendRouteDecision: this.recordBackendRouteDecision.bind(this),
+        executeWorkflowRun: this.executeLockedWorkflowRun.bind(this),
+        executeAutoDevRun: this.executeLockedAutoDevRun.bind(this),
+        executeChatRun: this.executeLockedChatRun.bind(this),
       },
     });
   }
@@ -897,45 +885,51 @@ export class Orchestrator {
   }
 
   private buildStatusCommandDispatchContext() {
-    return runBuildStatusCommandDispatchContext({
-      botNoticePrefix: this.botNoticePrefix,
-      groupDirectModeEnabled: this.groupDirectModeEnabled,
-      updateCheckTtlMs: this.updateCheckTtlMs,
-      cliCompatEnabled: this.cliCompat.enabled,
-      workflowEnabled: this.workflowRunner.isEnabled(),
-      autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
-      workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
-      workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
-      workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
-      autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
-      autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
-      autoDevAutoCommit: this.autoDevAutoCommit,
-      autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-      stateStore: this.stateStore,
-      workflowSnapshots: this.workflowSnapshots,
-      autoDevSnapshots: this.autoDevSnapshots,
-      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
-      pendingStopRequests: this.pendingStopRequests,
-      sessionBackendOverrides: this.sessionBackendOverrides,
-      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-      resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
-      getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
-      getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
-      getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
-      isAutoDevDetailedProgressEnabled: (targetSessionKey: string) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
-      listWorkflowDiagRunsBySession: (kind: "autodev", targetSessionKey: string, limit: number) =>
-        this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
-      listWorkflowDiagEvents: (runId: string, limit?: number) => this.listWorkflowDiagEvents(runId, limit),
-      buildWorkflowRoleSkillStatus: (targetSessionKey: string) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
-      getPackageUpdateStatus: () => this.packageUpdateChecker.getStatus(),
-      getLatestUpgradeRun: () => this.getLatestUpgradeRun(),
-      getRecentUpgradeRuns: (limit: number) => this.getRecentUpgradeRuns(limit),
-      getUpgradeRunStats: () => this.getUpgradeRunStats(),
-      getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
-      resolveSessionBackendStatusProfile: (targetSessionKey: string) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-      formatBackendToolLabel: (profile: BackendModelRouteProfile) => this.formatBackendToolLabel(profile),
-      sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
+    return runBuildStatusCommandDispatchContextFromRuntime({
+      config: {
+        botNoticePrefix: this.botNoticePrefix,
+        groupDirectModeEnabled: this.groupDirectModeEnabled,
+        updateCheckTtlMs: this.updateCheckTtlMs,
+        cliCompat: this.cliCompat,
+        workflowRunner: this.workflowRunner,
+        autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+        workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
+        workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
+        workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
+        autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
+        autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
+        autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+      },
+      snapshots: {
+        stateStore: this.stateStore,
+        workflowSnapshots: this.workflowSnapshots,
+        autoDevSnapshots: this.autoDevSnapshots,
+        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+        pendingStopRequests: this.pendingStopRequests,
+        sessionBackendOverrides: this.sessionBackendOverrides,
+        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+      },
+      actions: {
+        resolveRoomRuntimeConfig: this.resolveRoomRuntimeConfig.bind(this),
+        metrics: this.metrics,
+        runningExecutions: this.runningExecutions,
+        rateLimiter: this.rateLimiter,
+        getBackendRuntimeStats: this.getBackendRuntimeStats.bind(this),
+        isAutoDevDetailedProgressEnabled: this.isAutoDevDetailedProgressEnabled.bind(this),
+        listWorkflowDiagRunsBySession: this.listWorkflowDiagRunsBySession.bind(this),
+        listWorkflowDiagEvents: this.listWorkflowDiagEvents.bind(this),
+        buildWorkflowRoleSkillStatus: this.buildWorkflowRoleSkillStatus.bind(this),
+        packageUpdateChecker: this.packageUpdateChecker,
+        getLatestUpgradeRun: this.getLatestUpgradeRun.bind(this),
+        getRecentUpgradeRuns: this.getRecentUpgradeRuns.bind(this),
+        getUpgradeRunStats: this.getUpgradeRunStats.bind(this),
+        getUpgradeExecutionLockSnapshot: this.getUpgradeExecutionLockSnapshot.bind(this),
+        resolveSessionBackendStatusProfile: this.resolveSessionBackendStatusProfile.bind(this),
+        formatBackendToolLabel: this.formatBackendToolLabel.bind(this),
+        sendNotice: this.channel.sendNotice.bind(this.channel),
+      },
     });
   }
 
