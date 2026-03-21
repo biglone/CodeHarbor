@@ -8,6 +8,21 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.54] - 2026-03-22
+
+- Builtin role skills (Planner/Executor/Reviewer) are significantly deepened with structured contracts:
+  - adopted Trigger conditions / Workflow / Guardrails / Output contract sections for stronger execution consistency
+  - strengthened `superpowers-workflow` with required machine-parsable output sections and explicit `STATUS=COMPLETE|INCOMPLETE` contract
+- Expanded install-ready builtin skill set inspired by community/open-source plugin ecosystems:
+  - added `superpowers-workflow`, `ui-ux-pro-max`, and `pptx`
+  - extended and hardened `planning-with-files`, `webapp-testing`, `code-simplifier`, `multi-agent-code-review`, and `commit-message`
+- Commit quality policy improvements:
+  - `commit-message` now includes stricter guardrails for Conventional Commits, repo-language alignment, footer rules, and diff-evidence checks
+  - `commit-message` is included in default reviewer builtin role assignment
+- Docs and validation:
+  - updated README and Chinese user manual for expanded builtin role-skill catalog
+  - expanded role-skill tests and context-budget assertions to cover new builtin skills and structured contracts
+
 ## [0.1.53] - 2026-03-21
 
 - AutoDev 大功能完成：T8.1 多模态体验：增强 Matrix 消息中的图片/语音结果渲染（结构化展示、摘要与可读性）
