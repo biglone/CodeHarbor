@@ -95,7 +95,6 @@ import {
   parseControlCommand,
 } from "./orchestrator/command-routing";
 import {
-  collectLocalAttachmentPaths,
   formatMimeAllowlist,
 } from "./orchestrator/media-progress";
 import {
@@ -141,6 +140,7 @@ import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock }
 import { submitApiTask as runSubmitApiTask } from "./orchestrator/api-task-submission";
 import { bootstrapTaskQueueRecovery as runBootstrapTaskQueueRecovery } from "./orchestrator/task-queue-recovery";
 import { sendQueuedTaskFailureNotice as runSendQueuedTaskFailureNotice } from "./orchestrator/queue-failure-notice";
+import { handleMessageInternal as runHandleMessageInternal } from "./orchestrator/message-handler";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -177,7 +177,6 @@ import {
   buildApiTaskErrorSummary,
   buildApiTaskEventId,
   buildSessionKey,
-  cleanupAttachmentFiles,
   formatByteSize,
   mapApiTaskStage,
 } from "./orchestrator/misc-utils";
@@ -515,63 +514,32 @@ export class Orchestrator {
       deferFailureHandlingToQueue: boolean;
     },
   ): Promise<void> {
-    const attachmentPaths = collectLocalAttachmentPaths(message);
-    let deferAttachmentCleanup = false;
-    let queueDrainSessionKey: string | null = null;
-    let sessionKeyForLifecycle: string | null = null;
-
-    try {
-      const requestId = message.requestId || message.eventId;
-      this.syncRuntimeHotConfig();
-      const sessionKey = buildSessionKey(message);
-      sessionKeyForLifecycle = sessionKey;
-      this.markSessionRequestStarted(sessionKey);
-
-      if (
-        await this.tryHandleDirectStopCommand({
-          message,
-          requestId,
-          sessionKey,
-        })
-      ) {
-        return;
-      }
-
-      if (
-        await this.tryHandleUnlockedStatusCommand({
-          message,
-          requestId,
-          sessionKey,
-          receivedAt,
-          options,
-        })
-      ) {
-        return;
-      }
-
-      const lockedResult = await runExecuteMessageWithinSessionLock({
-        getLock: (targetSessionKey) => this.getLock(targetSessionKey),
-        buildLockedMessageDispatchContext: () => this.buildLockedMessageDispatchContext(),
+    await runHandleMessageInternal(
+      {
+        syncRuntimeHotConfig: () => this.syncRuntimeHotConfig(),
+        buildSessionKey: (targetMessage) => buildSessionKey(targetMessage),
+        markSessionRequestStarted: (sessionKey) => this.markSessionRequestStarted(sessionKey),
+        markSessionRequestFinished: (sessionKey) => this.markSessionRequestFinished(sessionKey),
+        tryHandleDirectStopCommand: (input) => this.tryHandleDirectStopCommand(input),
+        tryHandleUnlockedStatusCommand: (input) => this.tryHandleUnlockedStatusCommand(input),
+        executeMessageWithinSessionLock: (input) =>
+          runExecuteMessageWithinSessionLock({
+            getLock: (targetSessionKey) => this.getLock(targetSessionKey),
+            buildLockedMessageDispatchContext: () => this.buildLockedMessageDispatchContext(),
+            message: input.message,
+            requestId: input.requestId,
+            sessionKey: input.sessionKey,
+            receivedAt: input.receivedAt,
+            options: input.options,
+          }),
+        startSessionQueueDrain: (sessionKey) => this.startSessionQueueDrain(sessionKey),
+      },
+      {
         message,
-        requestId,
-        sessionKey,
         receivedAt,
         options,
-      });
-      deferAttachmentCleanup = lockedResult.deferAttachmentCleanup;
-      queueDrainSessionKey = lockedResult.queueDrainSessionKey;
-    } finally {
-      if (sessionKeyForLifecycle) {
-        this.markSessionRequestFinished(sessionKeyForLifecycle);
-      }
-      if (!deferAttachmentCleanup) {
-        await cleanupAttachmentFiles(attachmentPaths);
-      }
-    }
-
-    if (queueDrainSessionKey) {
-      this.startSessionQueueDrain(queueDrainSessionKey);
-    }
+      },
+    );
   }
 
   private async tryHandleDirectStopCommand(input: {
