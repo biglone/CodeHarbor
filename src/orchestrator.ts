@@ -144,6 +144,7 @@ import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from ".
 import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
 import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./orchestrator/execute-message-with-lock";
 import { submitApiTask as runSubmitApiTask } from "./orchestrator/api-task-submission";
+import { bootstrapTaskQueueRecovery as runBootstrapTaskQueueRecovery } from "./orchestrator/task-queue-recovery";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -500,39 +501,15 @@ export class Orchestrator {
     if (!queueStore) {
       return;
     }
-    if (!this.taskQueueRecoveryEnabled) {
-      this.logger.info("Task queue recovery disabled by configuration.");
-      return;
-    }
-
-    try {
-      const recovery = queueStore.recoverTasks(this.taskQueueRecoveryBatchLimit);
-      const sessions = new Set<string>(recovery.tasks.map((task) => task.sessionKey));
-      let afterTaskId = 0;
-      while (true) {
-        const batch = queueStore.listPendingTaskSessions(this.taskQueueRecoveryBatchLimit, afterTaskId);
-        if (batch.length === 0) {
-          break;
-        }
-        for (const item of batch) {
-          sessions.add(item.sessionKey);
-          afterTaskId = item.firstTaskId;
-        }
-      }
-      for (const sessionKey of sessions) {
-        this.startSessionQueueDrain(sessionKey);
-      }
-      this.logger.info("Task queue recovery completed", {
-        requeuedRunning: recovery.requeuedRunning,
-        pendingTotal: recovery.pendingTotal,
-        recoveredSessions: sessions.size,
-        hasMorePending: recovery.hasMorePending,
-      });
-    } catch (error) {
-      this.logger.error("Failed to recover task queue", {
-        error: formatError(error),
-      });
-    }
+    runBootstrapTaskQueueRecovery(
+      {
+        logger: this.logger,
+        taskQueueRecoveryEnabled: this.taskQueueRecoveryEnabled,
+        taskQueueRecoveryBatchLimit: this.taskQueueRecoveryBatchLimit,
+        startSessionQueueDrain: (sessionKey) => this.startSessionQueueDrain(sessionKey),
+      },
+      queueStore,
+    );
   }
 
   private async handleMessageInternal(
