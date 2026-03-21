@@ -74,6 +74,8 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "4) Mark blockers and identify tasks that can run in parallel.",
       "5) Include a lightweight estimate per step (S/M/L) and owner hint (planner/executor/reviewer).",
       "6) Highlight the earliest point where user-visible value is delivered.",
+      "7) Avoid vague verbs; each step should be directly executable.",
+      "8) Ask only blocking questions, and only after finishing non-blocked work.",
       "Output format:",
       "- Step N: goal | input | output | check | risk | rollback",
     ].join("\n"),
@@ -91,6 +93,8 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "4) Ensure delivered changes map back to explicit requirement items.",
       "5) Detect missing acceptance criteria and propose concrete testable checks.",
       "6) Call out hidden assumptions and list them as explicit implementation notes.",
+      "7) Label each rule as hard constraint vs. soft preference.",
+      "8) Flag missing observability, rollback, and compatibility requirements when absent.",
       "Output format:",
       "- Constraint: source | rule | impact | implementation note",
     ].join("\n"),
@@ -109,6 +113,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Keep each step independently reviewable and easy to revert.",
       "6) Prefer additive changes before destructive changes.",
       "7) End with a concise execution checklist for the executor.",
+      "8) Suggest file/module ownership to reduce edit conflicts.",
     ].join("\n"),
   },
   {
@@ -125,6 +130,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Run the smallest relevant validation command after each code change cluster.",
       "6) Avoid broad refactors unless they directly unblock the target task.",
       "7) Report concrete evidence (files, commands, outcomes), not intent-only status.",
+      "8) Read before write: inspect existing patterns before introducing new structures.",
     ].join("\n"),
   },
   {
@@ -141,6 +147,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) If uncertainty remains, compare at most two hypotheses and state disambiguation steps.",
       "6) Favor targeted instrumentation over noisy logging.",
       "7) Explicitly mark whether the fix is preventive, corrective, or both.",
+      "8) Stop repeated blind retries and escalate with a concrete blocker summary.",
     ].join("\n"),
   },
   {
@@ -157,6 +164,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Prefer black-box behavior assertions over implementation-coupled assertions.",
       "6) Add one negative test for malformed input or rejected state transitions.",
       "7) Keep test runtime lean and isolate flaky sources.",
+      "8) Include retry/idempotency checks for async or queue-driven flows when relevant.",
     ].join("\n"),
   },
   {
@@ -173,6 +181,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Preserve backward-compatible behavior unless requirements explicitly permit breaking changes.",
       "6) Keep commits cohesive: one business intent per commit.",
       "7) Maintain a short risk list for reviewer handoff.",
+      "8) Never revert unrelated user changes while implementing the current task.",
     ].join("\n"),
   },
   {
@@ -189,6 +198,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Classify findings by severity: critical, major, minor, info.",
       "6) Distinguish must-fix blockers from optional improvements.",
       "7) Prefer concrete evidence (file/path/behavior) over generic style comments.",
+      "8) Explicitly verify requirement-to-diff traceability before approval.",
     ].join("\n"),
   },
   {
@@ -205,6 +215,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) Flag missing rate limits, abuse controls, or replay protections when relevant.",
       "6) Verify secure defaults for configuration and runtime switches.",
       "7) Provide remediation guidance with least-privilege and fail-closed principles.",
+      "8) Classify findings by exploitability and blast radius.",
     ].join("\n"),
   },
   {
@@ -221,6 +232,7 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) If rejected, include a compact SUMMARY and top issues in priority order.",
       "6) If approved, call out residual risks and monitoring suggestions.",
       "7) Keep findings precise enough for direct executor action.",
+      "8) Keep output machine-readable with VERDICT/SUMMARY/ISSUES/SUGGESTIONS blocks.",
     ].join("\n"),
   },
 ];
