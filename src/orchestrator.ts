@@ -75,6 +75,11 @@ import {
   setWorkflowRoleSkillPolicyOverride as runSetWorkflowRoleSkillPolicyOverride,
 } from "./orchestrator/workflow-role-skill-policy";
 import {
+  listAutoDevGitCommitRecords as runListAutoDevGitCommitRecords,
+  recordAutoDevGitCommit as runRecordAutoDevGitCommit,
+  type AutoDevGitCommitRecord,
+} from "./orchestrator/autodev-git-commit-history";
+import {
   type AutoDevGitCommitResult,
 } from "./orchestrator/autodev-git";
 import {
@@ -340,13 +345,6 @@ interface AutoDevRunSnapshot {
   loopDeadlineAt: string | null;
   lastGitCommitSummary: string | null;
   lastGitCommitAt: string | null;
-}
-
-interface AutoDevGitCommitRecord {
-  at: string;
-  sessionKey: string;
-  taskId: string;
-  result: AutoDevGitCommitResult;
 }
 
 export interface ApiTaskSubmitInput {
@@ -1513,20 +1511,11 @@ export class Orchestrator {
   }
 
   private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
-    this.autoDevGitCommitRecords.push({
-      at: new Date().toISOString(),
-      sessionKey,
-      taskId,
-      result,
-    });
-    if (this.autoDevGitCommitRecords.length > AUTODEV_GIT_COMMIT_HISTORY_MAX) {
-      this.autoDevGitCommitRecords.splice(0, this.autoDevGitCommitRecords.length - AUTODEV_GIT_COMMIT_HISTORY_MAX);
-    }
+    runRecordAutoDevGitCommit(this.autoDevGitCommitRecords, sessionKey, taskId, result, AUTODEV_GIT_COMMIT_HISTORY_MAX);
   }
 
   private listAutoDevGitCommitRecords(limit: number): AutoDevGitCommitRecord[] {
-    const safeLimit = Math.max(1, Math.floor(limit));
-    return this.autoDevGitCommitRecords.slice(Math.max(0, this.autoDevGitCommitRecords.length - safeLimit)).reverse();
+    return runListAutoDevGitCommitRecords(this.autoDevGitCommitRecords, limit);
   }
 
   private async handleWorkflowRunCommand(
