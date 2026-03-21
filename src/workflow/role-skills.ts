@@ -72,6 +72,10 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Break work into ordered steps with inputs, outputs, and acceptance checks.",
       "3) Prioritize critical-path and high-risk tasks first.",
       "4) Mark blockers and identify tasks that can run in parallel.",
+      "5) Include a lightweight estimate per step (S/M/L) and owner hint (planner/executor/reviewer).",
+      "6) Highlight the earliest point where user-visible value is delivered.",
+      "Output format:",
+      "- Step N: goal | input | output | check | risk | rollback",
     ].join("\n"),
   },
   {
@@ -85,6 +89,10 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Extract hard constraints (compatibility, release policy, and edge-case rules).",
       "3) If code choices conflict with requirements, follow requirements and document trade-offs.",
       "4) Ensure delivered changes map back to explicit requirement items.",
+      "5) Detect missing acceptance criteria and propose concrete testable checks.",
+      "6) Call out hidden assumptions and list them as explicit implementation notes.",
+      "Output format:",
+      "- Constraint: source | rule | impact | implementation note",
     ].join("\n"),
   },
   {
@@ -98,6 +106,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Identify blockers, unknowns, and external dependencies early.",
       "3) Add risk notes and rollback options to avoid all-at-once rewrites.",
       "4) Define validation paths (tests, lint, type checks, and manual verification).",
+      "5) Keep each step independently reviewable and easy to revert.",
+      "6) Prefer additive changes before destructive changes.",
+      "7) End with a concise execution checklist for the executor.",
     ].join("\n"),
   },
   {
@@ -111,6 +122,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Deliver at least one verifiable increment each round.",
       "3) Finish the core path first, then handle boundaries and documentation.",
       "4) When failures occur, isolate root cause before proposing the next fix.",
+      "5) Run the smallest relevant validation command after each code change cluster.",
+      "6) Avoid broad refactors unless they directly unblock the target task.",
+      "7) Report concrete evidence (files, commands, outcomes), not intent-only status.",
     ].join("\n"),
   },
   {
@@ -124,6 +138,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Separate symptoms from root causes and fix the root cause first.",
       "3) Add focused regression tests after each fix.",
       "4) Report risks and side effects of the chosen fix.",
+      "5) If uncertainty remains, compare at most two hypotheses and state disambiguation steps.",
+      "6) Favor targeted instrumentation over noisy logging.",
+      "7) Explicitly mark whether the fix is preventive, corrective, or both.",
     ].join("\n"),
   },
   {
@@ -137,6 +154,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Include both success and failure scenarios.",
       "3) Use intention-revealing test names and readable assertions.",
       "4) Keep fixtures minimal and deterministic.",
+      "5) Prefer black-box behavior assertions over implementation-coupled assertions.",
+      "6) Add one negative test for malformed input or rejected state transitions.",
+      "7) Keep test runtime lean and isolate flaky sources.",
     ].join("\n"),
   },
   {
@@ -150,6 +170,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Follow existing style and avoid unrelated code churn.",
       "3) Produce at least one verifiable artifact per round.",
       "4) On failure, identify the cause and change strategy instead of repeating the same attempt.",
+      "5) Preserve backward-compatible behavior unless requirements explicitly permit breaking changes.",
+      "6) Keep commits cohesive: one business intent per commit.",
+      "7) Maintain a short risk list for reviewer handoff.",
     ].join("\n"),
   },
   {
@@ -163,6 +186,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Check readability, duplication, and complexity hotspots.",
       "3) Identify likely regressions and behavior drift.",
       "4) Provide actionable, minimal fix suggestions for each issue.",
+      "5) Classify findings by severity: critical, major, minor, info.",
+      "6) Distinguish must-fix blockers from optional improvements.",
+      "7) Prefer concrete evidence (file/path/behavior) over generic style comments.",
     ].join("\n"),
   },
   {
@@ -176,6 +202,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Check authentication/authorization controls and privilege boundaries.",
       "3) Review command execution and file-operation safety boundaries.",
       "4) Ensure logs do not expose secrets or sensitive data.",
+      "5) Flag missing rate limits, abuse controls, or replay protections when relevant.",
+      "6) Verify secure defaults for configuration and runtime switches.",
+      "7) Provide remediation guidance with least-privilege and fail-closed principles.",
     ].join("\n"),
   },
   {
@@ -189,6 +218,9 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "2) Check boundary conditions, failure paths, and regression risk.",
       "3) Every issue must include a concrete, minimal remediation path.",
       "4) Final decision must include VERDICT: APPROVED or REJECTED.",
+      "5) If rejected, include a compact SUMMARY and top issues in priority order.",
+      "6) If approved, call out residual risks and monitoring suggestions.",
+      "7) Keep findings precise enough for direct executor action.",
     ].join("\n"),
   },
 ];
