@@ -1088,31 +1088,16 @@ export class Orchestrator {
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
-      handleProgress: (
-        conversationId,
-        isDirectMessage,
-        progress,
-        getLastProgressAt,
-        setLastProgressAt,
-        getLastProgressText,
-        setLastProgressText,
-        getProgressNoticeEventId,
-        setProgressNoticeEventId,
-      ) =>
-        this.handleProgress(
-          conversationId,
-          isDirectMessage,
-          progress,
-          getLastProgressAt,
-          setLastProgressAt,
-          getLastProgressText,
-          setLastProgressText,
-          getProgressNoticeEventId,
-          setProgressNoticeEventId,
-        ),
+      handleProgress: (...args) => this.forwardChatRequestProgress(...args),
       finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),
       formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
     });
+  }
+
+  private forwardChatRequestProgress(
+    ...args: Parameters<Parameters<typeof executeChatRequest>[0]["handleProgress"]>
+  ): Promise<void> {
+    return this.handleProgress(...args);
   }
 
   private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
