@@ -143,6 +143,7 @@ import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failur
 import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
 import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
+import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1230,7 +1231,7 @@ export class Orchestrator {
   }
 
   private buildStatusCommandDispatchContext() {
-    return {
+    return runBuildStatusCommandDispatchContext({
       botNoticePrefix: this.botNoticePrefix,
       groupDirectModeEnabled: this.groupDirectModeEnabled,
       updateCheckTtlMs: this.updateCheckTtlMs,
@@ -1244,17 +1245,16 @@ export class Orchestrator {
       autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
       autoDevAutoCommit: this.autoDevAutoCommit,
       autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
-      getSessionStatus: (targetSessionKey: string) => this.stateStore.getSessionStatus(targetSessionKey),
+      stateStore: this.stateStore,
       resolveRoomRuntimeConfig: (conversationId: string) => this.resolveRoomRuntimeConfig(conversationId),
       getRuntimeMetricsSnapshot: () => this.metrics.snapshot(this.runningExecutions.size),
       getRateLimiterSnapshot: () => this.rateLimiter.snapshot(),
       getBackendRuntimeStats: () => this.getBackendRuntimeStats(),
-      getWorkflowSnapshot: (targetSessionKey: string) => this.workflowSnapshots.get(targetSessionKey) ?? null,
-      getAutoDevSnapshot: (targetSessionKey: string) => this.autoDevSnapshots.get(targetSessionKey) ?? null,
-      hasActiveAutoDevLoopSession: (targetSessionKey: string) => this.activeAutoDevLoopSessions.has(targetSessionKey),
-      hasPendingAutoDevLoopStopRequest: (targetSessionKey: string) =>
-        this.pendingAutoDevLoopStopRequests.has(targetSessionKey),
-      hasPendingStopRequest: (targetSessionKey: string) => this.pendingStopRequests.has(targetSessionKey),
+      workflowSnapshots: this.workflowSnapshots,
+      autoDevSnapshots: this.autoDevSnapshots,
+      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+      pendingStopRequests: this.pendingStopRequests,
       isAutoDevDetailedProgressEnabled: (targetSessionKey: string) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
       listWorkflowDiagRunsBySession: (kind: "autodev", targetSessionKey: string, limit: number) =>
         this.listWorkflowDiagRunsBySession(kind, targetSessionKey, limit),
@@ -1266,11 +1266,11 @@ export class Orchestrator {
       getUpgradeRunStats: () => this.getUpgradeRunStats(),
       getUpgradeExecutionLockSnapshot: () => this.getUpgradeExecutionLockSnapshot(),
       resolveSessionBackendStatusProfile: (targetSessionKey: string) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-      hasSessionBackendOverride: (targetSessionKey: string) => this.sessionBackendOverrides.has(targetSessionKey),
-      getSessionBackendDecision: (targetSessionKey: string) => this.sessionLastBackendDecisions.get(targetSessionKey) ?? null,
+      sessionBackendOverrides: this.sessionBackendOverrides,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
       formatBackendToolLabel: (profile: BackendModelRouteProfile) => this.formatBackendToolLabel(profile),
       sendNotice: (conversationId: string, text: string) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private async handleAutoDevProgressCommand(
