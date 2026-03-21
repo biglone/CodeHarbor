@@ -15,9 +15,7 @@ import {
   type RuntimeMetricsSnapshot,
 } from "./metrics";
 import {
-  NpmRegistryUpdateChecker,
   type PackageUpdateChecker,
-  resolvePackageVersion,
 } from "./package-update-checker";
 import { RateLimiter } from "./rate-limiter";
 import {
@@ -30,7 +28,6 @@ import {
 } from "./runtime-hot-config";
 import {
   ARCHIVE_REASON_MAX_ATTEMPTS,
-  createRetryPolicy,
   type RetryPolicy,
 } from "./reliability/retry-policy";
 import {
@@ -38,8 +35,6 @@ import {
   BACKEND_ROUTE_DIAG_HISTORY_MAX,
   CONTEXT_BRIDGE_HISTORY_LIMIT,
   CONTEXT_BRIDGE_MAX_CHARS,
-  DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT,
-  DEFAULT_TASK_QUEUE_RETRY_POLICY,
   DEFAULT_UPGRADE_LOCK_TTL_MS,
   DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
   DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
@@ -150,6 +145,7 @@ import { resolveUpgradeRuntimeConfig as runResolveUpgradeRuntimeConfig } from ".
 import { resolveWorkflowRuntimeConfig as runResolveWorkflowRuntimeConfig } from "./orchestrator/workflow-runtime-config";
 import { resolveInputRuntimeConfig as runResolveInputRuntimeConfig } from "./orchestrator/input-runtime-config";
 import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from "./orchestrator/autodev-runtime-config";
+import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -447,24 +443,13 @@ export class Orchestrator {
     this.autoDevAutoCommit = autoDevRuntimeConfig.autoDevAutoCommit;
     this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
-    const currentVersion = resolvePackageVersion();
-    this.botNoticePrefix = `[CodeHarbor v${currentVersion}]`;
-    this.packageUpdateChecker =
-      options?.packageUpdateChecker ??
-      new NpmRegistryUpdateChecker({
-        packageName: "codeharbor",
-        currentVersion,
-      });
-    this.updateCheckTtlMs = Math.max(0, options?.updateCheckTtlMs ?? 6 * 60 * 60 * 1000);
-    this.taskQueueRecoveryEnabled = options?.taskQueueRecoveryEnabled ?? true;
-    this.taskQueueRecoveryBatchLimit = Math.max(
-      1,
-      options?.taskQueueRecoveryBatchLimit ?? DEFAULT_TASK_QUEUE_RECOVERY_BATCH_LIMIT,
-    );
-    this.taskQueueRetryPolicy = createRetryPolicy({
-      ...DEFAULT_TASK_QUEUE_RETRY_POLICY,
-      ...options?.taskQueueRetryPolicy,
-    });
+    const serviceRuntimeConfig = runResolveServiceRuntimeConfig(options);
+    this.botNoticePrefix = serviceRuntimeConfig.botNoticePrefix;
+    this.packageUpdateChecker = serviceRuntimeConfig.packageUpdateChecker;
+    this.updateCheckTtlMs = serviceRuntimeConfig.updateCheckTtlMs;
+    this.taskQueueRecoveryEnabled = serviceRuntimeConfig.taskQueueRecoveryEnabled;
+    this.taskQueueRecoveryBatchLimit = serviceRuntimeConfig.taskQueueRecoveryBatchLimit;
+    this.taskQueueRetryPolicy = serviceRuntimeConfig.taskQueueRetryPolicy;
     this.executorFactory = options?.executorFactory ?? null;
     this.defaultBackendProfile = {
       provider: options?.aiCliProvider ?? "codex",
