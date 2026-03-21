@@ -699,36 +699,43 @@ export class Orchestrator {
       setSessionLastBackendDecision: (targetSessionKey, decision) =>
         this.sessionLastBackendDecisions.set(targetSessionKey, decision),
       recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
-      executeWorkflowRun: async (input) => {
-        await runExecuteLockedWorkflowRun(
-          {
-            buildAgentRunRequestContext: () => this.buildAgentRunRequestContext(),
-            handleWorkflowRunCommand: (objective, sessionKey, message, requestId, workdir) =>
-              this.handleWorkflowRunCommand(objective, sessionKey, message, requestId, workdir),
-            sendWorkflowFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
-          },
-          input,
-        );
-      },
-      executeAutoDevRun: async (input) => {
-        await runExecuteLockedAutoDevRun(
-          {
-            buildAgentRunRequestContext: () => this.buildAgentRunRequestContext(),
-            handleAutoDevRunCommand: (taskId, sessionKey, message, requestId, workdir) =>
-              this.handleAutoDevRunCommand(taskId, sessionKey, message, requestId, workdir),
-            sendAutoDevFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
-          },
-          input,
-        );
-      },
-      executeChatRun: (input) =>
-        runExecuteLockedChatRun(
-          {
-            buildChatRequestDispatchContext: () => this.buildChatRequestDispatchContext(),
-          },
-          input,
-        ),
+      executeWorkflowRun: (input) => this.executeLockedWorkflowRun(input),
+      executeAutoDevRun: (input) => this.executeLockedAutoDevRun(input),
+      executeChatRun: (input) => this.executeLockedChatRun(input),
     });
+  }
+
+  private async executeLockedWorkflowRun(input: Parameters<typeof runExecuteLockedWorkflowRun>[1]): Promise<void> {
+    await runExecuteLockedWorkflowRun(
+      {
+        buildAgentRunRequestContext: () => this.buildAgentRunRequestContext(),
+        handleWorkflowRunCommand: (objective, sessionKey, message, requestId, workdir) =>
+          this.handleWorkflowRunCommand(objective, sessionKey, message, requestId, workdir),
+        sendWorkflowFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
+      },
+      input,
+    );
+  }
+
+  private async executeLockedAutoDevRun(input: Parameters<typeof runExecuteLockedAutoDevRun>[1]): Promise<void> {
+    await runExecuteLockedAutoDevRun(
+      {
+        buildAgentRunRequestContext: () => this.buildAgentRunRequestContext(),
+        handleAutoDevRunCommand: (taskId, sessionKey, message, requestId, workdir) =>
+          this.handleAutoDevRunCommand(taskId, sessionKey, message, requestId, workdir),
+        sendAutoDevFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
+      },
+      input,
+    );
+  }
+
+  private executeLockedChatRun(input: Parameters<typeof runExecuteLockedChatRun>[1]): Promise<void> {
+    return runExecuteLockedChatRun(
+      {
+        buildChatRequestDispatchContext: () => this.buildChatRequestDispatchContext(),
+      },
+      input,
+    );
   }
 
   private async tryHandleNonBlockingStatusRoute(input: {
