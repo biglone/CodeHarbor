@@ -14,6 +14,16 @@ export interface AutoDevGitCommitRecordLike {
   result: AutoDevGitCommitResultLike;
 }
 
+export interface AutoDevReleaseResultLike {
+  kind: "released" | "skipped" | "failed";
+  version?: string;
+  commitHash?: string;
+  pushed?: boolean;
+  pushError?: string;
+  reason?: string;
+  error?: string;
+}
+
 export interface BackendModelRouteProfileLike {
   provider: string;
   model: string | null;
@@ -141,4 +151,16 @@ export function formatAutoDevGitChangedFiles(result: AutoDevGitCommitResultLike)
     return preview;
   }
   return `${preview}, ... (+${changedFiles.length - 8})`;
+}
+
+export function formatAutoDevReleaseResult(result: AutoDevReleaseResultLike): string {
+  if (result.kind === "released") {
+    const pushText = result.pushed ? "yes" : "no";
+    const pushErrorText = result.pushError ? `, pushError=${result.pushError}` : "";
+    return `released v${result.version ?? "unknown"} (commit=${result.commitHash ?? "unknown"}, pushed=${pushText}${pushErrorText})`;
+  }
+  if (result.kind === "skipped") {
+    return `skipped (${result.reason ?? "unknown"})`;
+  }
+  return `failed (${result.error ?? "unknown"})`;
 }

@@ -34,7 +34,7 @@ Publish runs when one of these is true:
    - `release` keyword
    - semver version string (example: `release v0.2.0`)
 
-If the version already exists on npm, publish is skipped.
+If the version already exists on npm, publish is skipped and workflow logs include a suggested next patch version (`Suggested next version`).
 
 ## npm Publish Auth Modes
 
@@ -82,6 +82,21 @@ The workflow will automatically prefer token mode when this secret exists.
 11. Publish community notes:
    - create GitHub Release notes (auto-generated + hand edits)
    - open/update a Discussions `Announcements` post and link feedback channels
+
+### AutoDev big-feature release flow
+
+When AutoDev completes a mapped big-feature task (for example `T8.1`), it can generate:
+
+- task commit (feature implementation)
+- release commit: `release: vX.Y.Z [publish-npm]`
+
+The release commit updates:
+
+- `package.json`
+- `package-lock.json` (if present)
+- `CHANGELOG.md`
+
+After pushing to `main`, `Release NPM` workflow is triggered by `[publish-npm]`.
 
 ## Rollback Playbook
 

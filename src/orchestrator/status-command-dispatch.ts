@@ -83,6 +83,8 @@ interface AutoDevStatusContext extends StatusCommandDispatchContext {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
 }
 
@@ -172,6 +174,8 @@ export async function sendAutoDevStatusCommand(
     | "autoDevLoopMaxRuns"
     | "autoDevLoopMaxMinutes"
     | "autoDevAutoCommit"
+    | "autoDevAutoReleaseEnabled"
+    | "autoDevAutoReleasePush"
     | "autoDevMaxConsecutiveFailures"
     | "autoDevDetailedProgressDefaultEnabled"
     | "getAutoDevSnapshot"
@@ -191,6 +195,8 @@ export async function sendAutoDevStatusCommand(
       autoDevLoopMaxRuns: context.autoDevLoopMaxRuns,
       autoDevLoopMaxMinutes: context.autoDevLoopMaxMinutes,
       autoDevAutoCommit: context.autoDevAutoCommit,
+      autoDevAutoReleaseEnabled: context.autoDevAutoReleaseEnabled,
+      autoDevAutoReleasePush: context.autoDevAutoReleasePush,
       autoDevMaxConsecutiveFailures: context.autoDevMaxConsecutiveFailures,
       autoDevDetailedProgressDefaultEnabled: context.autoDevDetailedProgressDefaultEnabled,
       getAutoDevSnapshot: (sessionKey) => context.getAutoDevSnapshot(sessionKey),

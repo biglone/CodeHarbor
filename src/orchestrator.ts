@@ -350,6 +350,8 @@ export class Orchestrator {
   private readonly autoDevLoopMaxRuns: number;
   private readonly autoDevLoopMaxMinutes: number;
   private readonly autoDevAutoCommit: boolean;
+  private readonly autoDevAutoReleaseEnabled: boolean;
+  private readonly autoDevAutoReleasePush: boolean;
   private readonly autoDevMaxConsecutiveFailures: number;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
   private readonly autoDevDetailedProgressOverrides = new Map<string, boolean>();
@@ -417,6 +419,8 @@ export class Orchestrator {
     this.autoDevLoopMaxRuns = autoDevRuntimeConfig.autoDevLoopMaxRuns;
     this.autoDevLoopMaxMinutes = autoDevRuntimeConfig.autoDevLoopMaxMinutes;
     this.autoDevAutoCommit = autoDevRuntimeConfig.autoDevAutoCommit;
+    this.autoDevAutoReleaseEnabled = autoDevRuntimeConfig.autoDevAutoReleaseEnabled;
+    this.autoDevAutoReleasePush = autoDevRuntimeConfig.autoDevAutoReleasePush;
     this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
     const serviceRuntimeConfig = runResolveServiceRuntimeConfig(options);
@@ -899,6 +903,8 @@ export class Orchestrator {
         autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
         autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
         autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
+        autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
       },
       snapshots: {
@@ -1016,6 +1022,8 @@ export class Orchestrator {
         autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
         autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
         autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
+        autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
       },
       state: {
@@ -1745,6 +1753,8 @@ export class Orchestrator {
         loopMaxRuns: this.autoDevLoopMaxRuns,
         loopMaxMinutes: this.autoDevLoopMaxMinutes,
         autoCommit: this.autoDevAutoCommit,
+        autoReleaseEnabled: this.autoDevAutoReleaseEnabled,
+        autoReleasePush: this.autoDevAutoReleasePush,
         maxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
       },
       runningExecutions: this.runningExecutions,

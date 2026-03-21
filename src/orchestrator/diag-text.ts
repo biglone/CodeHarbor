@@ -76,6 +76,8 @@ export function buildDiagAutoDevNotice(input: {
     loopMaxRuns: number;
     loopMaxMinutes: number;
     autoCommit: boolean;
+    autoReleaseEnabled: boolean;
+    autoReleasePush: boolean;
     maxConsecutiveFailures: number;
   };
   commitText: string;
@@ -85,7 +87,7 @@ export function buildDiagAutoDevNotice(input: {
 - recentCount: ${input.recentCount}
 - status: running=${input.running}, succeeded=${input.succeeded}, failed=${input.failed}, cancelled=${input.cancelled}
 - live: state=${input.snapshot.state}, mode=${input.snapshot.mode}, loop=${input.snapshot.loopRound}/${input.snapshot.loopMaxRuns}, completed=${input.snapshot.loopCompletedRuns}, deadline=${input.snapshot.loopDeadlineAt ?? "N/A"}
-- config: loopMaxRuns=${input.config.loopMaxRuns}, loopMaxMinutes=${input.config.loopMaxMinutes}, autoCommit=${input.config.autoCommit ? "on" : "off"}, maxConsecutiveFailures=${input.config.maxConsecutiveFailures}
+- config: loopMaxRuns=${input.config.loopMaxRuns}, loopMaxMinutes=${input.config.loopMaxMinutes}, autoCommit=${input.config.autoCommit ? "on" : "off"}, autoRelease=${input.config.autoReleaseEnabled ? "on" : "off"}, autoReleasePush=${input.config.autoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${input.config.maxConsecutiveFailures}
 - recentGitCommits:
 ${input.commitText}
 - records:

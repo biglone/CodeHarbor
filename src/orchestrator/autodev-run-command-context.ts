@@ -7,6 +7,8 @@ interface AutoDevRunCommandContextInput {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
   activeAutoDevLoopSessions: AutoDevRunCommandDispatchContext["activeAutoDevLoopSessions"];
@@ -28,6 +30,8 @@ interface AutoDevRunCommandRuntimeContextInput {
     autoDevLoopMaxRuns: number;
     autoDevLoopMaxMinutes: number;
     autoDevAutoCommit: boolean;
+    autoDevAutoReleaseEnabled: boolean;
+    autoDevAutoReleasePush: boolean;
     autoDevMaxConsecutiveFailures: number;
   };
   state: {
@@ -56,6 +60,8 @@ export function buildAutoDevRunCommandDispatchContext(
     autoDevLoopMaxRuns: input.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.autoDevAutoCommit,
+    autoDevAutoReleaseEnabled: input.autoDevAutoReleaseEnabled,
+    autoDevAutoReleasePush: input.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
     pendingAutoDevLoopStopRequests: input.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.activeAutoDevLoopSessions,
@@ -80,6 +86,8 @@ export function buildAutoDevRunCommandDispatchContextFromRuntime(
     autoDevLoopMaxRuns: input.config.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.config.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.config.autoDevAutoCommit,
+    autoDevAutoReleaseEnabled: input.config.autoDevAutoReleaseEnabled,
+    autoDevAutoReleasePush: input.config.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
     pendingAutoDevLoopStopRequests: input.state.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.state.activeAutoDevLoopSessions,

@@ -63,6 +63,8 @@ export interface OrchestratorOptions {
   autoDevLoopMaxRuns?: number;
   autoDevLoopMaxMinutes?: number;
   autoDevAutoCommit?: boolean;
+  autoDevAutoReleaseEnabled?: boolean;
+  autoDevAutoReleasePush?: boolean;
   autoDevMaxConsecutiveFailures?: number;
   autoDevDetailedProgressEnabled?: boolean;
 }

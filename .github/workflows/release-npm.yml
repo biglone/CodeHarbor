@@ -146,9 +146,31 @@ jobs:
 
       - name: Skip publish (version exists)
         if: steps.intent.outputs.publish == 'true' && steps.version.outputs.exists == 'true'
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         run: |
           echo "Version already published:"
           echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
+          next_patch="$(node - <<'NODE'
+          const raw = process.env.PACKAGE_VERSION || "";
+          const m = raw.trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+          if (!m) {
+            process.exit(0);
+          }
+          const major = Number.parseInt(m[1], 10);
+          const minor = Number.parseInt(m[2], 10);
+          const patch = Number.parseInt(m[3], 10);
+          if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
+            process.exit(0);
+          }
+          process.stdout.write(`${major}.${minor}.${patch + 1}`);
+          NODE
+          )"
+          if [ -n "${next_patch}" ]; then
+            echo "Suggested next version: ${next_patch}"
+            echo "Suggested release commit: release: v${next_patch} [publish-npm]"
+          fi
 
       - name: Post-publish verification
         if: steps.intent.outputs.publish == 'true'

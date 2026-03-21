@@ -17,5 +17,7 @@ export function createIdleAutoDevSnapshot(): AutoDevRunSnapshot {
     loopDeadlineAt: null,
     lastGitCommitSummary: null,
     lastGitCommitAt: null,
+    lastReleaseSummary: null,
+    lastReleaseAt: null,
   };
 }

@@ -22,6 +22,8 @@ interface AutoDevStatusCommandDeps {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   autoDevDetailedProgressDefaultEnabled: boolean;
   getAutoDevSnapshot: (sessionKey: string) => AutoDevRunSnapshot | null;
@@ -83,7 +85,7 @@ export async function handleAutoDevStatusCommand(
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
 - runState: ${snapshot.state}
@@ -96,6 +98,8 @@ export async function handleAutoDevStatusCommand(
 - runError: ${snapshot.error ?? "N/A"}
 - runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
 - runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
+- runRelease: ${snapshot.lastReleaseSummary ?? "N/A"}
+- runReleaseAt: ${snapshot.lastReleaseAt ?? "N/A"}
 - workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
 - workflowDiagLastStage: ${latestRunLastStage}
 - workflowStage: ${latestStageSummary}

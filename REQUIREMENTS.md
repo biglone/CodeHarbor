@@ -163,4 +163,4 @@ Admin UI -> Config Service -> SQLite(config tables) + runtime config cache
 - 兼容性要求：Linux/macOS 运行；Node.js >= 20。
 
 ---
-生成时间：2026-03-03 11:20:00 CST
+生成时间：2026-03-21 20:20:00 CST

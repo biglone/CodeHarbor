@@ -13,6 +13,8 @@ interface DiagCommandContextInput {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   runningExecutionsSize: number;
   cliCompat: {
@@ -53,6 +55,8 @@ interface DiagCommandRuntimeContextInput {
     loopMaxRuns: number;
     loopMaxMinutes: number;
     autoCommit: boolean;
+    autoReleaseEnabled: boolean;
+    autoReleasePush: boolean;
     maxConsecutiveFailures: number;
   };
   runningExecutions: { size: number };
@@ -87,6 +91,8 @@ export function buildDiagCommandDispatchContext(input: DiagCommandContextInput):
     autoDevLoopMaxRuns: input.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.autoDevAutoCommit,
+    autoDevAutoReleaseEnabled: input.autoDevAutoReleaseEnabled,
+    autoDevAutoReleasePush: input.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
     runningExecutionsSize: input.runningExecutionsSize,
     cliCompat: input.cliCompat,
@@ -123,6 +129,8 @@ export function buildDiagCommandDispatchContextFromRuntime(
     autoDevLoopMaxRuns: input.autoDevConfig.loopMaxRuns,
     autoDevLoopMaxMinutes: input.autoDevConfig.loopMaxMinutes,
     autoDevAutoCommit: input.autoDevConfig.autoCommit,
+    autoDevAutoReleaseEnabled: input.autoDevConfig.autoReleaseEnabled,
+    autoDevAutoReleasePush: input.autoDevConfig.autoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevConfig.maxConsecutiveFailures,
     runningExecutionsSize: input.runningExecutions.size,
     cliCompat: input.cliCompat,

@@ -84,6 +84,8 @@ interface DiagCommandDeps {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   runningExecutionsSize: number;
   cliCompat: {
@@ -233,6 +235,8 @@ async function handleAutoDevDiag(
         loopMaxRuns: deps.autoDevLoopMaxRuns,
         loopMaxMinutes: deps.autoDevLoopMaxMinutes,
         autoCommit: deps.autoDevAutoCommit,
+        autoReleaseEnabled: deps.autoDevAutoReleaseEnabled,
+        autoReleasePush: deps.autoDevAutoReleasePush,
         maxConsecutiveFailures: deps.autoDevMaxConsecutiveFailures,
       },
       commitText,

@@ -1,4 +1,6 @@
 import {
+  DEFAULT_AUTODEV_AUTO_RELEASE_ENABLED,
+  DEFAULT_AUTODEV_AUTO_RELEASE_PUSH,
   DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
   DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
   DEFAULT_AUTODEV_LOOP_MAX_RUNS,
@@ -11,6 +13,8 @@ export interface AutoDevRuntimeConfig {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   autoDevDetailedProgressDefaultEnabled: boolean;
 }
@@ -28,6 +32,12 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
         parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, DEFAULT_AUTODEV_LOOP_MAX_MINUTES),
     ),
     autoDevAutoCommit: options?.autoDevAutoCommit ?? parseEnvBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
+    autoDevAutoReleaseEnabled:
+      options?.autoDevAutoReleaseEnabled ??
+      parseEnvBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, DEFAULT_AUTODEV_AUTO_RELEASE_ENABLED),
+    autoDevAutoReleasePush:
+      options?.autoDevAutoReleasePush ??
+      parseEnvBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, DEFAULT_AUTODEV_AUTO_RELEASE_PUSH),
     autoDevMaxConsecutiveFailures: Math.max(
       1,
       options?.autoDevMaxConsecutiveFailures ??

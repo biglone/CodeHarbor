@@ -215,7 +215,7 @@ Auth mode selection:
 - If `NPM_TOKEN` secret exists: publish with token.
 - If `NPM_TOKEN` is absent: publish via npm Trusted Publishing (OIDC).
 
-If the same package version already exists on npm, publish is skipped automatically.
+If the same package version already exists on npm, publish is skipped automatically and the workflow prints a suggested next patch version.
 
 Release checklist (recommended):
 
@@ -638,6 +638,10 @@ Backend/model rule routing:
   - max wall-clock minutes for one `/autodev run` loop execution (default `120`)
 - `AUTODEV_AUTO_COMMIT=true|false`
   - enable/disable AutoDev git auto-commit after reviewer `APPROVED` (default `true`)
+- `AUTODEV_AUTO_RELEASE_ENABLED=true|false`
+  - enable/disable AutoDev "big feature done -> release commit" flow (default `true`)
+- `AUTODEV_AUTO_RELEASE_PUSH=true|false`
+  - push release commit automatically after local release commit (default `false`)
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`
   - when the same task fails repeatedly and reaches this threshold, mark it `🚫` blocked (default `3`)
 
@@ -654,6 +658,8 @@ AutoDev (`/autodev`) conventions:
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <taskId> <task-summary>`.
 - AutoDev commit body includes `Task`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
+- If `TASK_LIST.md` has a release mapping row like `| T8.1 | v0.1.52 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
+- When CI detects that the target version already exists on npm, the release workflow skips publishing and prints `Suggested next version` to keep release flow idempotent.
 - If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
 - When using `scripts/autodev-loop-runner.sh`, a new trigger is skipped while any task is already `🔄` in progress.

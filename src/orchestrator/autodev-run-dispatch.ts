@@ -31,6 +31,8 @@ interface HandleAutoDevRunCommandDeps {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
@@ -87,6 +89,8 @@ export async function handleAutoDevRunCommand(
       autoDevLoopMaxRuns: deps.autoDevLoopMaxRuns,
       autoDevLoopMaxMinutes: deps.autoDevLoopMaxMinutes,
       autoDevAutoCommit: deps.autoDevAutoCommit,
+      autoDevAutoReleaseEnabled: deps.autoDevAutoReleaseEnabled,
+      autoDevAutoReleasePush: deps.autoDevAutoReleasePush,
       pendingAutoDevLoopStopRequests: deps.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: deps.activeAutoDevLoopSessions,
       consumePendingStopRequest: (sessionKey) => deps.consumePendingStopRequest(sessionKey),

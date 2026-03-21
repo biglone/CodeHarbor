@@ -27,6 +27,8 @@ interface StatusCommandContextInput {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   stateStore: {
     getSessionStatus: (sessionKey: string) => {
@@ -90,6 +92,8 @@ interface StatusCommandRuntimeConfigInput {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
 }
 
@@ -144,6 +148,8 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevLoopMaxRuns: input.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.autoDevAutoCommit,
+    autoDevAutoReleaseEnabled: input.autoDevAutoReleaseEnabled,
+    autoDevAutoReleasePush: input.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
     getSessionStatus: (sessionKey: string) => input.stateStore.getSessionStatus(sessionKey),
     resolveRoomRuntimeConfig: (conversationId: string) => input.resolveRoomRuntimeConfig(conversationId),
@@ -189,6 +195,8 @@ export function buildStatusCommandDispatchContextFromRuntime(
     autoDevLoopMaxRuns: input.config.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.config.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.config.autoDevAutoCommit,
+    autoDevAutoReleaseEnabled: input.config.autoDevAutoReleaseEnabled,
+    autoDevAutoReleasePush: input.config.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
     stateStore: input.snapshots.stateStore,
     workflowSnapshots: input.snapshots.workflowSnapshots,

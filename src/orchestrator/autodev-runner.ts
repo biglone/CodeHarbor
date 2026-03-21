@@ -17,8 +17,13 @@ import {
   type AutoDevGitCommitResult,
 } from "./autodev-git";
 import {
+  tryAutoDevTaskRelease,
+  type AutoDevReleaseResult,
+} from "./autodev-release";
+import {
   formatAutoDevGitChangedFiles,
   formatAutoDevGitCommitResult,
+  formatAutoDevReleaseResult,
 } from "./diagnostic-formatters";
 import { formatError } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
@@ -39,6 +44,8 @@ export interface AutoDevRunSnapshot {
   loopDeadlineAt: string | null;
   lastGitCommitSummary: string | null;
   lastGitCommitAt: string | null;
+  lastReleaseSummary?: string | null;
+  lastReleaseAt?: string | null;
 }
 
 export interface AutoDevRunContext {
@@ -89,6 +96,8 @@ interface AutoDevRunnerDeps {
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
+  autoDevAutoReleaseEnabled: boolean;
+  autoDevAutoReleasePush: boolean;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   consumePendingStopRequest: (sessionKey: string) => boolean;
@@ -439,6 +448,10 @@ export async function runAutoDevCommand(
       kind: "skipped",
       reason: "reviewer 未批准，未自动提交",
     };
+    let releaseResult: AutoDevReleaseResult = {
+      kind: "skipped",
+      reason: "reviewer 未批准，未自动发布",
+    };
     if (result.approved) {
       finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
       gitCommit = await tryAutoDevGitCommit({
@@ -446,6 +459,17 @@ export async function runAutoDevCommand(
         task: finalTask,
         baseline: gitBaseline,
         autoCommit: deps.autoDevAutoCommit,
+        logger: deps.logger,
+      });
+      releaseResult = await tryAutoDevTaskRelease({
+        workdir: input.workdir,
+        task: finalTask,
+        taskListPath: context.taskListPath,
+        gitCommit,
+        settings: {
+          enabled: deps.autoDevAutoReleaseEnabled,
+          autoPush: deps.autoDevAutoReleasePush,
+        },
         logger: deps.logger,
       });
     }
@@ -456,6 +480,13 @@ export async function runAutoDevCommand(
       "git_commit",
       0,
       `task=${finalTask.id} result=${formatAutoDevGitCommitResult(gitCommit)} files=${formatAutoDevGitChangedFiles(gitCommit)}`,
+    );
+    deps.appendWorkflowDiagEvent(
+      workflowDiagRunId,
+      "autodev",
+      "release",
+      0,
+      `task=${finalTask.id} result=${formatAutoDevReleaseResult(releaseResult)}`,
     );
     deps.resetAutoDevFailureStreak(input.workdir, finalTask.id);
     const endedAtIso = new Date().toISOString();
@@ -475,6 +506,8 @@ export async function runAutoDevCommand(
       loopDeadlineAt: effectiveContext.loopDeadlineAt,
       lastGitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
       lastGitCommitAt: new Date().toISOString(),
+      lastReleaseSummary: formatAutoDevReleaseResult(releaseResult),
+      lastReleaseAt: releaseResult.kind === "released" ? new Date().toISOString() : null,
     });
     deps.autoDevMetrics.recordRunOutcome("succeeded");
 
@@ -488,6 +521,7 @@ export async function runAutoDevCommand(
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
+- release: ${formatAutoDevReleaseResult(releaseResult)}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
     );
     deps.appendWorkflowDiagEvent(
@@ -495,7 +529,7 @@ export async function runAutoDevCommand(
       "autodev",
       "autodev",
       0,
-      `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}`,
+      `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
     );
   } catch (error) {
     const failurePolicy = await deps.applyAutoDevFailurePolicy({
