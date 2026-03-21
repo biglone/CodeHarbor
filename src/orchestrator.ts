@@ -55,10 +55,6 @@ import {
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
 import {
-  type AutoDevTask,
-  updateAutoDevTaskStatus,
-} from "./workflow/autodev";
-import {
   WorkflowRoleSkillCatalog,
   type WorkflowRole,
   type WorkflowRoleSkillDisclosureMode,
@@ -80,7 +76,6 @@ import {
   type AutoDevGitCommitResult,
 } from "./orchestrator/autodev-git";
 import {
-  runAutoDevCommand,
   type AutoDevRunContext,
 } from "./orchestrator/autodev-runner";
 import {
@@ -185,6 +180,7 @@ import {
   beginWorkflowDiagRun as runBeginWorkflowDiagRun,
   finishWorkflowDiagRun as runFinishWorkflowDiagRun,
 } from "./orchestrator/workflow-diag-mutations";
+import { handleAutoDevRunCommand as runHandleAutoDevRunCommand } from "./orchestrator/autodev-run-dispatch";
 
 export { buildApiTaskEventId, buildSessionKey };
 
@@ -318,12 +314,6 @@ interface AutoDevRunSnapshot {
   loopDeadlineAt: string | null;
   lastGitCommitSummary: string | null;
   lastGitCommitAt: string | null;
-}
-
-interface AutoDevFailurePolicyResult {
-  blocked: boolean;
-  streak: number;
-  task: AutoDevTask;
 }
 
 interface AutoDevGitCommitRecord {
@@ -1471,14 +1461,16 @@ export class Orchestrator {
     workdir: string,
     runContext?: AutoDevRunContext,
   ): Promise<void> {
-    await runAutoDevCommand(
+    await runHandleAutoDevRunCommand(
       {
         logger: this.logger,
         autoDevLoopMaxRuns: this.autoDevLoopMaxRuns,
         autoDevLoopMaxMinutes: this.autoDevLoopMaxMinutes,
         autoDevAutoCommit: this.autoDevAutoCommit,
+        autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
         pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
         activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+        autoDevFailureStreaks: this.autoDevFailureStreaks,
         consumePendingStopRequest: (targetSessionKey) => this.consumePendingStopRequest(targetSessionKey),
         consumePendingAutoDevLoopStopRequest: (targetSessionKey) =>
           this.consumePendingAutoDevLoopStopRequest(targetSessionKey),
@@ -1501,9 +1493,6 @@ export class Orchestrator {
           ),
         recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
           this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
-        resetAutoDevFailureStreak: (targetWorkdir, targetTaskId) =>
-          this.resetAutoDevFailureStreak(targetWorkdir, targetTaskId),
-        applyAutoDevFailurePolicy: (input) => this.applyAutoDevFailurePolicy(input),
         autoDevMetrics: this.autoDevMetrics,
       },
       {
@@ -1515,51 +1504,6 @@ export class Orchestrator {
         runContext,
       },
     );
-  }
-
-  private async applyAutoDevFailurePolicy(input: {
-    workdir: string;
-    task: AutoDevTask;
-    taskListPath: string;
-  }): Promise<AutoDevFailurePolicyResult> {
-    const key = this.buildAutoDevFailureKey(input.workdir, input.task.id);
-    const streak = (this.autoDevFailureStreaks.get(key) ?? 0) + 1;
-    this.autoDevFailureStreaks.set(key, streak);
-    if (streak < this.autoDevMaxConsecutiveFailures) {
-      return {
-        blocked: false,
-        streak,
-        task: input.task,
-      };
-    }
-    try {
-      const blockedTask = await updateAutoDevTaskStatus(input.taskListPath, input.task, "blocked");
-      return {
-        blocked: true,
-        streak,
-        task: blockedTask,
-      };
-    } catch (error) {
-      this.logger.warn("Failed to mark AutoDev task as blocked after consecutive failures", {
-        taskId: input.task.id,
-        streak,
-        error: formatError(error),
-      });
-      return {
-        blocked: false,
-        streak,
-        task: input.task,
-      };
-    }
-  }
-
-  private resetAutoDevFailureStreak(workdir: string, taskId: string): void {
-    const key = this.buildAutoDevFailureKey(workdir, taskId);
-    this.autoDevFailureStreaks.delete(key);
-  }
-
-  private buildAutoDevFailureKey(workdir: string, taskId: string): string {
-    return `${workdir}::${taskId.trim().toLowerCase()}`;
   }
 
   private recordAutoDevGitCommit(sessionKey: string, taskId: string, result: AutoDevGitCommitResult): void {
