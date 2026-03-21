@@ -115,7 +115,7 @@ import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestra
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
 import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
 import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
-import { buildControlCommandDispatchContext as runBuildControlCommandDispatchContext } from "./orchestrator/control-command-context";
+import { buildControlCommandDispatchContextFromRuntime as runBuildControlCommandDispatchContextFromRuntime } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
@@ -843,11 +843,11 @@ export class Orchestrator {
   }
 
   private buildControlCommandDispatchContext(): Parameters<typeof runSendControlCommand>[0] {
-    return runBuildControlCommandDispatchContext({
+    return runBuildControlCommandDispatchContextFromRuntime({
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       botNoticePrefix: this.botNoticePrefix,
       stateStore: this.stateStore,
-      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+      clearSessionFromAllRuntimes: this.clearSessionFromAllRuntimes.bind(this),
       sessionBackendOverrides: this.sessionBackendOverrides,
       sessionBackendProfiles: this.sessionBackendProfiles,
       sessionLastBackendDecisions: this.sessionLastBackendDecisions,
@@ -859,15 +859,16 @@ export class Orchestrator {
       pendingStopRequests: this.pendingStopRequests,
       pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-      getPackageUpdateStatus: (query) => this.packageUpdateChecker.getStatus(query),
-      formatMultimodalHelpStatus: () => this.formatMultimodalHelpStatus(),
-      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      handleStatusCommand: (targetSessionKey, targetMessage) => this.sendStatusCommand(targetSessionKey, targetMessage),
-      handleStopCommand: (targetSessionKey, targetMessage, targetRequestId) =>
-        this.handleStopCommand(targetSessionKey, targetMessage, targetRequestId),
-      handleBackendCommand: (targetSessionKey, targetMessage) => this.handleBackendCommand(targetSessionKey, targetMessage),
-      handleDiagCommand: (targetMessage) => this.handleDiagCommand(targetMessage),
-      handleUpgradeCommand: (targetMessage) => this.handleUpgradeCommand(targetMessage),
+      packageUpdateChecker: this.packageUpdateChecker,
+      formatMultimodalHelpStatus: this.formatMultimodalHelpStatus.bind(this),
+      sendNotice: this.channel.sendNotice.bind(this.channel),
+      handlers: {
+        handleStatusCommand: this.sendStatusCommand.bind(this),
+        handleStopCommand: this.handleStopCommand.bind(this),
+        handleBackendCommand: this.handleBackendCommand.bind(this),
+        handleDiagCommand: this.handleDiagCommand.bind(this),
+        handleUpgradeCommand: this.handleUpgradeCommand.bind(this),
+      },
     });
   }
 
