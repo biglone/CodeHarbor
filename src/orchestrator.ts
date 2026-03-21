@@ -148,6 +148,7 @@ import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispa
 import { buildControlCommandDispatchContext as runBuildControlCommandDispatchContext } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
+import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1866,7 +1867,7 @@ export class Orchestrator {
   }
 
   private buildUpgradeCommandDispatchContext(): Parameters<typeof runSendUpgradeCommand>[0] {
-    return {
+    return runBuildUpgradeCommandDispatchContext({
       logger: this.logger,
       botNoticePrefix: this.botNoticePrefix,
       upgradeMutex: this.upgradeMutex,
@@ -1879,7 +1880,7 @@ export class Orchestrator {
       upgradeRestartPlanner: () => this.upgradeRestartPlanner(),
       upgradeVersionProbe: () => this.upgradeVersionProbe(),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-    };
+    });
   }
 
   private authorizeUpgradeRequest(message: InboundMessage): { allowed: true } | { allowed: false; reason: string } {
