@@ -22,6 +22,32 @@ interface BackendCommandContextInput {
   sendNotice: BackendCommandDispatchContext["sendNotice"];
 }
 
+interface BackendCommandRuntimeContextInput {
+  sessionActiveWindowMs: number;
+  canCreateBackendRuntime: boolean;
+  state: Pick<
+    BackendCommandContextInput,
+    | "sessionBackendOverrides"
+    | "sessionBackendProfiles"
+    | "sessionLastBackendDecisions"
+    | "workflowSnapshots"
+    | "autoDevSnapshots"
+    | "runningExecutions"
+    | "stateStore"
+  >;
+  hooks: Pick<
+    BackendCommandContextInput,
+    | "resolveSessionBackendStatusProfile"
+    | "formatBackendToolLabel"
+    | "resolveManualBackendProfile"
+    | "serializeBackendProfile"
+    | "hasBackendRuntime"
+    | "ensureBackendRuntime"
+    | "clearSessionFromAllRuntimes"
+    | "sendNotice"
+  >;
+}
+
 export function buildBackendCommandDispatchContext(
   input: BackendCommandContextInput,
 ): BackendCommandDispatchContext {
@@ -44,4 +70,28 @@ export function buildBackendCommandDispatchContext(
     clearSessionFromAllRuntimes: input.clearSessionFromAllRuntimes,
     sendNotice: input.sendNotice,
   };
+}
+
+export function buildBackendCommandDispatchContextFromRuntime(
+  input: BackendCommandRuntimeContextInput,
+): BackendCommandDispatchContext {
+  return buildBackendCommandDispatchContext({
+    sessionActiveWindowMs: input.sessionActiveWindowMs,
+    canCreateBackendRuntime: input.canCreateBackendRuntime,
+    sessionBackendOverrides: input.state.sessionBackendOverrides,
+    sessionBackendProfiles: input.state.sessionBackendProfiles,
+    sessionLastBackendDecisions: input.state.sessionLastBackendDecisions,
+    workflowSnapshots: input.state.workflowSnapshots,
+    autoDevSnapshots: input.state.autoDevSnapshots,
+    runningExecutions: input.state.runningExecutions,
+    stateStore: input.state.stateStore,
+    resolveSessionBackendStatusProfile: input.hooks.resolveSessionBackendStatusProfile,
+    formatBackendToolLabel: input.hooks.formatBackendToolLabel,
+    resolveManualBackendProfile: input.hooks.resolveManualBackendProfile,
+    serializeBackendProfile: input.hooks.serializeBackendProfile,
+    hasBackendRuntime: input.hooks.hasBackendRuntime,
+    ensureBackendRuntime: input.hooks.ensureBackendRuntime,
+    clearSessionFromAllRuntimes: input.hooks.clearSessionFromAllRuntimes,
+    sendNotice: input.hooks.sendNotice,
+  });
 }

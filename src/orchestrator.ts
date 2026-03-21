@@ -117,7 +117,7 @@ import { buildDiagCommandDispatchContextFromRuntime as runBuildDiagCommandDispat
 import { buildAutoDevRunCommandDispatchContextFromRuntime as runBuildAutoDevRunCommandDispatchContextFromRuntime } from "./orchestrator/autodev-run-command-context";
 import { buildControlCommandDispatchContextFromRuntime as runBuildControlCommandDispatchContextFromRuntime } from "./orchestrator/control-command-context";
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
-import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
+import { buildBackendCommandDispatchContextFromRuntime as runBuildBackendCommandDispatchContextFromRuntime } from "./orchestrator/backend-command-context";
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
 import { buildChatRequestDispatchContextFromRuntime as runBuildChatRequestDispatchContextFromRuntime } from "./orchestrator/chat-request-context";
@@ -1693,24 +1693,28 @@ export class Orchestrator {
   }
 
   private buildBackendCommandDispatchContext(): Parameters<typeof runSendBackendCommand>[0] {
-    return runBuildBackendCommandDispatchContext({
+    return runBuildBackendCommandDispatchContextFromRuntime({
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       canCreateBackendRuntime: Boolean(this.executorFactory),
-      sessionBackendOverrides: this.sessionBackendOverrides,
-      sessionBackendProfiles: this.sessionBackendProfiles,
-      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
-      workflowSnapshots: this.workflowSnapshots,
-      autoDevSnapshots: this.autoDevSnapshots,
-      runningExecutions: this.runningExecutions,
-      stateStore: this.stateStore,
-      resolveSessionBackendStatusProfile: (targetSessionKey) => this.resolveSessionBackendStatusProfile(targetSessionKey),
-      formatBackendToolLabel: (profile) => this.formatBackendToolLabel(profile),
-      resolveManualBackendProfile: (provider) => this.resolveManualBackendProfile(provider),
-      serializeBackendProfile: (profile) => this.serializeBackendProfile(profile),
-      hasBackendRuntime: (profile) => this.hasBackendRuntime(profile),
-      ensureBackendRuntime: (profile) => this.ensureBackendRuntime(profile),
-      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
-      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      state: {
+        sessionBackendOverrides: this.sessionBackendOverrides,
+        sessionBackendProfiles: this.sessionBackendProfiles,
+        sessionLastBackendDecisions: this.sessionLastBackendDecisions,
+        workflowSnapshots: this.workflowSnapshots,
+        autoDevSnapshots: this.autoDevSnapshots,
+        runningExecutions: this.runningExecutions,
+        stateStore: this.stateStore,
+      },
+      hooks: {
+        resolveSessionBackendStatusProfile: this.resolveSessionBackendStatusProfile.bind(this),
+        formatBackendToolLabel: this.formatBackendToolLabel.bind(this),
+        resolveManualBackendProfile: this.resolveManualBackendProfile.bind(this),
+        serializeBackendProfile: this.serializeBackendProfile.bind(this),
+        hasBackendRuntime: this.hasBackendRuntime.bind(this),
+        ensureBackendRuntime: this.ensureBackendRuntime.bind(this),
+        clearSessionFromAllRuntimes: this.clearSessionFromAllRuntimes.bind(this),
+        sendNotice: this.channel.sendNotice.bind(this.channel),
+      },
     });
   }
 
