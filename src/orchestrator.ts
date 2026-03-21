@@ -110,6 +110,7 @@ import {
   type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
+import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
@@ -2085,16 +2086,7 @@ export class Orchestrator {
   }
 
   private pruneSessionLocks(now: number): void {
-    const expireBefore = now - this.lockTtlMs;
-    for (const [sessionKey, entry] of this.sessionLocks.entries()) {
-      if (entry.lastUsedAt >= expireBefore) {
-        continue;
-      }
-      if (entry.mutex.isLocked()) {
-        continue;
-      }
-      this.sessionLocks.delete(sessionKey);
-    }
+    runPruneSessionLocks(this.sessionLocks, now, this.lockTtlMs);
   }
 
   private async handleUpgradeCommand(message: InboundMessage): Promise<void> {
