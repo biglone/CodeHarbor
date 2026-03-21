@@ -644,6 +644,14 @@ Backend/model rule routing:
   - optional role-to-skill mapping override JSON (`planner`/`executor`/`reviewer` -> `string[]`)
   - defaults map to install-ready builtin fallback skills; local skills with the same id override builtin entries automatically
   - builtin fallback skill prompts are maintained in English for consistent global defaults
+  - default builtin assignment baseline:
+    - planner: `task-planner`, `requirements-doc`, `builtin-planner-core`, `dependency-analyzer`
+    - executor: `autonomous-dev`, `bug-finder`, `test-generator`, `builtin-executor-core`, `refactoring`
+    - reviewer: `code-reviewer`, `security-audit`, `builtin-reviewer-core`, `changelog-generator`, `commit-message`
+  - additional builtin fallbacks are also available for assignment override:
+    - planning/design: `api-designer`, `superpowers-workflow`, `brainstorming`, `planning-with-files`
+    - execution/testing: `performance-optimizer`, `auto-code-pipeline`, `migration-helper`, `tdd-workflow`, `webapp-testing`, `ui-ux-pro-max`, `pptx`, `ralph-loop`
+    - review/release: `commit-message`, `code-simplifier`, `multi-agent-code-review`
 - `AUTODEV_LOOP_MAX_RUNS`
   - max task attempts for one `/autodev run` loop execution (default `20`)
 - `AUTODEV_LOOP_MAX_MINUTES`

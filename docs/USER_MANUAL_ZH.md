@@ -174,6 +174,14 @@ codeharbor admin serve
 - `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`：可选，角色到 SKILL 列表映射（JSON）
   - 默认映射已内置可开箱即用的基础 SKILL；若本地存在同名 SKILL，会自动覆盖内置版本
   - 内置兜底 SKILL 提示词统一维护为英文，保证国际化场景的一致默认体验
+  - 默认内置映射：
+    - planner: `task-planner`, `requirements-doc`, `builtin-planner-core`, `dependency-analyzer`
+    - executor: `autonomous-dev`, `bug-finder`, `test-generator`, `builtin-executor-core`, `refactoring`
+    - reviewer: `code-reviewer`, `security-audit`, `builtin-reviewer-core`, `changelog-generator`, `commit-message`
+  - 可选扩展内置 SKILL（按需在 ASSIGNMENTS_JSON 中启用）：
+    - 规划/设计：`api-designer`, `superpowers-workflow`, `brainstorming`, `planning-with-files`
+    - 执行/测试：`performance-optimizer`, `auto-code-pipeline`, `migration-helper`, `tdd-workflow`, `webapp-testing`, `ui-ux-pro-max`, `pptx`, `ralph-loop`
+    - 审查/发布：`commit-message`, `code-simplifier`, `multi-agent-code-review`
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）

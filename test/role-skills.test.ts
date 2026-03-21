@@ -111,8 +111,12 @@ describe("WorkflowRoleSkillCatalog", () => {
 
     const snapshot = catalog.getStatusSnapshot();
     expect(snapshot.loadedSkills.planner.some((entry) => entry.includes("task-planner(builtin)"))).toBe(true);
+    expect(snapshot.loadedSkills.planner.some((entry) => entry.includes("dependency-analyzer(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.executor.some((entry) => entry.includes("autonomous-dev(builtin)"))).toBe(true);
+    expect(snapshot.loadedSkills.executor.some((entry) => entry.includes("refactoring(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("code-reviewer(builtin)"))).toBe(true);
+    expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("changelog-generator(builtin)"))).toBe(true);
+    expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("commit-message(builtin)"))).toBe(true);
 
     const plannerPrompt = catalog.buildPrompt({
       role: "planner",
@@ -121,5 +125,118 @@ describe("WorkflowRoleSkillCatalog", () => {
     });
     expect(plannerPrompt.text).toContain('skill id="task-planner" source="builtin"');
     expect(plannerPrompt.text).toContain('skill id="builtin-planner-core" source="builtin"');
+  });
+
+  it("allows configuring extended builtin fallback skills", () => {
+    const catalog = new WorkflowRoleSkillCatalog({
+      enabled: true,
+      mode: "summary",
+      roots: [],
+      roleAssignments: {
+        planner: ["api-designer"],
+        executor: ["performance-optimizer", "auto-code-pipeline", "migration-helper"],
+        reviewer: ["commit-message"],
+      },
+    });
+
+    const plannerPrompt = catalog.buildPrompt({
+      role: "planner",
+      stage: "planner",
+      round: 0,
+    });
+    expect(plannerPrompt.text).toContain('skill id="api-designer" source="builtin"');
+
+    const executorPrompt = catalog.buildPrompt({
+      role: "executor",
+      stage: "executor",
+      round: 0,
+    });
+    expect(executorPrompt.text).toContain('skill id="performance-optimizer" source="builtin"');
+    expect(executorPrompt.text).toContain('skill id="auto-code-pipeline" source="builtin"');
+    expect(executorPrompt.text).toContain('skill id="migration-helper" source="builtin"');
+
+    const reviewerPrompt = catalog.buildPrompt({
+      role: "reviewer",
+      stage: "reviewer",
+      round: 0,
+    });
+    expect(reviewerPrompt.text).toContain('skill id="commit-message" source="builtin"');
+  });
+
+  it("supports community-inspired builtin role skills via assignment override", () => {
+    const catalog = new WorkflowRoleSkillCatalog({
+      enabled: true,
+      mode: "summary",
+      maxChars: 10_000,
+      roots: [],
+      roleAssignments: {
+        planner: ["brainstorming", "planning-with-files"],
+        executor: ["tdd-workflow", "webapp-testing", "ralph-loop"],
+        reviewer: ["code-simplifier", "multi-agent-code-review"],
+      },
+    });
+
+    const plannerPrompt = catalog.buildPrompt({
+      role: "planner",
+      stage: "planner",
+      round: 0,
+    });
+    expect(plannerPrompt.text).toContain('skill id="brainstorming" source="builtin"');
+    expect(plannerPrompt.text).toContain('skill id="planning-with-files" source="builtin"');
+
+    const executorPrompt = catalog.buildPrompt({
+      role: "executor",
+      stage: "executor",
+      round: 0,
+    });
+    expect(executorPrompt.text).toContain('skill id="tdd-workflow" source="builtin"');
+    expect(executorPrompt.text).toContain('skill id="webapp-testing" source="builtin"');
+    expect(executorPrompt.text).toContain('skill id="ralph-loop" source="builtin"');
+
+    const reviewerPrompt = catalog.buildPrompt({
+      role: "reviewer",
+      stage: "reviewer",
+      round: 0,
+    });
+    expect(reviewerPrompt.text).toContain('skill id="code-simplifier" source="builtin"');
+    expect(reviewerPrompt.text).toContain('skill id="multi-agent-code-review" source="builtin"');
+  });
+
+  it("supports extended builtin skills inspired by open-source plugin ecosystems", () => {
+    const catalog = new WorkflowRoleSkillCatalog({
+      enabled: true,
+      mode: "full",
+      maxChars: 10_000,
+      roots: [],
+      roleAssignments: {
+        planner: ["superpowers-workflow"],
+        executor: ["ui-ux-pro-max", "pptx"],
+        reviewer: ["multi-agent-code-review"],
+      },
+    });
+
+    const plannerPrompt = catalog.buildPrompt({
+      role: "planner",
+      stage: "planner",
+      round: 0,
+    });
+    expect(plannerPrompt.text).toContain('skill id="superpowers-workflow" source="builtin"');
+    expect(plannerPrompt.text).toContain("Required sections: SPEC, PLAN, EVIDENCE, VALIDATION, RISKS, NEXT_STEPS, STATUS.");
+    expect(plannerPrompt.text).toContain("STATUS must be COMPLETE or INCOMPLETE.");
+
+    const executorPrompt = catalog.buildPrompt({
+      role: "executor",
+      stage: "executor",
+      round: 0,
+    });
+    expect(executorPrompt.text).toContain('skill id="ui-ux-pro-max" source="builtin"');
+    expect(executorPrompt.text).toContain('skill id="pptx" source="builtin"');
+
+    const reviewerPrompt = catalog.buildPrompt({
+      role: "reviewer",
+      stage: "reviewer",
+      round: 0,
+    });
+    expect(reviewerPrompt.text).toContain('skill id="multi-agent-code-review" source="builtin"');
   });
 });

@@ -3745,7 +3745,7 @@ describe("Orchestrator", () => {
 
       const reviewerPrompt = executor.calls.find((call) => call.text.includes("[role:reviewer]"))?.text ?? "";
       expect(reviewerPrompt).toContain("executor_output truncated");
-      expect(reviewerPrompt.length).toBeLessThan(2_000);
+      expect(reviewerPrompt.length).toBeLessThan(2_500);
       expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent context:"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("output=1200"))).toBe(true);
     } finally {
