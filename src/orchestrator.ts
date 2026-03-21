@@ -152,6 +152,7 @@ import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchCon
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
 import { buildChatRequestDispatchContext as runBuildChatRequestDispatchContext } from "./orchestrator/chat-request-context";
 import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
+import { buildLockedMessageDispatchContext as runBuildLockedMessageDispatchContext } from "./orchestrator/locked-message-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -770,119 +771,7 @@ export class Orchestrator {
       const lock = this.getLock(sessionKey);
       await lock.runExclusive(async () => {
         const lockedResult = await executeLockedMessage(
-          {
-            logger: this.logger,
-            workflowEnabled: this.workflowRunner.isEnabled(),
-            hasProcessedEvent: (targetSessionKey, eventId) => this.stateStore.hasProcessedEvent(targetSessionKey, eventId),
-            markEventProcessed: (targetSessionKey, eventId) => this.stateStore.markEventProcessed(targetSessionKey, eventId),
-            recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-              this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-            resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
-            routeMessage: (targetMessage, targetSessionKey, roomConfig) =>
-              this.routeMessage(targetMessage, targetSessionKey, roomConfig),
-            handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
-              this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
-            handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
-              this.handleWorkflowStatusCommand(targetSessionKey, targetMessage),
-            handleAutoDevStatusCommand: (targetSessionKey, targetMessage, workdir) =>
-              this.handleAutoDevStatusCommand(targetSessionKey, targetMessage, workdir),
-            handleAutoDevProgressCommand: (targetSessionKey, targetMessage, mode) =>
-              this.handleAutoDevProgressCommand(targetSessionKey, targetMessage, mode),
-            handleAutoDevSkillsCommand: (targetSessionKey, targetMessage, mode) =>
-              this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
-            handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
-              this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
-            getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-            tryAcquireRateLimit: (input) => this.rateLimiter.tryAcquire(input),
-            sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-            classifyBackendTaskType: (workflowCommand, autoDevCommand) =>
-              classifyBackendTaskType(workflowCommand, autoDevCommand),
-            resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
-            prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
-              this.prepareBackendRuntimeForSession(targetSessionKey, profile),
-            setSessionLastBackendDecision: (targetSessionKey, decision) =>
-              this.sessionLastBackendDecisions.set(targetSessionKey, decision),
-            recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
-            executeWorkflowRun: async (input) => {
-              await executeAgentRunRequest(
-                this.buildAgentRunRequestContext(),
-                {
-                  kind: "workflow",
-                  sessionKey: input.sessionKey,
-                  message: input.message,
-                  requestId: input.requestId,
-                  queueWaitMs: input.queueWaitMs,
-                  workdir: input.workdir,
-                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
-                  executor: input.executor,
-                  run: async () => {
-                    await this.handleWorkflowRunCommand(
-                      input.objective,
-                      input.sessionKey,
-                      input.message,
-                      input.requestId,
-                      input.workdir,
-                    );
-                  },
-                  sendFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
-                  releaseRateLimit: () => {
-                    input.releaseRateLimit();
-                  },
-                },
-              );
-            },
-            executeAutoDevRun: async (input) => {
-              await executeAgentRunRequest(
-                this.buildAgentRunRequestContext(),
-                {
-                  kind: "autodev",
-                  sessionKey: input.sessionKey,
-                  message: input.message,
-                  requestId: input.requestId,
-                  queueWaitMs: input.queueWaitMs,
-                  workdir: input.workdir,
-                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
-                  executor: input.executor,
-                  run: async () => {
-                    await this.handleAutoDevRunCommand(
-                      input.taskId,
-                      input.sessionKey,
-                      input.message,
-                      input.requestId,
-                      input.workdir,
-                    );
-                  },
-                  sendFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
-                  releaseRateLimit: () => {
-                    input.releaseRateLimit();
-                  },
-                },
-              );
-            },
-            executeChatRun: (input) =>
-              executeChatRequest(
-                this.buildChatRequestDispatchContext(),
-                {
-                  message: input.message,
-                  receivedAt: input.receivedAt,
-                  queueWaitMs: input.queueWaitMs,
-                  routePrompt: input.routePrompt,
-                  sessionKey: input.sessionKey,
-                  requestId: input.requestId,
-                  roomWorkdir: input.roomWorkdir,
-                  roomConfigSource: input.roomConfigSource,
-                  backendProfile: input.backendProfile,
-                  backendRouteSource: input.backendRouteSource,
-                  backendRouteReason: input.backendRouteReason,
-                  backendRouteRuleId: input.backendRouteRuleId,
-                  sessionRuntime: input.sessionRuntime,
-                  deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
-                  releaseRateLimit: () => {
-                    input.releaseRateLimit();
-                  },
-                },
-              ),
-          },
+          this.buildLockedMessageDispatchContext(),
           {
             message,
             requestId,
@@ -913,6 +802,121 @@ export class Orchestrator {
     if (queueDrainSessionKey) {
       this.startSessionQueueDrain(queueDrainSessionKey);
     }
+  }
+
+  private buildLockedMessageDispatchContext(): Parameters<typeof executeLockedMessage>[0] {
+    return runBuildLockedMessageDispatchContext({
+      logger: this.logger,
+      workflowEnabled: this.workflowRunner.isEnabled(),
+      hasProcessedEvent: (targetSessionKey, eventId) => this.stateStore.hasProcessedEvent(targetSessionKey, eventId),
+      markEventProcessed: (targetSessionKey, eventId) => this.stateStore.markEventProcessed(targetSessionKey, eventId),
+      recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+        this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+      resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
+      routeMessage: (targetMessage, targetSessionKey, roomConfig) =>
+        this.routeMessage(targetMessage, targetSessionKey, roomConfig),
+      handleControlCommand: (command, targetSessionKey, targetMessage, targetRequestId) =>
+        this.handleControlCommand(command, targetSessionKey, targetMessage, targetRequestId),
+      handleWorkflowStatusCommand: (targetSessionKey, targetMessage) =>
+        this.handleWorkflowStatusCommand(targetSessionKey, targetMessage),
+      handleAutoDevStatusCommand: (targetSessionKey, targetMessage, workdir) =>
+        this.handleAutoDevStatusCommand(targetSessionKey, targetMessage, workdir),
+      handleAutoDevProgressCommand: (targetSessionKey, targetMessage, mode) =>
+        this.handleAutoDevProgressCommand(targetSessionKey, targetMessage, mode),
+      handleAutoDevSkillsCommand: (targetSessionKey, targetMessage, mode) =>
+        this.handleAutoDevSkillsCommand(targetSessionKey, targetMessage, mode),
+      handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
+        this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
+      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+      tryAcquireRateLimit: (input) => this.rateLimiter.tryAcquire(input),
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      classifyBackendTaskType: (workflowCommand, autoDevCommand) => classifyBackendTaskType(workflowCommand, autoDevCommand),
+      resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
+      prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
+        this.prepareBackendRuntimeForSession(targetSessionKey, profile),
+      setSessionLastBackendDecision: (targetSessionKey, decision) =>
+        this.sessionLastBackendDecisions.set(targetSessionKey, decision),
+      recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
+      executeWorkflowRun: async (input) => {
+        await executeAgentRunRequest(
+          this.buildAgentRunRequestContext(),
+          {
+            kind: "workflow",
+            sessionKey: input.sessionKey,
+            message: input.message,
+            requestId: input.requestId,
+            queueWaitMs: input.queueWaitMs,
+            workdir: input.workdir,
+            deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+            executor: input.executor,
+            run: async () => {
+              await this.handleWorkflowRunCommand(
+                input.objective,
+                input.sessionKey,
+                input.message,
+                input.requestId,
+                input.workdir,
+              );
+            },
+            sendFailure: (conversationId, error) => this.sendWorkflowFailure(conversationId, error),
+            releaseRateLimit: () => {
+              input.releaseRateLimit();
+            },
+          },
+        );
+      },
+      executeAutoDevRun: async (input) => {
+        await executeAgentRunRequest(
+          this.buildAgentRunRequestContext(),
+          {
+            kind: "autodev",
+            sessionKey: input.sessionKey,
+            message: input.message,
+            requestId: input.requestId,
+            queueWaitMs: input.queueWaitMs,
+            workdir: input.workdir,
+            deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+            executor: input.executor,
+            run: async () => {
+              await this.handleAutoDevRunCommand(
+                input.taskId,
+                input.sessionKey,
+                input.message,
+                input.requestId,
+                input.workdir,
+              );
+            },
+            sendFailure: (conversationId, error) => this.sendAutoDevFailure(conversationId, error),
+            releaseRateLimit: () => {
+              input.releaseRateLimit();
+            },
+          },
+        );
+      },
+      executeChatRun: (input) =>
+        executeChatRequest(
+          this.buildChatRequestDispatchContext(),
+          {
+            message: input.message,
+            receivedAt: input.receivedAt,
+            queueWaitMs: input.queueWaitMs,
+            routePrompt: input.routePrompt,
+            sessionKey: input.sessionKey,
+            requestId: input.requestId,
+            roomWorkdir: input.roomWorkdir,
+            roomConfigSource: input.roomConfigSource,
+            backendProfile: input.backendProfile,
+            backendRouteSource: input.backendRouteSource,
+            backendRouteReason: input.backendRouteReason,
+            backendRouteRuleId: input.backendRouteRuleId,
+            sessionRuntime: input.sessionRuntime,
+            deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+            releaseRateLimit: () => {
+              input.releaseRateLimit();
+            },
+          },
+        ),
+    });
   }
 
   private async tryHandleNonBlockingStatusRoute(input: {
