@@ -133,7 +133,7 @@ import {
 import { tryHandleNonBlockingStatusRoute as runNonBlockingStatusRoute } from "./orchestrator/non-blocking-status-route";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { executeWorkflowRunRequest } from "./orchestrator/workflow-run-request";
-import { handleStopCommand as runStopCommand } from "./orchestrator/stop-command";
+import { sendStopCommand as runSendStopCommand } from "./orchestrator/stop-command-dispatch";
 import { handleUpgradeCommand as runUpgradeCommand } from "./orchestrator/upgrade-command";
 import {
   buildApiTaskErrorSummary,
@@ -1585,32 +1585,36 @@ export class Orchestrator {
   }
 
   private async handleStopCommand(sessionKey: string, message: InboundMessage, requestId: string): Promise<void> {
-    await runStopCommand(
-      {
-        logger: this.logger,
-        pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
-        activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
-        autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
-        stateStore: this.stateStore,
-        clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
-        sessionBackendProfiles: this.sessionBackendProfiles,
-        skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
-        getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-        runningExecutions: this.runningExecutions,
-        pendingStopRequests: this.pendingStopRequests,
-        cancelRunningExecutionInAllRuntimes: (targetSessionKey) => this.cancelRunningExecutionInAllRuntimes(targetSessionKey),
-        isSessionBusy: (targetSessionKey) => {
-          const lockEntry = this.sessionLocks.get(targetSessionKey);
-          return Boolean(lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(targetSessionKey));
-        },
-        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
-      },
+    await runSendStopCommand(
+      this.buildStopCommandDispatchContext(),
       {
         sessionKey,
         message,
         requestId,
       },
     );
+  }
+
+  private buildStopCommandDispatchContext(): Parameters<typeof runSendStopCommand>[0] {
+    return {
+      logger: this.logger,
+      pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
+      activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
+      autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
+      stateStore: this.stateStore,
+      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+      sessionBackendProfiles: this.sessionBackendProfiles,
+      skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
+      getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
+      runningExecutions: this.runningExecutions,
+      pendingStopRequests: this.pendingStopRequests,
+      cancelRunningExecutionInAllRuntimes: (targetSessionKey) => this.cancelRunningExecutionInAllRuntimes(targetSessionKey),
+      isSessionBusy: (targetSessionKey) => {
+        const lockEntry = this.sessionLocks.get(targetSessionKey);
+        return Boolean(lockEntry?.mutex.isLocked() || this.hasConcurrentSessionRequest(targetSessionKey));
+      },
+      sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
   }
 
   private markSessionRequestStarted(sessionKey: string): void {
