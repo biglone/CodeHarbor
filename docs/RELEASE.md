@@ -85,7 +85,7 @@ The workflow will automatically prefer token mode when this secret exists.
 
 ### AutoDev big-feature release flow
 
-When AutoDev completes a mapped big-feature task (for example `T8.1`), it can generate:
+When AutoDev completes a mapped big-feature task (for example `T8.4`), it can generate:
 
 - task commit (feature implementation)
 - release commit: `release: vX.Y.Z [publish-npm]`

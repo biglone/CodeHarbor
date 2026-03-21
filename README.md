@@ -410,7 +410,7 @@ Main endpoints:
 - `PUT /api/admin/config/rooms/:roomId`
 - `DELETE /api/admin/config/rooms/:roomId`
 - `GET /api/admin/health`
-- `GET /api/admin/audit?limit=50`
+- `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error`
 - `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`
 - `GET /api/admin/sessions/export?roomId=...&userId=...&from=...&to=...&limit=50&offset=0&includeMessages=true`
 - `GET /api/admin/sessions/:sessionKey/messages?limit=100`
@@ -428,16 +428,26 @@ Authorization: Bearer <ADMIN_TOKEN>
 Access control options:
 
 - `ADMIN_TOKEN`: require bearer token for `/api/admin/*` and `/metrics`
-- `ADMIN_TOKENS_JSON`: optional multi-token RBAC list (supports `admin` and `viewer` roles)
+- `ADMIN_TOKENS_JSON`: optional multi-token RBAC list (supports `admin`/`viewer` role defaults and custom `scopes`)
+- `API_TOKEN_SCOPES_JSON`: optional API token scope override (JSON array, for example `["tasks.submit.api"]` or `["tasks.read.api"]`)
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
 - `ADMIN_ALLOWED_ORIGINS`: optional CORS origin allowlist for browser-based cross-origin admin access
 
 RBAC behavior:
 
-- `viewer` tokens can call read endpoints (`GET /api/admin/*` and `GET /metrics`)
-- `admin` tokens can call read + write endpoints (`PUT/POST/DELETE /api/admin/*`)
+- `viewer` role defaults: `admin.read` + `metrics.read` (broad read compatibility)
+- `admin` role defaults: `admin.read` + `metrics.read` + `admin.write`
+- optional `scopes` in `ADMIN_TOKENS_JSON` overrides role defaults for that token (supports patterns like `admin.read.audit`, `admin.write.config.*`, `*`)
+- API token defaults to broad compatibility scopes `tasks.submit` + `tasks.read`; `API_TOKEN_SCOPES_JSON` can narrow it to submit-only/read-only
+- legacy broad scopes (`admin.read`, `admin.write`, `tasks.submit`, `tasks.read`, `webhook.ingest`) still authorize new fine-grained actions for backward compatibility
 - for `ADMIN_TOKENS_JSON`, audit actor is derived from token identity (`actor` field), not `x-admin-actor`
 - Admin UI shows current permission status (role/source) after saving auth
+
+Operation audit behavior:
+
+- `kind=config` (default): configuration revision audit entries
+- `kind=operations`: authorization and operation outcomes for Admin/API/Webhook (`allowed`/`denied`/`error`)
+- `kind=all`: merged timeline of config + operation audit entries (sorted by latest first)
 
 Metrics quick check:
 
@@ -466,6 +476,7 @@ Rotate tokens quickly (repository script):
 ```bash
 ./scripts/rotate-admin-token.sh --target rbac --role admin --actor ops-admin
 ./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
+./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit --scopes admin.read.auth,admin.read.audit
 ```
 
 Note: `PUT /api/admin/config/global` always writes `.env`; high-frequency whitelist keys hot-apply for new requests, while non-whitelist keys still require restart.
@@ -680,7 +691,7 @@ AutoDev (`/autodev`) conventions:
 - Commit language policy: for a brand-new project (no history) the first AutoDev commit defaults to English; for existing projects, AutoDev follows the recent repository commit language trend.
 - AutoDev commit body includes `Task-ID`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
-- If `TASK_LIST.md` has a release mapping row like `| T8.1 | v0.1.52 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
+- If `TASK_LIST.md` has a release mapping row like `| T8.4 | v0.1.55 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
 - When CI detects that the target version already exists on npm, the release workflow skips publishing and prints `Suggested next version` to keep release flow idempotent.
 - If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
