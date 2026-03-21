@@ -8,6 +8,10 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.53] - 2026-03-21
+
+- AutoDev 大功能完成：T8.1 多模态体验：增强 Matrix 消息中的图片/语音结果渲染（结构化展示、摘要与可读性）
+
 ## [0.1.52] - 2026-03-21
 
 - AutoDev big-feature auto-release flow:
