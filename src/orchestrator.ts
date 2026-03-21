@@ -146,6 +146,7 @@ import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from ".
 import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
 import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
 import { buildApiTaskPayload as runBuildApiTaskPayload } from "./orchestrator/api-task-payload";
+import { executeMessageWithinSessionLock as runExecuteMessageWithinSessionLock } from "./orchestrator/execute-message-with-lock";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -607,7 +608,9 @@ export class Orchestrator {
         }
       }
 
-      const lockedResult = await this.executeMessageWithinSessionLock({
+      const lockedResult = await runExecuteMessageWithinSessionLock({
+        getLock: (targetSessionKey) => this.getLock(targetSessionKey),
+        buildLockedMessageDispatchContext: () => this.buildLockedMessageDispatchContext(),
         message,
         requestId,
         sessionKey,
@@ -628,45 +631,6 @@ export class Orchestrator {
     if (queueDrainSessionKey) {
       this.startSessionQueueDrain(queueDrainSessionKey);
     }
-  }
-
-  private async executeMessageWithinSessionLock(input: {
-    message: InboundMessage;
-    requestId: string;
-    sessionKey: string;
-    receivedAt: number;
-    options: {
-      bypassQueue: boolean;
-      forcedPrompt: string | null;
-      deferFailureHandlingToQueue: boolean;
-    };
-  }): Promise<{
-    deferAttachmentCleanup: boolean;
-    queueDrainSessionKey: string | null;
-  }> {
-    const lock = this.getLock(input.sessionKey);
-    let lockedResult: {
-      deferAttachmentCleanup: boolean;
-      queueDrainSessionKey: string | null;
-    } = {
-      deferAttachmentCleanup: false,
-      queueDrainSessionKey: null,
-    };
-    await lock.runExclusive(async () => {
-      lockedResult = await executeLockedMessage(
-        this.buildLockedMessageDispatchContext(),
-        {
-          message: input.message,
-          requestId: input.requestId,
-          sessionKey: input.sessionKey,
-          receivedAt: input.receivedAt,
-          bypassQueue: input.options.bypassQueue,
-          forcedPrompt: input.options.forcedPrompt,
-          deferFailureHandlingToQueue: input.options.deferFailureHandlingToQueue,
-        },
-      );
-    });
-    return lockedResult;
   }
 
   private buildLockedMessageDispatchContext(): Parameters<typeof executeLockedMessage>[0] {
