@@ -145,6 +145,7 @@ import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestra
 import { buildStatusCommandDispatchContext as runBuildStatusCommandDispatchContext } from "./orchestrator/status-command-context";
 import { buildDiagCommandDispatchContext as runBuildDiagCommandDispatchContext } from "./orchestrator/diag-command-context";
 import { buildAutoDevRunCommandDispatchContext as runBuildAutoDevRunCommandDispatchContext } from "./orchestrator/autodev-run-command-context";
+import { buildControlCommandDispatchContext as runBuildControlCommandDispatchContext } from "./orchestrator/control-command-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -1168,7 +1169,7 @@ export class Orchestrator {
   }
 
   private buildControlCommandDispatchContext(): Parameters<typeof runSendControlCommand>[0] {
-    return {
+    return runBuildControlCommandDispatchContext({
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       botNoticePrefix: this.botNoticePrefix,
       stateStore: this.stateStore,
@@ -1193,7 +1194,7 @@ export class Orchestrator {
       handleBackendCommand: (targetSessionKey, targetMessage) => this.handleBackendCommand(targetSessionKey, targetMessage),
       handleDiagCommand: (targetMessage) => this.handleDiagCommand(targetMessage),
       handleUpgradeCommand: (targetMessage) => this.handleUpgradeCommand(targetMessage),
-    };
+    });
   }
 
   private async sendStatusCommand(sessionKey: string, message: InboundMessage): Promise<void> {
