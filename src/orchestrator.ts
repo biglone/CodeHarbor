@@ -149,6 +149,7 @@ import { buildControlCommandDispatchContext as runBuildControlCommandDispatchCon
 import { buildStopCommandDispatchContext as runBuildStopCommandDispatchContext } from "./orchestrator/stop-command-context";
 import { buildBackendCommandDispatchContext as runBuildBackendCommandDispatchContext } from "./orchestrator/backend-command-context";
 import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchContext } from "./orchestrator/upgrade-command-context";
+import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
 import {
   buildDefaultUpgradeRestartPlan,
   probeInstalledVersion,
@@ -802,15 +803,7 @@ export class Orchestrator {
             recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
             executeWorkflowRun: async (input) => {
               await executeAgentRunRequest(
-                {
-                  logger: this.logger,
-                  sessionActiveWindowMs: this.sessionActiveWindowMs,
-                  stateStore: this.stateStore,
-                  workflowRunner: this.workflowRunner,
-                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-                },
+                this.buildAgentRunRequestContext(),
                 {
                   kind: "workflow",
                   sessionKey: input.sessionKey,
@@ -838,15 +831,7 @@ export class Orchestrator {
             },
             executeAutoDevRun: async (input) => {
               await executeAgentRunRequest(
-                {
-                  logger: this.logger,
-                  sessionActiveWindowMs: this.sessionActiveWindowMs,
-                  stateStore: this.stateStore,
-                  workflowRunner: this.workflowRunner,
-                  recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
-                    this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-                  persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
-                },
+                this.buildAgentRunRequestContext(),
                 {
                   kind: "autodev",
                   sessionKey: input.sessionKey,
@@ -1387,6 +1372,18 @@ export class Orchestrator {
       recordAutoDevGitCommit: (targetSessionKey, taskId, result) =>
         this.recordAutoDevGitCommit(targetSessionKey, taskId, result),
       autoDevMetrics: this.autoDevMetrics,
+    });
+  }
+
+  private buildAgentRunRequestContext(): Parameters<typeof executeAgentRunRequest>[0] {
+    return runBuildAgentRunRequestContext({
+      logger: this.logger,
+      sessionActiveWindowMs: this.sessionActiveWindowMs,
+      stateStore: this.stateStore,
+      workflowRunner: this.workflowRunner,
+      recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
+        this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+      persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
     });
   }
 
