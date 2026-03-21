@@ -99,6 +99,7 @@ import {
   parseQueuedInboundPayload,
   type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
+import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
 import {
@@ -2063,18 +2064,13 @@ export class Orchestrator {
   }
 
   private pruneRunSnapshots(now: number): void {
-    pruneSnapshotMap(
-      this.workflowSnapshots,
+    runPruneRunSnapshots({
+      workflowSnapshots: this.workflowSnapshots,
+      autoDevSnapshots: this.autoDevSnapshots,
       now,
-      (snapshot) => snapshot.state !== "running",
-      (snapshot) => snapshot.endedAt ?? snapshot.startedAt,
-    );
-    pruneSnapshotMap(
-      this.autoDevSnapshots,
-      now,
-      (snapshot) => snapshot.state !== "running",
-      (snapshot) => snapshot.endedAt ?? snapshot.startedAt,
-    );
+      ttlMs: RUN_SNAPSHOT_TTL_MS,
+      maxEntries: RUN_SNAPSHOT_MAX_ENTRIES,
+    });
   }
 
   private getLock(key: string): Mutex {
@@ -2434,59 +2430,6 @@ export class Orchestrator {
 
   private listRecentAutoDevGitCommitEventSummaries(limit: number): string[] {
     return runListRecentAutoDevGitCommitEventSummaries(this.workflowDiagStore, limit);
-  }
-}
-
-function pruneSnapshotMap<T>(
-  snapshots: Map<string, T>,
-  now: number,
-  isPrunable: (snapshot: T) => boolean,
-  resolveSnapshotTimeIso: (snapshot: T) => string | null,
-): void {
-  const staleKeys: string[] = [];
-  const candidatesForOverflow: Array<{ key: string; timestamp: number }> = [];
-
-  for (const [key, snapshot] of snapshots.entries()) {
-    if (!isPrunable(snapshot)) {
-      continue;
-    }
-
-    const timeIso = resolveSnapshotTimeIso(snapshot);
-    if (!timeIso) {
-      staleKeys.push(key);
-      continue;
-    }
-
-    const timestamp = Date.parse(timeIso);
-    if (!Number.isFinite(timestamp)) {
-      staleKeys.push(key);
-      continue;
-    }
-
-    if (now - timestamp > RUN_SNAPSHOT_TTL_MS) {
-      staleKeys.push(key);
-      continue;
-    }
-
-    candidatesForOverflow.push({ key, timestamp });
-  }
-
-  for (const key of staleKeys) {
-    snapshots.delete(key);
-  }
-
-  if (snapshots.size <= RUN_SNAPSHOT_MAX_ENTRIES) {
-    return;
-  }
-
-  const overflow = snapshots.size - RUN_SNAPSHOT_MAX_ENTRIES;
-  if (overflow <= 0) {
-    return;
-  }
-
-  candidatesForOverflow.sort((a, b) => a.timestamp - b.timestamp);
-  for (let i = 0; i < overflow && i < candidatesForOverflow.length; i += 1) {
-    snapshots.delete(candidatesForOverflow[i].key);
   }
 }
 
