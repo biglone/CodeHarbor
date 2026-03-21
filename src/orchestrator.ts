@@ -11,7 +11,6 @@ import {
   type CodexProgressEvent,
 } from "./executor/codex-executor";
 import { CodexSessionRuntime } from "./executor/codex-session-runtime";
-import type { DocumentContextItem } from "./document-context";
 import { Logger } from "./logger";
 import {
   type RuntimeMetricsSnapshot,
@@ -92,6 +91,7 @@ import {
   resolveWorkflowRoleSkillPolicy as runResolveWorkflowRoleSkillPolicy,
   setWorkflowRoleSkillPolicyOverride as runSetWorkflowRoleSkillPolicyOverride,
 } from "./orchestrator/workflow-role-skill-policy";
+import { recordCliCompatPrompt as runRecordCliCompatPrompt } from "./orchestrator/cli-compat-prompt-recorder";
 import {
   listAutoDevGitCommitRecords as runListAutoDevGitCommitRecords,
   recordAutoDevGitCommit as runRecordAutoDevGitCommit,
@@ -969,16 +969,26 @@ export class Orchestrator {
                   persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
                   recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
                     this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
-                  recordCliCompatPrompt: (entry) => this.recordCliCompatPrompt(entry),
-                  buildConversationBridgeContext: (targetSessionKey) => this.buildConversationBridgeContext(targetSessionKey),
+                  recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(this.cliCompatRecorder, this.logger, entry),
+                  buildConversationBridgeContext: (targetSessionKey) =>
+                    runBuildConversationBridgeContext({
+                      messages: this.stateStore.listRecentConversationMessages(targetSessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT),
+                      maxChars: CONTEXT_BRIDGE_MAX_CHARS,
+                    }),
                   transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
                     this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
                   prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
                     this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
                   prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
                     this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
-                  buildExecutionPrompt: (basePrompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
-                    this.buildExecutionPrompt(basePrompt, targetMessage, audioTranscripts, documents, bridgeContext),
+                  buildExecutionPrompt: (prompt, targetMessage, audioTranscripts, documents, bridgeContext) =>
+                    runBuildExecutionPrompt({
+                      prompt,
+                      message: targetMessage,
+                      audioTranscripts,
+                      extractedDocuments: documents,
+                      bridgeContext,
+                    }),
                   sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
                   sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
                   startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
@@ -1852,59 +1862,6 @@ export class Orchestrator {
         sessionKey,
       },
     );
-  }
-
-  private buildExecutionPrompt(
-    prompt: string,
-    message: InboundMessage,
-    audioTranscripts: AudioTranscript[],
-    extractedDocuments: DocumentContextItem[],
-    bridgeContext: string | null,
-  ): string {
-    return runBuildExecutionPrompt({
-      prompt,
-      message,
-      audioTranscripts,
-      extractedDocuments,
-      bridgeContext,
-    });
-  }
-
-  private buildConversationBridgeContext(sessionKey: string): string | null {
-    const messages = this.stateStore.listRecentConversationMessages(sessionKey, CONTEXT_BRIDGE_HISTORY_LIMIT);
-    return runBuildConversationBridgeContext({
-      messages,
-      maxChars: CONTEXT_BRIDGE_MAX_CHARS,
-    });
-  }
-
-  private async recordCliCompatPrompt(entry: {
-    requestId: string;
-    sessionKey: string;
-    conversationId: string;
-    senderId: string;
-    prompt: string;
-    imageCount: number;
-  }): Promise<void> {
-    if (!this.cliCompatRecorder) {
-      return;
-    }
-    try {
-      await this.cliCompatRecorder.append({
-        timestamp: new Date().toISOString(),
-        requestId: entry.requestId,
-        sessionKey: entry.sessionKey,
-        conversationId: entry.conversationId,
-        senderId: entry.senderId,
-        prompt: entry.prompt,
-        imageCount: entry.imageCount,
-      });
-    } catch (error) {
-      this.logger.warn("Failed to record cli compat prompt", {
-        requestId: entry.requestId,
-        error,
-      });
-    }
   }
 
   private setWorkflowSnapshot(sessionKey: string, snapshot: WorkflowRunSnapshot): void {
