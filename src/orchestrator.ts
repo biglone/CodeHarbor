@@ -122,7 +122,7 @@ import { buildUpgradeCommandDispatchContext as runBuildUpgradeCommandDispatchCon
 import { buildAgentRunRequestContext as runBuildAgentRunRequestContext } from "./orchestrator/agent-run-request-context";
 import { buildChatRequestDispatchContextFromRuntime as runBuildChatRequestDispatchContextFromRuntime } from "./orchestrator/chat-request-context";
 import { buildWorkflowRunCommandDispatchContext as runBuildWorkflowRunCommandDispatchContext } from "./orchestrator/workflow-run-command-context";
-import { buildLockedMessageDispatchContext as runBuildLockedMessageDispatchContext } from "./orchestrator/locked-message-context";
+import { buildLockedMessageDispatchContextFromRuntime as runBuildLockedMessageDispatchContextFromRuntime } from "./orchestrator/locked-message-context";
 import { buildNonBlockingStatusRouteContextFromRuntime as runBuildNonBlockingStatusRouteContextFromRuntime } from "./orchestrator/non-blocking-status-context";
 import {
   executeLockedAutoDevRun as runExecuteLockedAutoDevRun,
@@ -592,11 +592,10 @@ export class Orchestrator {
   }
 
   private buildLockedMessageDispatchContext(): Parameters<typeof executeLockedMessage>[0] {
-    return runBuildLockedMessageDispatchContext({
+    return runBuildLockedMessageDispatchContextFromRuntime({
       logger: this.logger,
       workflowEnabled: this.workflowRunner.isEnabled(),
-      hasProcessedEvent: (targetSessionKey, eventId) => this.stateStore.hasProcessedEvent(targetSessionKey, eventId),
-      markEventProcessed: (targetSessionKey, eventId) => this.stateStore.markEventProcessed(targetSessionKey, eventId),
+      stateStore: this.stateStore,
       recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
         this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
       resolveRoomRuntimeConfig: (conversationId) => this.resolveRoomRuntimeConfig(conversationId),
@@ -615,14 +614,15 @@ export class Orchestrator {
       handleAutoDevLoopStopCommand: (targetSessionKey, targetMessage) =>
         this.handleAutoDevLoopStopCommand(targetSessionKey, targetMessage),
       getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
-      tryAcquireRateLimit: (input) => this.rateLimiter.tryAcquire(input),
+      rateLimiter: {
+        tryAcquire: (request) => this.rateLimiter.tryAcquire(request),
+      },
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       classifyBackendTaskType: (workflowCommand, autoDevCommand) => classifyBackendTaskType(workflowCommand, autoDevCommand),
       resolveSessionBackendDecision: (input) => this.resolveSessionBackendDecision(input),
       prepareBackendRuntimeForSession: (targetSessionKey, profile) =>
         this.prepareBackendRuntimeForSession(targetSessionKey, profile),
-      setSessionLastBackendDecision: (targetSessionKey, decision) =>
-        this.sessionLastBackendDecisions.set(targetSessionKey, decision),
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
       recordBackendRouteDecision: (input) => this.recordBackendRouteDecision(input),
       executeWorkflowRun: (input) => this.executeLockedWorkflowRun(input),
       executeAutoDevRun: (input) => this.executeLockedAutoDevRun(input),
