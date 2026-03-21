@@ -113,9 +113,7 @@ import {
 } from "./orchestrator/progress-dispatch";
 import {
   isApiTaskPayloadEquivalent,
-  normalizeApiTaskRequestId,
   parseQueuedInboundPayload,
-  type QueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
@@ -147,6 +145,7 @@ import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from ".
 import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
 import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
 import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
+import { buildApiTaskPayload as runBuildApiTaskPayload } from "./orchestrator/api-task-payload";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -474,7 +473,7 @@ export class Orchestrator {
       throw new Error("Task queue is unavailable.");
     }
 
-    const { message, sessionKey, payload } = this.buildApiTaskPayload(input);
+    const { message, sessionKey, payload } = runBuildApiTaskPayload(input);
 
     const result = queueStore.enqueueTask({
       sessionKey,
@@ -497,39 +496,6 @@ export class Orchestrator {
       sessionKey,
       eventId: result.task.eventId,
       requestId: result.task.requestId,
-    };
-  }
-
-  private buildApiTaskPayload(input: ApiTaskSubmitInput): {
-    message: InboundMessage;
-    sessionKey: string;
-    payload: QueuedInboundPayload;
-  } {
-    const normalizedConversationId = input.conversationId.trim();
-    const normalizedSenderId = input.senderId.trim();
-    const normalizedText = input.text.trim();
-    const eventId = buildApiTaskEventId(input.idempotencyKey);
-    const requestId = normalizeApiTaskRequestId(input.requestId, eventId);
-    const message: InboundMessage = {
-      requestId,
-      channel: "matrix",
-      conversationId: normalizedConversationId,
-      senderId: normalizedSenderId,
-      eventId,
-      text: normalizedText,
-      attachments: [],
-      isDirectMessage: input.isDirectMessage ?? true,
-      mentionsBot: input.mentionsBot ?? false,
-      repliesToBot: input.repliesToBot ?? false,
-    };
-    return {
-      message,
-      sessionKey: buildSessionKey(message),
-      payload: {
-        message,
-        receivedAt: Date.now(),
-        prompt: message.text,
-      },
     };
   }
 
