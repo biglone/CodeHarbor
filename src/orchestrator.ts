@@ -87,6 +87,10 @@ import {
 } from "./orchestrator/autodev-runner";
 import { createIdleAutoDevSnapshot } from "./orchestrator/autodev-snapshot";
 import {
+  ensureBackendRuntime as runEnsureBackendRuntime,
+  prepareBackendRuntimeForSession as runPrepareBackendRuntimeForSession,
+} from "./orchestrator/backend-runtime-management";
+import {
   cancelRunningExecutionInAllRuntimes as runCancelRunningExecutionInAllRuntimes,
   clearSessionFromAllRuntimes as runClearSessionFromAllRuntimes,
   getBackendRuntimeStats as runGetBackendRuntimeStats,
@@ -95,8 +99,6 @@ import {
 } from "./orchestrator/backend-runtime-registry";
 import {
   classifyBackendTaskType,
-  isSameBackendProfile,
-  normalizeBackendProfile,
   parseControlCommand,
 } from "./orchestrator/command-routing";
 import {
@@ -1731,24 +1733,17 @@ export class Orchestrator {
   }
 
   private prepareBackendRuntimeForSession(sessionKey: string, profile: BackendModelRouteProfile): BackendRuntimeBundle {
-    const nextProfile = normalizeBackendProfile(profile);
-    const previousProfile = this.sessionBackendProfiles.get(sessionKey);
-    const hasPersistedSession = this.stateStore.getCodexSessionId(sessionKey) !== null;
-
-    const shouldResetSession =
-      previousProfile !== undefined
-        ? !isSameBackendProfile(previousProfile, nextProfile)
-        : hasPersistedSession && !isSameBackendProfile(this.defaultBackendProfile, nextProfile);
-    if (shouldResetSession) {
-      this.stateStore.clearCodexSessionId(sessionKey);
-      this.clearSessionFromAllRuntimes(sessionKey);
-      this.workflowSnapshots.delete(sessionKey);
-      this.autoDevSnapshots.delete(sessionKey);
-    }
-
-    const runtime = this.ensureBackendRuntime(nextProfile);
-    this.sessionBackendProfiles.set(sessionKey, nextProfile);
-    return runtime;
+    return runPrepareBackendRuntimeForSession({
+      sessionKey,
+      profile,
+      defaultBackendProfile: this.defaultBackendProfile,
+      stateStore: this.stateStore,
+      sessionBackendProfiles: this.sessionBackendProfiles,
+      workflowSnapshots: this.workflowSnapshots,
+      autoDevSnapshots: this.autoDevSnapshots,
+      clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
+      ensureBackendRuntime: (targetProfile) => this.ensureBackendRuntime(targetProfile),
+    });
   }
 
   private resolveSessionBackendStatusProfile(sessionKey: string): BackendModelRouteProfile {
@@ -1768,23 +1763,11 @@ export class Orchestrator {
   }
 
   private ensureBackendRuntime(profile: BackendModelRouteProfile): BackendRuntimeBundle {
-    const normalized = normalizeBackendProfile(profile);
-    const key = this.serializeBackendProfile(normalized);
-    const existing = this.backendRuntimes.get(key);
-    if (existing) {
-      return existing;
-    }
-    if (!this.executorFactory) {
-      throw new Error("Backend executor factory is unavailable.");
-    }
-    const executor = this.executorFactory(normalized.provider, normalized.model);
-    const bundle: BackendRuntimeBundle = {
-      profile: normalized,
-      executor,
-      sessionRuntime: new CodexSessionRuntime(executor),
-    };
-    this.backendRuntimes.set(key, bundle);
-    return bundle;
+    return runEnsureBackendRuntime({
+      profile,
+      backendRuntimes: this.backendRuntimes,
+      executorFactory: this.executorFactory,
+    });
   }
 
   private hasBackendRuntime(profile: BackendModelRouteProfile): boolean {
