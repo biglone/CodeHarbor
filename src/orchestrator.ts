@@ -146,6 +146,7 @@ import { resolveInputRuntimeConfig as runResolveInputRuntimeConfig } from "./orc
 import { resolveAutoDevRuntimeConfig as runResolveAutoDevRuntimeConfig } from "./orchestrator/autodev-runtime-config";
 import { resolveServiceRuntimeConfig as runResolveServiceRuntimeConfig } from "./orchestrator/service-runtime-config";
 import { resolveBackendRuntimeConfig as runResolveBackendRuntimeConfig } from "./orchestrator/backend-runtime-config";
+import { resolveSessionRuntimeConfig as runResolveSessionRuntimeConfig } from "./orchestrator/session-runtime-config";
 import {
   formatBackendRouteProfile,
 } from "./orchestrator/diagnostic-formatters";
@@ -402,30 +403,16 @@ export class Orchestrator {
     this.audioTranscriber = inputRuntimeConfig.audioTranscriber;
     this.progressMinIntervalMs = inputRuntimeConfig.progressMinIntervalMs;
     this.typingTimeoutMs = inputRuntimeConfig.typingTimeoutMs;
-    this.commandPrefix = (options?.commandPrefix ?? "").trim();
-    this.matrixUserId = options?.matrixUserId ?? "";
-    const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
-    this.sessionActiveWindowMs = Math.max(1, sessionActiveWindowMinutes) * 60_000;
-    this.groupDirectModeEnabled = options?.groupDirectModeEnabled ?? false;
-    this.defaultGroupTriggerPolicy = options?.defaultGroupTriggerPolicy ?? {
-      allowMention: true,
-      allowReply: true,
-      allowActiveWindow: true,
-      allowPrefix: true,
-    };
-    this.roomTriggerPolicies = options?.roomTriggerPolicies ?? {};
-    this.configService = options?.configService ?? null;
-    this.defaultCodexWorkdir = options?.defaultCodexWorkdir ?? process.cwd();
-    this.rateLimiter = new RateLimiter(
-      options?.rateLimiterOptions ?? {
-        windowMs: 60_000,
-        maxRequestsPerUser: 20,
-        maxRequestsPerRoom: 120,
-        maxConcurrentGlobal: 8,
-        maxConcurrentPerUser: 1,
-        maxConcurrentPerRoom: 4,
-      },
-    );
+    const sessionRuntimeConfig = runResolveSessionRuntimeConfig(options);
+    this.commandPrefix = sessionRuntimeConfig.commandPrefix;
+    this.matrixUserId = sessionRuntimeConfig.matrixUserId;
+    this.sessionActiveWindowMs = sessionRuntimeConfig.sessionActiveWindowMs;
+    this.groupDirectModeEnabled = sessionRuntimeConfig.groupDirectModeEnabled;
+    this.defaultGroupTriggerPolicy = sessionRuntimeConfig.defaultGroupTriggerPolicy;
+    this.roomTriggerPolicies = sessionRuntimeConfig.roomTriggerPolicies;
+    this.configService = sessionRuntimeConfig.configService;
+    this.defaultCodexWorkdir = sessionRuntimeConfig.defaultCodexWorkdir;
+    this.rateLimiter = sessionRuntimeConfig.rateLimiter;
     const workflowRuntimeConfig = runResolveWorkflowRuntimeConfig({
       options,
       executor,
