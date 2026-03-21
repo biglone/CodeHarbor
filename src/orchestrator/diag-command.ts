@@ -256,8 +256,9 @@ async function handleRouteDiag(
   const backendDecision = deps.getSessionBackendDecision(sessionKey);
   const mode = backendOverride ? "manual" : "auto";
   const source = backendOverride ? "manual_override" : backendDecision?.source ?? "default";
-  const reason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
-  const rule = backendDecision?.ruleId ?? "none";
+  const rawReason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
+  const reason = !backendOverride && rawReason === "manual_override" ? "default_fallback" : rawReason;
+  const rule = !backendOverride && rawReason === "manual_override" ? "none" : backendDecision?.ruleId ?? "none";
   const reasonDesc = describeBackendRouteReason(reason);
   const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
   const ruleStats = deps.getBackendModelRouterStats();

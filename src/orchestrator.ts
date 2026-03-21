@@ -312,6 +312,8 @@ export class Orchestrator {
   private readonly pendingAutoDevLoopStopRequests = new Set<string>();
   private readonly activeAutoDevLoopSessions = new Set<string>();
   private readonly skipBridgeForNextPrompt = new Set<string>();
+  private readonly contextBridgeHistoryLimit: number;
+  private readonly contextBridgeMaxChars: number;
   private readonly lockTtlMs: number;
   private readonly lockPruneIntervalMs: number;
   private progressUpdatesEnabled: boolean;
@@ -404,6 +406,14 @@ export class Orchestrator {
     this.configService = sessionRuntimeConfig.configService;
     this.defaultCodexWorkdir = sessionRuntimeConfig.defaultCodexWorkdir;
     this.rateLimiter = sessionRuntimeConfig.rateLimiter;
+    this.contextBridgeHistoryLimit =
+      typeof options?.contextBridgeHistoryLimit === "number" && Number.isFinite(options.contextBridgeHistoryLimit)
+        ? Math.max(1, Math.floor(options.contextBridgeHistoryLimit))
+        : CONTEXT_BRIDGE_HISTORY_LIMIT;
+    this.contextBridgeMaxChars =
+      typeof options?.contextBridgeMaxChars === "number" && Number.isFinite(options.contextBridgeMaxChars)
+        ? Math.max(200, Math.floor(options.contextBridgeMaxChars))
+        : CONTEXT_BRIDGE_MAX_CHARS;
     const workflowRuntimeConfig = runResolveWorkflowRuntimeConfig({
       options,
       executor,
@@ -1081,8 +1091,8 @@ export class Orchestrator {
       recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
         this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
       cliCompatRecorder: this.cliCompatRecorder,
-      contextBridgeHistoryLimit: CONTEXT_BRIDGE_HISTORY_LIMIT,
-      contextBridgeMaxChars: CONTEXT_BRIDGE_MAX_CHARS,
+      contextBridgeHistoryLimit: this.contextBridgeHistoryLimit,
+      contextBridgeMaxChars: this.contextBridgeMaxChars,
       transcribeAudioAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.transcribeAudioAttachments(targetMessage, targetRequestId, targetSessionKey),
       prepareImageAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
@@ -1200,6 +1210,7 @@ export class Orchestrator {
       stateStore: this.stateStore,
       clearSessionFromAllRuntimes: (targetSessionKey) => this.clearSessionFromAllRuntimes(targetSessionKey),
       sessionBackendProfiles: this.sessionBackendProfiles,
+      sessionLastBackendDecisions: this.sessionLastBackendDecisions,
       skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
       getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
       runningExecutions: this.runningExecutions,
@@ -1383,8 +1394,11 @@ export class Orchestrator {
     });
   }
 
-  private resolveManualBackendProfile(provider: "codex" | "claude"): BackendModelRouteProfile {
-    return runResolveManualBackendProfile(provider, this.defaultBackendProfile);
+  private resolveManualBackendProfile(input: {
+    provider: "codex" | "claude";
+    model?: string | null;
+  }): BackendModelRouteProfile {
+    return runResolveManualBackendProfile(input, this.defaultBackendProfile);
   }
 
   private ensureBackendRuntime(profile: BackendModelRouteProfile): BackendRuntimeBundle {

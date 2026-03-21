@@ -8,6 +8,7 @@ import {
   parseControlCommand,
   parseDiagTarget,
   parseUpgradeTarget,
+  serializeBackendTarget,
 } from "../src/orchestrator/command-routing";
 
 describe("orchestrator command routing helpers", () => {
@@ -29,9 +30,27 @@ describe("orchestrator command routing helpers", () => {
   });
 
   it("parses backend and upgrade targets", () => {
-    expect(parseBackendTarget("/backend")).toBe("status");
-    expect(parseBackendTarget("/backend codex")).toBe("codex");
+    expect(parseBackendTarget("/backend")).toEqual({ kind: "status" });
+    expect(parseBackendTarget("/backend status")).toEqual({ kind: "status" });
+    expect(parseBackendTarget("/backend auto")).toEqual({ kind: "auto" });
+    expect(parseBackendTarget("/backend codex")).toEqual({
+      kind: "manual",
+      profile: { provider: "codex", model: null },
+    });
+    expect(parseBackendTarget("/backend codex gpt-5.4")).toEqual({
+      kind: "manual",
+      profile: { provider: "codex", model: "gpt-5.4" },
+    });
+    expect(parseBackendTarget("/backend claude:claude-sonnet-4-5")).toEqual({
+      kind: "manual",
+      profile: { provider: "claude", model: "claude-sonnet-4-5" },
+    });
+    expect(parseBackendTarget("//backend claude/claude-sonnet-4-5")).toEqual({
+      kind: "manual",
+      profile: { provider: "claude", model: "claude-sonnet-4-5" },
+    });
     expect(parseBackendTarget("/backend bad")).toBeNull();
+    expect(parseBackendTarget("/backend auto extra")).toBeNull();
 
     expect(parseUpgradeTarget("/upgrade")).toEqual({ ok: true, version: null });
     expect(parseUpgradeTarget("/upgrade v0.1.50")).toEqual({ ok: true, version: "0.1.50" });
@@ -54,5 +73,16 @@ describe("orchestrator command routing helpers", () => {
     expect(left).toEqual({ provider: "codex", model: "gpt-5.4" });
     expect(isSameBackendProfile(left, right)).toBe(true);
     expect(isSameBackendProfile(left, { provider: "claude", model: "gpt-5.4" })).toBe(false);
+  });
+
+  it("serializes backend target using canonical format", () => {
+    expect(serializeBackendTarget({ kind: "status" })).toBe("status");
+    expect(serializeBackendTarget({ kind: "auto" })).toBe("auto");
+    expect(
+      serializeBackendTarget({
+        kind: "manual",
+        profile: { provider: "claude", model: "claude-sonnet-4-5" },
+      }),
+    ).toBe("claude:claude-sonnet-4-5");
   });
 });

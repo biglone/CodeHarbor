@@ -223,6 +223,43 @@ describe("loadConfig BACKEND_MODEL_ROUTING_RULES_JSON", () => {
   });
 });
 
+describe("loadConfig CONTEXT_BRIDGE settings", () => {
+  it("uses default bridge limits", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.contextBridgeHistoryLimit).toBe(16);
+    expect(config.contextBridgeMaxChars).toBe(8000);
+  });
+
+  it("parses custom bridge limits", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        CONTEXT_BRIDGE_HISTORY_LIMIT: "24",
+        CONTEXT_BRIDGE_MAX_CHARS: "12000",
+      }),
+    );
+    expect(config.contextBridgeHistoryLimit).toBe(24);
+    expect(config.contextBridgeMaxChars).toBe(12000);
+  });
+
+  it("rejects invalid bridge limits", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          CONTEXT_BRIDGE_HISTORY_LIMIT: "0",
+        }),
+      ),
+    ).toThrow(/CONTEXT_BRIDGE_HISTORY_LIMIT/i);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          CONTEXT_BRIDGE_MAX_CHARS: "120",
+        }),
+      ),
+    ).toThrow(/CONTEXT_BRIDGE_MAX_CHARS/i);
+  });
+});
+
 describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("uses safe defaults", () => {
     const config = loadConfig(createBaseEnv());

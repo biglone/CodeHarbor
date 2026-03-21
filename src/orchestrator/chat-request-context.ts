@@ -94,6 +94,8 @@ interface ChatRequestRuntimeContextInput {
 export function buildChatRequestDispatchContextFromRuntime(
   input: ChatRequestRuntimeContextInput,
 ): ChatRequestDispatchContext {
+  const contextBridgeHistoryLimit = Math.max(1, Math.floor(input.contextBridgeHistoryLimit));
+  const contextBridgeMaxChars = Math.max(0, Math.floor(input.contextBridgeMaxChars));
   return buildChatRequestDispatchContext({
     logger: input.logger,
     sessionActiveWindowMs: input.sessionActiveWindowMs,
@@ -111,8 +113,8 @@ export function buildChatRequestDispatchContextFromRuntime(
     recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(input.cliCompatRecorder, input.logger, entry),
     buildConversationBridgeContext: (sessionKey) =>
       runBuildConversationBridgeContext({
-        messages: input.stateStore.listRecentConversationMessages(sessionKey, input.contextBridgeHistoryLimit),
-        maxChars: input.contextBridgeMaxChars,
+        messages: input.stateStore.listRecentConversationMessages(sessionKey, contextBridgeHistoryLimit),
+        maxChars: contextBridgeMaxChars,
       }),
     transcribeAudioAttachments: input.transcribeAudioAttachments,
     prepareImageAttachments: input.prepareImageAttachments,

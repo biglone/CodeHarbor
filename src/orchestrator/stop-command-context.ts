@@ -10,6 +10,7 @@ interface StopCommandContextInput {
   stateStore: StopCommandDispatchContext["stateStore"];
   clearSessionFromAllRuntimes: StopCommandDispatchContext["clearSessionFromAllRuntimes"];
   sessionBackendProfiles: StopCommandDispatchContext["sessionBackendProfiles"];
+  sessionLastBackendDecisions: StopCommandDispatchContext["sessionLastBackendDecisions"];
   skipBridgeForNextPrompt: StopCommandDispatchContext["skipBridgeForNextPrompt"];
   getTaskQueueStateStore: StopCommandDispatchContext["getTaskQueueStateStore"];
   runningExecutions: StopCommandDispatchContext["runningExecutions"];
@@ -28,6 +29,7 @@ export function buildStopCommandDispatchContext(input: StopCommandContextInput):
     stateStore: input.stateStore,
     clearSessionFromAllRuntimes: input.clearSessionFromAllRuntimes,
     sessionBackendProfiles: input.sessionBackendProfiles,
+    sessionLastBackendDecisions: input.sessionLastBackendDecisions,
     skipBridgeForNextPrompt: input.skipBridgeForNextPrompt,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     runningExecutions: input.runningExecutions,

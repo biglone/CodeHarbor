@@ -149,6 +149,16 @@ const configSchema = z
       .transform((v) => v.toLowerCase() === "true"),
     ROOM_TRIGGER_POLICY_JSON: z.string().default(""),
     BACKEND_MODEL_ROUTING_RULES_JSON: z.string().default(""),
+    CONTEXT_BRIDGE_HISTORY_LIMIT: z
+      .string()
+      .default("16")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(1).max(100)),
+    CONTEXT_BRIDGE_MAX_CHARS: z
+      .string()
+      .default("8000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(200).max(40_000)),
     RATE_LIMIT_WINDOW_SECONDS: z
       .string()
       .default("60")
@@ -340,6 +350,8 @@ const configSchema = z
     },
     roomTriggerPolicies: parseRoomTriggerPolicyOverrides(v.ROOM_TRIGGER_POLICY_JSON),
     backendModelRoutingRules: parseBackendModelRoutingRules(v.BACKEND_MODEL_ROUTING_RULES_JSON),
+    contextBridgeHistoryLimit: v.CONTEXT_BRIDGE_HISTORY_LIMIT,
+    contextBridgeMaxChars: v.CONTEXT_BRIDGE_MAX_CHARS,
     rateLimiter: {
       windowMs: v.RATE_LIMIT_WINDOW_SECONDS * 1000,
       maxRequestsPerUser: v.RATE_LIMIT_MAX_REQUESTS_PER_USER,

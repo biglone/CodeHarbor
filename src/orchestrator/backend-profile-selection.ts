@@ -14,10 +14,23 @@ export function resolveSessionBackendStatusProfile(input: {
   return input.sessionBackendProfiles.get(input.sessionKey) ?? input.defaultBackendProfile;
 }
 
-export function resolveManualBackendProfile(provider: "codex" | "claude", defaultBackendProfile: BackendModelRouteProfile): BackendModelRouteProfile {
-  const model = provider === defaultBackendProfile.provider ? defaultBackendProfile.model : null;
+export function resolveManualBackendProfile(
+  input: {
+    provider: "codex" | "claude";
+    model?: string | null;
+  },
+  defaultBackendProfile: BackendModelRouteProfile,
+): BackendModelRouteProfile {
+  const normalizedInputModel = typeof input.model === "string" ? input.model.trim() || null : null;
+  if (normalizedInputModel !== null) {
+    return {
+      provider: input.provider,
+      model: normalizedInputModel,
+    };
+  }
+  const model = input.provider === defaultBackendProfile.provider ? defaultBackendProfile.model : null;
   return {
-    provider,
+    provider: input.provider,
     model,
   };
 }

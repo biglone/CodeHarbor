@@ -122,8 +122,8 @@ export async function tryAutoDevTaskRelease(input: {
 
     const commitSubject = `release: v${releaseVersion} [publish-npm]`;
     const commitBody = [
-      `Task: ${input.task.id} ${input.task.description}`,
-      `AutoDev-Task-Commit: ${input.gitCommit.commitHash}`,
+      `Task-ID: ${input.task.id}`,
+      `Task-Commit: ${input.gitCommit.commitHash}`,
       "Generated-by: CodeHarbor AutoDev",
     ].join("\n");
     await runGitCommand(input.workdir, [
@@ -248,7 +248,7 @@ async function upsertChangelogRelease(workdir: string, version: string, task: Au
   const changelogPath = path.join(workdir, CHANGELOG_FILE);
   const today = new Date().toISOString().slice(0, 10);
   const header = `## [${version}] - ${today}`;
-  const bullet = `- AutoDev 大功能完成：${task.id} ${task.description}`;
+  const bullet = `- AutoDev feature delivered: ${task.id}`;
   const content = await readOptionalFile(changelogPath);
   if (!content) {
     const initial = [

@@ -790,6 +790,42 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("升级任务完成"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("已安装版本: 0.1.34"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("升级校验: 通过"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("失败恢复命令: codeharbor self-update --version 0.1.34 --skip-restart"))).toBe(true);
+  });
+
+  it("keeps /upgrade successful when version probe fails but self-update reports installed version", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const selfUpdateRunner = vi.fn(async () => ({
+      installedVersion: "0.1.34",
+      stdout: "",
+      stderr: "",
+    }));
+
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      upgradeAllowedUsers: ["@alice:example.com"],
+      selfUpdateRunner,
+      upgradeRestartPlanner: async () => ({
+        summary: "test-noop",
+        apply: async () => {},
+      }),
+      upgradeVersionProbe: async () => ({
+        version: null,
+        source: "probe-failed",
+        error: "timeout",
+      }),
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/upgrade 0.1.34" }));
+
+    expect(executor.calls).toHaveLength(0);
+    expect(selfUpdateRunner).toHaveBeenCalledWith({ version: "0.1.34" });
+    expect(channel.notices.some((entry) => entry.text.includes("升级任务完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("source=self-update output"))).toBe(true);
   });
 
   it("reports post-check failure when installed version mismatches target", async () => {
@@ -825,6 +861,7 @@ describe("Matrix e2e regression", () => {
     expect(selfUpdateRunner).toHaveBeenCalledWith({ version: "0.1.34" });
     expect(channel.notices.some((entry) => entry.text.includes("升级后校验失败"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("期望 0.1.34，实际 0.1.33"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("回滚命令: codeharbor self-update --version 0.1.33 --skip-restart"))).toBe(true);
   });
 
   it("supports plain-text upgrade alias and rejects unauthorized users", async () => {
@@ -986,6 +1023,7 @@ describe("Matrix e2e regression", () => {
     expect(failureNotice?.text).toContain("Root privileges are required");
     expect(failureNotice?.text).not.toContain("ExperimentalWarning");
     expect(failureNotice?.text).not.toContain("--trace-warnings");
+    expect(failureNotice?.text).toContain("回滚命令: codeharbor self-update --version <previous-version> --skip-restart");
   });
 
   it("shows runtime diagnosis for /diag version command", async () => {
@@ -1225,13 +1263,13 @@ describe("Matrix e2e regression", () => {
     });
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first" }));
-    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude claude-sonnet-4-5" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second" }));
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
 
     expect(codexExecutor.calls).toHaveLength(1);
     expect(claudeExecutor.calls).toHaveLength(1);
-    expect(executorFactory).toHaveBeenCalledWith("claude", null);
+    expect(executorFactory).toHaveBeenCalledWith("claude", "claude-sonnet-4-5");
     expect(channel.notices.some((entry) => entry.text.includes("已切换后端工具为 claude"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("AI CLI: claude"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text === "from-codex")).toBe(true);
@@ -1239,6 +1277,128 @@ describe("Matrix e2e regression", () => {
     expect(claudeExecutor.calls[0]?.prompt).toContain("[conversation_bridge]");
     expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] user: first");
     expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] assistant: from-codex");
+  });
+
+  it("pins same backend profile without resetting active session", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      aiCliModel: "gpt-5.4",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend codex" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second" }));
+
+    expect(executor.calls).toHaveLength(2);
+    expect(executor.calls[1]?.sessionId).toBe("thread-1");
+    expect(executor.calls[1]?.prompt).not.toContain("[conversation_bridge]");
+    expect(channel.notices.some((entry) => entry.text.includes("当前会话保持不变"))).toBe(true);
+  });
+
+  it("keeps backend status reason consistent after switching back to auto mode", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "thread-codex", reply: "from-codex" }),
+      cancel: () => {},
+    }));
+    const claudeExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "session-claude", reply: "from-claude" }),
+      cancel: () => {},
+    }));
+    const store = new InMemoryStateStore();
+    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+      provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
+    );
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      executorFactory: executorFactory as never,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend auto" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/status" }));
+
+    const statusNotice = channel.notices.find((entry) => entry.text.includes("当前状态"));
+    expect(statusNotice).toBeDefined();
+    expect(statusNotice?.text).toContain("backend route: mode=auto, reason=default_fallback, rule=none");
+    expect(statusNotice?.text).not.toContain("backend route: mode=auto, reason=manual_override");
+  });
+
+  it("applies configurable conversation bridge history window after backend switch", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "thread-codex", reply: `ok:${input.prompt}` }),
+      cancel: () => {},
+    }));
+    const claudeExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "session-claude", reply: `claude:${input.prompt}` }),
+      cancel: () => {},
+    }));
+    const store = new InMemoryStateStore();
+    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+      provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
+    );
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      executorFactory: executorFactory as never,
+      contextBridgeHistoryLimit: 2,
+      contextBridgeMaxChars: 8000,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first-context" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second-context" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "third-context" }));
+
+    expect(claudeExecutor.calls).toHaveLength(1);
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[conversation_bridge]");
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] user: second-context");
+    expect(claudeExecutor.calls[0]?.prompt).toContain("[codex] assistant: ok:second-context");
+    expect(claudeExecutor.calls[0]?.prompt).not.toContain("[codex] user: first-context");
+  });
+
+  it("keeps bridge suppression after /stop even when backend is switched", async () => {
+    const channel = new FakeChannel();
+    const codexExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "thread-codex", reply: `ok:${input.prompt}` }),
+      cancel: () => {},
+    }));
+    const claudeExecutor = new ScriptedExecutor((input) => ({
+      result: Promise.resolve({ sessionId: input.sessionId ?? "thread-claude", reply: `claude:${input.prompt}` }),
+      cancel: () => {},
+    }));
+    const store = new InMemoryStateStore();
+    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+      provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
+    );
+    const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      aiCliProvider: "codex",
+      executorFactory: executorFactory as never,
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "first" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/stop" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/backend claude" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "second" }));
+
+    expect(claudeExecutor.calls).toHaveLength(1);
+    expect(claudeExecutor.calls[0]?.prompt).not.toContain("[conversation_bridge]");
   });
 
   it("auto-retries without images when claude image execution fails", async () => {

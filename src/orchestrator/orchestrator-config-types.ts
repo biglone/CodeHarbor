@@ -50,6 +50,8 @@ export interface OrchestratorOptions {
   aiCliProvider?: "codex" | "claude";
   aiCliModel?: string | null;
   backendModelRoutingRules?: BackendModelRouteRule[];
+  contextBridgeHistoryLimit?: number;
+  contextBridgeMaxChars?: number;
   matrixAdminUsers?: string[];
   executorFactory?: (provider: "codex" | "claude", model?: string | null) => CodexExecutor;
   upgradeAllowedUsers?: string[];

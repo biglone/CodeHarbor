@@ -20,6 +20,7 @@ interface StopCommandDeps {
   stateStore: StateStoreLike;
   clearSessionFromAllRuntimes: (sessionKey: string) => void;
   sessionBackendProfiles: Map<string, unknown>;
+  sessionLastBackendDecisions: Map<string, unknown>;
   skipBridgeForNextPrompt: Set<string>;
   getTaskQueueStateStore: () => { clearPendingTasks: (sessionKey: string) => { cancelledPending: number } } | null;
   runningExecutions: Map<string, RunningExecutionLike>;
@@ -43,6 +44,7 @@ export async function handleStopCommand(deps: StopCommandDeps, input: StopComman
   deps.stateStore.clearCodexSessionId(input.sessionKey);
   deps.clearSessionFromAllRuntimes(input.sessionKey);
   deps.sessionBackendProfiles.delete(input.sessionKey);
+  deps.sessionLastBackendDecisions.delete(input.sessionKey);
   deps.skipBridgeForNextPrompt.add(input.sessionKey);
 
   const queueStore = deps.getTaskQueueStateStore();

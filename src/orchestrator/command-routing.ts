@@ -21,6 +21,11 @@ export type DiagTarget =
   | { kind: "queue"; limit: number }
   | { kind: "help" };
 
+export type BackendTarget =
+  | { kind: "status" }
+  | { kind: "auto" }
+  | { kind: "manual"; profile: BackendModelRouteProfile };
+
 export function parseControlCommand(text: string): ControlCommand | null {
   const normalized = text.trim().toLowerCase();
   if (normalized === "help" || normalized === "帮助" || normalized === "菜单") {
@@ -96,25 +101,60 @@ export function parseDiagTarget(text: string): DiagTarget | null {
   return null;
 }
 
-export function parseBackendTarget(text: string): "codex" | "claude" | "auto" | "status" | null {
-  const tokens = text.trim().split(/\s+/);
-  if (tokens.length < 2) {
-    return "status";
+export function parseBackendTarget(text: string): BackendTarget | null {
+  const tokens = text
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) {
+    return { kind: "status" };
   }
-  const value = tokens[1]?.toLowerCase() ?? "";
-  if (value === "codex") {
-    return "codex";
+  const backendTokenIndex = tokens.findIndex((token) => normalizeSlashCommandToken(token) === "/backend");
+  if (backendTokenIndex < 0) {
+    return null;
   }
-  if (value === "claude") {
-    return "claude";
+  const args = tokens.slice(backendTokenIndex + 1);
+  if (args.length === 0) {
+    return { kind: "status" };
   }
-  if (value === "auto") {
-    return "auto";
+
+  const firstToken = args[0] ?? "";
+  const firstLower = firstToken.toLowerCase();
+  if (firstLower === "status") {
+    return args.length === 1 ? { kind: "status" } : null;
   }
-  if (value === "status") {
-    return "status";
+  if (firstLower === "auto") {
+    return args.length === 1 ? { kind: "auto" } : null;
   }
-  return null;
+
+  let providerToken = firstLower;
+  let modelToken: string | undefined;
+  const compositeMatch = firstToken.match(/^([^:/]+)[:/](.+)$/);
+  if (compositeMatch) {
+    providerToken = compositeMatch[1]?.trim().toLowerCase() ?? "";
+    modelToken = compositeMatch[2]?.trim() ?? "";
+    if (args.length > 1) {
+      return null;
+    }
+  } else if (args.length >= 2) {
+    modelToken = args[1];
+    if (args.length > 2) {
+      return null;
+    }
+  }
+
+  const provider = normalizeBackendProviderToken(providerToken);
+  if (!provider) {
+    return null;
+  }
+  const model = normalizeBackendModelToken(modelToken);
+  return {
+    kind: "manual",
+    profile: {
+      provider,
+      model,
+    },
+  };
 }
 
 export function classifyBackendTaskType(
@@ -147,6 +187,16 @@ export function normalizeBackendProfile(profile: BackendModelRouteProfile): Back
     provider: profile.provider,
     model: profile.model?.trim() || null,
   };
+}
+
+export function serializeBackendTarget(target: BackendTarget): string {
+  if (target.kind !== "manual") {
+    return target.kind;
+  }
+  if (!target.profile.model) {
+    return target.profile.provider;
+  }
+  return `${target.profile.provider}:${target.profile.model}`;
 }
 
 export function isSameBackendProfile(left: BackendModelRouteProfile, right: BackendModelRouteProfile): boolean {
@@ -227,4 +277,19 @@ function parseDiagTargetWithLimit<K extends DiagTarget["kind"]>(
     kind,
     limit: parsed,
   } as Extract<DiagTarget, { kind: K }>;
+}
+
+function normalizeBackendProviderToken(token: string): BackendModelRouteProfile["provider"] | null {
+  if (token === "codex" || token === "claude") {
+    return token;
+  }
+  return null;
+}
+
+function normalizeBackendModelToken(token: string | undefined): string | null {
+  if (typeof token !== "string") {
+    return null;
+  }
+  const normalized = token.trim();
+  return normalized.length > 0 ? normalized : null;
 }

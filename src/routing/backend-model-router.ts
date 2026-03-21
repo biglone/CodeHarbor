@@ -101,6 +101,7 @@ export class BackendModelRouter {
   }
 
   resolve(input: BackendModelRouteInput, fallback: BackendModelRouteProfile): BackendModelRouteDecision {
+    const normalizedFallback = normalizeBackendModelRouteProfile(fallback);
     for (const rule of this.rules) {
       if (!rule.enabled) {
         continue;
@@ -109,12 +110,12 @@ export class BackendModelRouter {
         continue;
       }
 
-      const provider = rule.target.provider ?? fallback.provider;
+      const provider = rule.target.provider ?? normalizedFallback.provider;
       let model: string | null;
       if (rule.target.model !== undefined) {
         model = normalizeModel(rule.target.model);
-      } else if (provider === fallback.provider) {
-        model = fallback.model;
+      } else if (provider === normalizedFallback.provider) {
+        model = normalizedFallback.model;
       } else {
         model = null;
       }
@@ -127,7 +128,7 @@ export class BackendModelRouter {
     }
 
     return {
-      profile: fallback,
+      profile: normalizedFallback,
       source: "default",
       reasonCode: "default_fallback",
       ruleId: null,
@@ -183,4 +184,11 @@ function normalizeModel(model: string | null | undefined): string | null {
   }
   const normalized = model.trim();
   return normalized ? normalized : null;
+}
+
+export function normalizeBackendModelRouteProfile(profile: BackendModelRouteProfile): BackendModelRouteProfile {
+  return {
+    provider: profile.provider,
+    model: normalizeModel(profile.model),
+  };
 }

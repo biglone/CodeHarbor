@@ -89,6 +89,8 @@ export class CodeHarborApp {
       aiCliProvider: config.aiCliProvider,
       aiCliModel: config.codexModel,
       backendModelRoutingRules: config.backendModelRoutingRules,
+      contextBridgeHistoryLimit: config.contextBridgeHistoryLimit,
+      contextBridgeMaxChars: config.contextBridgeMaxChars,
       matrixAdminUsers: config.matrixAdminUsers,
       upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,

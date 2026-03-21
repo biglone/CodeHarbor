@@ -2,6 +2,7 @@ import type { Mutex } from "async-mutex";
 
 import type { Logger } from "../logger";
 import type { InboundMessage } from "../types";
+import { buildUpgradeRecoveryAdvice, type UpgradeRecoveryAdvice } from "../upgrade-platform";
 import { parseUpgradeTarget } from "./command-routing";
 import { formatDurationMs } from "./helpers";
 import {
@@ -68,21 +69,29 @@ export async function handleUpgradeCommand(
   const startedAt = Date.now();
   await deps.sendNotice(
     message.conversationId,
-    `${deps.botNoticePrefix} 已开始升级（目标: ${targetLabel}），将安装 npm 最新包并自动重启服务。`,
+    `${deps.botNoticePrefix} 已开始升级（目标: ${targetLabel}），将安装 npm 包并按平台策略重启（失败时给出回滚命令）。`,
   );
 
   try {
     await deps.upgradeMutex.runExclusive(async () => {
+      const baselineVersionProbe = await safeProbeVersion(deps.upgradeVersionProbe);
       try {
         const result = await deps.selfUpdateRunner({
           version: parsed.version,
         });
         const restartPlan = await deps.upgradeRestartPlanner();
-        const versionProbe = await deps.upgradeVersionProbe();
+        const versionProbe = await safeProbeVersion(deps.upgradeVersionProbe);
         const postCheck = evaluateUpgradePostCheck({
           targetVersion: parsed.version,
           selfUpdateVersion: result.installedVersion,
           versionProbe,
+        });
+        const recoveryAdvice = buildUpgradeRecoveryAdvice({
+          previousVersion: baselineVersionProbe.version,
+          targetVersion: parsed.version,
+          installedVersion: postCheck.installedVersion,
+          includeAdminService: true,
+          manualRestartCommands: restartPlan.manualCommands ?? null,
         });
         const elapsed = formatDurationMs(Date.now() - startedAt);
         if (postCheck.ok) {
@@ -90,10 +99,13 @@ export async function handleUpgradeCommand(
           await deps.sendNotice(
             message.conversationId,
             `${deps.botNoticePrefix} 升级任务完成（耗时 ${elapsed}）
+- 状态: success
 - 目标版本: ${targetLabel}
 - 已安装版本: ${installedVersion}
 - 升级校验: 通过（${postCheck.checkDetail}）
 - 服务重启: ${restartPlan.summary}
+- 失败恢复命令: ${recoveryAdvice.rollbackCommand}
+- 重启命令: ${formatRestartCommandSummary(recoveryAdvice)}
 - 校验建议: 稍后发送 /diag version 或 /version`,
           );
           deps.finishUpgradeRun(upgradeRunId, {
@@ -106,11 +118,14 @@ export async function handleUpgradeCommand(
           await deps.sendNotice(
             message.conversationId,
             `${deps.botNoticePrefix} 升级后校验失败（耗时 ${elapsed}）
+- 状态: failed
 - 目标版本: ${targetLabel}
 - 观测版本: ${observedVersion}
 - 失败原因: ${postCheck.checkDetail}
 - 服务重启: ${restartPlan.summary}
-- 恢复建议: 发送 /diag version 查看实例路径；必要时执行 codeharbor self-update --with-admin`,
+- 回滚命令: ${recoveryAdvice.rollbackCommand}
+- 重启命令: ${formatRestartCommandSummary(recoveryAdvice)}
+- 诊断命令: /diag upgrade 5`,
           );
           deps.finishUpgradeRun(upgradeRunId, {
             status: "failed",
@@ -126,11 +141,19 @@ export async function handleUpgradeCommand(
       } catch (error) {
         const errorText = formatSelfUpdateError(error);
         const elapsed = formatDurationMs(Date.now() - startedAt);
+        const recoveryAdvice = buildUpgradeRecoveryAdvice({
+          previousVersion: baselineVersionProbe.version,
+          targetVersion: parsed.version,
+          installedVersion: null,
+          includeAdminService: true,
+        });
         await deps.sendNotice(
           message.conversationId,
           `${deps.botNoticePrefix} 升级失败（耗时 ${elapsed}）
 - 错误: ${errorText}
-- 兜底命令: codeharbor self-update --with-admin`,
+- 回滚命令: ${recoveryAdvice.rollbackCommand}
+- 重启命令: ${formatRestartCommandSummary(recoveryAdvice)}
+- 诊断命令: /diag upgrade 5`,
         );
         deps.finishUpgradeRun(upgradeRunId, {
           status: "failed",
@@ -142,4 +165,25 @@ export async function handleUpgradeCommand(
   } finally {
     deps.releaseUpgradeExecutionLock();
   }
+}
+
+async function safeProbeVersion(
+  probe: () => Promise<UpgradeVersionProbeResult>,
+): Promise<UpgradeVersionProbeResult> {
+  try {
+    return await probe();
+  } catch (error) {
+    return {
+      version: null,
+      source: "probe-failed",
+      error: formatSelfUpdateError(error),
+    };
+  }
+}
+
+function formatRestartCommandSummary(recoveryAdvice: UpgradeRecoveryAdvice): string {
+  if (recoveryAdvice.restartCommands.length === 0) {
+    return "N/A";
+  }
+  return recoveryAdvice.restartCommands.join(" || ");
 }

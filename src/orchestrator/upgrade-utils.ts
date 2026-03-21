@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 import type { Logger } from "../logger";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord } from "../store/state-store";
+import { buildManualRestartCommands, resolveLaunchdLabelConfig, resolveUpgradePlatform } from "../upgrade-platform";
 import { formatError } from "./helpers";
 
 const execFileAsync = promisify(execFile);
@@ -24,6 +25,7 @@ export interface UpgradeVersionProbeResult {
 export interface UpgradeRestartPlan {
   summary: string;
   apply: () => Promise<void>;
+  manualCommands?: string[];
 }
 
 export async function runSelfUpdateCommand(input: { version: string | null; timeoutMs: number }): Promise<SelfUpdateResult> {
@@ -70,37 +72,67 @@ export async function runSelfUpdateCommand(input: { version: string | null; time
 }
 
 export async function buildDefaultUpgradeRestartPlan(input: { logger: Logger }): Promise<UpgradeRestartPlan> {
-  if (process.platform !== "linux") {
+  const platform = resolveUpgradePlatform();
+  if (platform === "linux") {
+    return buildLinuxUpgradeRestartPlan(input);
+  }
+  if (platform === "macos") {
+    return buildMacosUpgradeRestartPlan(input);
+  }
+  if (platform === "windows") {
     return {
-      summary: "已跳过（非 Linux 平台）",
+      summary: "需手工重启（Windows Service）",
       apply: async () => {},
+      manualCommands: buildManualRestartCommands({
+        platform: "win32",
+        includeAdminService: true,
+      }),
     };
   }
+  return {
+    summary: `需手工重启（平台 ${process.platform}）`,
+    apply: async () => {},
+    manualCommands: buildManualRestartCommands({
+      platform: process.platform,
+      includeAdminService: true,
+    }),
+  };
+}
+
+async function buildLinuxUpgradeRestartPlan(input: { logger: Logger }): Promise<UpgradeRestartPlan> {
+  const manualCommands = buildManualRestartCommands({
+    platform: "linux",
+    includeAdminService: true,
+  });
   if (!(await isSystemctlCommandAvailable())) {
     return {
-      summary: "已跳过（未检测到 systemctl）",
+      summary: "需手工重启（未检测到 systemctl）",
       apply: async () => {},
+      manualCommands,
     };
   }
 
   const hasMainService = await isSystemdUnitInstalled("codeharbor.service");
   if (!hasMainService) {
     return {
-      summary: "已跳过（未检测到 codeharbor.service）",
+      summary: "需手工重启（未检测到 codeharbor.service）",
       apply: async () => {},
+      manualCommands: ["codeharbor start"],
     };
   }
   const hasAdminService = await isSystemdUnitInstalled("codeharbor-admin.service");
 
   if (!isLikelySystemdServiceProcess()) {
     return {
-      summary: "已跳过（当前非 systemd 服务上下文）",
+      summary: "需手工重启（当前非 systemd 服务上下文）",
       apply: async () => {},
+      manualCommands,
     };
   }
 
   return {
-    summary: `已触发（signal${hasAdminService ? ", main+admin" : ", main"}）`,
+    summary: `已触发（systemd signal${hasAdminService ? ", main+admin" : ", main"}）`,
+    manualCommands,
     apply: async () => {
       if (hasAdminService) {
         const adminPid = await readSystemdUnitMainPid("codeharbor-admin.service");
@@ -121,6 +153,46 @@ export async function buildDefaultUpgradeRestartPlan(input: { logger: Logger }):
           process.kill(process.pid, "SIGTERM");
         } catch (error) {
           input.logger.warn("Failed to signal current process for restart", { error });
+        }
+      }, 1200);
+      timer.unref?.();
+    },
+  };
+}
+
+async function buildMacosUpgradeRestartPlan(input: { logger: Logger }): Promise<UpgradeRestartPlan> {
+  const launchdLabels = resolveLaunchdLabelConfig();
+  const manualCommands = buildManualRestartCommands({
+    platform: "darwin",
+    includeAdminService: true,
+    launchdLabels,
+  });
+
+  if (!(await isLaunchctlCommandAvailable())) {
+    return {
+      summary: "需手工重启（未检测到 launchctl）",
+      apply: async () => {},
+      manualCommands,
+    };
+  }
+
+  if (!isLikelyLaunchdProcess()) {
+    return {
+      summary: "需手工重启（当前非 launchd 服务上下文）",
+      apply: async () => {},
+      manualCommands,
+    };
+  }
+
+  return {
+    summary: "已触发（launchd signal, main）",
+    manualCommands,
+    apply: async () => {
+      const timer = setTimeout(() => {
+        try {
+          process.kill(process.pid, "SIGTERM");
+        } catch (error) {
+          input.logger.warn("Failed to signal current process for launchd restart", { error });
         }
       }, 1200);
       timer.unref?.();
@@ -281,6 +353,19 @@ async function isSystemctlCommandAvailable(): Promise<boolean> {
   }
 }
 
+async function isLaunchctlCommandAvailable(): Promise<boolean> {
+  try {
+    await execFileAsync("launchctl", ["help"], {
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+      env: process.env,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function isSystemdUnitInstalled(unitName: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync("systemctl", ["list-unit-files", unitName, "--no-legend"], {
@@ -325,6 +410,10 @@ function isLikelySystemdServiceProcess(env: NodeJS.ProcessEnv = process.env): bo
   return Boolean(env.INVOCATION_ID || env.SYSTEMD_EXEC_PID || env.JOURNAL_STREAM);
 }
 
+function isLikelyLaunchdProcess(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.LAUNCHD_JOB_LABEL || env.__CFBundleIdentifier);
+}
+
 function resolveSelfUpdateInvocations(): Array<{ file: string; prefixArgs: string[]; label: string }> {
   const candidates: Array<{ file: string; prefixArgs: string[]; label: string }> = [];
 
@@ -365,9 +454,22 @@ function resolveSelfUpdateInvocations(): Array<{ file: string; prefixArgs: strin
   return uniqueCandidates;
 }
 
-function parseInstalledVersionFromSelfUpdateOutput(output: string): string | null {
-  const match = output.match(/Installed version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/i);
-  return match?.[1] ?? null;
+export function parseInstalledVersionFromSelfUpdateOutput(output: string): string | null {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!/installed\s*version\s*:|installedversion\s*:/i.test(line)) {
+      continue;
+    }
+    const parsed = parseSemanticVersion(line);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function parseSemanticVersion(text: string): string | null {

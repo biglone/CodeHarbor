@@ -13,6 +13,10 @@ export function buildConversationBridgeContext(input: BuildConversationBridgeCon
   if (input.messages.length === 0) {
     return null;
   }
+  const maxChars = Math.max(0, Math.floor(input.maxChars));
+  if (maxChars <= 0) {
+    return null;
+  }
 
   const lines = input.messages
     .map((message) => {
@@ -30,8 +34,14 @@ export function buildConversationBridgeContext(input: BuildConversationBridgeCon
   let usedChars = 0;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
-    if (usedChars + line.length + 1 > input.maxChars) {
-      continue;
+    if (usedChars + line.length + 1 > maxChars) {
+      if (selected.length === 0 && maxChars > 16) {
+        const clipped = `${line.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+        if (clipped.length > 0) {
+          selected.push(clipped);
+        }
+      }
+      break;
     }
     selected.push(line);
     usedChars += line.length + 1;

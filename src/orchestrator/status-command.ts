@@ -143,8 +143,16 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
   const backendProfile = deps.resolveSessionBackendStatusProfile(input.sessionKey);
   const backendRouteMode = deps.hasSessionBackendOverride(input.sessionKey) ? "manual" : "auto";
   const backendDecision = deps.getSessionBackendDecision(input.sessionKey);
-  const backendRouteReason = backendRouteMode === "manual" ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
-  const backendRouteRuleId = backendDecision?.ruleId ?? "none";
+  const backendRouteReasonRaw =
+    backendRouteMode === "manual" ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
+  const backendRouteReason =
+    backendRouteMode === "auto" && backendRouteReasonRaw === "manual_override"
+      ? "default_fallback"
+      : backendRouteReasonRaw;
+  const backendRouteRuleId =
+    backendRouteMode === "auto" && backendRouteReasonRaw === "manual_override"
+      ? "none"
+      : backendDecision?.ruleId ?? "none";
   const backendRouteReasonDesc = describeBackendRouteReason(backendRouteReason);
   const backendRouteFallback = isBackendRouteFallbackReason(backendRouteReason) ? "yes" : "no";
 

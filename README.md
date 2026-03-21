@@ -24,7 +24,7 @@ Quick feedback:
 - Duplicate Matrix event protection
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
 - Room-level trigger policy overrides
-- Runtime backend switch: `/backend codex|claude|auto|status`
+- Runtime backend switch: `/backend codex|claude [model] | /backend auto|status`
 - Cross-backend context bridge on next request after switch
 - Real `/stop` cancellation (kills in-flight AI CLI process)
 - Session runtime workers (logical worker per `channel:room:user`, with worker stats in `/status`)
@@ -111,8 +111,11 @@ Notes:
 - Service commands auto-elevate with `sudo` when root privileges are required.
 - `codeharbor service install --with-admin` and `install-linux-easy.sh --enable-admin-service` now install
   `/etc/sudoers.d/codeharbor-restart` for non-root service users, so Admin UI restart actions work out-of-box.
-- `npm install -g codeharbor@latest` now performs best-effort restart for active `codeharbor(.service)` units on Linux
-  so upgrades take effect immediately (set `CODEHARBOR_SKIP_POSTINSTALL_RESTART=1` to disable).
+- `npm install -g codeharbor@latest` now performs best-effort restart per platform:
+  - Linux: active `codeharbor(.service)` systemd units
+  - macOS: configured launchd labels (`CODEHARBOR_LAUNCHD_MAIN_LABEL`, `CODEHARBOR_LAUNCHD_ADMIN_LABEL`)
+  - Windows: safe fallback (prints manual PowerShell restart commands)
+  - set `CODEHARBOR_SKIP_POSTINSTALL_RESTART=1` to disable postinstall restart attempts.
 - If your environment blocks interactive `sudo`, use explicit fallback:
   - `sudo <node-bin> <codeharbor-cli-script> service ...`
 
@@ -178,8 +181,9 @@ Common in-chat control commands:
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
 - `/upgrade [version]` run self-update and auto-restart service from Matrix chat
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
-  - supports hardened systemd (`NoNewPrivileges=true`) by using signal-based restart fallback
-- `/backend codex|claude|auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
+  - supports Linux systemd signal restart fallback, macOS launchd/manual fallback, and Windows safe manual fallback
+  - emits structured success/failure summary with rollback and restart command templates
+- `/backend codex|claude [model] | /backend auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
 - `/reset` clear current conversation context
 - `/stop` cancel current running request
 
@@ -556,7 +560,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
-  - `/backend codex|claude|auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
+  - `/backend codex|claude [model] | /backend auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
   - `/reset` clear bound Codex session and keep conversation active
   - `/stop` cancel in-flight execution (if running) and reset session context
   - `/agents status` show multi-agent workflow status for current session (when enabled)
@@ -578,11 +582,15 @@ Version update check controls:
   - optional Matrix admin list used as `/upgrade` permission fallback when `MATRIX_UPGRADE_ALLOWED_USERS` is empty
 - `MATRIX_UPGRADE_ALLOWED_USERS=@admin:example.com,@ops:example.com`
   - optional explicit `/upgrade` allowlist (higher priority than `MATRIX_ADMIN_USERS`)
+- `CODEHARBOR_LAUNCHD_MAIN_LABEL=com.codeharbor.main`
+- `CODEHARBOR_LAUNCHD_ADMIN_LABEL=com.codeharbor.admin`
+  - optional launchd labels used by macOS upgrade/postinstall restart flow
 
 CLI update helper:
 
 - `codeharbor self-update`
-  - install latest npm package and attempt auto-restart for installed systemd service
+  - install latest npm package and run cross-platform restart strategy (Linux systemd / macOS launchd / Windows manual fallback)
+  - prints structured result summary with rollback + restart command templates for failure recovery
 
 AI CLI backend controls:
 
@@ -599,8 +607,10 @@ AI CLI backend controls:
 Cross-backend context bridge behavior:
 
 - CodeHarbor stores recent local `user/assistant` turns per Matrix session.
-- After `/backend codex|claude|auto`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
+- After `/backend codex|claude [model]` or `/backend auto`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
 - `/reset` and `/stop` explicitly suppress this one-shot bridge on the immediate next request so users can start fresh.
+- `CONTEXT_BRIDGE_HISTORY_LIMIT` controls how many recent local turns are considered for bridge assembly.
+- `CONTEXT_BRIDGE_MAX_CHARS` controls the max bridge payload length (characters).
 
 Backend/model rule routing:
 
@@ -655,8 +665,8 @@ AutoDev (`/autodev`) conventions:
 - `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
-- When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <taskId> <task-summary>`.
-- AutoDev commit body includes `Task`, `Changed-files`, and `Generated-by` for traceability.
+- When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.
+- AutoDev commit body includes `Task-ID`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
 - If `TASK_LIST.md` has a release mapping row like `| T8.1 | v0.1.52 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
 - When CI detects that the target version already exists on npm, the release workflow skips publishing and prints `Suggested next version` to keep release flow idempotent.

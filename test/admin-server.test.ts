@@ -61,6 +61,8 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     },
     roomTriggerPolicies: {},
     backendModelRoutingRules: [],
+    contextBridgeHistoryLimit: 16,
+    contextBridgeMaxChars: 8000,
     rateLimiter: {
       windowMs: 60_000,
       maxRequestsPerUser: 20,

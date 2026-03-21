@@ -1,6 +1,6 @@
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { InboundMessage } from "../types";
-import { parseBackendTarget } from "./command-routing";
+import { isSameBackendProfile, parseBackendTarget } from "./command-routing";
 import { describeBackendRouteReason, isBackendRouteFallbackReason } from "./diagnostic-formatters";
 
 interface SessionBackendOverrideLike {
@@ -32,7 +32,10 @@ interface HandleBackendCommandDeps {
   stateStore: StateStoreLike;
   resolveSessionBackendStatusProfile: (sessionKey: string) => BackendModelRouteProfile;
   formatBackendToolLabel: (profile: BackendModelRouteProfile) => string;
-  resolveManualBackendProfile: (provider: "codex" | "claude") => BackendModelRouteProfile;
+  resolveManualBackendProfile: (input: {
+    provider: "codex" | "claude";
+    model?: string | null;
+  }) => BackendModelRouteProfile;
   serializeBackendProfile: (profile: BackendModelRouteProfile) => string;
   hasBackendRuntime: (profile: BackendModelRouteProfile) => boolean;
   ensureBackendRuntime: (profile: BackendModelRouteProfile) => void;
@@ -52,21 +55,22 @@ export async function handleBackendCommand(
   const target = parseBackendTarget(input.message.text);
   const manualOverride = deps.sessionBackendOverrides.get(input.sessionKey);
   const statusProfile = deps.resolveSessionBackendStatusProfile(input.sessionKey);
-  if (!target || target === "status") {
+  if (!target || target.kind === "status") {
     const mode = manualOverride ? "manual" : "auto";
     const decision = deps.sessionLastBackendDecisions.get(input.sessionKey);
-    const reason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
-    const rule = decision?.ruleId ?? "none";
+    const rawReason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
+    const reason = !manualOverride && rawReason === "manual_override" ? "default_fallback" : rawReason;
+    const rule = !manualOverride && rawReason === "manual_override" ? "none" : decision?.ruleId ?? "none";
     const reasonDesc = describeBackendRouteReason(reason);
     const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
     await deps.sendNotice(
       input.message.conversationId,
-      `[CodeHarbor] 当前后端工具: ${deps.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n原因说明: ${reasonDesc}\n命中规则: ${rule}\n是否回退: ${fallback}\n可用命令: /backend codex | /backend claude | /backend auto | /backend status`,
+      `[CodeHarbor] 当前后端工具: ${deps.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n原因说明: ${reasonDesc}\n命中规则: ${rule}\n是否回退: ${fallback}\n可用命令: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
     );
     return;
   }
 
-  if (target === "auto") {
+  if (target.kind === "auto") {
     if (!manualOverride) {
       await deps.sendNotice(input.message.conversationId, "[CodeHarbor] 当前已经处于自动路由模式。");
       return;
@@ -79,6 +83,7 @@ export async function handleBackendCommand(
       return;
     }
     deps.sessionBackendOverrides.delete(input.sessionKey);
+    deps.sessionLastBackendDecisions.delete(input.sessionKey);
     deps.stateStore.clearCodexSessionId(input.sessionKey);
     deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
     deps.clearSessionFromAllRuntimes(input.sessionKey);
@@ -92,7 +97,7 @@ export async function handleBackendCommand(
     return;
   }
 
-  const targetProfile = deps.resolveManualBackendProfile(target);
+  const targetProfile = deps.resolveManualBackendProfile(target.profile);
   if (
     manualOverride &&
     deps.serializeBackendProfile(manualOverride.profile) === deps.serializeBackendProfile(targetProfile)
@@ -100,6 +105,26 @@ export async function handleBackendCommand(
     await deps.sendNotice(
       input.message.conversationId,
       `[CodeHarbor] 后端工具已是 ${deps.formatBackendToolLabel(targetProfile)}（manual）。`,
+    );
+    return;
+  }
+
+  if (!manualOverride && isSameBackendProfile(statusProfile, targetProfile)) {
+    deps.sessionBackendOverrides.set(input.sessionKey, {
+      profile: targetProfile,
+      updatedAt: Date.now(),
+    });
+    deps.sessionBackendProfiles.set(input.sessionKey, targetProfile);
+    deps.sessionLastBackendDecisions.set(input.sessionKey, {
+      profile: targetProfile,
+      source: "manual_override",
+      reasonCode: "manual_override",
+      ruleId: null,
+    });
+    deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
+    await deps.sendNotice(
+      input.message.conversationId,
+      `[CodeHarbor] 已固定当前后端工具为 ${deps.formatBackendToolLabel(targetProfile)}（manual）。当前会话保持不变。`,
     );
     return;
   }

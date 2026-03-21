@@ -19,7 +19,7 @@ export function buildHelpNotice(input: {
 - /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
 - /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
-- /backend codex|claude|auto|status: 查看/切换后端工具（auto=恢复自动路由）
+- /backend codex|claude [model] | /backend auto|status: 查看/切换后端工具（auto=恢复自动路由）
 - /reset: 清空当前会话上下文
 - /stop: 停止当前执行任务
 - Matrix 客户端若拦截 / 命令，可发送 //autodev run T6.2（兼容 //agents、//diag、//upgrade）

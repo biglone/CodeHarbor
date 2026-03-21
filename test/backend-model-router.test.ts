@@ -132,6 +132,27 @@ describe("BackendModelRouter", () => {
     });
   });
 
+  it("normalizes fallback profile model whitespace", () => {
+    const router = new BackendModelRouter([]);
+    const decision = router.resolve(
+      {
+        roomId: "!room:example.com",
+        senderId: "@alice:example.com",
+        taskType: "chat",
+        directMessage: true,
+        text: "hello",
+      },
+      {
+        provider: "codex",
+        model: " gpt-5.4 ",
+      },
+    );
+    expect(decision.profile).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+    });
+  });
+
   it("rejects invalid regex in rule definition", () => {
     expect(
       () =>

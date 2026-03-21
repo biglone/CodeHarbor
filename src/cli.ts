@@ -20,6 +20,12 @@ import {
   resolveRuntimeHomeForUser,
   uninstallSystemdServices,
 } from "./service-manager";
+import {
+  buildManualRestartCommands,
+  buildUpgradeRecoveryAdvice,
+  resolveLaunchdLabelConfig,
+  resolveUpgradePlatform,
+} from "./upgrade-platform";
 
 let runtimeHome: string | null = null;
 const cliVersion = resolveCliVersion();
@@ -60,7 +66,7 @@ program.addHelpText(
     "  - /diag media [count]",
     "  - /diag upgrade [count]",
     "  - /upgrade [version]",
-    "  - /backend codex|claude|status",
+    "  - /backend codex|claude [model] | /backend auto|status",
     "  - /autodev stop",
     "  - /reset",
     "  - /stop",
@@ -320,9 +326,14 @@ program
   .option("--with-admin", "also restart codeharbor-admin.service when installed")
   .option("--skip-restart", "skip service restart step after install")
   .action((options: { version?: string; withAdmin?: boolean; skipRestart?: boolean }) => {
+    const version = options.version?.trim();
+    const target = version ? `codeharbor@${version}` : "codeharbor@latest";
+    const includeAdminService = options.withAdmin ?? false;
+    const previousVersion = resolveInstalledCodeHarborVersion();
+    const fallbackRestartCommands = buildManualRestartCommands({
+      includeAdminService,
+    });
     try {
-      const version = options.version?.trim();
-      const target = version ? `codeharbor@${version}` : "codeharbor@latest";
       process.stdout.write(`[self-update] Installing ${target}...\n`);
       const installResult = spawnSync("npm", ["install", "-g", target], {
         stdio: "inherit",
@@ -335,36 +346,44 @@ program
       }
 
       const installedVersion = resolveInstalledCodeHarborVersion();
-      process.stdout.write(
-        `[self-update] Installed version: ${installedVersion ?? "(unknown, run codeharbor --version to verify)"}\n`,
-      );
-
-      if (options.skipRestart ?? false) {
-        process.stdout.write("[self-update] Skipping service restart.\n");
-        return;
-      }
-
-      if (process.platform !== "linux") {
-        process.stdout.write("[self-update] Non-Linux platform detected; skipped systemd restart.\n");
-        return;
-      }
-
-      const hasMainService = hasSystemdUnit("codeharbor.service");
-      const hasAdminService = hasSystemdUnit("codeharbor-admin.service");
-      if (!hasMainService) {
-        process.stdout.write("[self-update] No installed codeharbor.service found; skipped restart.\n");
-        return;
-      }
-
-      const restartAdmin = (options.withAdmin ?? false) && hasAdminService;
-      process.stdout.write(
-        `[self-update] Restarting service(s): codeharbor${restartAdmin ? ", codeharbor-admin" : ""}\n`,
-      );
-      restartSystemdServices({
-        restartAdmin,
+      const restartResult = runPostUpdateRestart({
+        includeAdminService,
+        skipRestart: options.skipRestart ?? false,
       });
+      const recoveryAdvice = buildUpgradeRecoveryAdvice({
+        previousVersion,
+        targetVersion: version ?? null,
+        installedVersion,
+        includeAdminService,
+        manualRestartCommands: restartResult.manualCommands,
+      });
+
+      process.stdout.write(`[self-update] 结果摘要\n`);
+      process.stdout.write(`- status: success\n`);
+      process.stdout.write(`- target: ${version ?? "latest"}\n`);
+      process.stdout.write(
+        `- installedVersion: ${installedVersion ?? "(unknown, run codeharbor --version to verify)"}\n`,
+      );
+      process.stdout.write(`- restart: ${restartResult.summary}\n`);
+      process.stdout.write(`- rollback: ${recoveryAdvice.rollbackCommand}\n`);
+      process.stdout.write(`- restartCommands: ${formatCommandSummary(recoveryAdvice.restartCommands)}\n`);
     } catch (error) {
-      process.stderr.write(`Self-update failed: ${formatError(error)}\n`);
+      const errorText = formatError(error);
+      const recoveryAdvice = buildUpgradeRecoveryAdvice({
+        previousVersion,
+        targetVersion: version ?? null,
+        installedVersion: null,
+        includeAdminService,
+        manualRestartCommands: fallbackRestartCommands,
+      });
+      process.stderr.write(`Self-update failed: ${errorText}\n`);
+      process.stderr.write(`[self-update] 结果摘要\n`);
+      process.stderr.write(`- status: failed\n`);
+      process.stderr.write(`- target: ${version ?? "latest"}\n`);
+      process.stderr.write(`- previousVersion: ${previousVersion ?? "(unknown)"}\n`);
+      process.stderr.write(`- rollback: ${recoveryAdvice.rollbackCommand}\n`);
+      process.stderr.write(`- restartCommands: ${formatCommandSummary(recoveryAdvice.restartCommands)}\n`);
+      process.stderr.write(`- error: ${errorText}\n`);
       process.exitCode = 1;
     }
   });
@@ -507,6 +526,208 @@ function hasSystemdUnit(unitName: string): boolean {
   return stdout
     .split(/\r?\n/)
     .some((line) => line.trim().startsWith(`${unit} `));
+}
+
+interface PostUpdateRestartResult {
+  summary: string;
+  manualCommands: string[];
+}
+
+function runPostUpdateRestart(input: {
+  includeAdminService: boolean;
+  skipRestart: boolean;
+}): PostUpdateRestartResult {
+  const platform = resolveUpgradePlatform();
+  if (platform === "linux") {
+    return runLinuxPostUpdateRestart(input);
+  }
+  if (platform === "macos") {
+    return runMacosPostUpdateRestart(input);
+  }
+  if (platform === "windows") {
+    return {
+      summary: input.skipRestart ? "已跳过（--skip-restart）" : "需手工重启（Windows Service）",
+      manualCommands: buildManualRestartCommands({
+        platform: "win32",
+        includeAdminService: input.includeAdminService,
+      }),
+    };
+  }
+  return {
+    summary: input.skipRestart ? "已跳过（--skip-restart）" : `需手工重启（平台 ${process.platform}）`,
+    manualCommands: buildManualRestartCommands({
+      platform: process.platform,
+      includeAdminService: input.includeAdminService,
+    }),
+  };
+}
+
+function runLinuxPostUpdateRestart(input: {
+  includeAdminService: boolean;
+  skipRestart: boolean;
+}): PostUpdateRestartResult {
+  const manualCommands = buildManualRestartCommands({
+    platform: "linux",
+    includeAdminService: input.includeAdminService,
+  });
+  if (input.skipRestart) {
+    return {
+      summary: "已跳过（--skip-restart）",
+      manualCommands,
+    };
+  }
+
+  if (!commandExistsSync("systemctl", ["--version"])) {
+    return {
+      summary: "需手工重启（未检测到 systemctl）",
+      manualCommands,
+    };
+  }
+
+  const hasMainService = hasSystemdUnit("codeharbor.service");
+  if (!hasMainService) {
+    return {
+      summary: "需手工重启（未检测到 codeharbor.service）",
+      manualCommands: ["codeharbor start"],
+    };
+  }
+  const hasAdminService = hasSystemdUnit("codeharbor-admin.service");
+  const restartAdmin = input.includeAdminService && hasAdminService;
+  try {
+    restartSystemdServices({
+      restartAdmin,
+    });
+    return {
+      summary: `已自动重启（systemd${restartAdmin ? ", main+admin" : ", main"}）`,
+      manualCommands,
+    };
+  } catch (error) {
+    return {
+      summary: `自动重启失败（${formatError(error)}）`,
+      manualCommands,
+    };
+  }
+}
+
+function runMacosPostUpdateRestart(input: {
+  includeAdminService: boolean;
+  skipRestart: boolean;
+}): PostUpdateRestartResult {
+  const launchdLabels = resolveLaunchdLabelConfig();
+  const manualCommands = buildManualRestartCommands({
+    platform: "darwin",
+    includeAdminService: input.includeAdminService,
+    launchdLabels,
+  });
+  if (input.skipRestart) {
+    return {
+      summary: "已跳过（--skip-restart）",
+      manualCommands,
+    };
+  }
+
+  if (!commandExistsSync("launchctl", ["help"])) {
+    return {
+      summary: "需手工重启（未检测到 launchctl）",
+      manualCommands,
+    };
+  }
+
+  const labels = [launchdLabels.main];
+  if (input.includeAdminService) {
+    labels.push(launchdLabels.admin);
+  }
+
+  const restartedTargets: string[] = [];
+  const errors: string[] = [];
+  for (const label of labels) {
+    try {
+      const restarted = restartLaunchdJob(label);
+      if (restarted) {
+        restartedTargets.push(restarted);
+      }
+    } catch (error) {
+      errors.push(`${label}: ${formatError(error)}`);
+    }
+  }
+
+  if (restartedTargets.length > 0) {
+    if (errors.length === 0) {
+      return {
+        summary: `已自动重启（launchd: ${restartedTargets.join(", ")}）`,
+        manualCommands,
+      };
+    }
+    return {
+      summary: `部分自动重启成功（launchd: ${restartedTargets.join(", ")}；errors=${errors.join(" | ")}）`,
+      manualCommands,
+    };
+  }
+
+  if (errors.length > 0) {
+    return {
+      summary: `自动重启失败（${errors.join(" | ")}）`,
+      manualCommands,
+    };
+  }
+
+  return {
+    summary: "需手工重启（未检测到 launchd job）",
+    manualCommands,
+  };
+}
+
+function restartLaunchdJob(label: string): string | null {
+  const safeLabel = label.trim();
+  if (!safeLabel) {
+    return null;
+  }
+  const domains = resolveLaunchdDomains();
+  for (const domain of domains) {
+    const target = `${domain}/${safeLabel}`;
+    const probe = spawnSync("launchctl", ["print", target], {
+      stdio: "ignore",
+    });
+    if ((probe.status ?? 1) !== 0 || probe.error) {
+      continue;
+    }
+    const kickstart = spawnSync("launchctl", ["kickstart", "-k", target], {
+      encoding: "utf8",
+    });
+    if (kickstart.error) {
+      throw new Error(kickstart.error.message);
+    }
+    if ((kickstart.status ?? 1) !== 0) {
+      const stderr = typeof kickstart.stderr === "string" ? kickstart.stderr.trim() : "";
+      throw new Error(stderr || `launchctl kickstart exited with code ${kickstart.status ?? 1}`);
+    }
+    return target;
+  }
+  return null;
+}
+
+function resolveLaunchdDomains(): string[] {
+  const domains: string[] = [];
+  if (typeof process.getuid === "function") {
+    const uid = process.getuid();
+    domains.push(`gui/${uid}`, `user/${uid}`);
+  }
+  domains.push("system");
+  return domains;
+}
+
+function commandExistsSync(file: string, args: string[]): boolean {
+  const result = spawnSync(file, args, {
+    stdio: "ignore",
+  });
+  return !result.error && (result.status ?? 1) === 0;
+}
+
+function formatCommandSummary(commands: string[]): string {
+  if (commands.length === 0) {
+    return "N/A";
+  }
+  return commands.join(" || ");
 }
 
 function resolveInstalledCodeHarborVersion(): string | null {
