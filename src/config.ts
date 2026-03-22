@@ -9,6 +9,7 @@ import {
   type TokenScopePattern,
 } from "./auth/scope-matrix";
 import type { BackendModelRouteRule, BackendModelRouteTaskType } from "./routing/backend-model-router";
+import type { WorkflowRole } from "./workflow/role-skills";
 
 export interface TriggerPolicy {
   allowMention: boolean;
@@ -102,6 +103,14 @@ const configSchema = z
       .default("1")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(0).max(10)),
+    AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
+    AGENT_WORKFLOW_ROLE_SKILLS_MODE: z.enum(["summary", "progressive", "full"]).default("progressive"),
+    AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS: z.string().default(""),
+    AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: z.string().default(""),
+    AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: z.string().default(""),
     STATE_DB_PATH: z.string().default("data/state.db"),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
@@ -369,6 +378,16 @@ const configSchema = z
     agentWorkflow: {
       enabled: v.AGENT_WORKFLOW_ENABLED,
       autoRepairMaxRounds: v.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS,
+      roleSkills: {
+        enabled: v.AGENT_WORKFLOW_ROLE_SKILLS_ENABLED,
+        mode: v.AGENT_WORKFLOW_ROLE_SKILLS_MODE,
+        maxChars: parseOptionalPositiveInt(
+          v.AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS,
+          "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS",
+        ),
+        roots: parseCsvList(v.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS),
+        roleAssignments: parseRoleSkillAssignments(v.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON),
+      },
     },
     stateDbPath: path.resolve(v.STATE_DB_PATH),
     legacyStateJsonPath: v.STATE_PATH.trim() ? path.resolve(v.STATE_PATH) : null,
@@ -829,6 +848,73 @@ function parseCsvList(raw: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+function parseOptionalPositiveInt(raw: string, fieldName: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`${fieldName} must be a positive integer.`);
+  }
+  return parsed;
+}
+
+function parseRoleSkillAssignments(raw: string): Partial<Record<WorkflowRole, string[]>> | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON must be a JSON object.");
+  }
+
+  const payload = parsed as Record<string, unknown>;
+  const output: Partial<Record<WorkflowRole, string[]>> = {};
+  for (const role of ["planner", "executor", "reviewer"] as WorkflowRole[]) {
+    const value = payload[role];
+    if (value === undefined) {
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      throw new Error(`AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON.${role} must be a string array.`);
+    }
+    output[role] = dedupeStringList(
+      value.map((entry, index) => {
+        if (typeof entry !== "string") {
+          throw new Error(`AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON.${role}[${index}] must be a string.`);
+        }
+        return entry;
+      }),
+    );
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function dedupeStringList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(trimmed);
+  }
+  return output;
 }
 
 function parseMimeTypeCsvList(raw: string, fallback: string[]): string[] {

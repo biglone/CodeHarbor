@@ -524,3 +524,51 @@ describe("loadConfig EXTERNAL_INTEGRATION", () => {
     ).toThrow(/EXTERNAL_NOTIFY_WEBHOOK_URL must be a valid URL/i);
   });
 });
+
+describe("loadConfig AGENT_WORKFLOW_ROLE_SKILLS", () => {
+  it("parses role skill env overrides", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: "false",
+        AGENT_WORKFLOW_ROLE_SKILLS_MODE: "full",
+        AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS: "3200",
+        AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: " /tmp/skills-a, /tmp/skills-b ",
+        AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: JSON.stringify({
+          planner: ["task-planner", "builtin-planner-core", "task-planner"],
+          reviewer: ["code-reviewer"],
+        }),
+      }),
+    );
+
+    expect(config.agentWorkflow.roleSkills).toEqual({
+      enabled: false,
+      mode: "full",
+      maxChars: 3200,
+      roots: ["/tmp/skills-a", "/tmp/skills-b"],
+      roleAssignments: {
+        planner: ["task-planner", "builtin-planner-core"],
+        reviewer: ["code-reviewer"],
+      },
+    });
+  });
+
+  it("rejects invalid role skill assignment payload", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: "{bad-json",
+        }),
+      ),
+    ).toThrow(/AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON/i);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: JSON.stringify({
+            planner: "task-planner",
+          }),
+        }),
+      ),
+    ).toThrow(/planner/i);
+  });
+});

@@ -28,6 +28,11 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "CODEX_EXTRA_ENV_JSON",
   "AGENT_WORKFLOW_ENABLED",
   "AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS",
+  "AGENT_WORKFLOW_ROLE_SKILLS_ENABLED",
+  "AGENT_WORKFLOW_ROLE_SKILLS_MODE",
+  "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS",
+  "AGENT_WORKFLOW_ROLE_SKILLS_ROOTS",
+  "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON",
   "STATE_DB_PATH",
   "STATE_PATH",
   "MAX_PROCESSED_EVENTS_PER_SESSION",
@@ -157,6 +162,16 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     CODEX_EXTRA_ENV_JSON: jsonObjectStringSchema("CODEX_EXTRA_ENV_JSON", true),
     AGENT_WORKFLOW_ENABLED: booleanStringSchema("AGENT_WORKFLOW_ENABLED"),
     AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS: integerStringSchema("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS", 0, 10),
+    AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: booleanStringSchema("AGENT_WORKFLOW_ROLE_SKILLS_ENABLED").default("true"),
+    AGENT_WORKFLOW_ROLE_SKILLS_MODE: z.enum(["summary", "progressive", "full"]).default("progressive"),
+    AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS: optionalIntegerStringSchema("AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS", 1).default(
+      "",
+    ),
+    AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: z.string().default(""),
+    AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: jsonObjectStringSchema(
+      "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON",
+      true,
+    ).default(""),
     STATE_DB_PATH: z.string().min(1),
     STATE_PATH: z.string(),
     MAX_PROCESSED_EVENTS_PER_SESSION: integerStringSchema("MAX_PROCESSED_EVENTS_PER_SESSION", 1),
@@ -402,6 +417,14 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     CODEX_EXTRA_ENV_JSON: serializeJsonObject(config.codexExtraEnv),
     AGENT_WORKFLOW_ENABLED: String(config.agentWorkflow.enabled),
     AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS: String(config.agentWorkflow.autoRepairMaxRounds),
+    AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: String(config.agentWorkflow.roleSkills.enabled),
+    AGENT_WORKFLOW_ROLE_SKILLS_MODE: config.agentWorkflow.roleSkills.mode,
+    AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS:
+      config.agentWorkflow.roleSkills.maxChars === null ? "" : String(config.agentWorkflow.roleSkills.maxChars),
+    AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: config.agentWorkflow.roleSkills.roots.join(","),
+    AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: serializeJsonObject(
+      config.agentWorkflow.roleSkills.roleAssignments ?? {},
+    ),
     STATE_DB_PATH: config.stateDbPath,
     STATE_PATH: config.legacyStateJsonPath ?? "",
     MAX_PROCESSED_EVENTS_PER_SESSION: String(config.maxProcessedEventsPerSession),
@@ -589,6 +612,25 @@ function integerStringSchema(key: string, min: number, max = Number.MAX_SAFE_INT
     return parsed >= min && parsed <= max;
   }, {
     message: `${key} must be an integer string in range [${min}, ${max}].`,
+  });
+}
+
+function optionalIntegerStringSchema(key: string, min: number, max = Number.MAX_SAFE_INTEGER): z.ZodString {
+  return z.string().refine((value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return true;
+    }
+    if (!INTEGER_STRING.test(trimmed)) {
+      return false;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed)) {
+      return false;
+    }
+    return parsed >= min && parsed <= max;
+  }, {
+    message: `${key} must be an empty string or an integer string in range [${min}, ${max}].`,
   });
 }
 

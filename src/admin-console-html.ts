@@ -94,7 +94,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       input[type="text"],
       input[type="password"],
       input[type="number"],
-      select {
+      select,
+      textarea {
         border: 1px solid var(--panel-border);
         background: #0f172acc;
         color: var(--text);
@@ -117,6 +118,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       button.danger {
         border-color: var(--danger);
         background: #881337;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 96px;
       }
       .notice {
         margin: 12px 0 0;
@@ -370,6 +375,32 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label" data-i18n="global.agentRounds">工作流自动修复轮次</span>
             <input id="global-agent-repair-rounds" type="number" min="0" max="10" />
           </label>
+          <label class="checkbox"><input id="global-agent-skills-enabled" type="checkbox" /><span data-i18n="global.agentSkillsEnabled">启用角色技能注入</span></label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.agentSkillsMode">角色技能披露模式</span>
+            <select id="global-agent-skills-mode">
+              <option value="summary">summary</option>
+              <option value="progressive">progressive</option>
+              <option value="full">full</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.agentSkillsMaxChars">角色技能提示上限字符数（留空=默认）</span>
+            <input id="global-agent-skills-max-chars" type="number" min="1" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.agentSkillsRoots">角色技能根目录（逗号分隔）</span>
+            <input
+              id="global-agent-skills-roots"
+              type="text"
+              placeholder="/home/user/.codex/skills,/opt/codeharbor/skills"
+              data-i18n-placeholder="global.agentSkillsRootsPlaceholder"
+            />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.agentSkillsAssignments">角色技能分配 JSON（planner/executor/reviewer）</span>
+            <textarea id="global-agent-skills-assignments" rows="6" placeholder='{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}' data-i18n-placeholder="global.agentSkillsAssignmentsPlaceholder"></textarea>
+          </label>
         </div>
         <div class="actions">
           <button id="global-save-btn" type="button" data-i18n="global.save">保存全局配置</button>
@@ -595,6 +626,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalTimeout": "本地 Whisper 超时（毫秒）",
             "global.agentEnabled": "启用多智能体工作流",
             "global.agentRounds": "工作流自动修复轮次",
+            "global.agentSkillsEnabled": "启用角色技能注入",
+            "global.agentSkillsMode": "角色技能披露模式",
+            "global.agentSkillsMaxChars": "角色技能提示上限字符数（留空=默认）",
+            "global.agentSkillsRoots": "角色技能根目录（逗号分隔）",
+            "global.agentSkillsRootsPlaceholder": "/home/user/.codex/skills,/opt/codeharbor/skills",
+            "global.agentSkillsAssignments": "角色技能分配 JSON（planner/executor/reviewer）",
+            "global.agentSkillsAssignmentsPlaceholder":
+              '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
             "global.save": "保存全局配置",
             "global.validate": "校验全局配置",
             "global.reload": "重新加载",
@@ -766,6 +805,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalTimeout": "Local whisper timeout (ms)",
             "global.agentEnabled": "Enable multi-agent workflow",
             "global.agentRounds": "Workflow auto-repair rounds",
+            "global.agentSkillsEnabled": "Enable role skill injection",
+            "global.agentSkillsMode": "Role skill disclosure mode",
+            "global.agentSkillsMaxChars": "Role skill prompt max chars (blank = default)",
+            "global.agentSkillsRoots": "Role skill roots (comma-separated)",
+            "global.agentSkillsRootsPlaceholder": "/home/user/.codex/skills,/opt/codeharbor/skills",
+            "global.agentSkillsAssignments": "Role skill assignment JSON (planner/executor/reviewer)",
+            "global.agentSkillsAssignmentsPlaceholder":
+              '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
             "global.save": "Save Global Config",
             "global.validate": "Validate Global Config",
             "global.reload": "Reload",
@@ -1067,6 +1114,72 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           return document.getElementById(inputId).value.trim();
         }
 
+        function asOptionalNumber(inputId) {
+          var raw = document.getElementById(inputId).value.trim();
+          if (!raw) {
+            return null;
+          }
+          var value = Number.parseInt(raw, 10);
+          return Number.isFinite(value) ? value : null;
+        }
+
+        function parseCsvText(value) {
+          if (!value) {
+            return [];
+          }
+          return value
+            .split(",")
+            .map(function (item) {
+              return item.trim();
+            })
+            .filter(function (item) {
+              return item.length > 0;
+            });
+        }
+
+        function parseRoleSkillAssignmentsInput(raw) {
+          if (!raw) {
+            return undefined;
+          }
+          var parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (error) {
+            throw new Error("agentWorkflow.roleSkills.roleAssignments must be valid JSON.");
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("agentWorkflow.roleSkills.roleAssignments must be a JSON object.");
+          }
+          var roles = ["planner", "executor", "reviewer"];
+          for (var i = 0; i < roles.length; i += 1) {
+            var role = roles[i];
+            if (!(role in parsed)) {
+              continue;
+            }
+            var list = parsed[role];
+            if (!Array.isArray(list)) {
+              throw new Error("agentWorkflow.roleSkills.roleAssignments." + role + " must be an array.");
+            }
+            for (var j = 0; j < list.length; j += 1) {
+              if (typeof list[j] !== "string") {
+                throw new Error("agentWorkflow.roleSkills.roleAssignments." + role + "[" + j + "] must be a string.");
+              }
+            }
+          }
+          return parsed;
+        }
+
+        function formatRoleSkillAssignments(value) {
+          if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return "";
+          }
+          try {
+            return JSON.stringify(value, null, 2);
+          } catch (error) {
+            return "";
+          }
+        }
+
         function numberInRange(value, min, max) {
           return Number.isFinite(value) && value >= min && value <= max;
         }
@@ -1120,6 +1233,19 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           }
           if (!numberInRange(payload.agentWorkflow.autoRepairMaxRounds, 0, 10)) {
             errors.push("global.agentRounds");
+          }
+          if (
+            payload.agentWorkflow.roleSkills.mode !== "summary" &&
+            payload.agentWorkflow.roleSkills.mode !== "progressive" &&
+            payload.agentWorkflow.roleSkills.mode !== "full"
+          ) {
+            errors.push("global.agentSkillsMode");
+          }
+          if (
+            payload.agentWorkflow.roleSkills.maxChars !== null &&
+            !numberInRange(payload.agentWorkflow.roleSkills.maxChars, 1, Number.MAX_SAFE_INTEGER)
+          ) {
+            errors.push("global.agentSkillsMaxChars");
           }
           return errors;
         }
@@ -1221,6 +1347,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var trigger = data.defaultGroupTriggerPolicy || {};
             var cliCompat = data.cliCompat || {};
             var agentWorkflow = data.agentWorkflow || {};
+            var roleSkills = agentWorkflow.roleSkills || {};
             var updateCheck = data.updateCheck || {};
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
@@ -1267,6 +1394,17 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-agent-repair-rounds").value = String(
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
             );
+            document.getElementById("global-agent-skills-enabled").checked =
+              roleSkills.enabled === undefined ? true : Boolean(roleSkills.enabled);
+            document.getElementById("global-agent-skills-mode").value = roleSkills.mode || "progressive";
+            document.getElementById("global-agent-skills-max-chars").value =
+              typeof roleSkills.maxChars === "number" ? String(roleSkills.maxChars) : "";
+            document.getElementById("global-agent-skills-roots").value = Array.isArray(roleSkills.roots)
+              ? roleSkills.roots.join(", ")
+              : "";
+            document.getElementById("global-agent-skills-assignments").value = formatRoleSkillAssignments(
+              roleSkills.roleAssignments
+            );
 
             showNotice("ok", t("notice.globalLoaded"));
           } catch (error) {
@@ -1275,6 +1413,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         }
 
         function buildGlobalPayloadFromForm() {
+          var roleAssignments = parseRoleSkillAssignmentsInput(asText("global-agent-skills-assignments"));
           return {
             matrixCommandPrefix: asText("global-matrix-prefix"),
             codexWorkdir: asText("global-workdir"),
@@ -1321,7 +1460,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             },
             agentWorkflow: {
               enabled: asBool("global-agent-enabled"),
-              autoRepairMaxRounds: asNumber("global-agent-repair-rounds", 1)
+              autoRepairMaxRounds: asNumber("global-agent-repair-rounds", 1),
+              roleSkills: {
+                enabled: asBool("global-agent-skills-enabled"),
+                mode: asText("global-agent-skills-mode") || "progressive",
+                maxChars: asOptionalNumber("global-agent-skills-max-chars"),
+                roots: parseCsvText(asText("global-agent-skills-roots")),
+                roleAssignments: roleAssignments
+              }
             }
           };
         }

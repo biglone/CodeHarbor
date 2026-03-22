@@ -41,6 +41,13 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     agentWorkflow: {
       enabled: false,
       autoRepairMaxRounds: 1,
+      roleSkills: {
+        enabled: true,
+        mode: "progressive",
+        maxChars: null,
+        roots: [],
+        roleAssignments: undefined,
+      },
     },
     stateDbPath: dbPath,
     legacyStateJsonPath: legacyPath,
@@ -259,6 +266,50 @@ describe("AdminServer", () => {
     });
     expect(validGlobal.status).toBe(200);
     expect(JSON.stringify(validGlobal.body)).toContain("matrixTypingTimeoutMs");
+
+    const invalidRoleSkills = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          agentWorkflow: {
+            roleSkills: {
+              mode: "invalid-mode",
+            },
+          },
+        },
+      }),
+    });
+    expect(invalidRoleSkills.status).toBe(400);
+    expect(JSON.stringify(invalidRoleSkills.body)).toContain("roleSkills.mode");
+
+    const validRoleSkills = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          agentWorkflow: {
+            roleSkills: {
+              mode: "summary",
+              maxChars: null,
+              roots: [path.join(dir, "skills")],
+              roleAssignments: {
+                planner: ["task-planner"],
+                reviewer: ["code-reviewer"],
+              },
+            },
+          },
+        },
+      }),
+    });
+    expect(validRoleSkills.status).toBe(200);
+    expect(JSON.stringify(validRoleSkills.body)).toContain("agentWorkflow.roleSkills.mode");
 
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
@@ -1194,6 +1245,11 @@ describe("AdminServer", () => {
         "CODEX_WORKDIR=/tmp/old",
         "AGENT_WORKFLOW_ENABLED=false",
         "AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=1",
+        "AGENT_WORKFLOW_ROLE_SKILLS_ENABLED=true",
+        "AGENT_WORKFLOW_ROLE_SKILLS_MODE=progressive",
+        "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS=",
+        "AGENT_WORKFLOW_ROLE_SKILLS_ROOTS=",
+        "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON=",
       ].join("\n"),
       "utf8",
     );
@@ -1229,6 +1285,17 @@ describe("AdminServer", () => {
         agentWorkflow: {
           enabled: true,
           autoRepairMaxRounds: 2,
+          roleSkills: {
+            enabled: true,
+            mode: "full",
+            maxChars: 3200,
+            roots: [path.join(dir, "skills-a"), path.join(dir, "skills-b")],
+            roleAssignments: {
+              planner: ["task-planner", "builtin-planner-core"],
+              executor: ["autonomous-dev"],
+              reviewer: ["code-reviewer", "builtin-reviewer-core"],
+            },
+          },
         },
         updateCheck: {
           enabled: false,
@@ -1246,6 +1313,13 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("RATE_LIMIT_MAX_CONCURRENT_GLOBAL=12");
     expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");
     expect(envRaw).toContain("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS=2");
+    expect(envRaw).toContain("AGENT_WORKFLOW_ROLE_SKILLS_ENABLED=true");
+    expect(envRaw).toContain("AGENT_WORKFLOW_ROLE_SKILLS_MODE=full");
+    expect(envRaw).toContain("AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS=3200");
+    expect(envRaw).toContain(`AGENT_WORKFLOW_ROLE_SKILLS_ROOTS="${path.join(dir, "skills-a")},${path.join(dir, "skills-b")}"`);
+    expect(envRaw).toContain(
+      'AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON="{\\"planner\\":[\\"task-planner\\",\\"builtin-planner-core\\"],\\"executor\\":[\\"autonomous-dev\\"],\\"reviewer\\":[\\"code-reviewer\\",\\"builtin-reviewer-core\\"]}"',
+    );
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");

@@ -54,6 +54,8 @@ const ADMIN_DEFAULT_EXPORT_MESSAGE_LIMIT = 200;
 const ADMIN_MAX_EXPORT_MESSAGE_LIMIT = 500;
 const ADMIN_DEFAULT_HISTORY_CLEANUP_RUN_LIMIT = 20;
 const ADMIN_MAX_HISTORY_CLEANUP_RUN_LIMIT = 200;
+const ROLE_SKILL_DISCLOSURE_MODES = new Set(["summary", "progressive", "full"]);
+const ROLE_SKILL_ROLES = ["planner", "executor", "reviewer"] as const;
 
 interface CodexHealthResult {
   ok: boolean;
@@ -1388,6 +1390,40 @@ export class AdminServer {
         envUpdates.AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS = String(value);
         markUpdatedKey("agentWorkflow.autoRepairMaxRounds");
       }
+      if ("roleSkills" in workflow) {
+        const roleSkills = asObject(workflow.roleSkills, "agentWorkflow.roleSkills");
+        const currentRoleSkills = ensureAgentWorkflowRoleSkillsConfig(currentAgentWorkflow);
+        if ("enabled" in roleSkills) {
+          const value = normalizeBoolean(roleSkills.enabled, currentRoleSkills.enabled);
+          currentRoleSkills.enabled = value;
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ENABLED = String(value);
+          markUpdatedKey("agentWorkflow.roleSkills.enabled");
+        }
+        if ("mode" in roleSkills) {
+          const value = normalizeRoleSkillDisclosureMode(roleSkills.mode, currentRoleSkills.mode);
+          currentRoleSkills.mode = value;
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_MODE = value;
+          markUpdatedKey("agentWorkflow.roleSkills.mode");
+        }
+        if ("maxChars" in roleSkills) {
+          const value = normalizeOptionalPositiveInt(roleSkills.maxChars, currentRoleSkills.maxChars);
+          currentRoleSkills.maxChars = value;
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS = value === null ? "" : String(value);
+          markUpdatedKey("agentWorkflow.roleSkills.maxChars");
+        }
+        if ("roots" in roleSkills) {
+          const value = normalizeRoleSkillRoots(roleSkills.roots, currentRoleSkills.roots);
+          currentRoleSkills.roots = value;
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS = value.join(",");
+          markUpdatedKey("agentWorkflow.roleSkills.roots");
+        }
+        if ("roleAssignments" in roleSkills) {
+          const value = normalizeRoleSkillAssignments(roleSkills.roleAssignments, currentRoleSkills.roleAssignments);
+          currentRoleSkills.roleAssignments = value;
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON = serializeRoleSkillAssignments(value);
+          markUpdatedKey("agentWorkflow.roleSkills.roleAssignments");
+        }
+      }
     }
 
     if (updatedKeys.length === 0) {
@@ -1678,6 +1714,30 @@ export class AdminServer {
       if ("autoRepairMaxRounds" in workflow) {
         normalizePositiveInt(workflow.autoRepairMaxRounds, currentAgentWorkflow.autoRepairMaxRounds, 0, 10);
         markCheckedKey("agentWorkflow.autoRepairMaxRounds");
+      }
+      if ("roleSkills" in workflow) {
+        const roleSkills = asObject(workflow.roleSkills, "agentWorkflow.roleSkills");
+        const currentRoleSkills = ensureAgentWorkflowRoleSkillsConfig(currentAgentWorkflow);
+        if ("enabled" in roleSkills) {
+          normalizeBoolean(roleSkills.enabled, currentRoleSkills.enabled);
+          markCheckedKey("agentWorkflow.roleSkills.enabled");
+        }
+        if ("mode" in roleSkills) {
+          normalizeRoleSkillDisclosureMode(roleSkills.mode, currentRoleSkills.mode);
+          markCheckedKey("agentWorkflow.roleSkills.mode");
+        }
+        if ("maxChars" in roleSkills) {
+          normalizeOptionalPositiveInt(roleSkills.maxChars, currentRoleSkills.maxChars);
+          markCheckedKey("agentWorkflow.roleSkills.maxChars");
+        }
+        if ("roots" in roleSkills) {
+          normalizeRoleSkillRoots(roleSkills.roots, currentRoleSkills.roots);
+          markCheckedKey("agentWorkflow.roleSkills.roots");
+        }
+        if ("roleAssignments" in roleSkills) {
+          normalizeRoleSkillAssignments(roleSkills.roleAssignments, currentRoleSkills.roleAssignments);
+          markCheckedKey("agentWorkflow.roleSkills.roleAssignments");
+        }
       }
     }
 
@@ -2074,6 +2134,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   cliCompat: AppConfig["cliCompat"];
   agentWorkflow: AppConfig["agentWorkflow"];
 } {
+  const agentWorkflow = ensureAgentWorkflowConfig(config);
+  const roleSkills = ensureAgentWorkflowRoleSkillsConfig(agentWorkflow);
   return {
     matrixCommandPrefix: config.matrixCommandPrefix,
     codexWorkdir: config.codexWorkdir,
@@ -2086,7 +2148,17 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
-    agentWorkflow: { ...ensureAgentWorkflowConfig(config) },
+    agentWorkflow: {
+      enabled: agentWorkflow.enabled,
+      autoRepairMaxRounds: agentWorkflow.autoRepairMaxRounds,
+      roleSkills: {
+        enabled: roleSkills.enabled,
+        mode: roleSkills.mode,
+        maxChars: roleSkills.maxChars,
+        roots: [...roleSkills.roots],
+        roleAssignments: normalizeRoleSkillAssignments(roleSkills.roleAssignments, undefined),
+      },
+    },
   };
 }
 
@@ -2094,14 +2166,55 @@ function ensureAgentWorkflowConfig(config: AppConfig): AppConfig["agentWorkflow"
   const mutable = config as AppConfig & { agentWorkflow?: AppConfig["agentWorkflow"] };
   const existing = mutable.agentWorkflow;
   if (existing && typeof existing.enabled === "boolean" && Number.isFinite(existing.autoRepairMaxRounds)) {
+    ensureAgentWorkflowRoleSkillsConfig(existing);
     return existing;
   }
 
   const fallback: AppConfig["agentWorkflow"] = {
     enabled: false,
     autoRepairMaxRounds: 1,
+    roleSkills: {
+      enabled: true,
+      mode: "progressive",
+      maxChars: null,
+      roots: [],
+      roleAssignments: undefined,
+    },
   };
   mutable.agentWorkflow = fallback;
+  return fallback;
+}
+
+function ensureAgentWorkflowRoleSkillsConfig(agentWorkflow: AppConfig["agentWorkflow"]): AppConfig["agentWorkflow"]["roleSkills"] {
+  const existing = agentWorkflow.roleSkills;
+  if (
+    existing &&
+    typeof existing.enabled === "boolean" &&
+    (existing.mode === "summary" || existing.mode === "progressive" || existing.mode === "full")
+  ) {
+    let normalizedMaxChars: number | null = null;
+    if (existing.maxChars !== null && existing.maxChars !== undefined) {
+      const parsed = Number.parseInt(String(existing.maxChars), 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        normalizedMaxChars = parsed;
+      }
+    }
+    const normalizedRoots = normalizeRoleSkillRoots(existing.roots, []);
+    const normalizedRoleAssignments = normalizeRoleSkillAssignments(existing.roleAssignments, undefined);
+    existing.maxChars = normalizedMaxChars;
+    existing.roots = normalizedRoots;
+    existing.roleAssignments = normalizedRoleAssignments;
+    return existing;
+  }
+
+  const fallback: AppConfig["agentWorkflow"]["roleSkills"] = {
+    enabled: true,
+    mode: "progressive",
+    maxChars: null,
+    roots: [],
+    roleAssignments: undefined,
+  };
+  agentWorkflow.roleSkills = fallback;
   return fallback;
 }
 
@@ -2659,6 +2772,157 @@ function normalizePositiveInt(value: unknown, fallback: number, min: number, max
 
 function normalizeNonNegativeInt(value: unknown, fallback: number): number {
   return normalizePositiveInt(value, fallback, 0, Number.MAX_SAFE_INTEGER);
+}
+
+function normalizeOptionalPositiveInt(value: unknown, fallback: number | null): number | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "string" && !value.trim()) {
+    return null;
+  }
+  return normalizePositiveInt(value, fallback ?? 1, 1, Number.MAX_SAFE_INTEGER);
+}
+
+function normalizeRoleSkillDisclosureMode(
+  value: unknown,
+  fallback: "summary" | "progressive" | "full",
+): "summary" | "progressive" | "full" {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, "agentWorkflow.roleSkills.mode must be a string.");
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!ROLE_SKILL_DISCLOSURE_MODES.has(normalized)) {
+    throw new HttpError(400, 'agentWorkflow.roleSkills.mode must be one of "summary", "progressive", "full".');
+  }
+  return normalized as "summary" | "progressive" | "full";
+}
+
+function normalizeRoleSkillRoots(value: unknown, fallback: string[]): string[] {
+  if (value === undefined) {
+    return [...fallback];
+  }
+  const items: string[] = [];
+  if (typeof value === "string") {
+    items.push(...value.split(","));
+  } else if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      if (typeof entry !== "string") {
+        throw new HttpError(400, `agentWorkflow.roleSkills.roots[${index}] must be a string.`);
+      }
+      items.push(entry);
+    }
+  } else {
+    throw new HttpError(400, "agentWorkflow.roleSkills.roots must be a CSV string or string array.");
+  }
+  return dedupeNormalizedStrings(items);
+}
+
+function normalizeRoleSkillAssignments(
+  value: unknown,
+  fallback: Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> | undefined,
+): Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> | undefined {
+  if (value === undefined) {
+    if (!fallback) {
+      return undefined;
+    }
+    const copied: Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> = {};
+    if (Array.isArray(fallback.planner)) {
+      copied.planner = [...fallback.planner];
+    }
+    if (Array.isArray(fallback.executor)) {
+      copied.executor = [...fallback.executor];
+    }
+    if (Array.isArray(fallback.reviewer)) {
+      copied.reviewer = [...fallback.reviewer];
+    }
+    return Object.keys(copied).length > 0 ? copied : undefined;
+  }
+  if (value === null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new HttpError(400, "agentWorkflow.roleSkills.roleAssignments must be valid JSON.");
+    }
+    return normalizeRoleSkillAssignmentsObject(parsed);
+  }
+  return normalizeRoleSkillAssignmentsObject(value);
+}
+
+function normalizeRoleSkillAssignmentsObject(
+  value: unknown,
+): Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HttpError(400, "agentWorkflow.roleSkills.roleAssignments must be an object.");
+  }
+  const payload = value as Record<string, unknown>;
+  const output: Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> = {};
+  for (const role of ROLE_SKILL_ROLES) {
+    const list = payload[role];
+    if (list === undefined) {
+      continue;
+    }
+    if (!Array.isArray(list)) {
+      throw new HttpError(400, `agentWorkflow.roleSkills.roleAssignments.${role} must be a string array.`);
+    }
+    const normalized: string[] = [];
+    for (const [index, entry] of list.entries()) {
+      if (typeof entry !== "string") {
+        throw new HttpError(
+          400,
+          `agentWorkflow.roleSkills.roleAssignments.${role}[${index}] must be a string.`,
+        );
+      }
+      normalized.push(entry);
+    }
+    output[role] = dedupeNormalizedStrings(normalized);
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function serializeRoleSkillAssignments(
+  value: Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> | undefined,
+): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = normalizeRoleSkillAssignmentsObject(value);
+  if (!normalized) {
+    return "";
+  }
+  return JSON.stringify(normalized);
+}
+
+function dedupeNormalizedStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const item of items) {
+    const trimmed = item.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(trimmed);
+  }
+  return output;
 }
 
 function ensureDirectory(targetPath: string, fieldName: string): void {

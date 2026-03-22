@@ -38,7 +38,7 @@ export interface OrchestratorOptions {
     roleSkills?: {
       enabled?: boolean;
       mode?: WorkflowRoleSkillDisclosureMode;
-      maxChars?: number;
+      maxChars?: number | null;
       roots?: string[];
       roleAssignments?: Partial<Record<WorkflowRole, string[]>>;
     };
