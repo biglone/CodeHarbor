@@ -57,6 +57,21 @@ const ADMIN_MAX_HISTORY_CLEANUP_RUN_LIMIT = 200;
 const ROLE_SKILL_DISCLOSURE_MODES = new Set(["summary", "progressive", "full"]);
 const ROLE_SKILL_ROLES = ["planner", "executor", "reviewer"] as const;
 const ALLOWED_ENV_OVERRIDE_KEYS = new Set<string>(CONFIG_SNAPSHOT_ENV_KEYS);
+const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
+  "AUTODEV_AUTO_COMMIT",
+  "AUTODEV_AUTO_RELEASE_ENABLED",
+  "AUTODEV_AUTO_RELEASE_PUSH",
+]);
+const OPTIONAL_POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
+  "AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS",
+  "AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS",
+  "AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS",
+]);
+const POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
+  "AUTODEV_LOOP_MAX_RUNS",
+  "AUTODEV_LOOP_MAX_MINUTES",
+  "AUTODEV_MAX_CONSECUTIVE_FAILURES",
+]);
 
 interface CodexHealthResult {
   ok: boolean;
@@ -3047,20 +3062,67 @@ function normalizeEnvOverrides(value: unknown): Record<string, string> {
       throw new HttpError(400, `envOverrides.${key} is not a supported configuration key.`);
     }
     if (rawValue === null || rawValue === undefined) {
-      output[key] = "";
+      const normalized = "";
+      validateEnvOverrideValue(key, normalized);
+      output[key] = normalized;
       continue;
     }
     if (typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
-      output[key] = String(rawValue);
+      const normalized = String(rawValue);
+      validateEnvOverrideValue(key, normalized);
+      output[key] = normalized;
       continue;
     }
     if (Array.isArray(rawValue) || typeof rawValue === "object") {
-      output[key] = JSON.stringify(rawValue);
+      const normalized = JSON.stringify(rawValue);
+      validateEnvOverrideValue(key, normalized);
+      output[key] = normalized;
       continue;
     }
     throw new HttpError(400, `envOverrides.${key} has unsupported value type.`);
   }
   return output;
+}
+
+function validateEnvOverrideValue(key: string, value: string): void {
+  const trimmed = value.trim();
+  if (BOOLEAN_ENV_OVERRIDE_KEYS.has(key)) {
+    if (!trimmed) {
+      throw new HttpError(400, `envOverrides.${key} cannot be empty.`);
+    }
+    const normalized = trimmed.toLowerCase();
+    if (
+      normalized !== "true" &&
+      normalized !== "false" &&
+      normalized !== "1" &&
+      normalized !== "0" &&
+      normalized !== "yes" &&
+      normalized !== "no" &&
+      normalized !== "on" &&
+      normalized !== "off"
+    ) {
+      throw new HttpError(400, `envOverrides.${key} must be a boolean value.`);
+    }
+    return;
+  }
+
+  if (OPTIONAL_POSITIVE_INT_ENV_OVERRIDE_KEYS.has(key)) {
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      throw new HttpError(400, `envOverrides.${key} must be empty or a positive integer.`);
+    }
+    return;
+  }
+
+  if (POSITIVE_INT_ENV_OVERRIDE_KEYS.has(key)) {
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      throw new HttpError(400, `envOverrides.${key} must be a positive integer.`);
+    }
+  }
 }
 
 function resolveNextConfigFromEnvUpdates(

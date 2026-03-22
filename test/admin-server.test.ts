@@ -345,6 +345,23 @@ describe("AdminServer", () => {
     expect(invalidEnvOverrides.status).toBe(400);
     expect(JSON.stringify(invalidEnvOverrides.body)).toContain("UNKNOWN_KEY");
 
+    const invalidAutoDevOverride = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          envOverrides: {
+            AUTODEV_AUTO_COMMIT: "maybe",
+          },
+        },
+      }),
+    });
+    expect(invalidAutoDevOverride.status).toBe(400);
+    expect(JSON.stringify(invalidAutoDevOverride.body)).toContain("AUTODEV_AUTO_COMMIT");
+
     const validEnvOverrides = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -355,12 +372,15 @@ describe("AdminServer", () => {
         data: {
           envOverrides: {
             MATRIX_ADMIN_USERS: "@ops:example.com",
+            AUTODEV_LOOP_MAX_RUNS: "12",
+            AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "9000",
           },
         },
       }),
     });
     expect(validEnvOverrides.status).toBe(200);
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.MATRIX_ADMIN_USERS");
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_LOOP_MAX_RUNS");
 
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
@@ -1361,6 +1381,15 @@ describe("AdminServer", () => {
         envOverrides: {
           MATRIX_ADMIN_USERS: "@ops:example.com,@oncall:example.com",
           CONTEXT_BRIDGE_HISTORY_LIMIT: "24",
+          AUTODEV_LOOP_MAX_RUNS: "9",
+          AUTODEV_LOOP_MAX_MINUTES: "60",
+          AUTODEV_AUTO_COMMIT: "false",
+          AUTODEV_AUTO_RELEASE_ENABLED: "false",
+          AUTODEV_AUTO_RELEASE_PUSH: "true",
+          AUTODEV_MAX_CONSECUTIVE_FAILURES: "5",
+          AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "7000",
+          AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS: "10000",
+          AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS: "",
         },
         updateCheck: {
           enabled: false,
@@ -1391,6 +1420,15 @@ describe("AdminServer", () => {
     expect(envRaw).toContain(`CLI_COMPAT_RECORD_PATH=${path.join(dir, "logs", "cli-record.ndjson")}`);
     expect(envRaw).toContain('MATRIX_ADMIN_USERS="@ops:example.com,@oncall:example.com"');
     expect(envRaw).toContain("CONTEXT_BRIDGE_HISTORY_LIMIT=24");
+    expect(envRaw).toContain("AUTODEV_LOOP_MAX_RUNS=9");
+    expect(envRaw).toContain("AUTODEV_LOOP_MAX_MINUTES=60");
+    expect(envRaw).toContain("AUTODEV_AUTO_COMMIT=false");
+    expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_ENABLED=false");
+    expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
+    expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");
+    expect(envRaw).toContain("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS=7000");
+    expect(envRaw).toContain("AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS=10000");
+    expect(envRaw).toContain("AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS=");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");

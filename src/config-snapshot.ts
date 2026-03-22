@@ -26,6 +26,12 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "CODEX_APPROVAL_POLICY",
   "CODEX_EXTRA_ARGS",
   "CODEX_EXTRA_ENV_JSON",
+  "AUTODEV_LOOP_MAX_RUNS",
+  "AUTODEV_LOOP_MAX_MINUTES",
+  "AUTODEV_AUTO_COMMIT",
+  "AUTODEV_AUTO_RELEASE_ENABLED",
+  "AUTODEV_AUTO_RELEASE_PUSH",
+  "AUTODEV_MAX_CONSECUTIVE_FAILURES",
   "AGENT_WORKFLOW_ENABLED",
   "AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS",
   "AGENT_WORKFLOW_ROLE_SKILLS_ENABLED",
@@ -33,6 +39,9 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS",
   "AGENT_WORKFLOW_ROLE_SKILLS_ROOTS",
   "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON",
+  "AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS",
+  "AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS",
+  "AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS",
   "STATE_DB_PATH",
   "STATE_PATH",
   "MAX_PROCESSED_EVENTS_PER_SESSION",
@@ -176,6 +185,12 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     CODEX_APPROVAL_POLICY: z.string(),
     CODEX_EXTRA_ARGS: z.string(),
     CODEX_EXTRA_ENV_JSON: jsonObjectStringSchema("CODEX_EXTRA_ENV_JSON", true),
+    AUTODEV_LOOP_MAX_RUNS: integerStringSchema("AUTODEV_LOOP_MAX_RUNS", 1).default("20"),
+    AUTODEV_LOOP_MAX_MINUTES: integerStringSchema("AUTODEV_LOOP_MAX_MINUTES", 1).default("120"),
+    AUTODEV_AUTO_COMMIT: booleanStringSchema("AUTODEV_AUTO_COMMIT").default("true"),
+    AUTODEV_AUTO_RELEASE_ENABLED: booleanStringSchema("AUTODEV_AUTO_RELEASE_ENABLED").default("true"),
+    AUTODEV_AUTO_RELEASE_PUSH: booleanStringSchema("AUTODEV_AUTO_RELEASE_PUSH").default("false"),
+    AUTODEV_MAX_CONSECUTIVE_FAILURES: integerStringSchema("AUTODEV_MAX_CONSECUTIVE_FAILURES", 1).default("3"),
     AGENT_WORKFLOW_ENABLED: booleanStringSchema("AGENT_WORKFLOW_ENABLED"),
     AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS: integerStringSchema("AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS", 0, 10),
     AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: booleanStringSchema("AGENT_WORKFLOW_ROLE_SKILLS_ENABLED").default("true"),
@@ -187,6 +202,17 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: jsonObjectStringSchema(
       "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON",
       true,
+    ).default(""),
+    AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: optionalIntegerStringSchema("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS", 1).default(
+      "",
+    ),
+    AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS: optionalIntegerStringSchema(
+      "AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS",
+      1,
+    ).default(""),
+    AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS: optionalIntegerStringSchema(
+      "AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS",
+      1,
     ).default(""),
     STATE_DB_PATH: z.string().min(1),
     STATE_PATH: z.string(),
@@ -451,6 +477,12 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     CODEX_APPROVAL_POLICY: config.codexApprovalPolicy ?? "",
     CODEX_EXTRA_ARGS: config.codexExtraArgs.join(" "),
     CODEX_EXTRA_ENV_JSON: serializeJsonObject(config.codexExtraEnv),
+    AUTODEV_LOOP_MAX_RUNS: normalizePositiveIntegerEnv(process.env.AUTODEV_LOOP_MAX_RUNS, "20"),
+    AUTODEV_LOOP_MAX_MINUTES: normalizePositiveIntegerEnv(process.env.AUTODEV_LOOP_MAX_MINUTES, "120"),
+    AUTODEV_AUTO_COMMIT: normalizeBooleanEnv(process.env.AUTODEV_AUTO_COMMIT, "true"),
+    AUTODEV_AUTO_RELEASE_ENABLED: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_ENABLED, "true"),
+    AUTODEV_AUTO_RELEASE_PUSH: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_PUSH, "false"),
+    AUTODEV_MAX_CONSECUTIVE_FAILURES: normalizePositiveIntegerEnv(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, "3"),
     AGENT_WORKFLOW_ENABLED: String(config.agentWorkflow.enabled),
     AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS: String(config.agentWorkflow.autoRepairMaxRounds),
     AGENT_WORKFLOW_ROLE_SKILLS_ENABLED: String(config.agentWorkflow.roleSkills.enabled),
@@ -460,6 +492,15 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: config.agentWorkflow.roleSkills.roots.join(","),
     AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: serializeJsonObject(
       config.agentWorkflow.roleSkills.roleAssignments ?? {},
+    ),
+    AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: normalizeOptionalPositiveIntegerEnv(
+      process.env.AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS,
+    ),
+    AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS: normalizeOptionalPositiveIntegerEnv(
+      process.env.AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS,
+    ),
+    AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS: normalizeOptionalPositiveIntegerEnv(
+      process.env.AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS,
     ),
     STATE_DB_PATH: config.stateDbPath,
     STATE_PATH: config.legacyStateJsonPath ?? "",
@@ -643,6 +684,41 @@ function serializeJsonArray<T>(value: T[]): string {
 
 function serializeAdminTokens(tokens: AdminTokenConfig[]): string {
   return tokens.length > 0 ? JSON.stringify(tokens) : "";
+}
+
+function normalizeBooleanEnv(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim().toLowerCase();
+  if (trimmed === "true" || trimmed === "false") {
+    return trimmed;
+  }
+  return fallback;
+}
+
+function normalizePositiveIntegerEnv(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed || !INTEGER_STRING.test(trimmed)) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return String(parsed);
+}
+
+function normalizeOptionalPositiveIntegerEnv(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (!INTEGER_STRING.test(trimmed)) {
+    return "";
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return "";
+  }
+  return String(parsed);
 }
 
 function booleanStringSchema(key: string): z.ZodString {

@@ -91,6 +91,9 @@ describe("config snapshot commands", () => {
     expect(parsed.env.CLI_COMPAT_IMAGE_MAX_BYTES).toBe("10485760");
     expect(parsed.env.CLI_COMPAT_IMAGE_MAX_COUNT).toBe("4");
     expect(parsed.env.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES).toBe("image/png,image/jpeg,image/webp,image/gif");
+    expect(parsed.env).toHaveProperty("AUTODEV_LOOP_MAX_RUNS");
+    expect(parsed.env).toHaveProperty("AUTODEV_AUTO_RELEASE_ENABLED");
+    expect(parsed.env).toHaveProperty("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS");
     expect(parsed.rooms).toHaveLength(1);
     expect(parsed.rooms[0]?.roomId).toBe("!room:example.com");
   });
