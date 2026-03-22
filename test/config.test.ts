@@ -465,3 +465,62 @@ describe("loadConfig API task server", () => {
     ).toThrow(/API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS/i);
   });
 });
+
+describe("loadConfig EXTERNAL_INTEGRATION", () => {
+  it("uses disabled integration defaults", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.externalTaskIntegration).toEqual({
+      enabled: false,
+      notifyWebhookUrl: null,
+      ticketWebhookUrl: null,
+      timeoutMs: 3000,
+      maxRetries: 1,
+      retryDelayMs: 500,
+      authToken: null,
+    });
+  });
+
+  it("parses integration endpoints and retry settings", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        EXTERNAL_INTEGRATION_ENABLED: "true",
+        EXTERNAL_NOTIFY_WEBHOOK_URL: "https://hooks.example.com/codeharbor/events",
+        EXTERNAL_TICKET_WEBHOOK_URL: "https://tickets.example.com/api/status",
+        EXTERNAL_INTEGRATION_TIMEOUT_MS: "2500",
+        EXTERNAL_INTEGRATION_MAX_RETRIES: "3",
+        EXTERNAL_INTEGRATION_RETRY_DELAY_MS: "900",
+        EXTERNAL_INTEGRATION_AUTH_TOKEN: "integration-secret",
+      }),
+    );
+
+    expect(config.externalTaskIntegration).toEqual({
+      enabled: true,
+      notifyWebhookUrl: "https://hooks.example.com/codeharbor/events",
+      ticketWebhookUrl: "https://tickets.example.com/api/status",
+      timeoutMs: 2500,
+      maxRetries: 3,
+      retryDelayMs: 900,
+      authToken: "integration-secret",
+    });
+  });
+
+  it("rejects enabled integration without target URLs", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          EXTERNAL_INTEGRATION_ENABLED: "true",
+        }),
+      ),
+    ).toThrow(/EXTERNAL_NOTIFY_WEBHOOK_URL or EXTERNAL_TICKET_WEBHOOK_URL is required/i);
+  });
+
+  it("rejects invalid integration URL", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          EXTERNAL_NOTIFY_WEBHOOK_URL: "not-a-url",
+        }),
+      ),
+    ).toThrow(/EXTERNAL_NOTIFY_WEBHOOK_URL must be a valid URL/i);
+  });
+});

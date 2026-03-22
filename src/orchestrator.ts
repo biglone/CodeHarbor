@@ -109,6 +109,7 @@ import {
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
 import { sendFailureNotice as runSendFailureNotice } from "./orchestrator/failure-notice-dispatch";
+import { formatError } from "./orchestrator/helpers";
 import { persistRuntimeMetricsSnapshot as runPersistRuntimeMetricsSnapshot } from "./orchestrator/runtime-metrics-persistence";
 import { resolveRoomRuntimeConfig as runResolveRoomRuntimeConfig } from "./orchestrator/room-runtime-config";
 import { AutoDevRuntimeMetrics, MediaMetrics, RequestMetrics } from "./orchestrator/runtime-metrics";
@@ -203,6 +204,7 @@ import {
   type WorkflowDiagStorePayload,
 } from "./orchestrator/workflow-diag";
 import type {
+  ApiTaskLifecycleEvent,
   ApiTaskQueryResult,
   ApiTaskSubmitInput,
   ApiTaskSubmitResult,
@@ -263,7 +265,15 @@ import {
 import { sendDiagCommand as runSendDiagCommand } from "./orchestrator/diag-command-dispatch";
 
 export { buildApiTaskEventId, buildSessionKey };
-export type { ApiTaskQueryResult, ApiTaskSubmitInput, ApiTaskSubmitResult, ApiTaskStage } from "./orchestrator/orchestrator-api-types";
+export type {
+  ApiTaskExternalContext,
+  ApiTaskExternalSource,
+  ApiTaskLifecycleEvent,
+  ApiTaskQueryResult,
+  ApiTaskStage,
+  ApiTaskSubmitInput,
+  ApiTaskSubmitResult,
+} from "./orchestrator/orchestrator-api-types";
 export { ApiTaskIdempotencyConflictError } from "./orchestrator/orchestrator-api-types";
 
 type UpgradeStateStore = Pick<
@@ -337,6 +347,7 @@ export class Orchestrator {
   private readonly taskQueueRecoveryEnabled: boolean;
   private readonly taskQueueRecoveryBatchLimit: number;
   private readonly taskQueueRetryPolicy: RetryPolicy;
+  private readonly onApiTaskLifecycleEvent: ((event: ApiTaskLifecycleEvent) => void) | null;
   private readonly sessionQueueDrains = new Map<string, Promise<void>>();
   private readonly sessionQueueRetryTimers = new Map<string, NodeJS.Timeout>();
   private readonly defaultBackendProfile: BackendModelRouteProfile;
@@ -440,6 +451,7 @@ export class Orchestrator {
     this.taskQueueRecoveryEnabled = serviceRuntimeConfig.taskQueueRecoveryEnabled;
     this.taskQueueRecoveryBatchLimit = serviceRuntimeConfig.taskQueueRecoveryBatchLimit;
     this.taskQueueRetryPolicy = serviceRuntimeConfig.taskQueueRetryPolicy;
+    this.onApiTaskLifecycleEvent = options?.onApiTaskLifecycleEvent ?? null;
     const backendRuntimeConfig = runResolveBackendRuntimeConfig({
       options,
       executor,
@@ -480,6 +492,7 @@ export class Orchestrator {
     return runSubmitApiTask(
       {
         startSessionQueueDrain: (sessionKey) => this.startSessionQueueDrain(sessionKey),
+        emitApiTaskLifecycleEvent: (event) => this.emitApiTaskLifecycleEvent(event),
       },
       queueStore,
       input,
@@ -724,6 +737,7 @@ export class Orchestrator {
         handleMessageInternal: (message, receivedAt, options) => this.handleMessageInternal(message, receivedAt, options),
         commitExecutionHandled: (targetSessionKey, eventId) => this.stateStore.commitExecutionHandled(targetSessionKey, eventId),
         sendQueuedTaskFailureNotice: (conversationId, input) => this.sendQueuedTaskFailureNotice(conversationId, input),
+        emitApiTaskLifecycleEvent: (event) => this.emitApiTaskLifecycleEvent(event),
       },
       {
         sessionKey,
@@ -795,6 +809,21 @@ export class Orchestrator {
       conversationId,
       input,
     );
+  }
+
+  private emitApiTaskLifecycleEvent(event: ApiTaskLifecycleEvent): void {
+    if (!this.onApiTaskLifecycleEvent) {
+      return;
+    }
+    try {
+      this.onApiTaskLifecycleEvent(event);
+    } catch (error) {
+      this.logger.warn("API task lifecycle callback failed", {
+        taskId: event.taskId,
+        stage: event.stage,
+        error: formatError(error),
+      });
+    }
   }
 
   private routeMessage(message: InboundMessage, sessionKey: string, roomConfig: RoomRuntimeConfig): RouteDecision {

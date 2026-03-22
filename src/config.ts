@@ -47,6 +47,16 @@ export interface UpdateCheckConfig {
   ttlMs: number;
 }
 
+export interface ExternalTaskIntegrationConfig {
+  enabled: boolean;
+  notifyWebhookUrl: string | null;
+  ticketWebhookUrl: string | null;
+  timeoutMs: number;
+  maxRetries: number;
+  retryDelayMs: number;
+  authToken: string | null;
+}
+
 export type AiCliProvider = "codex" | "claude";
 
 export type AdminTokenRole = "admin" | "viewer";
@@ -305,6 +315,28 @@ const configSchema = z
       .default("300")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(0).max(86_400)),
+    EXTERNAL_INTEGRATION_ENABLED: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
+    EXTERNAL_NOTIFY_WEBHOOK_URL: z.string().default(""),
+    EXTERNAL_TICKET_WEBHOOK_URL: z.string().default(""),
+    EXTERNAL_INTEGRATION_TIMEOUT_MS: z
+      .string()
+      .default("3000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    EXTERNAL_INTEGRATION_MAX_RETRIES: z
+      .string()
+      .default("1")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().min(0).max(10)),
+    EXTERNAL_INTEGRATION_RETRY_DELAY_MS: z
+      .string()
+      .default("500")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().nonnegative()),
+    EXTERNAL_INTEGRATION_AUTH_TOKEN: z.string().default(""),
     ADMIN_BIND_HOST: z.string().default("127.0.0.1"),
     ADMIN_PORT: z
       .string()
@@ -406,6 +438,15 @@ const configSchema = z
     apiTokenScopes: parseApiTokenScopes(v.API_TOKEN_SCOPES_JSON),
     apiWebhookSecret: v.API_WEBHOOK_SECRET.trim() || null,
     apiWebhookTimestampToleranceSeconds: v.API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+    externalTaskIntegration: {
+      enabled: v.EXTERNAL_INTEGRATION_ENABLED,
+      notifyWebhookUrl: parseOptionalUrl(v.EXTERNAL_NOTIFY_WEBHOOK_URL, "EXTERNAL_NOTIFY_WEBHOOK_URL"),
+      ticketWebhookUrl: parseOptionalUrl(v.EXTERNAL_TICKET_WEBHOOK_URL, "EXTERNAL_TICKET_WEBHOOK_URL"),
+      timeoutMs: v.EXTERNAL_INTEGRATION_TIMEOUT_MS,
+      maxRetries: v.EXTERNAL_INTEGRATION_MAX_RETRIES,
+      retryDelayMs: v.EXTERNAL_INTEGRATION_RETRY_DELAY_MS,
+      authToken: v.EXTERNAL_INTEGRATION_AUTH_TOKEN.trim() || null,
+    },
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
     adminPort: v.ADMIN_PORT,
     adminToken: v.ADMIN_TOKEN.trim() || null,
@@ -440,6 +481,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.data.apiEnabled && !parsed.data.apiToken) {
     throw new Error("Invalid configuration: API_TOKEN is required when API_ENABLED=true.");
+  }
+  if (
+    parsed.data.externalTaskIntegration.enabled &&
+    !parsed.data.externalTaskIntegration.notifyWebhookUrl &&
+    !parsed.data.externalTaskIntegration.ticketWebhookUrl
+  ) {
+    throw new Error(
+      "Invalid configuration: EXTERNAL_NOTIFY_WEBHOOK_URL or EXTERNAL_TICKET_WEBHOOK_URL is required when EXTERNAL_INTEGRATION_ENABLED=true.",
+    );
   }
 
   return parsed.data;
@@ -633,6 +683,22 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseOptionalUrl(raw: string, field: string): string | null {
+  const normalized = raw.trim();
+  if (!normalized) {
+    return null;
+  }
+  try {
+    const parsed = new URL(normalized);
+    if (!parsed.protocol || !parsed.hostname) {
+      throw new Error("invalid url");
+    }
+    return normalized;
+  } catch {
+    throw new Error(`${field} must be a valid URL.`);
+  }
 }
 
 function parseOptionalStringList(value: unknown, field: string): string[] | undefined {

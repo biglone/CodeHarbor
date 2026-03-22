@@ -113,6 +113,13 @@ These must be valid before `codeharbor start`.
 | `API_TOKEN_SCOPES_JSON` | No | empty | No | Restart | Optional API token scope override JSON array (for example `["tasks.submit.api"]` or `["tasks.read.api"]`) |
 | `API_WEBHOOK_SECRET` | No | empty | No | Restart | Enables webhook signature validation when set |
 | `API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` | No | `300` | No | Restart | Allowed webhook timestamp skew window |
+| `EXTERNAL_INTEGRATION_ENABLED` | No | `false` | No | Restart | Enable outbound lifecycle callbacks for API/webhook tasks |
+| `EXTERNAL_NOTIFY_WEBHOOK_URL` | No | empty | No | Restart | Generic lifecycle callback URL (`queued/executing/retrying/completed/failed`) |
+| `EXTERNAL_TICKET_WEBHOOK_URL` | No | empty | No | Restart | Optional ticket status callback URL (ticket-source tasks only) |
+| `EXTERNAL_INTEGRATION_TIMEOUT_MS` | No | `3000` | No | Restart | Delivery timeout (ms) for outbound callbacks |
+| `EXTERNAL_INTEGRATION_MAX_RETRIES` | No | `1` | No | Restart | Retry count for outbound callback failures |
+| `EXTERNAL_INTEGRATION_RETRY_DELAY_MS` | No | `500` | No | Restart | Delay (ms) between outbound callback retries |
+| `EXTERNAL_INTEGRATION_AUTH_TOKEN` | No | empty | No | Restart | Optional bearer token for outbound callback authorization |
 | `ADMIN_BIND_HOST` | No | `127.0.0.1` | No | Restart | Admin listener host |
 | `ADMIN_PORT` | No | `8787` | No | Restart | Admin listener port |
 | `ADMIN_TOKEN` | No (functional), **Yes (public exposure)** | empty | UI can set header only | Restart | API bearer auth. Required for non-loopback/public usage |

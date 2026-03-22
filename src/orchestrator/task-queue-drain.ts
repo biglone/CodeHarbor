@@ -3,13 +3,22 @@ import { ARCHIVE_REASON_NON_RETRYABLE, type RetryPolicy } from "../reliability/r
 import type { InboundMessage } from "../types";
 import { formatError, summarizeSingleLine } from "./helpers";
 import { classifyQueueTaskRetry } from "./misc-utils";
+import type { ApiTaskLifecycleEvent } from "./orchestrator-api-types";
 import { parseQueuedInboundPayload, type QueuedInboundPayload } from "./queue-payload";
 
 interface TaskQueueRecordLike {
   id: number;
   sessionKey: string;
   eventId: string;
+  requestId: string;
   attempt: number;
+  status: "pending" | "running" | "succeeded" | "failed";
+  enqueuedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  nextRetryAt: number | null;
+  error: string | null;
+  lastError: string | null;
   payloadJson: string;
 }
 
@@ -50,6 +59,7 @@ interface DrainSessionQueueDeps {
   ) => Promise<void>;
   commitExecutionHandled: (sessionKey: string, eventId: string) => void;
   sendQueuedTaskFailureNotice: (conversationId: string, input: QueueTaskFailureNoticeInput) => Promise<void>;
+  emitApiTaskLifecycleEvent?: (event: ApiTaskLifecycleEvent) => void;
 }
 
 interface DrainSessionQueueInput {
@@ -70,12 +80,46 @@ export async function drainSessionQueue(
     let payload: QueuedInboundPayload | null = null;
     try {
       payload = parseQueuedInboundPayload(task.payloadJson);
+      if (payload.apiTask) {
+        deps.emitApiTaskLifecycleEvent?.({
+          stage: "executing",
+          taskId: task.id,
+          sessionKey: task.sessionKey,
+          eventId: task.eventId,
+          requestId: task.requestId,
+          status: "running",
+          attempt: task.attempt,
+          enqueuedAt: task.enqueuedAt,
+          startedAt: task.startedAt,
+          finishedAt: null,
+          nextRetryAt: null,
+          errorSummary: null,
+          externalContext: payload.externalContext,
+        });
+      }
       await deps.handleMessageInternal(payload.message, payload.receivedAt, {
         bypassQueue: true,
         forcedPrompt: payload.prompt,
         deferFailureHandlingToQueue: true,
       });
       input.queueStore.finishTask(task.id);
+      if (payload.apiTask) {
+        deps.emitApiTaskLifecycleEvent?.({
+          stage: "completed",
+          taskId: task.id,
+          sessionKey: task.sessionKey,
+          eventId: task.eventId,
+          requestId: task.requestId,
+          status: "succeeded",
+          attempt: task.attempt,
+          enqueuedAt: task.enqueuedAt,
+          startedAt: task.startedAt,
+          finishedAt: Date.now(),
+          nextRetryAt: null,
+          errorSummary: null,
+          externalContext: payload.externalContext,
+        });
+      }
       deps.logger.debug("Queued task completed", {
         taskId: task.id,
         sessionKey: task.sessionKey,
@@ -93,6 +137,23 @@ export async function drainSessionQueue(
           nextRetryAt,
           error: detail,
         });
+        if (payload?.apiTask) {
+          deps.emitApiTaskLifecycleEvent?.({
+            stage: "retrying",
+            taskId: task.id,
+            sessionKey: task.sessionKey,
+            eventId: task.eventId,
+            requestId: task.requestId,
+            status: "pending",
+            attempt: task.attempt,
+            enqueuedAt: task.enqueuedAt,
+            startedAt: null,
+            finishedAt: null,
+            nextRetryAt,
+            errorSummary: detail,
+            externalContext: payload.externalContext,
+          });
+        }
         deps.logger.warn("Queued task scheduled for retry", {
           taskId: task.id,
           sessionKey: task.sessionKey,
@@ -117,6 +178,24 @@ export async function drainSessionQueue(
         retryAfterMs: retryDecision.retryAfterMs,
       });
       deps.commitExecutionHandled(task.sessionKey, task.eventId);
+
+      if (payload?.apiTask) {
+        deps.emitApiTaskLifecycleEvent?.({
+          stage: "failed",
+          taskId: task.id,
+          sessionKey: task.sessionKey,
+          eventId: task.eventId,
+          requestId: task.requestId,
+          status: "failed",
+          attempt: task.attempt,
+          enqueuedAt: task.enqueuedAt,
+          startedAt: task.startedAt,
+          finishedAt: Date.now(),
+          nextRetryAt: null,
+          errorSummary: detail,
+          externalContext: payload.externalContext,
+        });
+      }
 
       if (payload && archiveReason !== "cancelled") {
         await deps.sendQueuedTaskFailureNotice(payload.message.conversationId, {

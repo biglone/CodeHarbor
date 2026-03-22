@@ -432,6 +432,7 @@ Access control options:
 - `API_TOKEN_SCOPES_JSON`: optional API token scope override (JSON array, for example `["tasks.submit.api"]` or `["tasks.read.api"]`)
 - `ADMIN_IP_ALLOWLIST`: optional comma-separated client IP whitelist (for example `127.0.0.1,192.168.1.10`)
 - `ADMIN_ALLOWED_ORIGINS`: optional CORS origin allowlist for browser-based cross-origin admin access
+- `EXTERNAL_INTEGRATION_*`: optional outbound callback config for API/webhook lifecycle + ticket sync (`queued/executing/retrying/completed/failed`)
 
 RBAC behavior:
 
@@ -442,6 +443,13 @@ RBAC behavior:
 - legacy broad scopes (`admin.read`, `admin.write`, `tasks.submit`, `tasks.read`, `webhook.ingest`) still authorize new fine-grained actions for backward compatibility
 - for `ADMIN_TOKENS_JSON`, audit actor is derived from token identity (`actor` field), not `x-admin-actor`
 - Admin UI shows current permission status (role/source) after saving auth
+
+External integration callbacks:
+
+- inbound `POST /api/webhooks/ci|ticket` requests are normalized into `externalContext` and persisted into queue payloads
+- when `EXTERNAL_INTEGRATION_ENABLED=true`, CodeHarbor emits non-blocking lifecycle callbacks with short-timeout retries (`EXTERNAL_NOTIFY_WEBHOOK_URL`)
+- optional ticket callback (`EXTERNAL_TICKET_WEBHOOK_URL`) is emitted only for ticket-source tasks
+- delivery failures never block task execution; outcomes are written into operation audit logs (`source=integration:notify|ticket`)
 
 Operation audit behavior:
 

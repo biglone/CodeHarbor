@@ -39,9 +39,21 @@ export function tryEnqueueQueuedInboundRequest(
   }
 
   const payload: QueuedInboundPayload = {
+    apiTask: false,
     message: input.message,
     receivedAt: input.receivedAt,
     prompt: input.routePrompt,
+    externalContext: {
+      source: "api",
+      eventId: null,
+      workflowId: null,
+      externalRef: null,
+      matrixConversationId: input.message.conversationId,
+      matrixSenderId: input.message.senderId,
+      ci: null,
+      ticket: null,
+      metadata: {},
+    },
   };
   const enqueueResult = queueStore.enqueueTask({
     sessionKey: input.sessionKey,

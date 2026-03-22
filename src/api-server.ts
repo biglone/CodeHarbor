@@ -13,6 +13,7 @@ import {
 } from "./auth/scope-matrix";
 import { Logger } from "./logger";
 import {
+  type ApiTaskExternalContext,
   ApiTaskIdempotencyConflictError,
   type ApiTaskQueryResult,
   type ApiTaskSubmitInput,
@@ -764,6 +765,10 @@ function parseTaskSubmitBody(value: unknown): Omit<ApiTaskSubmitInput, "idempote
   const conversationId = normalizeRequiredString(body.conversationId, "conversationId");
   const senderId = normalizeRequiredString(body.senderId, "senderId");
   const text = normalizeRequiredString(body.text, "text");
+  const externalContext = parseTaskSubmitExternalContext(body.externalContext, {
+    conversationId,
+    senderId,
+  });
   return {
     conversationId,
     senderId,
@@ -772,6 +777,7 @@ function parseTaskSubmitBody(value: unknown): Omit<ApiTaskSubmitInput, "idempote
     isDirectMessage: normalizeBoolean(body.isDirectMessage, true),
     mentionsBot: normalizeBoolean(body.mentionsBot, false),
     repliesToBot: normalizeBoolean(body.repliesToBot, false),
+    ...(externalContext ? { externalContext } : {}),
   };
 }
 
@@ -869,6 +875,7 @@ function mapCiWebhookPayload(body: Record<string, unknown>): WebhookMapResult {
     "conversationId",
   );
   const senderId = readWebhookOptionalString(body, ["senderId", "actor", "triggeredBy", "userId", "user"]);
+  const resolvedSenderId = senderId ?? WEBHOOK_DEFAULT_SENDER_BY_SOURCE.ci;
   const repository = readWebhookRequiredString(body, ["repository", "repo", "project", "projectKey"], "repository");
   const pipeline = readWebhookOptionalString(body, ["pipeline", "workflow", "job", "build", "stage"]);
   const status = readWebhookOptionalString(body, ["status", "conclusion", "result"]) ?? "unknown";
@@ -877,6 +884,9 @@ function mapCiWebhookPayload(body: Record<string, unknown>): WebhookMapResult {
   const url = readWebhookOptionalString(body, ["url", "pipelineUrl", "buildUrl", "runUrl"]);
   const summary = readWebhookOptionalString(body, ["summary", "message", "detail"]);
   const instruction = readWebhookOptionalString(body, ["instruction", "task", "prompt"]);
+  const eventId = readWebhookOptionalString(body, ["eventId", "deliveryId", "runId", "buildId"]);
+  const workflowId = readWebhookOptionalString(body, ["workflowId", "workflowRunId", "runId", "buildId", "pipelineId"]);
+  const externalRef = readWebhookOptionalString(body, ["externalId", "deliveryId", "eventId", "runId", "buildId"]);
 
   const lines = ["[CI Webhook]", `Repository: ${repository}`, `Status: ${status}`];
   if (pipeline) {
@@ -903,12 +913,30 @@ function mapCiWebhookPayload(body: Record<string, unknown>): WebhookMapResult {
   return {
     taskInput: {
       conversationId,
-      senderId: senderId ?? WEBHOOK_DEFAULT_SENDER_BY_SOURCE.ci,
+      senderId: resolvedSenderId,
       text: lines.join("\n"),
       requestId: readWebhookOptionalString(body, ["requestId", "eventId", "deliveryId", "runId", "buildId"]) ?? undefined,
       isDirectMessage: false,
       mentionsBot: true,
       repliesToBot: false,
+      externalContext: {
+        source: "ci",
+        eventId,
+        workflowId,
+        externalRef,
+        matrixConversationId: conversationId,
+        matrixSenderId: resolvedSenderId,
+        ci: {
+          repository,
+          pipeline,
+          status,
+          branch,
+          commit,
+          url,
+        },
+        ticket: null,
+        metadata: collectWebhookMetadata(body, ["provider", "project", "projectKey", "environment", "region"]),
+      },
     },
     idempotencyHint: readWebhookOptionalString(body, [
       "eventId",
@@ -928,6 +956,7 @@ function mapTicketWebhookPayload(body: Record<string, unknown>): WebhookMapResul
     "conversationId",
   );
   const senderId = readWebhookOptionalString(body, ["senderId", "actor", "reporter", "assignee", "userId", "user"]);
+  const resolvedSenderId = senderId ?? WEBHOOK_DEFAULT_SENDER_BY_SOURCE.ticket;
   const ticketId = readWebhookRequiredString(body, ["ticketId", "issueKey", "key", "id"], "ticketId");
   const title = readWebhookRequiredString(body, ["title", "summary", "subject"], "title");
   const status = readWebhookOptionalString(body, ["status", "state"]);
@@ -936,6 +965,9 @@ function mapTicketWebhookPayload(body: Record<string, unknown>): WebhookMapResul
   const url = readWebhookOptionalString(body, ["url", "ticketUrl", "issueUrl"]);
   const description = readWebhookOptionalString(body, ["description", "detail", "content"]);
   const instruction = readWebhookOptionalString(body, ["instruction", "task", "prompt"]);
+  const eventId = readWebhookOptionalString(body, ["eventId", "ticketEventId", "externalId"]);
+  const workflowId = readWebhookOptionalString(body, ["workflowId", "workflowRunId", "runId"]);
+  const externalRef = readWebhookOptionalString(body, ["externalId", "ticketEventId", "eventId"]);
 
   const lines = ["[Ticket Webhook]", `Ticket: ${ticketId}`, `Title: ${title}`];
   if (status) {
@@ -962,12 +994,30 @@ function mapTicketWebhookPayload(body: Record<string, unknown>): WebhookMapResul
   return {
     taskInput: {
       conversationId,
-      senderId: senderId ?? WEBHOOK_DEFAULT_SENDER_BY_SOURCE.ticket,
+      senderId: resolvedSenderId,
       text: lines.join("\n"),
       requestId: readWebhookOptionalString(body, ["requestId", "eventId", "ticketEventId", "externalId"]) ?? undefined,
       isDirectMessage: false,
       mentionsBot: true,
       repliesToBot: false,
+      externalContext: {
+        source: "ticket",
+        eventId,
+        workflowId,
+        externalRef,
+        matrixConversationId: conversationId,
+        matrixSenderId: resolvedSenderId,
+        ci: null,
+        ticket: {
+          ticketId,
+          title,
+          status,
+          priority,
+          assignee,
+          url,
+        },
+        metadata: collectWebhookMetadata(body, ["project", "projectKey", "board", "team"]),
+      },
     },
     idempotencyHint: readWebhookOptionalString(body, [
       "eventId",
@@ -1004,6 +1054,18 @@ function readWebhookOptionalString(body: Record<string, unknown>, keys: string[]
     }
   }
   return null;
+}
+
+function collectWebhookMetadata(body: Record<string, unknown>, keys: string[]): Record<string, string> {
+  const metadata: Record<string, string> = {};
+  for (const key of keys) {
+    const value = readWebhookOptionalString(body, [key]);
+    if (!value) {
+      continue;
+    }
+    metadata[key] = value;
+  }
+  return metadata;
 }
 
 function buildWebhookIdempotencyKey(
@@ -1083,6 +1145,107 @@ function normalizeOptionalString(value: unknown): string | undefined {
   }
   const normalized = value.trim();
   return normalized || undefined;
+}
+
+function normalizeOptionalNullString(value: unknown, fieldName: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, `Expected string value for ${fieldName}.`);
+  }
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function parseTaskSubmitExternalContext(
+  value: unknown,
+  fallback: { conversationId: string; senderId: string },
+): ApiTaskExternalContext | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const payload = asObject(value, "externalContext");
+  const sourceRaw = normalizeOptionalNullString(payload.source, "externalContext.source");
+  const source = normalizeApiExternalSource(sourceRaw);
+  if (!source) {
+    throw new HttpError(400, "externalContext.source must be one of: api, ci, ticket.");
+  }
+
+  return {
+    source,
+    eventId: normalizeOptionalNullString(payload.eventId, "externalContext.eventId"),
+    workflowId: normalizeOptionalNullString(payload.workflowId, "externalContext.workflowId"),
+    externalRef: normalizeOptionalNullString(payload.externalRef, "externalContext.externalRef"),
+    matrixConversationId:
+      normalizeOptionalNullString(payload.matrixConversationId, "externalContext.matrixConversationId") ??
+      fallback.conversationId,
+    matrixSenderId:
+      normalizeOptionalNullString(payload.matrixSenderId, "externalContext.matrixSenderId") ?? fallback.senderId,
+    ci: parseExternalCiContext(payload.ci),
+    ticket: parseExternalTicketContext(payload.ticket),
+    metadata: parseExternalMetadata(payload.metadata),
+  };
+}
+
+function normalizeApiExternalSource(value: string | null): ApiTaskExternalContext["source"] | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "api" || normalized === "ci" || normalized === "ticket") {
+    return normalized;
+  }
+  return null;
+}
+
+function parseExternalCiContext(value: unknown): ApiTaskExternalContext["ci"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const payload = asObject(value, "externalContext.ci");
+  return {
+    repository: normalizeOptionalNullString(payload.repository, "externalContext.ci.repository"),
+    pipeline: normalizeOptionalNullString(payload.pipeline, "externalContext.ci.pipeline"),
+    status: normalizeOptionalNullString(payload.status, "externalContext.ci.status"),
+    branch: normalizeOptionalNullString(payload.branch, "externalContext.ci.branch"),
+    commit: normalizeOptionalNullString(payload.commit, "externalContext.ci.commit"),
+    url: normalizeOptionalNullString(payload.url, "externalContext.ci.url"),
+  };
+}
+
+function parseExternalTicketContext(value: unknown): ApiTaskExternalContext["ticket"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const payload = asObject(value, "externalContext.ticket");
+  return {
+    ticketId: normalizeOptionalNullString(payload.ticketId, "externalContext.ticket.ticketId"),
+    title: normalizeOptionalNullString(payload.title, "externalContext.ticket.title"),
+    status: normalizeOptionalNullString(payload.status, "externalContext.ticket.status"),
+    priority: normalizeOptionalNullString(payload.priority, "externalContext.ticket.priority"),
+    assignee: normalizeOptionalNullString(payload.assignee, "externalContext.ticket.assignee"),
+    url: normalizeOptionalNullString(payload.url, "externalContext.ticket.url"),
+  };
+}
+
+function parseExternalMetadata(value: unknown): Record<string, string> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const payload = asObject(value, "externalContext.metadata");
+  const output: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(payload)) {
+    if (typeof entry !== "string") {
+      throw new HttpError(400, `externalContext.metadata.${key} must be a string.`);
+    }
+    const normalized = entry.trim();
+    if (!normalized) {
+      continue;
+    }
+    output[key] = normalized;
+  }
+  return output;
 }
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {

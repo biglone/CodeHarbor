@@ -1,9 +1,12 @@
 import type { InboundMessage } from "../types";
+import type { ApiTaskExternalContext, ApiTaskExternalSource } from "./orchestrator-api-types";
 
 export interface QueuedInboundPayload {
+  apiTask: boolean;
   message: InboundMessage;
   receivedAt: number;
   prompt: string | null;
+  externalContext: ApiTaskExternalContext;
 }
 
 export function normalizeApiTaskRequestId(requestId: string | undefined, eventId: string): string {
@@ -30,12 +33,16 @@ export function parseQueuedInboundPayload(payloadJson: string): QueuedInboundPay
   }
 
   const message = parseQueuedInboundMessage(parsed.message);
+  const apiTask = parseQueuedApiTaskFlag(parsed.apiTask);
   const receivedAt = parseQueuedReceivedAt(parsed.receivedAt);
   const prompt = parseQueuedPrompt(parsed.prompt, message.text);
+  const externalContext = parseQueuedExternalContext(parsed.externalContext, message);
   return {
+    apiTask,
     message,
     receivedAt,
     prompt,
+    externalContext,
   };
 }
 
@@ -130,6 +137,112 @@ function parseQueuedPrompt(value: unknown, fallbackText: string): string | null 
     throw new Error("Invalid queued payload prompt.");
   }
   return value;
+}
+
+function parseQueuedApiTaskFlag(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("Invalid queued payload apiTask.");
+  }
+  return value;
+}
+
+function parseQueuedExternalContext(value: unknown, message: InboundMessage): ApiTaskExternalContext {
+  const fallback = createDefaultExternalContext(message);
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const sourceRaw = parseNullableString(value.source, "externalContext.source");
+  const source = normalizeExternalSource(sourceRaw) ?? fallback.source;
+  const ci = parseQueuedCiContext(value.ci);
+  const ticket = parseQueuedTicketContext(value.ticket);
+
+  return {
+    source,
+    eventId: parseNullableString(value.eventId, "externalContext.eventId"),
+    workflowId: parseNullableString(value.workflowId, "externalContext.workflowId"),
+    externalRef: parseNullableString(value.externalRef, "externalContext.externalRef"),
+    matrixConversationId:
+      parseNullableString(value.matrixConversationId, "externalContext.matrixConversationId") ?? message.conversationId,
+    matrixSenderId: parseNullableString(value.matrixSenderId, "externalContext.matrixSenderId") ?? message.senderId,
+    ci,
+    ticket,
+    metadata: parseQueuedMetadata(value.metadata),
+  };
+}
+
+function createDefaultExternalContext(message: InboundMessage): ApiTaskExternalContext {
+  return {
+    source: "api",
+    eventId: null,
+    workflowId: null,
+    externalRef: null,
+    matrixConversationId: message.conversationId,
+    matrixSenderId: message.senderId,
+    ci: null,
+    ticket: null,
+    metadata: {},
+  };
+}
+
+function normalizeExternalSource(value: string | null): ApiTaskExternalSource | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "api" || normalized === "ci" || normalized === "ticket") {
+    return normalized;
+  }
+  return null;
+}
+
+function parseQueuedCiContext(value: unknown): ApiTaskExternalContext["ci"] {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return {
+    repository: parseNullableString(value.repository, "externalContext.ci.repository"),
+    pipeline: parseNullableString(value.pipeline, "externalContext.ci.pipeline"),
+    status: parseNullableString(value.status, "externalContext.ci.status"),
+    branch: parseNullableString(value.branch, "externalContext.ci.branch"),
+    commit: parseNullableString(value.commit, "externalContext.ci.commit"),
+    url: parseNullableString(value.url, "externalContext.ci.url"),
+  };
+}
+
+function parseQueuedTicketContext(value: unknown): ApiTaskExternalContext["ticket"] {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return {
+    ticketId: parseNullableString(value.ticketId, "externalContext.ticket.ticketId"),
+    title: parseNullableString(value.title, "externalContext.ticket.title"),
+    status: parseNullableString(value.status, "externalContext.ticket.status"),
+    priority: parseNullableString(value.priority, "externalContext.ticket.priority"),
+    assignee: parseNullableString(value.assignee, "externalContext.ticket.assignee"),
+    url: parseNullableString(value.url, "externalContext.ticket.url"),
+  };
+}
+
+function parseQueuedMetadata(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const output: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    const normalized = entry.trim();
+    if (!normalized) {
+      continue;
+    }
+    output[key] = normalized;
+  }
+  return output;
 }
 
 function parseRequiredString(value: unknown, fieldName: string): string {

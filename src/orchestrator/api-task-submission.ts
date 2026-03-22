@@ -1,5 +1,10 @@
 import { buildApiTaskPayload } from "./api-task-payload";
-import { ApiTaskIdempotencyConflictError, type ApiTaskSubmitInput, type ApiTaskSubmitResult } from "./orchestrator-api-types";
+import {
+  ApiTaskIdempotencyConflictError,
+  type ApiTaskLifecycleEvent,
+  type ApiTaskSubmitInput,
+  type ApiTaskSubmitResult,
+} from "./orchestrator-api-types";
 import { isApiTaskPayloadEquivalent, parseQueuedInboundPayload } from "./queue-payload";
 import type { TaskQueueEnqueueInput, TaskQueueEnqueueResult } from "../store/state-store";
 
@@ -9,6 +14,7 @@ interface QueueStoreLike {
 
 interface SubmitApiTaskDeps {
   startSessionQueueDrain: (sessionKey: string) => void;
+  emitApiTaskLifecycleEvent?: (event: ApiTaskLifecycleEvent) => void;
 }
 
 export function submitApiTask(
@@ -29,6 +35,24 @@ export function submitApiTask(
     if (!isApiTaskPayloadEquivalent(existing.message, message)) {
       throw new ApiTaskIdempotencyConflictError(sessionKey, message.eventId);
     }
+  }
+
+  if (result.created) {
+    deps.emitApiTaskLifecycleEvent?.({
+      stage: "queued",
+      taskId: result.task.id,
+      sessionKey,
+      eventId: result.task.eventId,
+      requestId: result.task.requestId,
+      status: result.task.status,
+      attempt: result.task.attempt,
+      enqueuedAt: result.task.enqueuedAt,
+      startedAt: result.task.startedAt,
+      finishedAt: result.task.finishedAt,
+      nextRetryAt: result.task.nextRetryAt,
+      errorSummary: result.task.error ?? result.task.lastError,
+      externalContext: payload.externalContext,
+    });
   }
 
   deps.startSessionQueueDrain(sessionKey);

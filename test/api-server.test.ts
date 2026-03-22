@@ -640,6 +640,16 @@ describe("ApiServer", () => {
         idempotencyKey: "webhook:ci:ci-run-77",
         requestId: "ci-request-77",
         isDirectMessage: false,
+        externalContext: expect.objectContaining({
+          source: "ci",
+          matrixConversationId: "!ci-room:example.com",
+          matrixSenderId: "@ci:webhook.codeharbor",
+          ci: expect.objectContaining({
+            repository: "acme/backend",
+            pipeline: "build-and-test",
+            status: "failed",
+          }),
+        }),
       }),
     );
     expect(service.calls[0]?.text).toContain("[CI Webhook]");
@@ -686,10 +696,66 @@ describe("ApiServer", () => {
         idempotencyKey: "webhook:ticket:ticket-event-88",
         requestId: "ticket-event-88",
         isDirectMessage: false,
+        externalContext: expect.objectContaining({
+          source: "ticket",
+          matrixConversationId: "!ops-room:example.com",
+          matrixSenderId: "@oncall:example.com",
+          ticket: expect.objectContaining({
+            ticketId: "OPS-88",
+            title: "Release blocked by migration error",
+          }),
+        }),
       }),
     );
     expect(service.calls[0]?.text).toContain("[Ticket Webhook]");
     expect(service.calls[0]?.text).toContain("Ticket: OPS-88");
+  });
+
+  it("accepts external context on /api/tasks payload", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextResult = buildSubmitResult({ created: true, taskId: 66 });
+    const baseUrl = await createApiServer(service);
+
+    const response = await fetchJson(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer secret-token",
+        "idempotency-key": "idem-external-context-1",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        senderId: "@ci:example.com",
+        text: "run checks",
+        externalContext: {
+          source: "ci",
+          workflowId: "build-66",
+          ci: {
+            repository: "acme/backend",
+            status: "running",
+          },
+          metadata: {
+            provider: "github-actions",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(service.calls).toHaveLength(1);
+    expect(service.calls[0]?.externalContext).toEqual(
+      expect.objectContaining({
+        source: "ci",
+        workflowId: "build-66",
+        ci: expect.objectContaining({
+          repository: "acme/backend",
+          status: "running",
+        }),
+        metadata: expect.objectContaining({
+          provider: "github-actions",
+        }),
+      }),
+    );
   });
 
   it("returns 422 when webhook payload misses required mapping fields", async () => {

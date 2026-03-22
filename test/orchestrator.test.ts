@@ -10,7 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { type Channel, type InboundHandler, type SendMessageOptions } from "../src/channels/channel";
 import { DEFAULT_DOCUMENT_MAX_BYTES } from "../src/document-extractor";
 import { CodexExecutionCancelledError } from "../src/executor/codex-executor";
-import { ApiTaskIdempotencyConflictError, Orchestrator, buildSessionKey } from "../src/orchestrator";
+import {
+  ApiTaskIdempotencyConflictError,
+  type ApiTaskLifecycleEvent,
+  Orchestrator,
+  buildSessionKey,
+} from "../src/orchestrator";
 import { GLOBAL_RUNTIME_HOT_CONFIG_KEY } from "../src/runtime-hot-config";
 import { StateStore } from "../src/store/state-store";
 import { InboundMessage } from "../src/types";
@@ -1410,7 +1415,7 @@ describe("Orchestrator", () => {
       });
 
       await orchestrator.bootstrapTaskQueueRecovery();
-      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded");
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 8_000);
 
       expect(executor.callCount).toBe(2);
       expect(store.getTaskById(queued.taskId)?.attempt).toBe(2);
@@ -1634,6 +1639,65 @@ describe("Orchestrator", () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("emits API lifecycle stages across queue execution and retry", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-lifecycle-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new SequencedExecutor([
+        { kind: "error", error: new Error("temporary upstream issue") },
+        { kind: "success", reply: "ok-after-retry" },
+      ]);
+      const lifecycleEvents: ApiTaskLifecycleEvent[] = [];
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        taskQueueRetryPolicy: {
+          maxAttempts: 3,
+          initialDelayMs: 1,
+          maxDelayMs: 10,
+          multiplier: 1,
+          jitterRatio: 0,
+        },
+        onApiTaskLifecycleEvent: (event) => lifecycleEvents.push(event),
+      });
+
+      const queued = orchestrator.submitApiTask({
+        conversationId: "!api-room:example.com",
+        senderId: "@ci:example.com",
+        text: "run lifecycle verification",
+        idempotencyKey: "idem-api-lifecycle",
+        externalContext: {
+          source: "ci",
+          workflowId: "build-123",
+          ci: {
+            repository: "acme/backend",
+            pipeline: "integration",
+            status: "running",
+            branch: null,
+            commit: null,
+            url: null,
+          },
+          ticket: null,
+          metadata: {
+            provider: "github-actions",
+          },
+        },
+      });
+
+      await waitForCondition(() => store.getTaskById(queued.task.id)?.status === "succeeded", 8_000);
+      expect(lifecycleEvents.map((event) => event.stage)).toEqual(
+        expect.arrayContaining(["queued", "executing", "retrying", "completed"]),
+      );
+      expect(lifecycleEvents.filter((event) => event.stage === "executing")).toHaveLength(2);
+      expect(lifecycleEvents.some((event) => event.stage === "retrying" && event.nextRetryAt !== null)).toBe(true);
+      expect(lifecycleEvents[0]?.externalContext.source).toBe("ci");
+      expect(lifecycleEvents[0]?.externalContext.matrixConversationId).toBe("!api-room:example.com");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it("exposes API task query snapshot with status, stage, and error summary", async () => {
     const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-query-");

@@ -8,6 +8,7 @@ import { MatrixChannel } from "./channels/matrix-channel";
 import { ConfigService } from "./config-service";
 import { AppConfig } from "./config";
 import { CodexExecutor } from "./executor/codex-executor";
+import { ExternalTaskIntegrationDispatcher } from "./external-task-integration";
 import { HistoryService } from "./history-service";
 import { Logger } from "./logger";
 import { Orchestrator } from "./orchestrator";
@@ -25,6 +26,7 @@ export class CodeHarborApp {
   private readonly channel: Channel;
   private readonly orchestrator: Orchestrator;
   private readonly configService: ConfigService;
+  private readonly externalTaskIntegrationDispatcher: ExternalTaskIntegrationDispatcher | null;
   private readonly apiServer: ApiServer | null;
 
   constructor(config: AppConfig) {
@@ -59,6 +61,29 @@ export class CodeHarborApp {
     const workflowExecTimeoutMs = Math.max(config.codexExecTimeoutMs, DEFAULT_WORKFLOW_EXEC_TIMEOUT_MS);
 
     this.channel = new MatrixChannel(config, this.logger);
+    this.externalTaskIntegrationDispatcher = config.externalTaskIntegration.enabled
+      ? new ExternalTaskIntegrationDispatcher(this.logger, config.externalTaskIntegration, {
+          auditRecorder: (event) => {
+            this.stateStore.appendOperationAuditLog({
+              actor: "system:codeharbor",
+              source: `integration:${event.sink}`,
+              surface: "webhook",
+              action: event.sink === "ticket" ? "webhook.dispatch.ticket" : "webhook.dispatch.notify",
+              resource: event.targetUrl,
+              method: "POST",
+              path: event.targetUrl,
+              outcome: event.outcome,
+              reason: event.reason,
+              metadata: {
+                stage: event.stage,
+                taskId: event.taskId,
+                source: event.source,
+                attempts: event.attempts,
+              },
+            });
+          },
+        })
+      : null;
     const packageVersion = resolvePackageVersion();
     this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger, {
       progressUpdatesEnabled: config.matrixProgressUpdates,
@@ -94,6 +119,7 @@ export class CodeHarborApp {
       matrixAdminUsers: config.matrixAdminUsers,
       upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,
+      onApiTaskLifecycleEvent: (event) => this.externalTaskIntegrationDispatcher?.emitTaskLifecycle(event),
     });
     this.apiServer =
       config.apiEnabled && config.apiToken
