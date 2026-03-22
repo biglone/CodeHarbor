@@ -2875,6 +2875,124 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("fails fast before /autodev run task execution when git worktree is dirty", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-preflight-single-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T15.1 | preflight single | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+    await fs.writeFile(path.join(tempRoot, "DIRTY_NOTE.md"), "dirty\n", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T15.1",
+          eventId: "$autodev-run-preflight-single",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T15.1 | preflight single | ⬜ |");
+      expect(executor.callCount).toBe(0);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 已停止（Git preflight 未通过）"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("git status"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.runs.failed).toBe(1);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails fast in /autodev run loop when git worktree is dirty", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-preflight-loop-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T15.2 | preflight loop one | ⬜ |",
+        "| T15.3 | preflight loop two | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+    await fs.writeFile(path.join(tempRoot, "DIRTY_LOOP.md"), "dirty\n", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-preflight-loop",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T15.2 | preflight loop one | ⬜ |");
+      expect(updated).toContain("| T15.3 | preflight loop two | ⬜ |");
+      expect(executor.callCount).toBe(0);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 已停止（Git preflight 未通过）"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("mode: loop"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.runs.failed).toBe(1);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
@@ -3344,11 +3462,58 @@ describe("Orchestrator", () => {
       const statusNotice = channel.notices.find((entry) => entry.text.includes("AutoDev 状态"))?.text ?? "";
       expect(statusNotice).toContain("AutoDev 状态");
       expect(statusNotice).toContain("currentTask: N/A");
+      expect(statusNotice).toContain("gitPreflight: no_repo");
       expect(statusNotice).toContain("runWindow: startedAt=N/A, endedAt=N/A, duration=N/A");
       expect(statusNotice).toContain("runControl: loopActive=no, loopStopRequested=no, stopRequested=no");
       expect(statusNotice).toContain("workflowDiag: runId=N/A");
       expect(statusNotice).toContain("stageTrace:");
       expect(statusNotice).toContain("- (empty)");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("shows auto-release push warning in /autodev status when auto push is disabled", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-release-warning-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T1.3 | release warning task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevAutoReleaseEnabled: true,
+        autoDevAutoReleasePush: false,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status-release-warning",
+        }),
+      );
+
+      const statusNotice = channel.notices.find((entry) => entry.text.includes("AutoDev 状态"))?.text ?? "";
+      expect(statusNotice).toContain("warning: autoRelease=on 但 autoReleasePush=off");
+      expect(statusNotice).toContain("git push");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

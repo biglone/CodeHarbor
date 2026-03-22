@@ -1,5 +1,6 @@
 import type { InboundMessage } from "../types";
 import { formatTaskForDisplay, loadAutoDevContext, summarizeAutoDevTasks } from "../workflow/autodev";
+import { inspectAutoDevGitPreflight } from "./autodev-git";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
 import { formatError, formatRunWindowDuration, formatWorkflowDiagRunDuration } from "./helpers";
@@ -51,6 +52,7 @@ export async function handleAutoDevStatusCommand(
   try {
     const context = await loadAutoDevContext(input.workdir);
     const summary = summarizeAutoDevTasks(context.tasks);
+    const gitPreflight = await inspectAutoDevGitPreflight(input.workdir);
     const inProgressTask = context.tasks.find((task) => task.status === "in_progress") ?? null;
     const runDuration = formatRunWindowDuration(snapshot.startedAt, snapshot.endedAt);
     const loopActive = deps.hasActiveAutoDevLoopSession(input.sessionKey) ? "yes" : "no";
@@ -69,6 +71,10 @@ export async function handleAutoDevStatusCommand(
     const latestRunLastStage = latestRun?.lastStage
       ? `${latestRun.lastStage}${latestRun.lastMessage ? `(${latestRun.lastMessage})` : ""}`
       : "N/A";
+    const autoReleasePushWarning =
+      deps.autoDevAutoReleaseEnabled && !deps.autoDevAutoReleasePush
+        ? `\n- warning: autoRelease=on 但 autoReleasePush=off；发布提交不会自动推送，请手动执行 \`git push\` 触发 CI 发布`
+        : "";
     const currentTask =
       snapshot.taskId && snapshot.taskDescription
         ? `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
@@ -85,7 +91,9 @@ export async function handleAutoDevStatusCommand(
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
+- gitPreflight: ${gitPreflight.state}
 - config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- gitPreflightReason: ${gitPreflight.reason ?? "N/A"}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
 - runState: ${snapshot.state}
