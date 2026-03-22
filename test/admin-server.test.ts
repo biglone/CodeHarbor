@@ -362,6 +362,23 @@ describe("AdminServer", () => {
     expect(invalidAutoDevOverride.status).toBe(400);
     expect(JSON.stringify(invalidAutoDevOverride.body)).toContain("AUTODEV_AUTO_COMMIT");
 
+    const invalidLaunchdOverride = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          envOverrides: {
+            CODEHARBOR_LAUNCHD_MAIN_LABEL: "bad label with space",
+          },
+        },
+      }),
+    });
+    expect(invalidLaunchdOverride.status).toBe(400);
+    expect(JSON.stringify(invalidLaunchdOverride.body)).toContain("CODEHARBOR_LAUNCHD_MAIN_LABEL");
+
     const validEnvOverrides = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -374,6 +391,7 @@ describe("AdminServer", () => {
             MATRIX_ADMIN_USERS: "@ops:example.com",
             AUTODEV_LOOP_MAX_RUNS: "12",
             AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "9000",
+            CODEHARBOR_LAUNCHD_MAIN_LABEL: "com.custom.main",
           },
         },
       }),
@@ -1321,6 +1339,8 @@ describe("AdminServer", () => {
         "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS=",
         "AGENT_WORKFLOW_ROLE_SKILLS_ROOTS=",
         "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON=",
+        "CODEHARBOR_LAUNCHD_MAIN_LABEL=com.codeharbor.main",
+        "CODEHARBOR_LAUNCHD_ADMIN_LABEL=com.codeharbor.admin",
         "CLI_COMPAT_IMAGE_MAX_BYTES=10485760",
         "CLI_COMPAT_IMAGE_MAX_COUNT=4",
         "CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif",
@@ -1390,6 +1410,8 @@ describe("AdminServer", () => {
           AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "7000",
           AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS: "10000",
           AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS: "",
+          CODEHARBOR_LAUNCHD_MAIN_LABEL: "com.custom.main",
+          CODEHARBOR_LAUNCHD_ADMIN_LABEL: "com.custom.admin",
         },
         updateCheck: {
           enabled: false,
@@ -1429,6 +1451,8 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS=7000");
     expect(envRaw).toContain("AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS=10000");
     expect(envRaw).toContain("AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS=");
+    expect(envRaw).toContain("CODEHARBOR_LAUNCHD_MAIN_LABEL=com.custom.main");
+    expect(envRaw).toContain("CODEHARBOR_LAUNCHD_ADMIN_LABEL=com.custom.admin");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");

@@ -72,6 +72,11 @@ const POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_LOOP_MAX_MINUTES",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
 ]);
+const LAUNCHD_LABEL_ENV_OVERRIDE_KEYS = new Set<string>([
+  "CODEHARBOR_LAUNCHD_MAIN_LABEL",
+  "CODEHARBOR_LAUNCHD_ADMIN_LABEL",
+]);
+const SAFE_LAUNCHD_LABEL_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 interface CodexHealthResult {
   ok: boolean;
@@ -3121,6 +3126,16 @@ function validateEnvOverrideValue(key: string, value: string): void {
     const parsed = Number.parseInt(trimmed, 10);
     if (!Number.isFinite(parsed) || parsed < 1) {
       throw new HttpError(400, `envOverrides.${key} must be a positive integer.`);
+    }
+    return;
+  }
+
+  if (LAUNCHD_LABEL_ENV_OVERRIDE_KEYS.has(key)) {
+    if (!trimmed) {
+      return;
+    }
+    if (!SAFE_LAUNCHD_LABEL_PATTERN.test(trimmed)) {
+      throw new HttpError(400, `envOverrides.${key} must be a safe launchd label.`);
     }
   }
 }

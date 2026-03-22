@@ -6,6 +6,7 @@ import { z } from "zod";
 import { loadConfig, type AdminTokenConfig, type AppConfig } from "./config";
 import { applyEnvOverrides } from "./init";
 import { RoomSettingsRecord, RoomSettingsUpsertInput, StateStore } from "./store/state-store";
+import { resolveLaunchdLabelConfig } from "./upgrade-platform";
 
 export const CONFIG_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
@@ -104,6 +105,8 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "EXTERNAL_INTEGRATION_MAX_RETRIES",
   "EXTERNAL_INTEGRATION_RETRY_DELAY_MS",
   "EXTERNAL_INTEGRATION_AUTH_TOKEN",
+  "CODEHARBOR_LAUNCHD_MAIN_LABEL",
+  "CODEHARBOR_LAUNCHD_ADMIN_LABEL",
   "ADMIN_BIND_HOST",
   "ADMIN_PORT",
   "ADMIN_TOKEN",
@@ -294,6 +297,12 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     EXTERNAL_INTEGRATION_MAX_RETRIES: integerStringSchema("EXTERNAL_INTEGRATION_MAX_RETRIES", 0, 10).default("1"),
     EXTERNAL_INTEGRATION_RETRY_DELAY_MS: integerStringSchema("EXTERNAL_INTEGRATION_RETRY_DELAY_MS", 0).default("500"),
     EXTERNAL_INTEGRATION_AUTH_TOKEN: z.string().default(""),
+    CODEHARBOR_LAUNCHD_MAIN_LABEL: launchdLabelStringSchema("CODEHARBOR_LAUNCHD_MAIN_LABEL").default(
+      "com.codeharbor.main",
+    ),
+    CODEHARBOR_LAUNCHD_ADMIN_LABEL: launchdLabelStringSchema("CODEHARBOR_LAUNCHD_ADMIN_LABEL").default(
+      "com.codeharbor.admin",
+    ),
     ADMIN_BIND_HOST: z.string(),
     ADMIN_PORT: integerStringSchema("ADMIN_PORT", 1, 65_535),
     ADMIN_TOKEN: z.string(),
@@ -460,6 +469,7 @@ export async function runConfigImportCommand(options: ConfigImportCommandOptions
 }
 
 function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
+  const launchdLabels = resolveLaunchdLabelConfig(process.env);
   return {
     MATRIX_HOMESERVER: config.matrixHomeserver,
     MATRIX_USER_ID: config.matrixUserId,
@@ -564,6 +574,8 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     EXTERNAL_INTEGRATION_MAX_RETRIES: String(config.externalTaskIntegration.maxRetries),
     EXTERNAL_INTEGRATION_RETRY_DELAY_MS: String(config.externalTaskIntegration.retryDelayMs),
     EXTERNAL_INTEGRATION_AUTH_TOKEN: config.externalTaskIntegration.authToken ?? "",
+    CODEHARBOR_LAUNCHD_MAIN_LABEL: launchdLabels.main,
+    CODEHARBOR_LAUNCHD_ADMIN_LABEL: launchdLabels.admin,
     ADMIN_BIND_HOST: config.adminBindHost,
     ADMIN_PORT: String(config.adminPort),
     ADMIN_TOKEN: config.adminToken ?? "",
@@ -759,6 +771,18 @@ function optionalIntegerStringSchema(key: string, min: number, max = Number.MAX_
     return parsed >= min && parsed <= max;
   }, {
     message: `${key} must be an empty string or an integer string in range [${min}, ${max}].`,
+  });
+}
+
+function launchdLabelStringSchema(key: string): z.ZodString {
+  return z.string().refine((value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return true;
+    }
+    return /^[A-Za-z0-9_.-]+$/.test(trimmed);
+  }, {
+    message: `${key} must be empty or a safe launchd label string.`,
   });
 }
 

@@ -94,6 +94,8 @@ describe("config snapshot commands", () => {
     expect(parsed.env).toHaveProperty("AUTODEV_LOOP_MAX_RUNS");
     expect(parsed.env).toHaveProperty("AUTODEV_AUTO_RELEASE_ENABLED");
     expect(parsed.env).toHaveProperty("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS");
+    expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_MAIN_LABEL");
+    expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_ADMIN_LABEL");
     expect(parsed.rooms).toHaveLength(1);
     expect(parsed.rooms[0]?.roomId).toBe("!room:example.com");
   });
