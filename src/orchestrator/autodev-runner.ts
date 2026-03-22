@@ -1,6 +1,7 @@
 import type { Logger } from "../logger";
 import type { InboundMessage } from "../types";
 import type { MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
+import type { OutputLanguage } from "../config";
 import {
   type AutoDevTask,
   buildAutoDevObjective,
@@ -28,6 +29,7 @@ import {
 } from "./diagnostic-formatters";
 import { formatError } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
+import { byOutputLanguage } from "./output-language";
 
 export interface AutoDevRunSnapshot {
   state: "idle" | "running" | "succeeded" | "failed";
@@ -107,6 +109,7 @@ interface BeginWorkflowDiagRunInput {
 
 interface AutoDevRunnerDeps {
   logger: Logger;
+  outputLanguage: OutputLanguage;
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
@@ -169,24 +172,34 @@ export async function runAutoDevCommand(
         ? null
         : new Date(Date.now() + deps.autoDevLoopMaxMinutes * 60_000).toISOString(),
   };
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   if (!context.requirementsContent) {
     await deps.channelSendNotice(
       input.message.conversationId,
-      `[CodeHarbor] AutoDev 需要 ${context.requirementsPath}，请先准备需求文档。`,
+      localize(
+        `[CodeHarbor] AutoDev 需要 ${context.requirementsPath}，请先准备需求文档。`,
+        `[CodeHarbor] AutoDev requires ${context.requirementsPath}. Please prepare the requirements document first.`,
+      ),
     );
     return;
   }
   if (!context.taskListContent) {
     await deps.channelSendNotice(
       input.message.conversationId,
-      `[CodeHarbor] AutoDev 需要 ${context.taskListPath}，请先准备任务清单。`,
+      localize(
+        `[CodeHarbor] AutoDev 需要 ${context.taskListPath}，请先准备任务清单。`,
+        `[CodeHarbor] AutoDev requires ${context.taskListPath}. Please prepare the task list first.`,
+      ),
     );
     return;
   }
   if (context.tasks.length === 0) {
     await deps.channelSendNotice(
       input.message.conversationId,
-      "[CodeHarbor] 未在 TASK_LIST.md 识别到任务（需包含任务 ID 与状态列）。",
+      localize(
+        "[CodeHarbor] 未在 TASK_LIST.md 识别到任务（需包含任务 ID 与状态列）。",
+        "[CodeHarbor] No tasks recognized in TASK_LIST.md (requires task ID and status columns).",
+      ),
     );
     return;
   }
@@ -252,10 +265,16 @@ export async function runAutoDevCommand(
           });
           await deps.channelSendNotice(
             input.message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
+            localize(
+              `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopMaxRuns: ${activeContext.loopMaxRuns}`,
+              `[CodeHarbor] AutoDev loop stopped at run limit.
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- loopMaxRuns: ${activeContext.loopMaxRuns}`,
+            ),
           );
           return;
         }
@@ -281,10 +300,16 @@ export async function runAutoDevCommand(
           });
           await deps.channelSendNotice(
             input.message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
+            localize(
+              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopDeadlineAt: ${loopDeadlineAtIso}`,
+              `[CodeHarbor] AutoDev loop stopped at time limit.
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- loopDeadlineAt: ${loopDeadlineAtIso}`,
+            ),
           );
           return;
         }
@@ -327,15 +352,26 @@ export async function runAutoDevCommand(
             lastGitCommitAt: null,
           });
           if (completedRuns === 0) {
-            await deps.channelSendNotice(input.message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+            await deps.channelSendNotice(
+              input.message.conversationId,
+              localize(
+                "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。",
+                "[CodeHarbor] No executable tasks (pending/in_progress).",
+              ),
+            );
             return;
           }
           const summary = summarizeAutoDevTasks(loopContext.tasks);
           await deps.channelSendNotice(
             input.message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行完成
+            localize(
+              `[CodeHarbor] AutoDev 循环执行完成
 - completedRuns: ${completedRuns}
 - remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+              `[CodeHarbor] AutoDev loop completed
+- completedRuns: ${completedRuns}
+- remaining: pending=${summary.pending}, in_progress=${summary.inProgress}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+            ),
           );
           return;
         }
@@ -376,7 +412,10 @@ export async function runAutoDevCommand(
           deps.autoDevMetrics.recordLoopStop("task_incomplete");
           await deps.channelSendNotice(
             input.message.conversationId,
-            `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
+            localize(
+              `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
+              `[CodeHarbor] AutoDev loop paused: task ${refreshedTask.id} is ${statusToSymbol(refreshedTask.status)}. Please handle it before continuing.`,
+            ),
           );
           return;
         }
@@ -390,18 +429,33 @@ export async function runAutoDevCommand(
   const selectedTask = resolveAutoDevTask(context.tasks, requestedTaskId, requestedTaskLineIndex);
   if (!selectedTask) {
     if (requestedTaskId) {
-      await deps.channelSendNotice(input.message.conversationId, `[CodeHarbor] 未找到任务 ${requestedTaskId}。`);
+      await deps.channelSendNotice(
+        input.message.conversationId,
+        localize(`[CodeHarbor] 未找到任务 ${requestedTaskId}。`, `[CodeHarbor] Task ${requestedTaskId} was not found.`),
+      );
       return;
     }
-    await deps.channelSendNotice(input.message.conversationId, "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。");
+    await deps.channelSendNotice(
+      input.message.conversationId,
+      localize(
+        "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。",
+        "[CodeHarbor] No executable tasks (pending/in_progress).",
+      ),
+    );
     return;
   }
   if (selectedTask.status === "completed") {
-    await deps.channelSendNotice(input.message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已完成（✅）。`);
+    await deps.channelSendNotice(
+      input.message.conversationId,
+      localize(`[CodeHarbor] 任务 ${selectedTask.id} 已完成（✅）。`, `[CodeHarbor] Task ${selectedTask.id} is already completed (✅).`),
+    );
     return;
   }
   if (selectedTask.status === "cancelled") {
-    await deps.channelSendNotice(input.message.conversationId, `[CodeHarbor] 任务 ${selectedTask.id} 已取消（❌）。`);
+    await deps.channelSendNotice(
+      input.message.conversationId,
+      localize(`[CodeHarbor] 任务 ${selectedTask.id} 已取消（❌）。`, `[CodeHarbor] Task ${selectedTask.id} is cancelled (❌).`),
+    );
     return;
   }
 
@@ -472,12 +526,18 @@ export async function runAutoDevCommand(
     "autodev",
     "autodev",
     0,
-    `AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+    localize(
+      `AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+      `AutoDev started task ${activeTask.id}: ${activeTask.description}`,
+    ),
   );
 
   await deps.channelSendNotice(
     input.message.conversationId,
-    `[CodeHarbor] AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+    localize(
+      `[CodeHarbor] AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
+      `[CodeHarbor] AutoDev started task ${activeTask.id}: ${activeTask.description}`,
+    ),
   );
 
   try {
@@ -496,11 +556,11 @@ export async function runAutoDevCommand(
     let finalTask = activeTask;
     let gitCommit: AutoDevGitCommitResult = {
       kind: "skipped",
-      reason: "reviewer 未批准，未自动提交",
+      reason: localize("reviewer 未批准，未自动提交", "reviewer not approved; auto commit skipped"),
     };
     let releaseResult: AutoDevReleaseResult = {
       kind: "skipped",
-      reason: "reviewer 未批准，未自动发布",
+      reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
     };
     if (result.approved) {
       finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
@@ -566,7 +626,8 @@ export async function runAutoDevCommand(
     const nextTask = selectAutoDevTask(refreshed.tasks);
     await deps.channelSendNotice(
       input.message.conversationId,
-      `[CodeHarbor] AutoDev 任务结果
+      localize(
+        `[CodeHarbor] AutoDev 任务结果
 - task: ${finalTask.id}
 - reviewer approved: ${result.approved ? "yes" : "no"}
 - task status: ${statusToSymbol(finalTask.status)}
@@ -574,13 +635,25 @@ export async function runAutoDevCommand(
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
 - release: ${formatAutoDevReleaseResult(releaseResult)}
 - nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
+        `[CodeHarbor] AutoDev task result
+- task: ${finalTask.id}
+- reviewer approved: ${result.approved ? "yes" : "no"}
+- task status: ${statusToSymbol(finalTask.status)}
+- git commit: ${formatAutoDevGitCommitResult(gitCommit)}
+- git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
+- release: ${formatAutoDevReleaseResult(releaseResult)}
+- nextTask: ${nextTask ? formatTaskForDisplay(nextTask) : "N/A"}`,
+      ),
     );
     deps.appendWorkflowDiagEvent(
       workflowDiagRunId,
       "autodev",
       "autodev",
       0,
-      `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+      localize(
+        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+        `AutoDev task result: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+      ),
     );
   } catch (error) {
     const failurePolicy = await deps.applyAutoDevFailurePolicy({
@@ -624,15 +697,23 @@ export async function runAutoDevCommand(
       "autodev",
       "autodev",
       0,
-      `AutoDev 失败: ${formatError(error)}, streak=${failurePolicy.streak}, blocked=${
-        failurePolicy.blocked ? "yes" : "no"
-      }`,
+      localize(
+        `AutoDev 失败: ${formatError(error)}, streak=${failurePolicy.streak}, blocked=${
+          failurePolicy.blocked ? "yes" : "no"
+        }`,
+        `AutoDev failed: ${formatError(error)}, streak=${failurePolicy.streak}, blocked=${
+          failurePolicy.blocked ? "yes" : "no"
+        }`,
+      ),
     );
     if (failurePolicy.blocked) {
       deps.autoDevMetrics.recordTaskBlocked();
       await deps.channelSendNotice(
         input.message.conversationId,
-        `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
+        localize(
+          `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
+          `[CodeHarbor] AutoDev task ${activeTask.id} failed ${failurePolicy.streak} times consecutively and is marked blocked (🚫).`,
+        ),
       );
     }
     deps.autoDevMetrics.recordRunOutcome(status === "cancelled" ? "cancelled" : "failed");
@@ -662,6 +743,7 @@ async function failAutoDevOnGitPreflightError(
   deps: AutoDevRunnerDeps,
   input: AutoDevGitPreflightCheckInput,
 ): Promise<boolean> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   if (!deps.autoDevAutoCommit) {
     return false;
   }
@@ -672,7 +754,7 @@ async function failAutoDevOnGitPreflightError(
   }
 
   const endedAtIso = new Date().toISOString();
-  const reason = preflight.reason ?? "运行前存在未提交改动";
+  const reason = preflight.reason ?? localize("运行前存在未提交改动", "working tree is dirty before run");
   const taskLabel = input.task ? `${input.task.id} ${input.task.description}`.trim() : "N/A";
   const changedPreview = preflight.dirtyFiles.slice(0, 5);
   const changedPreviewLine =
@@ -707,7 +789,8 @@ async function failAutoDevOnGitPreflightError(
 
   await deps.channelSendNotice(
     input.conversationId,
-    `[CodeHarbor] AutoDev 已停止（Git preflight 未通过）。
+    localize(
+      `[CodeHarbor] AutoDev 已停止（Git preflight 未通过）。
 - reason: ${reason}
 - mode: ${input.mode}
 - task: ${taskLabel}
@@ -715,6 +798,15 @@ async function failAutoDevOnGitPreflightError(
 - fix: \`git status\`
 - fix: \`git add -A && git commit -m "chore: checkpoint before autodev run"\`
 - fix: \`git stash --include-untracked\`（如需暂存）`,
+      `[CodeHarbor] AutoDev stopped (Git preflight failed).
+- reason: ${reason}
+- mode: ${input.mode}
+- task: ${taskLabel}
+- gitPreflight: dirty${changedPreviewLine}
+- fix: \`git status\`
+- fix: \`git add -A && git commit -m "chore: checkpoint before autodev run"\`
+- fix: \`git stash --include-untracked\` (if you need to stash changes)`,
+    ),
   );
   return true;
 }
@@ -723,6 +815,7 @@ async function handleAutoDevLoopStopIfRequested(
   deps: AutoDevRunnerDeps,
   input: AutoDevLoopStopCheckInput,
 ): Promise<boolean> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   if (deps.consumePendingStopRequest(input.sessionKey)) {
     deps.autoDevMetrics.recordLoopStop("stop_requested");
     const endedAtIso = new Date().toISOString();
@@ -745,8 +838,12 @@ async function handleAutoDevLoopStopIfRequested(
     });
     await deps.channelSendNotice(
       input.conversationId,
-      `[CodeHarbor] AutoDev 循环执行已停止。
+      localize(
+        `[CodeHarbor] AutoDev 循环执行已停止。
 - completedRuns: ${input.completedRuns}`,
+        `[CodeHarbor] AutoDev loop stopped.
+- completedRuns: ${input.completedRuns}`,
+      ),
     );
     return true;
   }
@@ -773,9 +870,14 @@ async function handleAutoDevLoopStopIfRequested(
     });
     await deps.channelSendNotice(
       input.conversationId,
-      `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。
+      localize(
+        `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。
 - attemptedRuns: ${input.attemptedRuns}
 - completedRuns: ${input.completedRuns}`,
+        `[CodeHarbor] AutoDev loop stopped as requested (current task is complete).
+- attemptedRuns: ${input.attemptedRuns}
+- completedRuns: ${input.completedRuns}`,
+      ),
     );
     return true;
   }

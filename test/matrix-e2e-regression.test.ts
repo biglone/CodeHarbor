@@ -545,7 +545,7 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls[0]?.prompt).toContain("[role:planner]");
     expect(executor.calls[1]?.prompt).toContain("[role:executor]");
     expect(executor.calls[2]?.prompt).toContain("[role:reviewer]");
-    expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
+    expect(channel.sent.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("approved: yes"))).toBe(true);
   });
@@ -592,7 +592,7 @@ describe("Matrix e2e regression", () => {
     await expect(running).resolves.toBeUndefined();
 
     expect(channel.notices.some((entry) => entry.text.includes("已请求停止当前任务"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow 已取消"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("多智能体流程已取消"))).toBe(true);
   });
 
   it("rejects over-limit requests", async () => {

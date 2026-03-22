@@ -3875,7 +3875,7 @@ describe("Orchestrator", () => {
     );
 
     expect(executor.callCount).toBeGreaterThanOrEqual(4);
-    expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
+    expect(channel.sent.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text.includes("[planner]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
   });
@@ -3913,13 +3913,13 @@ describe("Orchestrator", () => {
       }),
     );
 
-    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] agent=planner, round=1"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("Planner 执行完成"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("[EXECUTOR] agent=executor, round=1"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("[REVIEWER] agent=reviewer, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] 代理=planner，轮次=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("规划代理执行完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[EXECUTOR] 代理=executor，轮次=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[REVIEWER] 代理=reviewer，轮次=1"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("verdict=REJECTED"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("Reviewer 契约补全启动"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("Reviewer 契约补全完成"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("审查代理契约补全启动"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("审查代理契约补全完成"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
   });
 
@@ -3972,9 +3972,55 @@ describe("Orchestrator", () => {
 
     expect(channel.notices.some((entry) => entry.text.includes("AutoDev 过程回显已更新"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("detailedProgress: off"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] round=1"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] agent=planner"))).toBe(false);
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] 轮次=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("[PLANNER] 代理=planner"))).toBe(false);
     expect(channel.notices.some((entry) => entry.text.includes("timeout="))).toBe(false);
+  });
+
+  it("switches command and workflow progress text to english when outputLanguage=en", async () => {
+    const channel = new FakeChannel();
+    const executor = new WorkflowExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: true,
+      outputLanguage: "en",
+      packageUpdateChecker: {
+        getStatus: async () => ({
+          packageName: "codeharbor",
+          currentVersion: "0.1.56",
+          latestVersion: "0.1.56",
+          state: "up_to_date",
+          checkedAt: "2026-03-22T00:00:00.000Z",
+          error: null,
+          upgradeCommand: "npm install -g codeharbor@latest",
+        }),
+      },
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 0,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/help",
+        eventId: "$help-en",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents run produce english progress",
+        eventId: "$workflow-en",
+      }),
+    );
+
+    expect(channel.notices.some((entry) => entry.text.includes("Available commands"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow started"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Planner started plan generation"))).toBe(true);
   });
 
   it("supports /autodev skills mode switch and injects role skills into workflow prompts", async () => {

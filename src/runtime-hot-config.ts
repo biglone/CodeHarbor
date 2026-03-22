@@ -1,4 +1,4 @@
-import { AppConfig, TriggerPolicy } from "./config";
+import { AppConfig, TriggerPolicy, type OutputLanguage } from "./config";
 import { RateLimiterOptions } from "./rate-limiter";
 
 export const GLOBAL_RUNTIME_HOT_CONFIG_KEY = "global_hot_config";
@@ -19,6 +19,7 @@ export const HOT_GLOBAL_CONFIG_KEYS = new Set<string>([
   "defaultGroupTriggerPolicy.allowReply",
   "defaultGroupTriggerPolicy.allowActiveWindow",
   "defaultGroupTriggerPolicy.allowPrefix",
+  "outputLanguage",
 ]);
 
 export interface RuntimeHotConfigPayload {
@@ -29,6 +30,7 @@ export interface RuntimeHotConfigPayload {
   sessionActiveWindowMinutes: number;
   groupDirectModeEnabled: boolean;
   defaultGroupTriggerPolicy: TriggerPolicy;
+  outputLanguage?: OutputLanguage;
 }
 
 export function isHotGlobalConfigKey(key: string): boolean {
@@ -56,6 +58,7 @@ export function buildRuntimeHotConfigPayload(config: AppConfig): RuntimeHotConfi
       allowActiveWindow: config.defaultGroupTriggerPolicy.allowActiveWindow,
       allowPrefix: config.defaultGroupTriggerPolicy.allowPrefix,
     },
+    outputLanguage: config.outputLanguage,
   };
 }
 
@@ -104,6 +107,7 @@ function normalizeRuntimeHotConfigPayload(value: unknown): RuntimeHotConfigPaylo
       allowActiveWindow: asBoolean(policy.allowActiveWindow),
       allowPrefix: asBoolean(policy.allowPrefix),
     },
+    outputLanguage: asOptionalOutputLanguage(record.outputLanguage),
   };
 
   return normalized;
@@ -128,4 +132,14 @@ function asInteger(value: unknown, min: number): number {
     throw new Error("Invalid runtime hot config payload.");
   }
   return value;
+}
+
+function asOptionalOutputLanguage(value: unknown): OutputLanguage | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "zh" || value === "en") {
+    return value;
+  }
+  throw new Error("Invalid runtime hot config payload.");
 }

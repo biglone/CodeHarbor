@@ -1,5 +1,5 @@
 import type { AudioTranscriberLike } from "../audio-transcriber";
-import type { CliCompatConfig, TriggerPolicy, RoomTriggerPolicyOverrides } from "../config";
+import type { CliCompatConfig, TriggerPolicy, RoomTriggerPolicyOverrides, OutputLanguage } from "../config";
 import type { ConfigService } from "../config-service";
 import type { CodexExecutor } from "../executor/codex-executor";
 import type { PackageUpdateChecker } from "../package-update-checker";
@@ -21,6 +21,7 @@ export interface OrchestratorOptions {
   progressMinIntervalMs?: number;
   typingTimeoutMs?: number;
   commandPrefix?: string;
+  outputLanguage?: OutputLanguage;
   matrixUserId?: string;
   sessionActiveWindowMinutes?: number;
   groupDirectModeEnabled?: boolean;

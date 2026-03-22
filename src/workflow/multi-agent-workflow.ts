@@ -10,10 +10,13 @@ import {
   type WorkflowRoleSkillPromptInput,
   type WorkflowRoleSkillPromptResult,
 } from "./role-skills";
+import type { OutputLanguage } from "../config";
+import { byOutputLanguage } from "../orchestrator/output-language";
 
 export interface MultiAgentWorkflowConfig {
   enabled: boolean;
   autoRepairMaxRounds: number;
+  outputLanguage?: OutputLanguage;
   executionTimeoutMs?: number;
   planContextMaxChars?: number | null;
   outputContextMaxChars?: number | null;
@@ -109,6 +112,7 @@ export class MultiAgentWorkflowRunner {
   private executor: CodexExecutor;
   private readonly logger: Logger;
   private readonly config: MultiAgentWorkflowConfig;
+  private readonly outputLanguage: OutputLanguage;
   private readonly promptContextLimits: WorkflowPromptContextLimits;
   private readonly roleSkillCatalog: WorkflowRoleSkillCatalog | null;
 
@@ -116,6 +120,7 @@ export class MultiAgentWorkflowRunner {
     this.executor = executor;
     this.logger = logger;
     this.config = config;
+    this.outputLanguage = config.outputLanguage === "en" ? "en" : "zh";
     this.promptContextLimits = resolvePromptContextLimits(config);
     this.roleSkillCatalog = config.roleSkillCatalog ?? null;
   }
@@ -129,6 +134,7 @@ export class MultiAgentWorkflowRunner {
   }
 
   async run(input: MultiAgentWorkflowRunInput): Promise<MultiAgentWorkflowRunResult> {
+    const localize = (zh: string, en: string): string => byOutputLanguage(this.outputLanguage, zh, en);
     const startedAt = Date.now();
     const objective = input.objective.trim();
     if (!objective) {
@@ -154,9 +160,14 @@ export class MultiAgentWorkflowRunner {
     await emitProgress(input, {
       stage: "planner",
       round: 0,
-      message: `Planner 开始生成执行计划（agent=planner, timeout=${formatDurationMs(
-        roleTimeoutMs,
-      )}, ${formatRoleSkillProgress(plannerSkillPrompt)}）`,
+      message: localize(
+        `规划代理开始生成执行计划（agent=planner, timeout=${formatDurationMs(roleTimeoutMs)}, ${formatRoleSkillProgress(
+          plannerSkillPrompt,
+        )}）`,
+        `Planner started plan generation (agent=planner, timeout=${formatDurationMs(
+          roleTimeoutMs,
+        )}, ${formatRoleSkillProgress(plannerSkillPrompt)})`,
+      ),
     });
     const planResult = await this.executeRole(
       "planner",
@@ -173,7 +184,10 @@ export class MultiAgentWorkflowRunner {
     await emitProgress(input, {
       stage: "planner",
       round: 0,
-      message: `Planner 执行完成（agent=planner, ${formatRoleExecutionStats(planResult)}）`,
+      message: localize(
+        `规划代理执行完成（agent=planner, ${formatRoleExecutionStats(planResult)}）`,
+        `Planner completed (agent=planner, ${formatRoleExecutionStats(planResult)})`,
+      ),
     });
 
     const executorSkillPrompt = this.buildRoleSkillPrompt({
@@ -185,9 +199,14 @@ export class MultiAgentWorkflowRunner {
     await emitProgress(input, {
       stage: "executor",
       round: 0,
-      message: `Executor 开始根据计划执行任务（agent=executor, timeout=${formatDurationMs(
-        roleTimeoutMs,
-      )}, ${formatRoleSkillProgress(executorSkillPrompt)}）`,
+      message: localize(
+        `执行代理开始根据计划执行任务（agent=executor, timeout=${formatDurationMs(
+          roleTimeoutMs,
+        )}, ${formatRoleSkillProgress(executorSkillPrompt)}）`,
+        `Executor started execution from plan (agent=executor, timeout=${formatDurationMs(
+          roleTimeoutMs,
+        )}, ${formatRoleSkillProgress(executorSkillPrompt)})`,
+      ),
     });
     let outputResult = await this.executeRole(
       "executor",
@@ -203,7 +222,10 @@ export class MultiAgentWorkflowRunner {
     await emitProgress(input, {
       stage: "executor",
       round: 0,
-      message: `Executor 初版交付完成（agent=executor, ${formatRoleExecutionStats(outputResult)}）`,
+      message: localize(
+        `执行代理初版交付完成（agent=executor, ${formatRoleExecutionStats(outputResult)}）`,
+        `Executor initial delivery completed (agent=executor, ${formatRoleExecutionStats(outputResult)})`,
+      ),
     });
 
     let finalReviewReply = "";
@@ -220,9 +242,14 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "reviewer",
         round: attempt,
-        message: `Reviewer 开始质量审查（agent=reviewer, round=${attempt + 1}, timeout=${formatDurationMs(
-          roleTimeoutMs,
-        )}, ${formatRoleSkillProgress(reviewerSkillPrompt)}）`,
+        message: localize(
+          `审查代理开始质量审查（agent=reviewer, round=${attempt + 1}, timeout=${formatDurationMs(
+            roleTimeoutMs,
+          )}, ${formatRoleSkillProgress(reviewerSkillPrompt)}）`,
+          `Reviewer started quality review (agent=reviewer, round=${attempt + 1}, timeout=${formatDurationMs(
+            roleTimeoutMs,
+          )}, ${formatRoleSkillProgress(reviewerSkillPrompt)})`,
+        ),
       });
       const reviewResult = await this.executeRole(
         "reviewer",
@@ -241,11 +268,18 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "reviewer",
         round: attempt,
-        message: `Reviewer 审查完成（agent=reviewer, round=${attempt + 1}, verdict=${
-          verdict.verdict
-        }, ${formatRoleExecutionStats(reviewResult)}）${
-          verdict.approved ? "" : `，summary=${verdict.summary}，contract=${formatReviewerContractStatus(verdict)}`
-        }`,
+        message: localize(
+          `审查代理审查完成（agent=reviewer, round=${attempt + 1}, verdict=${
+            verdict.verdict
+          }, ${formatRoleExecutionStats(reviewResult)}）${
+            verdict.approved ? "" : `，summary=${verdict.summary}，contract=${formatReviewerContractStatus(verdict)}`
+          }`,
+          `Reviewer completed (agent=reviewer, round=${attempt + 1}, verdict=${
+            verdict.verdict
+          }, ${formatRoleExecutionStats(reviewResult)})${
+            verdict.approved ? "" : `, summary=${verdict.summary}, contract=${formatReviewerContractStatus(verdict)}`
+          }`,
+        ),
       });
 
       const contractRepairResult = await this.ensureReviewerRepairContract({
@@ -283,9 +317,14 @@ export class MultiAgentWorkflowRunner {
         await emitProgress(input, {
           stage: "reviewer",
           round: attempt,
-          message: `Reviewer REJECTED 但未提供可执行修复契约，已停止自动修复（round=${attempt + 1}, contract=${formatReviewerContractStatus(
-            verdict,
-          )}）`,
+          message: localize(
+            `审查代理已拒绝但未提供可执行修复契约，已停止自动修复（round=${attempt + 1}, contract=${formatReviewerContractStatus(
+              verdict,
+            )}）`,
+            `Reviewer REJECTED without actionable repair contract; auto-repair stopped (round=${attempt + 1}, contract=${formatReviewerContractStatus(
+              verdict,
+            )})`,
+          ),
         });
         break;
       }
@@ -304,9 +343,14 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "repair",
         round: repairRounds,
-        message: `Executor 开始按 Reviewer 反馈修复（agent=executor, repairRound=${repairRounds}, timeout=${formatDurationMs(
-          roleTimeoutMs,
-        )}, ${formatRoleSkillProgress(repairSkillPrompt)}）`,
+        message: localize(
+          `执行代理开始按审查反馈修复（agent=executor, repairRound=${repairRounds}, timeout=${formatDurationMs(
+            roleTimeoutMs,
+          )}, ${formatRoleSkillProgress(repairSkillPrompt)}）`,
+          `Executor started repair from reviewer feedback (agent=executor, repairRound=${repairRounds}, timeout=${formatDurationMs(
+            roleTimeoutMs,
+          )}, ${formatRoleSkillProgress(repairSkillPrompt)})`,
+        ),
       });
 
       outputResult = await this.executeRole(
@@ -331,7 +375,12 @@ export class MultiAgentWorkflowRunner {
       await emitProgress(input, {
         stage: "repair",
         round: repairRounds,
-        message: `Executor 修复轮次完成（agent=executor, repairRound=${repairRounds}, ${formatRoleExecutionStats(outputResult)}）`,
+        message: localize(
+          `执行代理修复轮次完成（agent=executor, repairRound=${repairRounds}, ${formatRoleExecutionStats(outputResult)}）`,
+          `Executor repair round completed (agent=executor, repairRound=${repairRounds}, ${formatRoleExecutionStats(
+            outputResult,
+          )})`,
+        ),
       });
     }
 
@@ -400,6 +449,7 @@ export class MultiAgentWorkflowRunner {
   }
 
   private async ensureReviewerRepairContract(input: ReviewerContractRepairInput): Promise<ReviewerContractRepairResult> {
+    const localize = (zh: string, en: string): string => byOutputLanguage(this.outputLanguage, zh, en);
     let reviewReply = input.reviewReply;
     let verdict = input.verdict;
 
@@ -426,9 +476,14 @@ export class MultiAgentWorkflowRunner {
         {
           stage: "reviewer",
           round: input.round,
-          message: `Reviewer 契约补全启动（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
-            DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
-          }, status=${formatReviewerContractStatus(verdict)}）`,
+          message: localize(
+            `审查代理契约补全启动（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+              DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+            }, status=${formatReviewerContractStatus(verdict)}）`,
+            `Reviewer contract repair started (reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+              DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+            }, status=${formatReviewerContractStatus(verdict)})`,
+          ),
         },
       );
 
@@ -468,11 +523,18 @@ export class MultiAgentWorkflowRunner {
         {
           stage: "reviewer",
           round: input.round,
-          message: `Reviewer 契约补全完成（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
-            DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
-          }, verdict=${verdict.verdict}, status=${formatReviewerContractStatus(verdict)}, ${formatRoleExecutionStats(
-            repairResult,
-          )}）`,
+          message: localize(
+            `审查代理契约补全完成（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+              DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+            }, verdict=${verdict.verdict}, status=${formatReviewerContractStatus(verdict)}, ${formatRoleExecutionStats(
+              repairResult,
+            )}）`,
+            `Reviewer contract repair completed (reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+              DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+            }, verdict=${verdict.verdict}, status=${formatReviewerContractStatus(verdict)}, ${formatRoleExecutionStats(
+              repairResult,
+            )})`,
+          ),
         },
       );
     }

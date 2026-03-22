@@ -269,6 +269,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-workdir" type="text" />
           </label>
           <label class="field">
+            <span class="field-label" data-i18n="global.outputLanguage">机器人输出语言</span>
+            <select id="global-output-language">
+              <option value="zh">zh</option>
+              <option value="en">en</option>
+            </select>
+          </label>
+          <label class="field">
             <span class="field-label" data-i18n="global.progressInterval">进度更新间隔（毫秒）</span>
             <input id="global-progress-interval" type="number" min="1" />
           </label>
@@ -610,6 +617,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.title": "全局配置",
             "global.commandPrefix": "命令前缀",
             "global.defaultWorkdir": "默认工作目录",
+            "global.outputLanguage": "机器人输出语言",
             "global.progressInterval": "进度更新间隔（毫秒）",
             "global.typingTimeout": "输入状态超时（毫秒）",
             "global.sessionWindow": "会话活跃窗口（分钟）",
@@ -797,6 +805,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.title": "Global Config",
             "global.commandPrefix": "Command Prefix",
             "global.defaultWorkdir": "Default Workdir",
+            "global.outputLanguage": "Bot Output Language",
             "global.progressInterval": "Progress Interval (ms)",
             "global.typingTimeout": "Typing Timeout (ms)",
             "global.sessionWindow": "Session Active Window (minutes)",
@@ -1241,6 +1250,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!payload.codexWorkdir) {
             errors.push("global.defaultWorkdir");
           }
+          if (payload.outputLanguage !== "zh" && payload.outputLanguage !== "en") {
+            errors.push("global.outputLanguage");
+          }
           if (!numberInRange(payload.matrixProgressMinIntervalMs, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.progressInterval");
           }
@@ -1413,6 +1425,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
             document.getElementById("global-workdir").value = data.codexWorkdir || "";
+            document.getElementById("global-output-language").value = data.outputLanguage || "zh";
             document.getElementById("global-progress-enabled").checked = Boolean(data.matrixProgressUpdates);
             document.getElementById("global-progress-interval").value = String(data.matrixProgressMinIntervalMs || 2500);
             document.getElementById("global-typing-timeout").value = String(data.matrixTypingTimeoutMs || 10000);
@@ -1486,6 +1499,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           return {
             matrixCommandPrefix: asText("global-matrix-prefix"),
             codexWorkdir: asText("global-workdir"),
+            outputLanguage: asText("global-output-language") || "zh",
             matrixProgressUpdates: asBool("global-progress-enabled"),
             matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
             matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),

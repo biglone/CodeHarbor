@@ -26,6 +26,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     matrixUserId: "@bot:example.com",
     matrixAccessToken: "token",
     matrixCommandPrefix: "!code",
+    outputLanguage: "zh",
     matrixAdminUsers: [],
     matrixUpgradeAllowedUsers: [],
     aiCliProvider: "codex",
@@ -1330,6 +1331,7 @@ describe("AdminServer", () => {
       path.join(dir, ".env.example"),
       [
         "MATRIX_COMMAND_PREFIX=!code",
+        "OUTPUT_LANGUAGE=zh",
         "RATE_LIMIT_MAX_CONCURRENT_GLOBAL=8",
         "CODEX_WORKDIR=/tmp/old",
         "AGENT_WORKFLOW_ENABLED=false",
@@ -1373,6 +1375,7 @@ describe("AdminServer", () => {
       },
       body: JSON.stringify({
         matrixCommandPrefix: "!ai",
+        outputLanguage: "en",
         codexWorkdir: dir,
         rateLimiter: {
           maxConcurrentGlobal: 12,
@@ -1425,6 +1428,7 @@ describe("AdminServer", () => {
 
     const envRaw = fs.readFileSync(path.join(dir, ".env"), "utf8");
     expect(envRaw).toContain('MATRIX_COMMAND_PREFIX="!ai"');
+    expect(envRaw).toContain("OUTPUT_LANGUAGE=en");
     expect(envRaw).toContain(`CODEX_WORKDIR=${dir}`);
     expect(envRaw).toContain("RATE_LIMIT_MAX_CONCURRENT_GLOBAL=12");
     expect(envRaw).toContain("AGENT_WORKFLOW_ENABLED=true");

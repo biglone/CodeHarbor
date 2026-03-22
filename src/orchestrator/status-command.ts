@@ -4,6 +4,7 @@ import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord, UpgradeRunStats } from "../store/state-store";
 import type { InboundMessage } from "../types";
 import { createIdleWorkflowSnapshot, type WorkflowRunSnapshot } from "../workflow/multi-agent-workflow";
+import type { OutputLanguage } from "../config";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
 import {
@@ -21,6 +22,7 @@ import {
   formatRecentUpgradeRunsSummary,
   formatUpgradeLockSummary,
 } from "./upgrade-utils";
+import { byOutputLanguage } from "./output-language";
 import {
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunRecord,
@@ -60,6 +62,7 @@ interface RoleSkillStatusLike {
 
 interface StatusCommandDeps {
   botNoticePrefix: string;
+  outputLanguage: OutputLanguage;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -101,14 +104,15 @@ interface StatusCommandInput {
 }
 
 export async function handleStatusCommand(deps: StatusCommandDeps, input: StatusCommandInput): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const status = deps.getSessionStatus(input.sessionKey);
   const roomConfig = deps.resolveRoomRuntimeConfig(input.message.conversationId);
   const scope = input.message.isDirectMessage
-    ? "私聊（免前缀）"
+    ? localize("私聊（免前缀）", "DM (prefix-free)")
     : deps.groupDirectModeEnabled
-      ? "群聊（默认直通）"
-      : "群聊（按房间触发策略）";
-  const activeUntil = status.activeUntil ?? "未激活";
+      ? localize("群聊（默认直通）", "Group (direct mode)")
+      : localize("群聊（按房间触发策略）", "Group (room trigger policy)");
+  const activeUntil = status.activeUntil ?? localize("未激活", "inactive");
   const metrics = deps.getRuntimeMetricsSnapshot();
   const limiter = deps.getRateLimiterSnapshot();
   const runtime = deps.getBackendRuntimeStats();
@@ -160,6 +164,7 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
     input.message.conversationId,
     buildStatusNotice({
       botNoticePrefix: deps.botNoticePrefix,
+      outputLanguage: deps.outputLanguage,
       scope,
       isActive: status.isActive,
       activeUntil,

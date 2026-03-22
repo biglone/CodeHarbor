@@ -90,6 +90,7 @@ export class CodeHarborApp {
       progressMinIntervalMs: config.matrixProgressMinIntervalMs,
       typingTimeoutMs: config.matrixTypingTimeoutMs,
       commandPrefix: config.matrixCommandPrefix,
+      outputLanguage: config.outputLanguage,
       matrixUserId: config.matrixUserId,
       sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
       groupDirectModeEnabled: config.groupDirectModeEnabled,

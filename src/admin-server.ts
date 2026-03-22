@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { ConfigService } from "./config-service";
 import { buildConfigSnapshot, CONFIG_SNAPSHOT_ENV_KEYS, runConfigImportCommand } from "./config-snapshot";
 import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
-import { AdminTokenConfig, AppConfig, loadConfig } from "./config";
+import { AdminTokenConfig, AppConfig, loadConfig, type OutputLanguage } from "./config";
 import { HistoryService } from "./history-service";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
@@ -1073,6 +1073,13 @@ export class AdminServer {
       markUpdatedKey("matrixCommandPrefix");
     }
 
+    if ("outputLanguage" in body) {
+      const value = normalizeOutputLanguage(body.outputLanguage, this.config.outputLanguage);
+      this.config.outputLanguage = value;
+      envUpdates.OUTPUT_LANGUAGE = value;
+      markUpdatedKey("outputLanguage");
+    }
+
     if ("codexWorkdir" in body) {
       const workdir = path.resolve(String(body.codexWorkdir ?? "").trim());
       ensureDirectory(workdir, "codexWorkdir");
@@ -1581,6 +1588,11 @@ export class AdminServer {
     if ("matrixCommandPrefix" in body) {
       normalizeString(body.matrixCommandPrefix, this.config.matrixCommandPrefix, "matrixCommandPrefix");
       markCheckedKey("matrixCommandPrefix");
+    }
+
+    if ("outputLanguage" in body) {
+      normalizeOutputLanguage(body.outputLanguage, this.config.outputLanguage);
+      markCheckedKey("outputLanguage");
     }
 
     if ("codexWorkdir" in body) {
@@ -2220,6 +2232,7 @@ export class AdminServer {
 
 function buildGlobalConfigSnapshot(config: AppConfig): {
   matrixCommandPrefix: string;
+  outputLanguage: OutputLanguage;
   codexWorkdir: string;
   rateLimiter: AppConfig["rateLimiter"];
   groupDirectModeEnabled: boolean;
@@ -2236,6 +2249,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   const roleSkills = ensureAgentWorkflowRoleSkillsConfig(agentWorkflow);
   return {
     matrixCommandPrefix: config.matrixCommandPrefix,
+    outputLanguage: config.outputLanguage,
     codexWorkdir: config.codexWorkdir,
     rateLimiter: { ...config.rateLimiter },
     groupDirectModeEnabled: config.groupDirectModeEnabled,
@@ -2716,6 +2730,20 @@ function normalizeString(value: unknown, fallback: string, fieldName: string): s
     throw new HttpError(400, `Expected string value for ${fieldName}.`);
   }
   return value.trim();
+}
+
+function normalizeOutputLanguage(value: unknown, fallback: OutputLanguage): OutputLanguage {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, 'outputLanguage must be "zh" or "en".');
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "zh" || normalized === "en") {
+    return normalized;
+  }
+  throw new HttpError(400, 'outputLanguage must be "zh" or "en".');
 }
 
 function normalizeOptionalString(value: unknown): string | null {

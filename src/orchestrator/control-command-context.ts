@@ -5,6 +5,7 @@ type ControlCommandDispatchContext = Parameters<typeof runSendControlCommand>[0]
 interface ControlCommandContextInput {
   sessionActiveWindowMs: number;
   botNoticePrefix: string;
+  outputLanguage: ControlCommandDispatchContext["outputLanguage"];
   stateStore: ControlCommandDispatchContext["stateStore"];
   clearSessionFromAllRuntimes: ControlCommandDispatchContext["clearSessionFromAllRuntimes"];
   sessionBackendOverrides: ControlCommandDispatchContext["sessionBackendOverrides"];
@@ -31,6 +32,7 @@ interface ControlCommandContextInput {
 interface ControlCommandRuntimeContextInput {
   sessionActiveWindowMs: number;
   botNoticePrefix: string;
+  outputLanguage: ControlCommandDispatchContext["outputLanguage"];
   stateStore: ControlCommandDispatchContext["stateStore"];
   clearSessionFromAllRuntimes: ControlCommandDispatchContext["clearSessionFromAllRuntimes"];
   sessionBackendOverrides: ControlCommandDispatchContext["sessionBackendOverrides"];
@@ -63,6 +65,7 @@ export function buildControlCommandDispatchContext(
   return {
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     botNoticePrefix: input.botNoticePrefix,
+    outputLanguage: input.outputLanguage,
     stateStore: input.stateStore,
     clearSessionFromAllRuntimes: input.clearSessionFromAllRuntimes,
     sessionBackendOverrides: input.sessionBackendOverrides,
@@ -93,6 +96,7 @@ export function buildControlCommandDispatchContextFromRuntime(
   return buildControlCommandDispatchContext({
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     botNoticePrefix: input.botNoticePrefix,
+    outputLanguage: input.outputLanguage,
     stateStore: input.stateStore,
     clearSessionFromAllRuntimes: input.clearSessionFromAllRuntimes,
     sessionBackendOverrides: input.sessionBackendOverrides,

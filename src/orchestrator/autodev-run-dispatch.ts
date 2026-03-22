@@ -2,6 +2,7 @@ import type { Logger } from "../logger";
 import type { InboundMessage } from "../types";
 import type { MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
 import { type AutoDevTask, updateAutoDevTaskStatus } from "../workflow/autodev";
+import type { OutputLanguage } from "../config";
 import type { AutoDevGitCommitResult } from "./autodev-git";
 import {
   runAutoDevCommand,
@@ -28,6 +29,7 @@ interface BeginWorkflowDiagRunInput {
 
 interface HandleAutoDevRunCommandDeps {
   logger: Logger;
+  outputLanguage: OutputLanguage;
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
@@ -86,6 +88,7 @@ export async function handleAutoDevRunCommand(
   await runAutoDevCommand(
     {
       logger: deps.logger,
+      outputLanguage: deps.outputLanguage,
       autoDevLoopMaxRuns: deps.autoDevLoopMaxRuns,
       autoDevLoopMaxMinutes: deps.autoDevLoopMaxMinutes,
       autoDevAutoCommit: deps.autoDevAutoCommit,

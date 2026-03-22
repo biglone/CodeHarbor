@@ -4,6 +4,7 @@ type AutoDevRunCommandDispatchContext = Parameters<typeof runHandleAutoDevRunCom
 
 interface AutoDevRunCommandContextInput {
   logger: AutoDevRunCommandDispatchContext["logger"];
+  outputLanguage: AutoDevRunCommandDispatchContext["outputLanguage"];
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
@@ -33,6 +34,7 @@ interface AutoDevRunCommandRuntimeContextInput {
     autoDevAutoReleaseEnabled: boolean;
     autoDevAutoReleasePush: boolean;
     autoDevMaxConsecutiveFailures: number;
+    outputLanguage: AutoDevRunCommandDispatchContext["outputLanguage"];
   };
   state: {
     pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
@@ -57,6 +59,7 @@ export function buildAutoDevRunCommandDispatchContext(
 ): AutoDevRunCommandDispatchContext {
   return {
     logger: input.logger,
+    outputLanguage: input.outputLanguage,
     autoDevLoopMaxRuns: input.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.autoDevAutoCommit,
@@ -83,6 +86,7 @@ export function buildAutoDevRunCommandDispatchContextFromRuntime(
 ): AutoDevRunCommandDispatchContext {
   return buildAutoDevRunCommandDispatchContext({
     logger: input.logger,
+    outputLanguage: input.config.outputLanguage,
     autoDevLoopMaxRuns: input.config.autoDevLoopMaxRuns,
     autoDevLoopMaxMinutes: input.config.autoDevLoopMaxMinutes,
     autoDevAutoCommit: input.config.autoDevAutoCommit,

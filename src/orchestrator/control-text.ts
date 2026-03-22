@@ -1,7 +1,35 @@
+import type { OutputLanguage } from "../config";
+import { byOutputLanguage, yesNoByOutputLanguage } from "./output-language";
+
 export function buildHelpNotice(input: {
   botNoticePrefix: string;
+  outputLanguage: OutputLanguage;
   multimodalHelpStatus: string;
 }): string {
+  if (input.outputLanguage === "en") {
+    return `${input.botNoticePrefix} Available commands
+- /help: Show command help
+- /status: Show session status (version check uses cached result)
+- /version: Force real-time latest version check
+- /autodev status: Show AutoDev task, stage, and run state
+- /autodev run [taskId]: Run target task; when omitted, run task list in loop (example: /autodev run T6.2)
+- /autodev stop: Stop AutoDev loop after current task completes
+- /autodev progress [on|off|status]: Control detailed AutoDev/Multi-Agent progress echo (default on)
+- /autodev skills [on|off|summary|progressive|full|status]: Control role-skill injection and disclosure mode (default progressive)
+- multimodal: ${input.multimodalHelpStatus}
+- /diag version: Show runtime diagnosis
+- /diag media [count]: Show recent multimodal diagnosis (default count 10)
+- /diag upgrade [count]: Show recent upgrade diagnosis (default count 5)
+- /diag route [count]: Show backend routing hit/fallback diagnosis (default count 10)
+- /diag autodev [count]: Show AutoDev diagnosis (default count 10)
+- /diag queue [count]: Show task queue diagnosis (default count 10)
+- /upgrade [version]: Upgrade and auto-restart services (DM only; MATRIX_UPGRADE_ALLOWED_USERS first, then MATRIX_ADMIN_USERS)
+- /backend codex|claude [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
+- /reset: Clear current session context
+- /stop: Stop current execution
+- If Matrix client intercepts / commands, use //autodev run T6.2 (also supports //agents, //diag, //upgrade)
+- help|帮助|菜单: text aliases of /help`;
+  }
   return `${input.botNoticePrefix} 可用命令
 - /help: 查看命令帮助
 - /status: 查看会话状态（版本检查为缓存结果）
@@ -9,7 +37,7 @@ export function buildHelpNotice(input: {
 - /autodev status: 查看 AutoDev 当前任务、过程阶段与运行状态
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
-- /autodev progress [on|off|status]: 控制 AutoDev/Multi-Agent 过程回显详细模式（默认 on）
+- /autodev progress [on|off|status]: 控制 AutoDev/多智能体过程回显详细模式（默认 on）
 - /autodev skills [on|off|summary|progressive|full|status]: 控制角色技能注入开关与披露模式（默认 progressive）
 - 多模态状态: ${input.multimodalHelpStatus}
 - /diag version: 查看运行实例诊断信息
@@ -28,6 +56,7 @@ export function buildHelpNotice(input: {
 
 export function buildStatusNotice(input: {
   botNoticePrefix: string;
+  outputLanguage: OutputLanguage;
   scope: string;
   isActive: boolean;
   activeUntil: string;
@@ -86,27 +115,54 @@ export function buildStatusNotice(input: {
   autoDevStageSummary: string;
   autoDevStageMessage: string;
 }): string {
-  return `${input.botNoticePrefix} 当前状态
-- 会话类型: ${input.scope}
-- 激活中: ${input.isActive ? "是" : "否"}
+  const activeText = yesNoByOutputLanguage(input.outputLanguage, input.isActive);
+  const sessionText = yesNoByOutputLanguage(input.outputLanguage, input.hasCodexSession);
+  const updateSource = byOutputLanguage(
+    input.outputLanguage,
+    `缓存结果（TTL=${input.updateCacheTtlText}，发送 /version 可实时刷新）`,
+    `cached result (TTL=${input.updateCacheTtlText}; use /version to force refresh)`,
+  );
+  const title = byOutputLanguage(input.outputLanguage, "当前状态", "Current status");
+  const sessionType = byOutputLanguage(input.outputLanguage, "会话类型", "session");
+  const active = byOutputLanguage(input.outputLanguage, "激活中", "active");
+  const bound = byOutputLanguage(input.outputLanguage, "已绑定会话", "sessionBound");
+  const cwd = byOutputLanguage(input.outputLanguage, "当前工作目录", "workdir");
+  const currentVersion = byOutputLanguage(input.outputLanguage, "当前版本", "currentVersion");
+  const updateCheck = byOutputLanguage(input.outputLanguage, "更新检查", "updateHint");
+  const checkedAt = byOutputLanguage(input.outputLanguage, "更新检查时间", "checkedAt");
+  const updateSourceLabel = byOutputLanguage(input.outputLanguage, "更新来源", "updateSource");
+  const latestUpgrade = byOutputLanguage(input.outputLanguage, "最近升级", "latestUpgrade");
+  const upgradeHistory = byOutputLanguage(input.outputLanguage, "升级记录", "upgradeHistory");
+  const upgradeStats = byOutputLanguage(input.outputLanguage, "升级指标", "upgradeStats");
+  const upgradeLock = byOutputLanguage(input.outputLanguage, "升级锁", "upgradeLock");
+  const activeTasks = byOutputLanguage(input.outputLanguage, "运行中任务", "activeExecutions");
+  const metrics = byOutputLanguage(input.outputLanguage, "指标", "metrics");
+  const avgCost = byOutputLanguage(input.outputLanguage, "平均耗时", "avgDuration");
+  const limiter = byOutputLanguage(input.outputLanguage, "限流并发", "limiter");
+  const autoDevStage = byOutputLanguage(input.outputLanguage, "AutoDev 阶段", "AutoDev stage");
+  const autoDevStageDetail = byOutputLanguage(input.outputLanguage, "AutoDev 阶段详情", "AutoDev stage detail");
+
+  return `${input.botNoticePrefix} ${title}
+- ${sessionType}: ${input.scope}
+- ${active}: ${activeText}
 - activeUntil: ${input.activeUntil}
-- 已绑定会话: ${input.hasCodexSession ? "是" : "否"}
-- 当前工作目录: ${input.workdir}
+- ${bound}: ${sessionText}
+- ${cwd}: ${input.workdir}
 - AI CLI: ${input.backendLabel}
 - backend route: mode=${input.backendRouteMode}, reason=${input.backendRouteReason}, rule=${input.backendRouteRuleId}
 - backend route detail: desc=${input.backendRouteReasonDesc}, fallback=${input.backendRouteFallback}
-- 当前版本: ${input.currentVersion}
-- 更新检查: ${input.updateHint}
-- 更新检查时间: ${input.checkedAt}
-- 更新来源: 缓存结果（TTL=${input.updateCacheTtlText}，发送 /version 可实时刷新）
-- 最近升级: ${input.latestUpgradeSummary}
-- 升级记录: ${input.recentUpgradesSummary}
-- 升级指标: total=${input.upgradeStats.total}, succeeded=${input.upgradeStats.succeeded}, failed=${input.upgradeStats.failed}, running=${input.upgradeStats.running}, avg=${input.upgradeStats.avgDurationMs}ms
-- 升级锁: ${input.upgradeLockSummary}
-- 运行中任务: ${input.metrics.activeExecutions}
-- 指标: total=${input.metrics.total}, success=${input.metrics.success}, failed=${input.metrics.failed}, timeout=${input.metrics.timeout}, cancelled=${input.metrics.cancelled}, rate_limited=${input.metrics.rateLimited}
-- 平均耗时: queue=${input.metrics.avgQueueMs}ms, exec=${input.metrics.avgExecMs}ms, send=${input.metrics.avgSendMs}ms
-- 限流并发: global=${input.limiter.activeGlobal}, users=${input.limiter.activeUsers}, rooms=${input.limiter.activeRooms}
+- ${currentVersion}: ${input.currentVersion}
+- ${updateCheck}: ${input.updateHint}
+- ${checkedAt}: ${input.checkedAt}
+- ${updateSourceLabel}: ${updateSource}
+- ${latestUpgrade}: ${input.latestUpgradeSummary}
+- ${upgradeHistory}: ${input.recentUpgradesSummary}
+- ${upgradeStats}: total=${input.upgradeStats.total}, succeeded=${input.upgradeStats.succeeded}, failed=${input.upgradeStats.failed}, running=${input.upgradeStats.running}, avg=${input.upgradeStats.avgDurationMs}ms
+- ${upgradeLock}: ${input.upgradeLockSummary}
+- ${activeTasks}: ${input.metrics.activeExecutions}
+- ${metrics}: total=${input.metrics.total}, success=${input.metrics.success}, failed=${input.metrics.failed}, timeout=${input.metrics.timeout}, cancelled=${input.metrics.cancelled}, rate_limited=${input.metrics.rateLimited}
+- ${avgCost}: queue=${input.metrics.avgQueueMs}ms, exec=${input.metrics.avgExecMs}ms, send=${input.metrics.avgSendMs}ms
+- ${limiter}: global=${input.limiter.activeGlobal}, users=${input.limiter.activeUsers}, rooms=${input.limiter.activeRooms}
 - CLI runtime: workers=${input.runtime.workerCount}, running=${input.runtime.runningCount}, compat_mode=${input.cliCompatEnabled ? "on" : "off"}
 - Multi-Agent workflow: enabled=${input.workflowEnabled ? "on" : "off"}, state=${input.workflowState}
 - Multi-Agent context: plan=${input.workflowPlanBudget}, output=${input.workflowOutputBudget}, feedback=${input.workflowFeedbackBudget}
@@ -115,6 +171,6 @@ export function buildStatusNotice(input: {
 - AutoDev: enabled=${input.workflowEnabled ? "on" : "off"}, state=${input.autoDevState}, mode=${input.autoDevMode}, task=${input.autoDevTask}, duration=${input.autoDevRunDuration}
 - AutoDev loop: round=${input.autoDevLoopRound}/${input.autoDevLoopMaxRuns}, completed=${input.autoDevLoopCompletedRuns}, deadline=${input.autoDevLoopDeadlineAt ?? "N/A"}, active=${input.autoDevLoopActive}
 - AutoDev control: loopStopRequested=${input.autoDevLoopStopRequested}, stopRequested=${input.autoDevStopRequested}, detailedProgress=${input.autoDevDetailedProgress} (default=${input.autoDevDetailedProgressDefault})
-- AutoDev stage: run=${input.autoDevDiagRunId}, status=${input.autoDevDiagRunStatus}, latest=${input.autoDevStageSummary}
-- AutoDev stage detail: ${input.autoDevStageMessage}`;
+- ${autoDevStage}: run=${input.autoDevDiagRunId}, status=${input.autoDevDiagRunStatus}, latest=${input.autoDevStageSummary}
+- ${autoDevStageDetail}: ${input.autoDevStageMessage}`;
 }

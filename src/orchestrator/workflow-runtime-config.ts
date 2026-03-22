@@ -71,6 +71,7 @@ export function resolveWorkflowRuntimeConfig(input: {
   const workflowRunner = new MultiAgentWorkflowRunner(input.executor, input.logger, {
     enabled: input.options?.multiAgentWorkflow?.enabled ?? false,
     autoRepairMaxRounds: input.options?.multiAgentWorkflow?.autoRepairMaxRounds ?? 1,
+    outputLanguage: input.options?.outputLanguage,
     executionTimeoutMs: input.options?.multiAgentWorkflow?.executionTimeoutMs,
     planContextMaxChars: workflowPlanContextMaxChars,
     outputContextMaxChars: workflowOutputContextMaxChars,

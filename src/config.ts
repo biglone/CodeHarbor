@@ -48,6 +48,8 @@ export interface UpdateCheckConfig {
   ttlMs: number;
 }
 
+export type OutputLanguage = "zh" | "en";
+
 export interface ExternalTaskIntegrationConfig {
   enabled: boolean;
   notifyWebhookUrl: string | null;
@@ -75,6 +77,7 @@ const configSchema = z
     MATRIX_USER_ID: z.string().min(1),
     MATRIX_ACCESS_TOKEN: z.string().min(1),
     MATRIX_COMMAND_PREFIX: z.string().default("!code"),
+    OUTPUT_LANGUAGE: z.enum(["zh", "en"]).default("zh"),
     MATRIX_ADMIN_USERS: z.string().default(""),
     MATRIX_UPGRADE_ALLOWED_USERS: z.string().default(""),
     AI_CLI_PROVIDER: z.enum(["codex", "claude"]).default("codex"),
@@ -363,6 +366,7 @@ const configSchema = z
     matrixUserId: v.MATRIX_USER_ID,
     matrixAccessToken: v.MATRIX_ACCESS_TOKEN,
     matrixCommandPrefix: v.MATRIX_COMMAND_PREFIX,
+    outputLanguage: v.OUTPUT_LANGUAGE,
     matrixAdminUsers: parseCsvList(v.MATRIX_ADMIN_USERS),
     matrixUpgradeAllowedUsers: parseCsvList(v.MATRIX_UPGRADE_ALLOWED_USERS),
     aiCliProvider: v.AI_CLI_PROVIDER,

@@ -170,6 +170,22 @@ describe("loadConfig AI_CLI_PROVIDER", () => {
   });
 });
 
+describe("loadConfig OUTPUT_LANGUAGE", () => {
+  it("uses zh by default", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.outputLanguage).toBe("zh");
+  });
+
+  it("supports en output language", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        OUTPUT_LANGUAGE: "en",
+      }),
+    );
+    expect(config.outputLanguage).toBe("en");
+  });
+});
+
 describe("loadConfig BACKEND_MODEL_ROUTING_RULES_JSON", () => {
   it("parses backend/model routing rules", () => {
     const config = loadConfig(

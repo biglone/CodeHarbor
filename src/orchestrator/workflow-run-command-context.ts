@@ -3,6 +3,7 @@ import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./workflow-
 type WorkflowRunDispatchContext = Parameters<typeof runSendWorkflowRunRequest>[0];
 
 interface WorkflowRunCommandContextInput {
+  outputLanguage: WorkflowRunDispatchContext["outputLanguage"];
   setWorkflowSnapshot: WorkflowRunDispatchContext["setWorkflowSnapshot"];
   beginWorkflowDiagRun: WorkflowRunDispatchContext["beginWorkflowDiagRun"];
   startTypingHeartbeat: WorkflowRunDispatchContext["startTypingHeartbeat"];
@@ -24,6 +25,7 @@ export function buildWorkflowRunCommandDispatchContext(
   input: WorkflowRunCommandContextInput,
 ): WorkflowRunDispatchContext {
   return {
+    outputLanguage: input.outputLanguage,
     setWorkflowSnapshot: input.setWorkflowSnapshot,
     beginWorkflowDiagRun: input.beginWorkflowDiagRun,
     startTypingHeartbeat: input.startTypingHeartbeat,

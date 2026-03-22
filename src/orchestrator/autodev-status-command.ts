@@ -1,4 +1,5 @@
 import type { InboundMessage } from "../types";
+import type { OutputLanguage } from "../config";
 import { formatTaskForDisplay, loadAutoDevContext, summarizeAutoDevTasks } from "../workflow/autodev";
 import { inspectAutoDevGitPreflight } from "./autodev-git";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
@@ -10,6 +11,7 @@ import {
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunRecord,
 } from "./workflow-diag";
+import { byOutputLanguage } from "./output-language";
 
 interface RoleSkillStatusLike {
   enabled: boolean;
@@ -20,6 +22,7 @@ interface RoleSkillStatusLike {
 }
 
 interface AutoDevStatusCommandDeps {
+  outputLanguage: OutputLanguage;
   autoDevLoopMaxRuns: number;
   autoDevLoopMaxMinutes: number;
   autoDevAutoCommit: boolean;
@@ -48,6 +51,7 @@ export async function handleAutoDevStatusCommand(
   deps: AutoDevStatusCommandDeps,
   input: AutoDevStatusCommandInput,
 ): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const snapshot = deps.getAutoDevSnapshot(input.sessionKey) ?? createIdleAutoDevSnapshot();
   try {
     const context = await loadAutoDevContext(input.workdir);
@@ -73,7 +77,10 @@ export async function handleAutoDevStatusCommand(
       : "N/A";
     const autoReleasePushWarning =
       deps.autoDevAutoReleaseEnabled && !deps.autoDevAutoReleasePush
-        ? `\n- warning: autoRelease=on 但 autoReleasePush=off；发布提交不会自动推送，请手动执行 \`git push\` 触发 CI 发布`
+        ? localize(
+            `\n- warning: autoRelease=on 但 autoReleasePush=off；发布提交不会自动推送，请手动执行 \`git push\` 触发 CI 发布`,
+            `\n- warning: autoRelease=on while autoReleasePush=off; release commit will not be pushed automatically. Run \`git push\` to trigger CI release`,
+          )
         : "";
     const currentTask =
       snapshot.taskId && snapshot.taskDescription
@@ -83,6 +90,42 @@ export async function handleAutoDevStatusCommand(
           : inProgressTask
             ? formatTaskForDisplay(inProgressTask)
             : "N/A";
+
+    if (deps.outputLanguage === "en") {
+      await deps.sendNotice(
+        input.message.conversationId,
+        `[CodeHarbor] AutoDev status
+- workdir: ${input.workdir}
+- REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
+- TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
+- gitPreflight: ${gitPreflight.state}
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- gitPreflightReason: ${gitPreflight.reason ?? "N/A"}${autoReleasePushWarning}
+- roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
+- roleSkillsLoaded: ${roleSkillStatus.loaded}
+- runState: ${snapshot.state}
+- currentTask: ${currentTask}
+- runWindow: startedAt=${snapshot.startedAt ?? "N/A"}, endedAt=${snapshot.endedAt ?? "N/A"}, duration=${runDuration}
+- runMode: ${snapshot.mode}
+- runLoop: round=${snapshot.loopRound}, completed=${snapshot.loopCompletedRuns}/${snapshot.loopMaxRuns}, deadline=${snapshot.loopDeadlineAt ?? "N/A"}
+- runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
+- runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
+- runError: ${snapshot.error ?? "N/A"}
+- runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
+- runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
+- runRelease: ${snapshot.lastReleaseSummary ?? "N/A"}
+- runReleaseAt: ${snapshot.lastReleaseAt ?? "N/A"}
+- workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
+- workflowDiagLastStage: ${latestRunLastStage}
+- workflowStage: ${latestStageSummary}
+- recentRuns:
+${formatAutoDevStatusRunSummaries(recentRuns)}
+- stageTrace:
+${formatAutoDevStatusStageTrace(stageEvents)}`,
+      );
+      return;
+    }
 
     await deps.sendNotice(
       input.message.conversationId,
@@ -117,6 +160,12 @@ ${formatAutoDevStatusRunSummaries(recentRuns)}
 ${formatAutoDevStatusStageTrace(stageEvents)}`,
     );
   } catch (error) {
-    await deps.sendNotice(input.message.conversationId, `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`);
+    await deps.sendNotice(
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 状态读取失败: ${formatError(error)}`,
+        `[CodeHarbor] Failed to read AutoDev status: ${formatError(error)}`,
+      ),
+    );
   }
 }

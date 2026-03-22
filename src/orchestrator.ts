@@ -4,7 +4,7 @@ import { type AudioTranscriberLike, type AudioTranscript } from "./audio-transcr
 import { type Channel } from "./channels/channel";
 import { CliCompatRecorder } from "./compat/cli-compat-recorder";
 import { ConfigService } from "./config-service";
-import { CliCompatConfig, TriggerPolicy, type RoomTriggerPolicyOverrides } from "./config";
+import { CliCompatConfig, TriggerPolicy, type OutputLanguage, type RoomTriggerPolicyOverrides } from "./config";
 import {
   CodexExecutor,
   type CodexProgressEvent,
@@ -330,6 +330,7 @@ export class Orchestrator {
   private progressMinIntervalMs: number;
   private typingTimeoutMs: number;
   private readonly commandPrefix: string;
+  private outputLanguage: OutputLanguage;
   private readonly matrixUserId: string;
   private sessionActiveWindowMs: number;
   private groupDirectModeEnabled: boolean;
@@ -409,6 +410,7 @@ export class Orchestrator {
     this.typingTimeoutMs = inputRuntimeConfig.typingTimeoutMs;
     const sessionRuntimeConfig = runResolveSessionRuntimeConfig(options);
     this.commandPrefix = sessionRuntimeConfig.commandPrefix;
+    this.outputLanguage = options?.outputLanguage === "en" ? "en" : "zh";
     this.matrixUserId = sessionRuntimeConfig.matrixUserId;
     this.sessionActiveWindowMs = sessionRuntimeConfig.sessionActiveWindowMs;
     this.groupDirectModeEnabled = sessionRuntimeConfig.groupDirectModeEnabled;
@@ -866,6 +868,7 @@ export class Orchestrator {
     return runBuildControlCommandDispatchContextFromRuntime({
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       botNoticePrefix: this.botNoticePrefix,
+      outputLanguage: this.outputLanguage,
       stateStore: this.stateStore,
       clearSessionFromAllRuntimes: this.clearSessionFromAllRuntimes.bind(this),
       sessionBackendOverrides: this.sessionBackendOverrides,
@@ -931,6 +934,7 @@ export class Orchestrator {
     return runBuildStatusCommandDispatchContextFromRuntime({
       config: {
         botNoticePrefix: this.botNoticePrefix,
+        outputLanguage: this.outputLanguage,
         groupDirectModeEnabled: this.groupDirectModeEnabled,
         updateCheckTtlMs: this.updateCheckTtlMs,
         cliCompat: this.cliCompat,
@@ -1021,6 +1025,7 @@ export class Orchestrator {
   private buildAutoDevControlCommandDeps(): AutoDevControlCommandDeps {
     return {
       autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+      outputLanguage: this.outputLanguage,
       pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
       isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
@@ -1064,6 +1069,7 @@ export class Orchestrator {
         autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
         autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        outputLanguage: this.outputLanguage,
       },
       state: {
         pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
@@ -1176,6 +1182,7 @@ export class Orchestrator {
 
   private buildWorkflowRunDispatchContext(): Parameters<typeof runSendWorkflowRunRequest>[0] {
     return runBuildWorkflowRunCommandDispatchContext({
+      outputLanguage: this.outputLanguage,
       setWorkflowSnapshot: (targetSessionKey, snapshot) => this.setWorkflowSnapshot(targetSessionKey, snapshot),
       beginWorkflowDiagRun: (input) => this.beginWorkflowDiagRun(input),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
@@ -1198,6 +1205,7 @@ export class Orchestrator {
   private async sendWorkflowFailure(conversationId: string, error: unknown): Promise<number> {
     return runSendFailureNotice(
       {
+        outputLanguage: this.outputLanguage,
         sendNotice: (targetConversationId, text) => this.channel.sendNotice(targetConversationId, text),
         sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
       },
@@ -1210,6 +1218,7 @@ export class Orchestrator {
   private async sendAutoDevFailure(conversationId: string, error: unknown): Promise<number> {
     return runSendFailureNotice(
       {
+        outputLanguage: this.outputLanguage,
         sendNotice: (targetConversationId, text) => this.channel.sendNotice(targetConversationId, text),
         sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
       },
@@ -1369,6 +1378,9 @@ export class Orchestrator {
     this.defaultGroupTriggerPolicy.allowReply = config.defaultGroupTriggerPolicy.allowReply;
     this.defaultGroupTriggerPolicy.allowActiveWindow = config.defaultGroupTriggerPolicy.allowActiveWindow;
     this.defaultGroupTriggerPolicy.allowPrefix = config.defaultGroupTriggerPolicy.allowPrefix;
+    if (config.outputLanguage) {
+      this.outputLanguage = config.outputLanguage;
+    }
   }
 
   private resolveRoomRuntimeConfig(conversationId: string): RoomRuntimeConfig {
@@ -1777,9 +1789,15 @@ export class Orchestrator {
     const imageEnabled = this.cliCompat.fetchMedia ? "on" : "off";
     const audioEnabled = this.audioTranscriber.isEnabled() ? "on" : "off";
     const mimeText = formatMimeAllowlist(this.cliCompat.imageAllowedMimeTypes);
-    const backendImageSupport = this.defaultBackendProfile.provider === "codex" || this.defaultBackendProfile.provider === "claude"
-      ? "yes"
-      : "unknown";
+    const backendImageSupport =
+      this.defaultBackendProfile.provider === "codex" || this.defaultBackendProfile.provider === "claude"
+        ? "yes"
+        : "unknown";
+    if (this.outputLanguage === "en") {
+      return `image=${imageEnabled}(max=${this.cliCompat.imageMaxCount},<=${formatByteSize(
+        this.cliCompat.imageMaxBytes,
+      )},mime=${mimeText}); audio=${audioEnabled}; backendImageSupport=${backendImageSupport}`;
+    }
     return `图片=${imageEnabled}(max=${this.cliCompat.imageMaxCount},<=${formatByteSize(this.cliCompat.imageMaxBytes)},mime=${mimeText})；语音=${audioEnabled}；后端图片支持=${backendImageSupport}`;
   }
 

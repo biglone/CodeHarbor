@@ -16,6 +16,7 @@ type StatusCommandDispatchContext = Parameters<typeof runSendStatusCommand>[0] &
 
 interface StatusCommandContextInput {
   botNoticePrefix: string;
+  outputLanguage: StatusCommandDispatchContext["outputLanguage"];
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -81,6 +82,7 @@ interface StatusCommandContextInput {
 
 interface StatusCommandRuntimeConfigInput {
   botNoticePrefix: string;
+  outputLanguage: StatusCommandDispatchContext["outputLanguage"];
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompat: { enabled: boolean };
@@ -137,6 +139,7 @@ interface StatusCommandRuntimeContextInput {
 export function buildStatusCommandDispatchContext(input: StatusCommandContextInput): StatusCommandDispatchContext {
   return {
     botNoticePrefix: input.botNoticePrefix,
+    outputLanguage: input.outputLanguage,
     groupDirectModeEnabled: input.groupDirectModeEnabled,
     updateCheckTtlMs: input.updateCheckTtlMs,
     cliCompatEnabled: input.cliCompatEnabled,
@@ -184,6 +187,7 @@ export function buildStatusCommandDispatchContextFromRuntime(
 ): StatusCommandDispatchContext {
   return buildStatusCommandDispatchContext({
     botNoticePrefix: input.config.botNoticePrefix,
+    outputLanguage: input.config.outputLanguage,
     groupDirectModeEnabled: input.config.groupDirectModeEnabled,
     updateCheckTtlMs: input.config.updateCheckTtlMs,
     cliCompatEnabled: input.config.cliCompat.enabled,

@@ -1,9 +1,11 @@
 import type { MultiAgentWorkflowProgressEvent, MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
 import type { WorkflowRoleSkillDisclosureMode } from "../workflow/role-skills";
 import type { InboundMessage } from "../types";
+import type { OutputLanguage } from "../config";
 import { formatDurationMs, formatError, formatWorkflowProgressNotice } from "./helpers";
 import { buildFailureProgressSummary, buildWorkflowResultReply, classifyExecutionOutcome } from "./workflow-status";
 import type { WorkflowDiagRunKind } from "./workflow-diag";
+import { byOutputLanguage } from "./output-language";
 
 interface SendProgressContextLike {
   conversationId: string;
@@ -24,6 +26,7 @@ interface WorkflowRoleSkillPolicyLike {
 }
 
 interface ExecuteWorkflowRunRequestDeps {
+  outputLanguage: OutputLanguage;
   setWorkflowSnapshot: (
     sessionKey: string,
     snapshot: {
@@ -91,9 +94,16 @@ export async function executeWorkflowRunRequest(
   deps: ExecuteWorkflowRunRequestDeps,
   input: ExecuteWorkflowRunRequestInput,
 ): Promise<MultiAgentWorkflowRunResult | null> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const normalizedObjective = input.objective.trim();
   if (!normalizedObjective) {
-    await deps.sendNotice(input.message.conversationId, "[CodeHarbor] /agents run 需要提供任务目标。");
+    await deps.sendNotice(
+      input.message.conversationId,
+      localize(
+        "[CodeHarbor] /agents run 需要提供任务目标。",
+        "[CodeHarbor] /agents run requires an objective.",
+      ),
+    );
     return null;
   }
 
@@ -142,13 +152,17 @@ export async function executeWorkflowRunRequest(
   });
   deps.persistRuntimeMetricsSnapshot();
 
-  await deps.sendProgressUpdate(progressCtx, "[CodeHarbor] Multi-Agent workflow 启动：Planner -> Executor -> Reviewer");
+  const workflowStartText = localize(
+    "多智能体流程启动：规划代理 -> 执行代理 -> 审查代理",
+    "Multi-Agent workflow started: Planner -> Executor -> Reviewer",
+  );
+  await deps.sendProgressUpdate(progressCtx, `[CodeHarbor] ${workflowStartText}`);
   deps.appendWorkflowDiagEvent(
     workflowDiagRunId,
     diagRunKind,
     "workflow",
     0,
-    "Multi-Agent workflow 启动：Planner -> Executor -> Reviewer",
+    workflowStartText,
   );
   const detailedProgressEnabled = deps.isAutoDevDetailedProgressEnabled(input.sessionKey);
   const roleSkillPolicy = deps.resolveWorkflowRoleSkillPolicy(input.sessionKey);
@@ -168,7 +182,7 @@ export async function executeWorkflowRunRequest(
         deps.appendWorkflowDiagEvent(workflowDiagRunId, diagRunKind, event.stage, event.round, event.message);
         await deps.sendProgressUpdate(
           progressCtx,
-          `[CodeHarbor] ${formatWorkflowProgressNotice(event, detailedProgressEnabled)}`,
+          `[CodeHarbor] ${formatWorkflowProgressNotice(event, detailedProgressEnabled, deps.outputLanguage)}`,
         );
       },
     });
@@ -184,8 +198,14 @@ export async function executeWorkflowRunRequest(
       error: null,
     });
 
-    await deps.sendMessage(input.message.conversationId, buildWorkflowResultReply(result));
-    await deps.finishProgress(progressCtx, `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`);
+    await deps.sendMessage(input.message.conversationId, buildWorkflowResultReply(result, deps.outputLanguage));
+    await deps.finishProgress(
+      progressCtx,
+      localize(
+        `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+        `Multi-agent workflow completed (${formatDurationMs(Date.now() - requestStartedAt)})`,
+      ),
+    );
     deps.finishWorkflowDiagRun(workflowDiagRunId, {
       status: "succeeded",
       approved: result.approved,
@@ -205,7 +225,7 @@ export async function executeWorkflowRunRequest(
       repairRounds: 0,
       error: formatError(error),
     });
-    await deps.finishProgress(progressCtx, buildFailureProgressSummary(status, requestStartedAt, error));
+    await deps.finishProgress(progressCtx, buildFailureProgressSummary(status, requestStartedAt, error, deps.outputLanguage));
     deps.finishWorkflowDiagRun(workflowDiagRunId, {
       status: status === "cancelled" ? "cancelled" : "failed",
       approved: null,

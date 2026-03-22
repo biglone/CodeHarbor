@@ -4,6 +4,7 @@ import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord, UpgradeRunStats } from "../store/state-store";
 import type { InboundMessage } from "../types";
 import type { WorkflowRunSnapshot } from "../workflow/multi-agent-workflow";
+import type { OutputLanguage } from "../config";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { handleAutoDevStatusCommand as runAutoDevStatusCommand } from "./autodev-status-command";
 import { formatWorkflowContextBudget } from "./helpers";
@@ -45,6 +46,7 @@ interface BackendDecisionLike {
 
 interface StatusCommandDispatchContext {
   botNoticePrefix: string;
+  outputLanguage: OutputLanguage;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -104,6 +106,7 @@ export async function sendStatusCommand(
   await handleStatusCommand(
     {
       botNoticePrefix: context.botNoticePrefix,
+      outputLanguage: context.outputLanguage,
       groupDirectModeEnabled: context.groupDirectModeEnabled,
       updateCheckTtlMs: context.updateCheckTtlMs,
       cliCompatEnabled: context.cliCompatEnabled,
@@ -171,6 +174,7 @@ export async function sendWorkflowStatusCommand(
 export async function sendAutoDevStatusCommand(
   context: Pick<
     AutoDevStatusContext,
+    | "outputLanguage"
     | "autoDevLoopMaxRuns"
     | "autoDevLoopMaxMinutes"
     | "autoDevAutoCommit"
@@ -192,6 +196,7 @@ export async function sendAutoDevStatusCommand(
 ): Promise<void> {
   await runAutoDevStatusCommand(
     {
+      outputLanguage: context.outputLanguage,
       autoDevLoopMaxRuns: context.autoDevLoopMaxRuns,
       autoDevLoopMaxMinutes: context.autoDevLoopMaxMinutes,
       autoDevAutoCommit: context.autoDevAutoCommit,

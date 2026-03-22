@@ -1,6 +1,8 @@
 import { formatPackageUpdateHint, type PackageUpdateStatus } from "../package-update-checker";
 import type { InboundMessage } from "../types";
+import type { OutputLanguage } from "../config";
 import { buildHelpNotice } from "./control-text";
+import { byOutputLanguage } from "./output-language";
 
 export type ControlCommand = "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
 
@@ -12,6 +14,7 @@ interface MinimalStateStoreLike {
 interface HandleControlCommandDeps {
   sessionActiveWindowMs: number;
   botNoticePrefix: string;
+  outputLanguage: OutputLanguage;
   stateStore: MinimalStateStoreLike;
   clearSessionFromAllRuntimes: (sessionKey: string) => void;
   sessionBackendOverrides: Map<string, unknown>;
@@ -46,6 +49,7 @@ export async function handleControlCommand(
   deps: HandleControlCommandDeps,
   input: HandleControlCommandInput,
 ): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   if (input.command === "stop") {
     await deps.handleStopCommand(input.sessionKey, input.message, input.requestId);
     return;
@@ -68,7 +72,10 @@ export async function handleControlCommand(
     deps.activeAutoDevLoopSessions.delete(input.sessionKey);
     await deps.sendNotice(
       input.message.conversationId,
-      "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
+      localize(
+        "[CodeHarbor] 上下文已重置。你可以继续直接发送新需求。",
+        "[CodeHarbor] Context has been reset. You can send a new request now.",
+      ),
     );
     return;
   }
@@ -77,7 +84,10 @@ export async function handleControlCommand(
     const packageUpdate = await deps.getPackageUpdateStatus({ forceRefresh: true });
     await deps.sendNotice(
       input.message.conversationId,
-      `${deps.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
+      localize(
+        `${deps.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
+        `${deps.botNoticePrefix} Version\n- currentVersion: ${packageUpdate.currentVersion}\n- updateHint: ${formatPackageUpdateHint(packageUpdate)}\n- checkedAt: ${packageUpdate.checkedAt}`,
+      ),
     );
     return;
   }
@@ -97,6 +107,7 @@ export async function handleControlCommand(
       input.message.conversationId,
       buildHelpNotice({
         botNoticePrefix: deps.botNoticePrefix,
+        outputLanguage: deps.outputLanguage,
         multimodalHelpStatus: deps.formatMultimodalHelpStatus(),
       }),
     );

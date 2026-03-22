@@ -3,6 +3,7 @@ import {
   type WorkflowRoleSkillDisclosureMode,
   type WorkflowRoleSkillStatusSnapshot,
 } from "../workflow/role-skills";
+import type { OutputLanguage } from "../config";
 import type { MultiAgentWorkflowProgressEvent } from "../workflow/multi-agent-workflow";
 
 export function formatError(error: unknown): string {
@@ -101,22 +102,39 @@ function formatWorkflowRoleSkillList(items: string[]): string {
   return `${items.slice(0, 6).join(", ")}, ... (+${items.length - 6})`;
 }
 
-export function formatWorkflowProgressNotice(event: MultiAgentWorkflowProgressEvent, detailed: boolean): string {
-  const stageLabel = event.stage.toUpperCase();
+export function formatWorkflowProgressNotice(
+  event: MultiAgentWorkflowProgressEvent,
+  detailed: boolean,
+  outputLanguage: OutputLanguage,
+): string {
+  const stageLabel = resolveWorkflowStageLabel(event.stage, outputLanguage);
   const agent = resolveWorkflowStageAgent(event.stage);
   const round = event.stage === "repair" ? Math.max(1, event.round) : event.round + 1;
   if (detailed) {
-    return `[${stageLabel}] agent=${agent}, round=${round} ${event.message}`;
+    if (outputLanguage === "en") {
+      return `[${stageLabel}] agent=${agent}, round=${round} ${event.message}`;
+    }
+    return `[${stageLabel}] 代理=${agent}，轮次=${round} ${event.message}`;
   }
-  return `[${stageLabel}] round=${round} ${compactWorkflowProgressMessage(event.message)}`;
+  if (outputLanguage === "en") {
+    return `[${stageLabel}] round=${round} ${compactWorkflowProgressMessage(event.message, outputLanguage)}`;
+  }
+  return `[${stageLabel}] 轮次=${round} ${compactWorkflowProgressMessage(event.message, outputLanguage)}`;
 }
 
-function compactWorkflowProgressMessage(message: string): string {
+function compactWorkflowProgressMessage(message: string, outputLanguage: OutputLanguage): string {
   const stripped = message.replace(/（[^（）]*）/g, "").replace(/\s+/g, " ").trim();
   if (!stripped) {
-    return "阶段处理中";
+    return outputLanguage === "en" ? "processing" : "阶段处理中";
   }
   return stripped;
+}
+
+function resolveWorkflowStageLabel(stage: MultiAgentWorkflowProgressEvent["stage"], outputLanguage: OutputLanguage): string {
+  if (outputLanguage === "en" || outputLanguage === "zh") {
+    return stage.toUpperCase();
+  }
+  return stage.toUpperCase();
 }
 
 function resolveWorkflowStageAgent(stage: MultiAgentWorkflowProgressEvent["stage"]): string {
