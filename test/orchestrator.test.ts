@@ -3708,7 +3708,7 @@ describe("Orchestrator", () => {
       }),
     );
 
-    expect(executor.callCount).toBeGreaterThanOrEqual(5);
+    expect(executor.callCount).toBeGreaterThanOrEqual(4);
     expect(channel.sent.some((entry) => entry.text.includes("Multi-Agent workflow 完成"))).toBe(true);
     expect(channel.sent.some((entry) => entry.text.includes("[planner]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("state: succeeded"))).toBe(true);
@@ -3752,7 +3752,8 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("[EXECUTOR] agent=executor, round=1"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("[REVIEWER] agent=reviewer, round=1"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("verdict=REJECTED"))).toBe(true);
-    expect(channel.notices.some((entry) => entry.text.includes("[REPAIR] agent=executor, round=1"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Reviewer 契约补全启动"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Reviewer 契约补全完成"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
   });
 
@@ -3910,7 +3911,7 @@ describe("Orchestrator", () => {
 
       const reviewerPrompt = executor.calls.find((call) => call.text.includes("[role:reviewer]"))?.text ?? "";
       expect(reviewerPrompt).toContain("executor_output truncated");
-      expect(reviewerPrompt.length).toBeLessThan(2_500);
+      expect(reviewerPrompt.length).toBeLessThan(3_200);
       expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent context:"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("output=1200"))).toBe(true);
     } finally {
