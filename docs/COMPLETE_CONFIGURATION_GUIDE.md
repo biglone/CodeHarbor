@@ -363,9 +363,13 @@ When in doubt, treat config changes as restart-scoped for operational safety.
 - DM message gets response
 - Group trigger behaves as expected
 - `/status` returns session/limiter/worker info
+- `/diag version` returns runtime diagnostics (pid/start path/backend)
+- `/diag route` / `/diag autodev` return routing and AutoDev diagnostics
+- `/diag queue` returns queue diagnostics (or explicit unavailable reason when queue is disabled)
 - `/diag upgrade` returns upgrade lock/stats/records
 - `/version` returns current version and update hint
 - `/upgrade` can trigger in-chat self-update (if enabled/authorized)
+- escaped `//...` form works when Matrix client intercepts slash commands (for example `//status`, `//diag queue 5`)
 - Admin `/health` reports Matrix/Codex and CodeHarbor app version status
 - Admin `/audit` records your config updates
 - restart commands work (`service restart` or Admin restart API/UI)

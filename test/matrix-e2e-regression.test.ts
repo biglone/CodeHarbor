@@ -1175,6 +1175,45 @@ describe("Matrix e2e regression", () => {
     expect(routeDiagNotice?.text).toContain("fallback: yes");
   });
 
+  it("shows AutoDev diagnosis for /diag autodev command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag autodev 5" }));
+
+    expect(executor.calls).toHaveLength(0);
+    const autoDevDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（autodev）"));
+    expect(autoDevDiagNotice).toBeDefined();
+    expect(autoDevDiagNotice?.text).toContain("recentCount:");
+    expect(autoDevDiagNotice?.text).toContain("live: state=idle");
+    expect(autoDevDiagNotice?.text).toContain("config:");
+  });
+
+  it("shows queue diagnosis for /diag queue and escaped //diag queue command", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "/diag queue" }));
+    await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "//diag queue 3" }));
+
+    expect(executor.calls).toHaveLength(0);
+    const queueDiagNotices = channel.notices.filter((entry) => entry.text.includes("诊断信息（queue）"));
+    expect(queueDiagNotices).toHaveLength(2);
+    expect(queueDiagNotices.every((entry) => entry.text.includes("status: unavailable"))).toBe(true);
+  });
+
   it("shows recent upgrade records for /diag upgrade command", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor();

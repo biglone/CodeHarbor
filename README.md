@@ -170,7 +170,7 @@ codeharbor service --help
 Common in-chat control commands:
 
 - `/help` show command help
-- if Matrix client intercepts slash commands, send escaped form like `//autodev run T6.2` (also supports `//agents`, `//diag`, `//upgrade`)
+- if Matrix client intercepts slash commands, use escaped `//...` form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev run T6.2`)
 - `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids + upgrade metrics/lock, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
@@ -179,13 +179,13 @@ Common in-chat control commands:
 - `/diag route [count]` show backend routing diagnostics (rule hit/fallback reason + recent route records)
 - `/diag autodev [count]` show AutoDev diagnostics (stage trace, live loop snapshot, and recent git commit records)
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
-- `/upgrade [version]` run self-update and auto-restart service from Matrix chat
+- `/upgrade [version]` run self-update and auto-restart service from Matrix DM only
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports Linux systemd signal restart fallback, macOS launchd/manual fallback, and Windows safe manual fallback
   - emits structured success/failure summary with rollback and restart command templates
 - `/backend codex|claude [model] | /backend auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
-- `/reset` clear current conversation context
-- `/stop` cancel current running request
+- `/reset` clear current conversation context and suppress one-shot history bridge on the next request
+- `/stop` cancel current running request (or queue the stop), clear session context, and drop pending queued tasks for this session
 
 ## GitHub CI/CD Publish
 
@@ -568,7 +568,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - if Matrix intercepts `/...`, use escaped `//...` command form (for example `//autodev run T6.2`)
+  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev run T6.2`)
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
@@ -581,8 +581,8 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
   - `/backend codex|claude [model] | /backend auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
-  - `/reset` clear bound Codex session and keep conversation active
-  - `/stop` cancel in-flight execution (if running) and reset session context
+  - `/reset` clear bound Codex session, keep conversation active, and suppress one-shot history bridge on the next request
+  - `/stop` cancel in-flight execution (or queue a pending stop when busy), reset session context, and clear pending queue tasks for current session
   - `/agents status` show multi-agent workflow status for current session (when enabled)
   - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
   - `/autodev status` show AutoDev doc/task summary + currentTask/nextTask + run snapshot (when enabled)

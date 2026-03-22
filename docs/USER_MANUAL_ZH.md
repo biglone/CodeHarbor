@@ -201,19 +201,22 @@ codeharbor admin serve
 ### 5.6 版本检查与更新提示
 
 - `/help`：查看机器人可用命令列表（包含当前多模态状态摘要）
-- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（示例：`//autodev run T6.2`，同样适用于 `//agents`、`//diag`、`//upgrade`）
+- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（适用于所有斜杠命令；例如 `//status`、`//version`、`//diag queue 5`、`//upgrade`、`//autodev run T6.2`）
 - `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）、升级指标/锁状态，以及最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
 - `/diag media [count]`：输出多模态诊断（图片/语音计数器 + 最近处理记录）
 - `/diag upgrade [count]`：输出升级诊断信息（分布式升级锁、聚合指标、最近升级记录）
 - `/diag route [count]`：输出后端路由诊断（策略命中/回退原因 + 最近路由记录）
+- `/diag autodev [count]`：输出 AutoDev 诊断（最近运行状态统计、循环快照、最近 Git 提交记录与阶段轨迹）
+- `/diag queue [count]`：输出可恢复任务队列诊断（pending/running 计数、待重试会话、失败归档）
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - Linux 支持 systemd 信号重启回退；macOS 支持 launchd/手工回退；Windows 默认安全降级为手工回退
   - 会输出结构化升级结果摘要（成功/失败）与回滚/重启命令模板，降低失败恢复成本
 - `/backend codex|claude [model] | /backend auto|status`：会话内切换后端工具（`auto` 恢复自动路由）；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
-- `/reset`、`/stop`：会清理会话，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
+- `/reset`：清空会话上下文，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
+- `/stop`：请求停止当前执行（繁忙时进入待停止），并清理会话上下文/当前会话待处理队列
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
 - `PACKAGE_UPDATE_CHECK_TTL_MS`：更新检查结果缓存时长（毫秒，默认 6 小时）
@@ -245,7 +248,9 @@ codeharbor admin serve
 - DM 发消息，机器人能回复
 - 群聊触发策略符合预期
 - 管理后台 `health` 正常
+- `/status` 返回会话状态与运行指标
 - `/version` 返回当前版本与更新提示
+- `/diag version` / `/diag route` / `/diag autodev` / `/diag queue` 可返回诊断信息（如启用队列则校验 queue 明细）
 - 管理后台 `audit` 能看到配置变更
 - 重启按钮或 `codeharbor service restart --with-admin` 可用
 - 升级后版本正确：`codeharbor --version`

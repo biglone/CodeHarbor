@@ -25,8 +25,13 @@ describe("orchestrator command routing helpers", () => {
     expect(parseDiagTarget("/diag")).toEqual({ kind: "help" });
     expect(parseDiagTarget("/diag version")).toEqual({ kind: "version" });
     expect(parseDiagTarget("/diag media")).toEqual({ kind: "media", limit: 10 });
+    expect(parseDiagTarget("/diag autodev")).toEqual({ kind: "autodev", limit: 10 });
+    expect(parseDiagTarget("/diag queue")).toEqual({ kind: "queue", limit: 10 });
     expect(parseDiagTarget("/diag media 51")).toBeNull();
+    expect(parseDiagTarget("/diag autodev 51")).toBeNull();
+    expect(parseDiagTarget("/diag queue 0")).toBeNull();
     expect(parseDiagTarget("//diag route 3")).toEqual({ kind: "route", limit: 3 });
+    expect(parseDiagTarget("//diag queue 3")).toEqual({ kind: "queue", limit: 3 });
   });
 
   it("parses backend and upgrade targets", () => {
