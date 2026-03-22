@@ -108,4 +108,40 @@ describe("AutoDev workflow helpers", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("ignores release mapping rows and duplicate task ids when loading tasks", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-release-map-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "### 阶段 8：社区路线图投票落地（进行中）",
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T8.7 | 正式任务 | ✅ |",
+        "| T8.8 | 正式任务 | ⬜ |",
+        "",
+        "## 大功能 -> 发布映射（执行约定）",
+        "| 大功能任务 | 完成后目标版本 | 发布状态 |",
+        "|------------|----------------|----------|",
+        "| T8.7 | v0.1.58 | ⬜ 待发布 |",
+        "| T8.8 | v0.1.59 | ⬜ 待发布 |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const context = await loadAutoDevContext(tempRoot);
+      expect(context.tasks).toHaveLength(2);
+      expect(context.tasks.map((task) => `${task.id}:${task.status}`)).toEqual(["T8.7:completed", "T8.8:pending"]);
+
+      const next = selectAutoDevTask(context.tasks);
+      expect(next?.id).toBe("T8.8");
+      expect(next?.description).toContain("正式任务");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

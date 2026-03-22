@@ -89,6 +89,9 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   };
 }
 
+const MARKDOWN_HEADING_PATTERN = /^#{1,6}\s+/;
+const RELEASE_MAPPING_HEADING_PATTERN = /^#{1,6}\s+.*(?:发布映射|release mapping)/i;
+
 export async function loadAutoDevContext(workdir: string): Promise<AutoDevContext> {
   const requirementsPath = path.join(workdir, "REQUIREMENTS.md");
   const taskListPath = path.join(workdir, "TASK_LIST.md");
@@ -229,17 +232,37 @@ async function readOptionalFile(filePath: string): Promise<string | null> {
 function parseTasks(content: string): AutoDevTask[] {
   const lines = splitLines(content);
   const tasks: AutoDevTask[] = [];
+  const seenTaskIds = new Set<string>();
+  let inReleaseMappingSection = false;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
+    const trimmed = line.trim();
+    if (MARKDOWN_HEADING_PATTERN.test(trimmed)) {
+      inReleaseMappingSection = RELEASE_MAPPING_HEADING_PATTERN.test(trimmed);
+      continue;
+    }
+    if (inReleaseMappingSection) {
+      continue;
+    }
     const tableTask = parseTableTaskLine(line, index);
     if (tableTask) {
+      const normalizedTaskId = tableTask.id.toLowerCase();
+      if (seenTaskIds.has(normalizedTaskId)) {
+        continue;
+      }
+      seenTaskIds.add(normalizedTaskId);
       tasks.push(tableTask);
       continue;
     }
 
     const listTask = parseListTaskLine(line, index);
     if (listTask) {
+      const normalizedTaskId = listTask.id.toLowerCase();
+      if (seenTaskIds.has(normalizedTaskId)) {
+        continue;
+      }
+      seenTaskIds.add(normalizedTaskId);
       tasks.push(listTask);
     }
   }

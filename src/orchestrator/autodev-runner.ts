@@ -143,6 +143,7 @@ interface AutoDevRunnerDeps {
 
 interface RunAutoDevCommandInput {
   taskId: string | null;
+  taskLineIndex?: number | null;
   sessionKey: string;
   message: InboundMessage;
   requestId: string;
@@ -155,6 +156,8 @@ export async function runAutoDevCommand(
   input: RunAutoDevCommandInput,
 ): Promise<void> {
   const requestedTaskId = input.taskId?.trim() || null;
+  const requestedTaskLineIndex =
+    typeof input.taskLineIndex === "number" && Number.isFinite(input.taskLineIndex) ? Math.floor(input.taskLineIndex) : null;
   const context = await loadAutoDevContext(input.workdir);
   const activeContext: AutoDevRunContext = input.runContext ?? {
     mode: requestedTaskId ? "single" : "loop",
@@ -354,6 +357,7 @@ export async function runAutoDevCommand(
         await runAutoDevCommand(deps, {
           ...input,
           taskId: loopTask.id,
+          taskLineIndex: loopTask.lineIndex,
           runContext: {
             mode: "loop",
             loopRound: attemptedRuns,
@@ -364,7 +368,7 @@ export async function runAutoDevCommand(
         });
 
         const refreshed = await loadAutoDevContext(input.workdir);
-        const refreshedTask = selectAutoDevTask(refreshed.tasks, loopTask.id);
+        const refreshedTask = resolveAutoDevTask(refreshed.tasks, loopTask.id, loopTask.lineIndex);
         if (refreshedTask?.status === "completed") {
           completedRuns += 1;
         }
@@ -383,7 +387,7 @@ export async function runAutoDevCommand(
     }
   }
 
-  const selectedTask = selectAutoDevTask(context.tasks, requestedTaskId);
+  const selectedTask = resolveAutoDevTask(context.tasks, requestedTaskId, requestedTaskLineIndex);
   if (!selectedTask) {
     if (requestedTaskId) {
       await deps.channelSendNotice(input.message.conversationId, `[CodeHarbor] 未找到任务 ${requestedTaskId}。`);
@@ -637,6 +641,21 @@ export async function runAutoDevCommand(
     }
     throw error;
   }
+}
+
+function resolveAutoDevTask(
+  tasks: AutoDevTask[],
+  taskId: string | null,
+  lineIndex: number | null,
+): AutoDevTask | null {
+  if (taskId && typeof lineIndex === "number" && Number.isFinite(lineIndex)) {
+    const normalizedTaskId = taskId.trim().toLowerCase();
+    const matchedByLine = tasks.find((task) => task.id.toLowerCase() === normalizedTaskId && task.lineIndex === lineIndex);
+    if (matchedByLine) {
+      return matchedByLine;
+    }
+  }
+  return selectAutoDevTask(tasks, taskId);
 }
 
 async function failAutoDevOnGitPreflightError(
