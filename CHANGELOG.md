@@ -8,6 +8,10 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.59] - 2026-03-22
+
+- AutoDev feature delivered: T8.8
+
 ## [0.1.58] - 2026-03-22
 
 - AutoDev feature delivered: T8.7
