@@ -911,11 +911,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           void refreshAuthStatus();
         });
 
-        document.getElementById("auth-save-btn").addEventListener("click", function () {
+        document.getElementById("auth-save-btn").addEventListener("click", async function () {
           localStorage.setItem(storageTokenKey, tokenInput.value.trim());
           localStorage.setItem(storageActorKey, actorInput.value.trim());
           showNotice("ok", t("notice.authSaved"));
-          void refreshAuthStatus();
+          await reloadCurrentViewData();
+          await refreshAuthStatus();
         });
 
         document.getElementById("auth-clear-btn").addEventListener("click", function () {
@@ -1000,6 +1001,23 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             loadHealth();
           } else if (view === "audit") {
             loadAudit();
+          }
+          loaded[view] = true;
+        }
+
+        async function reloadCurrentViewData() {
+          var view = getCurrentView();
+          loaded[view] = false;
+          if (view === "settings-global") {
+            await loadGlobal();
+          } else if (view === "settings-rooms") {
+            await refreshRoomList();
+          } else if (view === "diagnostics") {
+            await loadDiagnostics();
+          } else if (view === "health") {
+            await loadHealth();
+          } else if (view === "audit") {
+            await loadAudit();
           }
           loaded[view] = true;
         }
@@ -1370,7 +1388,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               "codeharbor-config-" +
               timestamp.replace(/[:]/g, "-").replace(/[.][0-9]{3}Z$/, "Z") +
               ".json";
-            var raw = JSON.stringify(snapshot, null, 2) + "\n";
+            var raw = JSON.stringify(snapshot, null, 2) + "\\n";
             var blob = new Blob([raw], { type: "application/json;charset=utf-8" });
             var url = URL.createObjectURL(blob);
             var link = document.createElement("a");

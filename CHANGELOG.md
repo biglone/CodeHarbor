@@ -20,6 +20,9 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - AutoDev status observability:
   - `/autodev status` now reports `gitPreflight=clean|dirty|no_repo` and `gitPreflightReason`
   - when `AUTODEV_AUTO_RELEASE_ENABLED=true` and `AUTODEV_AUTO_RELEASE_PUSH=false`, status shows an explicit warning to `git push` for CI publish
+- Admin console stability:
+  - fixed a script syntax regression in config snapshot export path that blocked route initialization and data loading in Admin UI
+  - after saving auth token in Admin UI, the current view now reloads with the new auth context before status refresh
 
 ## [0.1.54] - 2026-03-22
 
