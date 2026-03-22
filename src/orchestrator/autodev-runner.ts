@@ -13,6 +13,7 @@ import {
 } from "../workflow/autodev";
 import {
   captureAutoDevGitBaseline,
+  inspectAutoDevGitPreflight,
   tryAutoDevGitCommit,
   type AutoDevGitCommitResult,
 } from "./autodev-git";
@@ -68,6 +69,19 @@ interface AutoDevLoopStopCheckInput {
   loopStartedAt: number;
   attemptedRuns: number;
   completedRuns: number;
+  loopMaxRuns: number;
+  loopDeadlineAtIso: string | null;
+}
+
+interface AutoDevGitPreflightCheckInput {
+  sessionKey: string;
+  conversationId: string;
+  workdir: string;
+  task: AutoDevTask | null;
+  mode: "single" | "loop";
+  startedAtIso: string;
+  loopRound: number;
+  loopCompletedRuns: number;
   loopMaxRuns: number;
   loopDeadlineAtIso: string | null;
 }
@@ -271,6 +285,21 @@ export async function runAutoDevCommand(
           );
           return;
         }
+        const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
+          sessionKey: input.sessionKey,
+          conversationId: input.message.conversationId,
+          workdir: input.workdir,
+          task: null,
+          mode: "loop",
+          startedAtIso: new Date(loopStartedAt).toISOString(),
+          loopRound: attemptedRuns,
+          loopCompletedRuns: completedRuns,
+          loopMaxRuns: activeContext.loopMaxRuns,
+          loopDeadlineAtIso,
+        });
+        if (preflightFailed) {
+          return;
+        }
 
         const loopContext = await loadAutoDevContext(input.workdir);
         const loopTask = selectAutoDevTask(loopContext.tasks);
@@ -372,10 +401,6 @@ export async function runAutoDevCommand(
     return;
   }
 
-  const gitBaseline = await captureAutoDevGitBaseline({
-    workdir: input.workdir,
-    logger: deps.logger,
-  });
   const effectiveContext: AutoDevRunContext = {
     mode: activeContext.mode,
     loopRound: Math.max(1, activeContext.loopRound),
@@ -383,6 +408,27 @@ export async function runAutoDevCommand(
     loopMaxRuns: Math.max(1, activeContext.loopMaxRuns),
     loopDeadlineAt: activeContext.loopDeadlineAt,
   };
+  if (effectiveContext.mode !== "loop") {
+    const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
+      sessionKey: input.sessionKey,
+      conversationId: input.message.conversationId,
+      workdir: input.workdir,
+      task: selectedTask,
+      mode: "single",
+      startedAtIso: new Date().toISOString(),
+      loopRound: effectiveContext.loopRound,
+      loopCompletedRuns: effectiveContext.loopCompletedRuns,
+      loopMaxRuns: effectiveContext.loopMaxRuns,
+      loopDeadlineAtIso: effectiveContext.loopDeadlineAt,
+    });
+    if (preflightFailed) {
+      return;
+    }
+  }
+  const gitBaseline = await captureAutoDevGitBaseline({
+    workdir: input.workdir,
+    logger: deps.logger,
+  });
   let activeTask = selectedTask;
   let promotedToInProgress = false;
   if (selectedTask.status === "pending") {
@@ -591,6 +637,67 @@ export async function runAutoDevCommand(
     }
     throw error;
   }
+}
+
+async function failAutoDevOnGitPreflightError(
+  deps: AutoDevRunnerDeps,
+  input: AutoDevGitPreflightCheckInput,
+): Promise<boolean> {
+  if (!deps.autoDevAutoCommit) {
+    return false;
+  }
+
+  const preflight = await inspectAutoDevGitPreflight(input.workdir);
+  if (preflight.state !== "dirty") {
+    return false;
+  }
+
+  const endedAtIso = new Date().toISOString();
+  const reason = preflight.reason ?? "运行前存在未提交改动";
+  const taskLabel = input.task ? `${input.task.id} ${input.task.description}`.trim() : "N/A";
+  const changedPreview = preflight.dirtyFiles.slice(0, 5);
+  const changedPreviewLine =
+    changedPreview.length > 0
+      ? `\n- dirtyFiles: ${changedPreview.join(", ")}${
+          preflight.dirtyFiles.length > changedPreview.length
+            ? ` ... (+${preflight.dirtyFiles.length - changedPreview.length})`
+            : ""
+        }`
+      : "";
+
+  deps.setAutoDevSnapshot(input.sessionKey, {
+    state: "failed",
+    startedAt: input.startedAtIso,
+    endedAt: endedAtIso,
+    taskId: input.task?.id ?? null,
+    taskDescription: input.task?.description ?? null,
+    approved: null,
+    repairRounds: 0,
+    error: `git preflight failed: ${reason}`,
+    mode: input.mode,
+    loopRound: input.loopRound,
+    loopCompletedRuns: input.loopCompletedRuns,
+    loopMaxRuns: input.loopMaxRuns,
+    loopDeadlineAt: input.loopDeadlineAtIso,
+    lastGitCommitSummary: null,
+    lastGitCommitAt: null,
+    lastReleaseSummary: null,
+    lastReleaseAt: null,
+  });
+  deps.autoDevMetrics.recordRunOutcome("failed");
+
+  await deps.channelSendNotice(
+    input.conversationId,
+    `[CodeHarbor] AutoDev 已停止（Git preflight 未通过）。
+- reason: ${reason}
+- mode: ${input.mode}
+- task: ${taskLabel}
+- gitPreflight: dirty${changedPreviewLine}
+- fix: \`git status\`
+- fix: \`git add -A && git commit -m "chore: checkpoint before autodev run"\`
+- fix: \`git stash --include-untracked\`（如需暂存）`,
+  );
+  return true;
 }
 
 async function handleAutoDevLoopStopIfRequested(

@@ -17,38 +17,70 @@ export interface AutoDevGitBaseline {
   cleanBeforeRun: boolean;
 }
 
+export type AutoDevGitPreflightState = "clean" | "dirty" | "no_repo";
+
+export interface AutoDevGitPreflight {
+  state: AutoDevGitPreflightState;
+  available: boolean;
+  cleanBeforeRun: boolean;
+  dirtyFiles: string[];
+  reason: string | null;
+}
+
 export type AutoDevGitCommitResult =
   | { kind: "committed"; commitHash: string; commitSubject: string; changedFiles: string[] }
   | { kind: "skipped"; reason: string }
   | { kind: "failed"; error: string };
 
+export async function inspectAutoDevGitPreflight(workdir: string): Promise<AutoDevGitPreflight> {
+  const insideRepo = await isGitRepository(workdir);
+  if (!insideRepo) {
+    return {
+      state: "no_repo",
+      available: false,
+      cleanBeforeRun: false,
+      dirtyFiles: [],
+      reason: "未检测到 git 仓库",
+    };
+  }
+
+  try {
+    const status = await runGitCommand(workdir, ["status", "--porcelain"]);
+    const dirtyFiles = parseGitDirtyFiles(status);
+    const cleanBeforeRun = dirtyFiles.length === 0;
+    return {
+      state: cleanBeforeRun ? "clean" : "dirty",
+      available: true,
+      cleanBeforeRun,
+      dirtyFiles,
+      reason: cleanBeforeRun ? null : `检测到 ${dirtyFiles.length} 项未提交改动`,
+    };
+  } catch (error) {
+    return {
+      state: "dirty",
+      available: true,
+      cleanBeforeRun: false,
+      dirtyFiles: [],
+      reason: `git status 读取失败: ${formatError(error)}`,
+    };
+  }
+}
+
 export async function captureAutoDevGitBaseline(input: {
   workdir: string;
   logger: Logger;
 }): Promise<AutoDevGitBaseline> {
-  const insideRepo = await isGitRepository(input.workdir);
-  if (!insideRepo) {
-    return {
-      available: false,
-      cleanBeforeRun: false,
-    };
-  }
-  try {
-    const status = await runGitCommand(input.workdir, ["status", "--porcelain"]);
-    return {
-      available: true,
-      cleanBeforeRun: status.trim().length === 0,
-    };
-  } catch (error) {
+  const preflight = await inspectAutoDevGitPreflight(input.workdir);
+  if (preflight.state === "dirty" && preflight.reason?.startsWith("git status 读取失败")) {
     input.logger.warn("Failed to capture AutoDev git baseline", {
       workdir: input.workdir,
-      error: formatError(error),
+      error: preflight.reason,
     });
-    return {
-      available: false,
-      cleanBeforeRun: false,
-    };
   }
+  return {
+    available: preflight.available,
+    cleanBeforeRun: preflight.cleanBeforeRun,
+  };
 }
 
 export async function tryAutoDevGitCommit(input: {
@@ -256,6 +288,20 @@ async function listUntrackedGitFiles(workdir: string): Promise<string[]> {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+function parseGitDirtyFiles(statusOutput: string): string[] {
+  return statusOutput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const payload = line.slice(3).trim();
+      const renamedParts = payload.split("->");
+      const pathLike = renamedParts[renamedParts.length - 1] ?? payload;
+      return pathLike.trim().replace(/^"|"$/g, "");
+    })
+    .filter((value) => value.length > 0);
 }
 
 async function isGitRepository(workdir: string): Promise<boolean> {
