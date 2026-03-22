@@ -417,6 +417,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label" data-i18n="global.agentSkillsAssignments">角色技能分配 JSON（planner/executor/reviewer）</span>
             <textarea id="global-agent-skills-assignments" rows="6" placeholder='{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}' data-i18n-placeholder="global.agentSkillsAssignmentsPlaceholder"></textarea>
           </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.envOverrides">高级环境变量覆盖（JSON，可选）</span>
+            <textarea id="global-env-overrides" rows="8" placeholder='{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}' data-i18n-placeholder="global.envOverridesPlaceholder"></textarea>
+          </label>
         </div>
         <div class="actions">
           <button id="global-save-btn" type="button" data-i18n="global.save">保存全局配置</button>
@@ -655,6 +659,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentSkillsAssignments": "角色技能分配 JSON（planner/executor/reviewer）",
             "global.agentSkillsAssignmentsPlaceholder":
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
+            "global.envOverrides": "高级环境变量覆盖（JSON，可选）",
+            "global.envOverridesPlaceholder":
+              '{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}',
             "global.save": "保存全局配置",
             "global.validate": "校验全局配置",
             "global.reload": "重新加载",
@@ -839,6 +846,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentSkillsAssignments": "Role skill assignment JSON (planner/executor/reviewer)",
             "global.agentSkillsAssignmentsPlaceholder":
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
+            "global.envOverrides": "Advanced env overrides (JSON, optional)",
+            "global.envOverridesPlaceholder":
+              '{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}',
             "global.save": "Save Global Config",
             "global.validate": "Validate Global Config",
             "global.reload": "Reload",
@@ -1195,6 +1205,22 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           return parsed;
         }
 
+        function parseEnvOverridesInput(raw) {
+          if (!raw) {
+            return undefined;
+          }
+          var parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (error) {
+            throw new Error("envOverrides must be valid JSON.");
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("envOverrides must be a JSON object.");
+          }
+          return parsed;
+        }
+
         function formatRoleSkillAssignments(value) {
           if (!value || typeof value !== "object" || Array.isArray(value)) {
             return "";
@@ -1446,6 +1472,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-agent-skills-assignments").value = formatRoleSkillAssignments(
               roleSkills.roleAssignments
             );
+            document.getElementById("global-env-overrides").value = "";
 
             showNotice("ok", t("notice.globalLoaded"));
           } catch (error) {
@@ -1455,6 +1482,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         function buildGlobalPayloadFromForm() {
           var roleAssignments = parseRoleSkillAssignmentsInput(asText("global-agent-skills-assignments"));
+          var envOverrides = parseEnvOverridesInput(asText("global-env-overrides"));
           return {
             matrixCommandPrefix: asText("global-matrix-prefix"),
             codexWorkdir: asText("global-workdir"),
@@ -1513,7 +1541,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 roots: parseCsvText(asText("global-agent-skills-roots")),
                 roleAssignments: roleAssignments
               }
-            }
+            },
+            envOverrides: envOverrides
           };
         }
 

@@ -6,9 +6,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { ConfigService } from "./config-service";
-import { buildConfigSnapshot, runConfigImportCommand } from "./config-snapshot";
+import { buildConfigSnapshot, CONFIG_SNAPSHOT_ENV_KEYS, runConfigImportCommand } from "./config-snapshot";
 import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
-import { AdminTokenConfig, AppConfig } from "./config";
+import { AdminTokenConfig, AppConfig, loadConfig } from "./config";
 import { HistoryService } from "./history-service";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
@@ -56,6 +56,7 @@ const ADMIN_DEFAULT_HISTORY_CLEANUP_RUN_LIMIT = 20;
 const ADMIN_MAX_HISTORY_CLEANUP_RUN_LIMIT = 200;
 const ROLE_SKILL_DISCLOSURE_MODES = new Set(["summary", "progressive", "full"]);
 const ROLE_SKILL_ROLES = ["planner", "executor", "reviewer"] as const;
+const ALLOWED_ENV_OVERRIDE_KEYS = new Set<string>(CONFIG_SNAPSHOT_ENV_KEYS);
 
 interface CodexHealthResult {
   ok: boolean;
@@ -1035,6 +1036,7 @@ export class AdminServer {
     const updatedKeys: string[] = [];
     const hotAppliedKeys: string[] = [];
     const restartRequiredKeys: string[] = [];
+    let updateCheckChanged = false;
     const markUpdatedKey = (key: string): void => {
       updatedKeys.push(key);
       if (isHotGlobalConfigKey(key)) {
@@ -1208,7 +1210,6 @@ export class AdminServer {
 
     if ("updateCheck" in body) {
       const updateCheck = asObject(body.updateCheck, "updateCheck");
-      let updateCheckChanged = false;
       if ("enabled" in updateCheck) {
         const value = normalizeBoolean(updateCheck.enabled, this.config.updateCheck.enabled);
         this.config.updateCheck.enabled = value;
@@ -1234,9 +1235,6 @@ export class AdminServer {
         envUpdates.PACKAGE_UPDATE_CHECK_TTL_MS = String(value);
         markUpdatedKey("updateCheck.ttlMs");
         updateCheckChanged = true;
-      }
-      if (updateCheckChanged && !this.hasCustomPackageUpdateChecker) {
-        this.packageUpdateChecker = this.createPackageUpdateChecker();
       }
     }
 
@@ -1460,8 +1458,30 @@ export class AdminServer {
       }
     }
 
+    if ("envOverrides" in body) {
+      const overrides = normalizeEnvOverrides(body.envOverrides);
+      for (const [key, value] of Object.entries(overrides)) {
+        envUpdates[key] = value;
+        markUpdatedKey(`envOverrides.${key}`);
+      }
+    }
+
     if (updatedKeys.length === 0) {
       throw new HttpError(400, "No supported global config fields provided.");
+    }
+
+    if ("envOverrides" in body) {
+      const nextConfig = resolveNextConfigFromEnvUpdates(this.config, this.stateStore, envUpdates);
+      Object.assign(this.config, nextConfig);
+    }
+    if (
+      !this.hasCustomPackageUpdateChecker &&
+      (updateCheckChanged ||
+        "PACKAGE_UPDATE_CHECK_ENABLED" in envUpdates ||
+        "PACKAGE_UPDATE_CHECK_TIMEOUT_MS" in envUpdates ||
+        "PACKAGE_UPDATE_CHECK_TTL_MS" in envUpdates)
+    ) {
+      this.packageUpdateChecker = this.createPackageUpdateChecker();
     }
 
     this.persistEnvUpdates(envUpdates);
@@ -1789,6 +1809,14 @@ export class AdminServer {
           markCheckedKey("agentWorkflow.roleSkills.roleAssignments");
         }
       }
+    }
+
+    if ("envOverrides" in body) {
+      const overrides = normalizeEnvOverrides(body.envOverrides);
+      for (const key of Object.keys(overrides)) {
+        markCheckedKey(`envOverrides.${key}`);
+      }
+      resolveNextConfigFromEnvUpdates(this.config, this.stateStore, overrides);
     }
 
     if (checkedKeys.length === 0) {
@@ -3002,6 +3030,62 @@ function dedupeNormalizedStrings(items: string[]): string[] {
     output.push(trimmed);
   }
   return output;
+}
+
+function normalizeEnvOverrides(value: unknown): Record<string, string> {
+  const payload = asObject(value, "envOverrides");
+  const output: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(payload)) {
+    const key = rawKey.trim();
+    if (!key) {
+      throw new HttpError(400, "envOverrides key cannot be empty.");
+    }
+    if (!/^[A-Z0-9_]+$/.test(key)) {
+      throw new HttpError(400, `envOverrides.${key} must use uppercase ENV key format.`);
+    }
+    if (!ALLOWED_ENV_OVERRIDE_KEYS.has(key)) {
+      throw new HttpError(400, `envOverrides.${key} is not a supported configuration key.`);
+    }
+    if (rawValue === null || rawValue === undefined) {
+      output[key] = "";
+      continue;
+    }
+    if (typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
+      output[key] = String(rawValue);
+      continue;
+    }
+    if (Array.isArray(rawValue) || typeof rawValue === "object") {
+      output[key] = JSON.stringify(rawValue);
+      continue;
+    }
+    throw new HttpError(400, `envOverrides.${key} has unsupported value type.`);
+  }
+  return output;
+}
+
+function resolveNextConfigFromEnvUpdates(
+  config: AppConfig,
+  stateStore: StateStore,
+  envUpdates: Record<string, string>,
+): AppConfig {
+  const snapshotEnv = buildConfigSnapshot(config, stateStore.listRoomSettings()).env;
+  const mergedEnv: NodeJS.ProcessEnv = { ...snapshotEnv };
+  for (const [key, value] of Object.entries(envUpdates)) {
+    mergedEnv[key] = value;
+  }
+  const preserveEphemeralAdminPort = config.adminPort === 0 && !Object.prototype.hasOwnProperty.call(envUpdates, "ADMIN_PORT");
+  if (preserveEphemeralAdminPort) {
+    mergedEnv.ADMIN_PORT = "8787";
+  }
+  try {
+    const nextConfig = loadConfig(mergedEnv);
+    if (preserveEphemeralAdminPort) {
+      nextConfig.adminPort = 0;
+    }
+    return nextConfig;
+  } catch (error) {
+    throw new HttpError(400, formatError(error));
+  }
 }
 
 function ensureDirectory(targetPath: string, fieldName: string): void {

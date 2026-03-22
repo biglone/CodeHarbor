@@ -328,6 +328,40 @@ describe("AdminServer", () => {
     expect(invalidCliMimeTypes.status).toBe(400);
     expect(JSON.stringify(invalidCliMimeTypes.body)).toContain("imageAllowedMimeTypes");
 
+    const invalidEnvOverrides = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          envOverrides: {
+            UNKNOWN_KEY: "x",
+          },
+        },
+      }),
+    });
+    expect(invalidEnvOverrides.status).toBe(400);
+    expect(JSON.stringify(invalidEnvOverrides.body)).toContain("UNKNOWN_KEY");
+
+    const validEnvOverrides = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          envOverrides: {
+            MATRIX_ADMIN_USERS: "@ops:example.com",
+          },
+        },
+      }),
+    });
+    expect(validEnvOverrides.status).toBe(200);
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.MATRIX_ADMIN_USERS");
+
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -1324,6 +1358,10 @@ describe("AdminServer", () => {
           imageAllowedMimeTypes: ["image/png", "image/webp"],
           recordPath: path.join(dir, "logs", "cli-record.ndjson"),
         },
+        envOverrides: {
+          MATRIX_ADMIN_USERS: "@ops:example.com,@oncall:example.com",
+          CONTEXT_BRIDGE_HISTORY_LIMIT: "24",
+        },
         updateCheck: {
           enabled: false,
           timeoutMs: 2000,
@@ -1351,6 +1389,8 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("CLI_COMPAT_IMAGE_MAX_COUNT=6");
     expect(envRaw).toContain('CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES="image/png,image/webp"');
     expect(envRaw).toContain(`CLI_COMPAT_RECORD_PATH=${path.join(dir, "logs", "cli-record.ndjson")}`);
+    expect(envRaw).toContain('MATRIX_ADMIN_USERS="@ops:example.com,@oncall:example.com"');
+    expect(envRaw).toContain("CONTEXT_BRIDGE_HISTORY_LIMIT=24");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
