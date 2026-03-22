@@ -8,6 +8,19 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.55] - 2026-03-22
+
+- AutoDev task delivery:
+  - completed T8.4 admin diagnostics and config import/export workflow
+  - completed T8.5 fine-grained API scopes and operation audit hardening
+- AutoDev git preflight fail-fast:
+  - `/autodev run` now checks git preflight before execution and stops immediately on dirty worktrees
+  - loop mode applies the same preflight before each round to prevent silent non-committable progress
+  - stop notice now includes explicit reason and actionable recovery commands (`git status`, commit checkpoint, optional stash)
+- AutoDev status observability:
+  - `/autodev status` now reports `gitPreflight=clean|dirty|no_repo` and `gitPreflightReason`
+  - when `AUTODEV_AUTO_RELEASE_ENABLED=true` and `AUTODEV_AUTO_RELEASE_PUSH=false`, status shows an explicit warning to `git push` for CI publish
+
 ## [0.1.54] - 2026-03-22
 
 - Builtin role skills (Planner/Executor/Reviewer) are significantly deepened with structured contracts:
