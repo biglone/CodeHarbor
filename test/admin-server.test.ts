@@ -985,6 +985,58 @@ describe("AdminServer", () => {
     expect(operationsText).toContain('"actor":"ops-audit"');
   });
 
+  it("records allowed read operations and supports operation audit filters", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        {
+          token: "read-token",
+          role: "viewer",
+          actor: "ops-read",
+          scopes: ["admin.read.config", "admin.read.audit"],
+        },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const readGlobal = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      headers: {
+        authorization: "Bearer read-token",
+        "x-request-id": "req-read-1",
+      },
+    });
+    expect(readGlobal.status).toBe(200);
+
+    const operations = await fetchJson(
+      `${baseUrl}/api/admin/audit?kind=operations&limit=20&surface=admin&outcome=allowed&actor=ops-read&action=admin.read.config&method=get&pathPrefix=/api/admin/config&createdFrom=1`,
+      {
+        headers: {
+          authorization: "Bearer read-token",
+        },
+      },
+    );
+    expect(operations.status).toBe(200);
+    const operationsText = JSON.stringify(operations.body);
+    expect(operationsText).toContain('"kind":"operation"');
+    expect(operationsText).toContain('"action":"admin.read.config"');
+    expect(operationsText).toContain('"/api/admin/config/global"');
+    expect(operationsText).toContain('"outcome":"allowed"');
+    expect(operationsText).toContain('"requestId":"req-read-1"');
+  });
+
   it("records service restart failures as operation audit errors", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
@@ -1028,7 +1080,7 @@ describe("AdminServer", () => {
     expect(restart.status).toBe(500);
     expect(JSON.stringify(restart.body)).toContain("Service restart failed");
 
-    const operations = await fetchJson(`${baseUrl}/api/admin/audit?kind=operations&limit=20`, {
+    const operations = await fetchJson(`${baseUrl}/api/admin/audit?kind=operations&limit=20&outcome=error`, {
       headers: {
         authorization: "Bearer service-admin",
       },

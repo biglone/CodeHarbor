@@ -259,6 +259,46 @@ describe("ApiServer", () => {
     );
   });
 
+  it("classifies API validation failures as denied audit events", async () => {
+    const service = new FakeTaskSubmissionService();
+    const audits: unknown[] = [];
+    const baseUrl = await createApiServer(service, {
+      auditRecorder: (event) => audits.push(event),
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-type": "application/json",
+        "x-request-id": "req-api-400",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        senderId: "@ci:example.com",
+        text: "run checks",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        surface: "api",
+        outcome: "denied",
+        path: "/api/tasks",
+      }),
+    );
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          statusCode: 400,
+          requestId: "req-api-400",
+        }),
+      }),
+    );
+  });
+
   it("rejects task submission without Idempotency-Key header", async () => {
     const service = new FakeTaskSubmissionService();
     const baseUrl = await createApiServer(service);
@@ -490,6 +530,46 @@ describe("ApiServer", () => {
 
     expect(response.status).toBe(401);
     expect(service.calls).toHaveLength(0);
+  });
+
+  it("classifies webhook availability failures as error audit events", async () => {
+    const service = new FakeTaskSubmissionService();
+    const audits: unknown[] = [];
+    const baseUrl = await createApiServer(service, {
+      webhookSecret: null,
+      auditRecorder: (event) => audits.push(event),
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/webhooks/ci`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": "req-webhook-503",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        repository: "acme/service",
+      }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        surface: "webhook",
+        outcome: "error",
+        reason: "webhook_unavailable",
+        action: "webhook.ingest.ci",
+      }),
+    );
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          statusCode: 503,
+          requestId: "req-webhook-503",
+        }),
+      }),
+    );
   });
 
   it("rejects webhook request when timestamp is outside tolerance", async () => {

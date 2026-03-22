@@ -410,7 +410,7 @@ Main endpoints:
 - `PUT /api/admin/config/rooms/:roomId`
 - `DELETE /api/admin/config/rooms/:roomId`
 - `GET /api/admin/health`
-- `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error`
+- `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error&actor=...&source=...&action=...&method=GET&pathPrefix=/api/...&reasonContains=...&createdFrom=...&createdTo=...`
 - `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`
 - `GET /api/admin/sessions/export?roomId=...&userId=...&from=...&to=...&limit=50&offset=0&includeMessages=true`
 - `GET /api/admin/sessions/:sessionKey/messages?limit=100`
@@ -448,6 +448,7 @@ Operation audit behavior:
 - `kind=config` (default): configuration revision audit entries
 - `kind=operations`: authorization and operation outcomes for Admin/API/Webhook (`allowed`/`denied`/`error`)
 - `kind=all`: merged timeline of config + operation audit entries (sorted by latest first)
+- operation entries support additional filters: `actor`, `source`, `action`, `method`, `pathPrefix`, `reasonContains`, `createdFrom`, `createdTo`
 
 Metrics quick check:
 

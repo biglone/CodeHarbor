@@ -187,9 +187,16 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   {
     surface: "admin",
     method: "POST|PUT|DELETE",
-    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/import|/api/admin/config/rooms/:roomId",
+    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/rooms/:roomId",
     action: TOKEN_SCOPES.ADMIN_WRITE_CONFIG,
     requiredScopes: [TOKEN_SCOPES.ADMIN_WRITE_CONFIG],
+  },
+  {
+    surface: "admin",
+    method: "POST",
+    path: "/api/admin/config/import",
+    action: TOKEN_SCOPES.ADMIN_WRITE_CONFIG_IMPORT,
+    requiredScopes: [TOKEN_SCOPES.ADMIN_WRITE_CONFIG_IMPORT],
   },
   {
     surface: "admin",

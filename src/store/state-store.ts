@@ -72,6 +72,14 @@ export interface OperationAuditQueryInput {
   limit?: number;
   surface?: OperationAuditSurface;
   outcome?: OperationAuditOutcome;
+  actor?: string;
+  source?: string;
+  action?: string;
+  method?: string;
+  pathPrefix?: string;
+  reasonContains?: string;
+  createdFrom?: number;
+  createdTo?: number;
 }
 
 export interface OperationAuditRecord {
@@ -665,6 +673,38 @@ export class StateStore {
     if (input.outcome) {
       clauses.push("outcome = ?");
       params.push(input.outcome);
+    }
+    if (input.actor) {
+      clauses.push("actor = ?");
+      params.push(input.actor);
+    }
+    if (input.source) {
+      clauses.push("source = ?");
+      params.push(input.source);
+    }
+    if (input.action) {
+      clauses.push("action = ?");
+      params.push(input.action);
+    }
+    if (input.method) {
+      clauses.push("method = ?");
+      params.push(input.method.toUpperCase());
+    }
+    if (input.pathPrefix) {
+      clauses.push("path LIKE ? ESCAPE '\\'");
+      params.push(`${escapeLikePattern(input.pathPrefix)}%`);
+    }
+    if (input.reasonContains) {
+      clauses.push("COALESCE(reason, '') LIKE ? ESCAPE '\\'");
+      params.push(`%${escapeLikePattern(input.reasonContains)}%`);
+    }
+    if (typeof input.createdFrom === "number" && Number.isFinite(input.createdFrom)) {
+      clauses.push("created_at >= ?");
+      params.push(Math.max(0, Math.floor(input.createdFrom)));
+    }
+    if (typeof input.createdTo === "number" && Number.isFinite(input.createdTo)) {
+      clauses.push("created_at <= ?");
+      params.push(Math.max(0, Math.floor(input.createdTo)));
     }
     params.push(safeLimit);
 
@@ -2129,6 +2169,11 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_created_at ON operation_audit_logs(created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_surface_created_at ON operation_audit_logs(surface, created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_outcome_created_at ON operation_audit_logs(outcome, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_actor_created_at ON operation_audit_logs(actor, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_action_created_at ON operation_audit_logs(action, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_source_created_at ON operation_audit_logs(source, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_method_created_at ON operation_audit_logs(method, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_path_created_at ON operation_audit_logs(path, created_at DESC, id DESC);
 
       CREATE TABLE IF NOT EXISTS upgrade_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2721,6 +2766,10 @@ function parseStringArrayJson(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/([%_\\])/g, "\\$1");
 }
 
 function buildSqlPlaceholders(count: number): string {

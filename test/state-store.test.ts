@@ -198,6 +198,7 @@ describe("StateStore", () => {
       metadata: {
         statusCode: 200,
       },
+      createdAt: 1_000,
     });
     store.appendOperationAuditLog({
       actor: null,
@@ -214,32 +215,75 @@ describe("StateStore", () => {
       metadata: {
         statusCode: 401,
       },
+      createdAt: 2_000,
+    });
+    store.appendOperationAuditLog({
+      actor: "ops-audit",
+      source: "scoped",
+      surface: "admin",
+      action: "admin.read.audit",
+      resource: "/api/admin/audit",
+      method: "GET",
+      path: "/api/admin/audit",
+      outcome: "denied",
+      reason: "missing_scope:admin.read.audit",
+      requiredScopes: ["admin.read.audit"],
+      grantedScopes: ["admin.read.auth"],
+      metadata: {
+        statusCode: 403,
+      },
+      createdAt: 3_000,
     });
 
     const all = store.listOperationAuditLogs({ limit: 10 });
-    expect(all).toHaveLength(2);
+    expect(all).toHaveLength(3);
     expect(all[0]).toEqual(
       expect.objectContaining({
-        surface: "api",
+        surface: "admin",
         outcome: "denied",
-        reason: "unauthorized",
+        reason: "missing_scope:admin.read.audit",
       }),
     );
     expect(all[1]).toEqual(
+      expect.objectContaining({
+        surface: "api",
+        outcome: "denied",
+      }),
+    );
+    expect(all[2]).toEqual(
       expect.objectContaining({
         surface: "admin",
         outcome: "allowed",
       }),
     );
-    expect(all[1]?.requiredScopes).toEqual(["admin.write.config"]);
-    expect(all[1]?.grantedScopes).toEqual(["admin.write"]);
+    expect(all[2]?.requiredScopes).toEqual(["admin.write.config"]);
+    expect(all[2]?.grantedScopes).toEqual(["admin.write"]);
 
     const deniedOnly = store.listOperationAuditLogs({
       limit: 10,
       outcome: "denied",
     });
-    expect(deniedOnly).toHaveLength(1);
-    expect(deniedOnly[0]?.surface).toBe("api");
+    expect(deniedOnly).toHaveLength(2);
+    expect(deniedOnly[0]?.actor).toBe("ops-audit");
+
+    const actorFiltered = store.listOperationAuditLogs({
+      limit: 10,
+      actor: "ops-admin",
+      action: "admin.write.config",
+      method: "put",
+      pathPrefix: "/api/admin/config",
+    });
+    expect(actorFiltered).toHaveLength(1);
+    expect(actorFiltered[0]?.path).toBe("/api/admin/config/global");
+
+    const reasonFiltered = store.listOperationAuditLogs({
+      limit: 10,
+      reasonContains: "missing_scope",
+      createdFrom: 2_500,
+      createdTo: 3_500,
+    });
+    expect(reasonFiltered).toHaveLength(1);
+    expect(reasonFiltered[0]?.action).toBe("admin.read.audit");
   });
 
   it("stores runtime config snapshots with monotonic version", () => {

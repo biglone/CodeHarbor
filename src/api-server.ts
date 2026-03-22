@@ -178,6 +178,7 @@ export class ApiServer {
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     let auditBase: Omit<ApiOperationAuditEvent, "outcome" | "reason"> | null = null;
     let auditWritten = false;
+    const requestId = normalizeHeaderValue(req.headers["x-request-id"]);
 
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -185,6 +186,10 @@ export class ApiServer {
       const taskDetailMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
       const isTaskSubmitRoute = url.pathname === "/api/tasks";
       const webhookMatch = /^\/api\/webhooks\/([^/]+)$/.exec(url.pathname);
+      const mergeAuditMetadata = (metadata: Record<string, unknown>): Record<string, unknown> => ({
+        ...(requestId ? { requestId } : {}),
+        ...metadata,
+      });
       this.setSecurityHeaders(res);
       res.setHeader(
         "Access-Control-Allow-Headers",
@@ -234,7 +239,7 @@ export class ApiServer {
             outcome: "denied",
             reason: "unauthorized",
             grantedScopes: [],
-            metadata: { statusCode: 401 },
+            metadata: mergeAuditMetadata({ statusCode: 401 }),
           });
           auditWritten = true;
         }
@@ -254,10 +259,10 @@ export class ApiServer {
             grantedScopes: authIdentity.scopes,
             outcome: "denied",
             reason: `missing_scope:${missingScopes.join(",")}`,
-            metadata: {
+            metadata: mergeAuditMetadata({
               statusCode: 403,
               missingScopes,
-            },
+            }),
           });
           auditWritten = true;
         }
@@ -275,6 +280,15 @@ export class ApiServer {
             ok: false,
             error: `Method not allowed: ${requestMethod}.`,
           });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              outcome: "denied",
+              reason: "method_not_allowed",
+              metadata: mergeAuditMetadata({ statusCode: 405 }),
+            });
+            auditWritten = true;
+          }
           return;
         }
 
@@ -296,11 +310,11 @@ export class ApiServer {
             source: authIdentity?.source ?? "none",
             grantedScopes: authIdentity?.scopes ?? [],
             outcome: "allowed",
-            metadata: {
+            metadata: mergeAuditMetadata({
               statusCode: result.created ? 202 : 200,
               created: result.created,
               taskId: result.task.id,
-            },
+            }),
           });
           auditWritten = true;
         }
@@ -313,6 +327,15 @@ export class ApiServer {
           ok: false,
           error: `Method not allowed: ${requestMethod}.`,
         });
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            outcome: "denied",
+            reason: "method_not_allowed",
+            metadata: mergeAuditMetadata({ statusCode: 405 }),
+          });
+          auditWritten = true;
+        }
         return;
       }
 
@@ -323,6 +346,15 @@ export class ApiServer {
           ok: false,
           error: `Task not found: ${taskId}.`,
         });
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            outcome: "denied",
+            reason: "not_found",
+            metadata: mergeAuditMetadata({ statusCode: 404, taskId }),
+          });
+          auditWritten = true;
+        }
         return;
       }
       this.sendJson(res, 200, {
@@ -336,11 +368,11 @@ export class ApiServer {
           source: authIdentity?.source ?? "none",
           grantedScopes: authIdentity?.scopes ?? [],
           outcome: "allowed",
-          metadata: {
+          metadata: mergeAuditMetadata({
             statusCode: 200,
             taskId: result.taskId,
             taskStatus: result.status,
-          },
+          }),
         });
         auditWritten = true;
       }
@@ -348,11 +380,15 @@ export class ApiServer {
       if (auditBase && !auditWritten) {
         const statusCode =
           error instanceof HttpError ? error.statusCode : error instanceof ApiTaskIdempotencyConflictError ? 409 : 500;
+        const outcome = statusCode >= 500 ? "error" : "denied";
         this.appendAuditEvent({
           ...auditBase,
-          outcome: "error",
+          outcome,
           reason: formatError(error),
-          metadata: { statusCode },
+          metadata: {
+            ...(requestId ? { requestId } : {}),
+            statusCode,
+          },
         });
       }
       if (error instanceof HttpError) {
@@ -387,6 +423,11 @@ export class ApiServer {
     const requestMethod = (req.method ?? "GET").toUpperCase();
     const requestPath = `/api/webhooks/${sourceParam ?? ""}`;
     const scopeRequirement = resolveWebhookScopeRequirement(requestPath);
+    const requestId = normalizeHeaderValue(req.headers["x-request-id"]);
+    const mergeAuditMetadata = (metadata: Record<string, unknown>): Record<string, unknown> => ({
+      ...(requestId ? { requestId } : {}),
+      ...metadata,
+    });
     let deniedAuditWritten = false;
 
     if (requestMethod !== "POST") {
@@ -395,6 +436,22 @@ export class ApiServer {
         ok: false,
         error: `Method not allowed: ${requestMethod}.`,
       });
+      if (scopeRequirement) {
+        this.appendAuditEvent({
+          actor: null,
+          source: "none",
+          surface: "webhook",
+          action: scopeRequirement.action,
+          resource: requestPath,
+          method: requestMethod,
+          path: requestPath,
+          outcome: "denied",
+          reason: "method_not_allowed",
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: [],
+          metadata: mergeAuditMetadata({ statusCode: 405 }),
+        });
+      }
       return;
     }
 
@@ -408,11 +465,11 @@ export class ApiServer {
           resource: requestPath,
           method: requestMethod,
           path: requestPath,
-          outcome: "denied",
+          outcome: "error",
           reason: "webhook_unavailable",
           requiredScopes: scopeRequirement.requiredScopes,
           grantedScopes: [],
-          metadata: { statusCode: 503 },
+          metadata: mergeAuditMetadata({ statusCode: 503 }),
         });
       }
       throw new HttpError(503, "Webhook is unavailable because API_WEBHOOK_SECRET is not configured.");
@@ -438,7 +495,7 @@ export class ApiServer {
         reason: formatError(error),
         requiredScopes: scopeRequirement.requiredScopes,
         grantedScopes: [],
-        metadata: { statusCode: 400 },
+        metadata: mergeAuditMetadata({ statusCode: 400 }),
       });
       throw error;
     }
@@ -470,10 +527,10 @@ export class ApiServer {
           reason: `missing_scope:${missingScopes.join(",")}`,
           requiredScopes: scopeRequirement.requiredScopes,
           grantedScopes: webhookIdentity.scopes,
-          metadata: {
+          metadata: mergeAuditMetadata({
             statusCode: 403,
             missingScopes,
-          },
+          }),
         });
         deniedAuditWritten = true;
         throw new HttpError(403, `Webhook is missing required scope: ${missingScopes.join(", ")}.`);
@@ -505,17 +562,18 @@ export class ApiServer {
         outcome: "allowed",
         requiredScopes: scopeRequirement.requiredScopes,
         grantedScopes: webhookIdentity.scopes,
-        metadata: {
+        metadata: mergeAuditMetadata({
           statusCode: result.created ? 202 : 200,
           source,
           created: result.created,
           taskId: result.task.id,
-        },
+        }),
       });
     } catch (error) {
       if (!deniedAuditWritten) {
         const statusCode =
           error instanceof HttpError ? error.statusCode : error instanceof ApiTaskIdempotencyConflictError ? 409 : 500;
+        const outcome = statusCode >= 500 ? "error" : "denied";
         this.appendAuditEvent({
           actor: webhookIdentity.actor,
           source: webhookIdentity.source,
@@ -524,11 +582,11 @@ export class ApiServer {
           resource: requestPath,
           method: requestMethod,
           path: requestPath,
-          outcome: "denied",
+          outcome,
           reason: formatError(error),
           requiredScopes: scopeRequirement.requiredScopes,
           grantedScopes: webhookIdentity.scopes,
-          metadata: { statusCode },
+          metadata: mergeAuditMetadata({ statusCode }),
         });
       }
       throw error;

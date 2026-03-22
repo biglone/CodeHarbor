@@ -227,6 +227,7 @@ export class AdminServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     let operationAuditEnabled = false;
+    let operationAuditResolved = false;
     let appendResolvedOperationAudit = (
       _outcome: OperationAuditOutcome,
       _statusCode: number,
@@ -277,6 +278,7 @@ export class AdminServer {
       const requestMethod = (req.method ?? "GET").toUpperCase();
       const scopeRequirement = resolveAdminScopeRequirement(requestMethod, url.pathname);
       const authIdentity = scopeRequirement ? this.resolveAdminIdentity(req) : null;
+      const requestId = normalizeHeaderValue(req.headers["x-request-id"]);
       operationAuditEnabled =
         Boolean(scopeRequirement) &&
         Boolean(authIdentity) &&
@@ -288,9 +290,10 @@ export class AdminServer {
         reason: string | null = null,
         metadata: Record<string, unknown> = {},
       ): void => {
-        if (!scopeRequirement || !authIdentity || !operationAuditEnabled) {
+        if (!scopeRequirement || !authIdentity || !operationAuditEnabled || operationAuditResolved) {
           return;
         }
+        operationAuditResolved = true;
         this.appendOperationAuditLog({
           actor: operationAuditActor,
           source: authIdentity.source,
@@ -306,11 +309,13 @@ export class AdminServer {
           metadata: {
             statusCode,
             role: authIdentity.role,
+            ...(requestId ? { requestId } : {}),
             ...metadata,
           },
         });
       };
       if (scopeRequirement && !authIdentity) {
+        operationAuditResolved = true;
         this.appendOperationAuditLog({
           actor: resolveAuditActor(req, null),
           source: "none",
@@ -323,7 +328,10 @@ export class AdminServer {
           reason: "unauthorized",
           requiredScopes: scopeRequirement.requiredScopes,
           grantedScopes: [],
-          metadata: { statusCode: 401 },
+          metadata: {
+            statusCode: 401,
+            ...(requestId ? { requestId } : {}),
+          },
         });
         this.sendJson(res, 401, {
           ok: false,
@@ -333,6 +341,7 @@ export class AdminServer {
       }
       if (scopeRequirement && authIdentity && !hasRequiredScopes(authIdentity.scopes, scopeRequirement.requiredScopes)) {
         const missingScopes = listMissingScopes(authIdentity.scopes, scopeRequirement.requiredScopes);
+        operationAuditResolved = true;
         this.appendOperationAuditLog({
           actor: resolveAuditActor(req, authIdentity),
           source: authIdentity.source,
@@ -348,6 +357,7 @@ export class AdminServer {
           metadata: {
             statusCode: 403,
             missingScopes,
+            ...(requestId ? { requestId } : {}),
           },
         });
         this.sendJson(res, 403, {
@@ -383,6 +393,9 @@ export class AdminServer {
           ok: true,
           data: buildGlobalConfigSnapshot(this.config),
           effective: "hot_for_whitelist_else_restart",
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_read_global",
         });
         return;
       }
@@ -554,6 +567,9 @@ export class AdminServer {
           ok: true,
           data: this.configService.listRoomSettings(),
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_read_rooms",
+        });
         return;
       }
 
@@ -567,6 +583,10 @@ export class AdminServer {
             throw new HttpError(404, `room settings not found for ${roomId}`);
           }
           this.sendJson(res, 200, { ok: true, data: room });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            type: "config_read_room",
+            roomId,
+          });
           return;
         }
 
@@ -599,6 +619,30 @@ export class AdminServer {
         const kind = normalizeAuditKind(url.searchParams.get("kind"));
         const surface = normalizeOptionalAuditSurface(url.searchParams.get("surface"));
         const outcome = normalizeOptionalAuditOutcome(url.searchParams.get("outcome"));
+        const actor = normalizeOptionalAuditFilterValue(url.searchParams.get("actor"));
+        const source = normalizeOptionalAuditFilterValue(url.searchParams.get("source"));
+        const action = normalizeOptionalAuditFilterValue(url.searchParams.get("action"));
+        const method = normalizeOptionalAuditMethod(url.searchParams.get("method"));
+        const pathPrefix = normalizeOptionalAuditFilterValue(url.searchParams.get("pathPrefix"));
+        const reasonContains = normalizeOptionalAuditFilterValue(url.searchParams.get("reasonContains"));
+        const createdFrom = parseOptionalTimestampQuery(url.searchParams.get("createdFrom"), "createdFrom");
+        const createdTo = parseOptionalTimestampQuery(url.searchParams.get("createdTo"), "createdTo");
+        if (createdFrom !== null && createdTo !== null && createdFrom > createdTo) {
+          throw new HttpError(400, "createdFrom must be less than or equal to createdTo.");
+        }
+        const operationQuery = {
+          limit,
+          surface,
+          outcome,
+          actor,
+          source,
+          action,
+          method,
+          pathPrefix,
+          reasonContains,
+          ...(createdFrom !== null ? { createdFrom } : {}),
+          ...(createdTo !== null ? { createdTo } : {}),
+        };
 
         if (kind === "config") {
           this.sendJson(res, 200, {
@@ -615,30 +659,28 @@ export class AdminServer {
         if (kind === "operations") {
           this.sendJson(res, 200, {
             ok: true,
-            data: this.stateStore
-              .listOperationAuditLogs({
-                limit,
-                surface,
-                outcome,
-              })
-              .map((entry) => formatOperationAuditEntry(entry)),
+            data: this.stateStore.listOperationAuditLogs(operationQuery).map((entry) => formatOperationAuditEntry(entry)),
           });
           appendResolvedOperationAudit("allowed", 200, null, {
             kind: "operations",
             limit,
             ...(surface ? { surface } : {}),
             ...(outcome ? { outcome } : {}),
+            ...(actor ? { actor } : {}),
+            ...(source ? { source } : {}),
+            ...(action ? { action } : {}),
+            ...(method ? { method } : {}),
+            ...(pathPrefix ? { pathPrefix } : {}),
+            ...(reasonContains ? { reasonContains } : {}),
+            ...(createdFrom !== null ? { createdFrom } : {}),
+            ...(createdTo !== null ? { createdTo } : {}),
           });
           return;
         }
 
         const configEntries = this.stateStore.listConfigRevisions(limit).map((entry) => formatConfigAuditEntry(entry));
         const operationEntries = this.stateStore
-          .listOperationAuditLogs({
-            limit,
-            surface,
-            outcome,
-          })
+          .listOperationAuditLogs(operationQuery)
           .map((entry) => formatOperationAuditEntry(entry));
         const merged = [...configEntries, ...operationEntries]
           .sort((left, right) => right.createdAt - left.createdAt)
@@ -653,6 +695,14 @@ export class AdminServer {
           limit,
           ...(surface ? { surface } : {}),
           ...(outcome ? { outcome } : {}),
+          ...(actor ? { actor } : {}),
+          ...(source ? { source } : {}),
+          ...(action ? { action } : {}),
+          ...(method ? { method } : {}),
+          ...(pathPrefix ? { pathPrefix } : {}),
+          ...(reasonContains ? { reasonContains } : {}),
+          ...(createdFrom !== null ? { createdFrom } : {}),
+          ...(createdTo !== null ? { createdTo } : {}),
         });
         return;
       }
@@ -705,6 +755,15 @@ export class AdminServer {
             hasMore: offset + exported.items.length < exported.total,
           },
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "sessions_export",
+          limit,
+          offset,
+          includeMessages,
+          messageLimitPerSession,
+          ...(roomId ? { roomId } : {}),
+          ...(userId ? { userId } : {}),
+        });
         return;
       }
 
@@ -741,6 +800,13 @@ export class AdminServer {
             hasMore: offset + result.items.length < result.total,
           },
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "sessions_list",
+          limit,
+          offset,
+          ...(roomId ? { roomId } : {}),
+          ...(userId ? { userId } : {}),
+        });
         return;
       }
 
@@ -766,6 +832,11 @@ export class AdminServer {
           ok: true,
           data: this.stateStore.listRecentConversationMessages(sessionKey, limit).map((entry) => formatSessionMessageEntry(entry)),
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "session_messages",
+          sessionKey,
+          limit,
+        });
         return;
       }
 
@@ -773,6 +844,9 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: true,
           data: formatHistoryRetentionPolicyEntry(this.historyService.getRetentionPolicy()),
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "history_retention_read",
         });
         return;
       }
@@ -818,6 +892,10 @@ export class AdminServer {
           ok: true,
           data: this.historyService.listCleanupRuns(limit).map((entry) => formatHistoryCleanupRunEntry(entry)),
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "history_cleanup_runs",
+          limit,
+        });
         return;
       }
 
@@ -861,6 +939,11 @@ export class AdminServer {
           app,
           timestamp: new Date().toISOString(),
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "health_check",
+          codexOk: codex.ok,
+          matrixOk: matrix.ok,
+        });
         return;
       }
 
@@ -869,6 +952,11 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: diagnostics.ok,
           data: diagnostics,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "diagnostics_read",
+          diagnosticsOk: diagnostics.ok,
+          warnings: diagnostics.warnings.length,
         });
         return;
       }
@@ -2492,14 +2580,31 @@ function normalizeOptionalAuditOutcome(value: string | null): OperationAuditOutc
   throw new HttpError(400, 'outcome must be one of "allowed", "denied", or "error".');
 }
 
-function shouldLogSuccessfulAuthEvent(pathname: string, method: string): boolean {
+function normalizeOptionalAuditFilterValue(value: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function normalizeOptionalAuditMethod(value: string | null): string | undefined {
+  const normalized = normalizeOptionalAuditFilterValue(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const upper = normalized.toUpperCase();
+  if (!/^[A-Z]+$/.test(upper)) {
+    throw new HttpError(400, "method must be a valid HTTP method token.");
+  }
+  return upper;
+}
+
+function shouldLogSuccessfulAuthEvent(pathname: string, _method: string): boolean {
   if (pathname === "/metrics" || pathname === "/api/admin/auth/status") {
     return false;
   }
-  if (method !== "GET" && method !== "HEAD") {
-    return true;
-  }
-  return pathname === "/api/admin/config/export" || pathname === "/api/admin/audit";
+  return true;
 }
 
 function decodePathParam(value: string, fieldName: string): string {
