@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.61] - 2026-03-23
+
+- admin: fix `/api/admin/service/restart` failure when restarting main + admin from the web console.
+- restart flow: avoid in-request self-restart race by queuing admin service restart asynchronously after main service restart.
+- service manager: improve sudo fallback error mapping to preserve actionable non-permission failures.
+- systemd: set admin unit template to `NoNewPrivileges=false` and align template test coverage.
+
 ## [0.1.60] - 2026-03-22
 
 - i18n: unify bot output language with configurable `OUTPUT_LANGUAGE` (`zh`/`en`) across command/help/status flows.
