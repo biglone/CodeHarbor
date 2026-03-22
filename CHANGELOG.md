@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.60] - 2026-03-22
+
+- i18n: unify bot output language with configurable `OUTPUT_LANGUAGE` (`zh`/`en`) across command/help/status flows.
+- i18n: localize AutoDev and Multi-Agent workflow stage progress messages to avoid mixed Chinese/English output.
+- i18n: localize `/backend`, `/diag`, `/upgrade`, `/agents status`, chat completion/failure, and queue failure notices.
+- runtime: keep hot config backward compatible when older snapshots do not include `outputLanguage`.
+
 ## [0.1.59] - 2026-03-22
 
 - AutoDev feature delivered: T8.8
