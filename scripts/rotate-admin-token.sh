@@ -5,6 +5,7 @@ ENV_FILE="${ENV_FILE:-.env}"
 TARGET="${TARGET:-rbac}"
 ROLE="${ROLE:-admin}"
 ACTOR="${ACTOR:-}"
+SCOPES="${SCOPES:-}"
 TOKEN_BYTES="${TOKEN_BYTES:-24}"
 APPEND_MODE="false"
 PRINT_ONLY="false"
@@ -20,6 +21,7 @@ Options:
   -t, --target <rbac|legacy>  Rotate ADMIN_TOKENS_JSON or ADMIN_TOKEN (default: rbac)
   -r, --role <admin|viewer>   Role for RBAC token (default: admin)
   -a, --actor <name>          Actor tag for RBAC token entry (optional)
+      --scopes <csv>          Optional custom scopes (comma-separated, overrides role default mapping)
   -b, --bytes <N>             Random bytes for token generation (default: 24)
       --append                Keep same role/actor entries and append new one
       --print-only            Print result without writing file
@@ -28,6 +30,7 @@ Options:
 Examples:
   scripts/rotate-admin-token.sh --target rbac --role admin --actor ops-admin
   scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
+  scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit --scopes admin.read.audit,admin.read.auth
   scripts/rotate-admin-token.sh --target legacy
 USAGE
 }
@@ -53,6 +56,11 @@ parse_args() {
       -a|--actor)
         [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 1; }
         ACTOR="$2"
+        shift 2
+        ;;
+      --scopes)
+        [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 1; }
+        SCOPES="$2"
         shift 2
         ;;
       -b|--bytes)
@@ -111,6 +119,7 @@ main() {
   ROTATE_TARGET="${TARGET}" \
   ROTATE_ROLE="${ROLE}" \
   ROTATE_ACTOR="${ACTOR}" \
+  ROTATE_SCOPES="${SCOPES}" \
   ROTATE_TOKEN_BYTES="${TOKEN_BYTES}" \
   ROTATE_APPEND_MODE="${APPEND_MODE}" \
   ROTATE_PRINT_ONLY="${PRINT_ONLY}" \
@@ -124,9 +133,11 @@ const target = process.env.ROTATE_TARGET || "rbac";
 const role = process.env.ROTATE_ROLE || "admin";
 const actorRaw = (process.env.ROTATE_ACTOR || "").trim();
 const actor = actorRaw || null;
+const scopesRaw = process.env.ROTATE_SCOPES || "";
 const tokenBytes = Number.parseInt(process.env.ROTATE_TOKEN_BYTES || "24", 10);
 const appendMode = process.env.ROTATE_APPEND_MODE === "true";
 const printOnly = process.env.ROTATE_PRINT_ONLY === "true";
+const customScopes = parseScopeCsv(scopesRaw);
 
 if (!fs.existsSync(envPath)) {
   throw new Error(`Env file not found: ${envPath}`);
@@ -149,6 +160,7 @@ if (target === "legacy") {
     token: nextToken,
     role,
     actor,
+    ...(customScopes.length > 0 ? { scopes: customScopes } : {}),
   });
 
   updates.ADMIN_TOKENS_JSON = JSON.stringify(filtered);
@@ -164,6 +176,7 @@ process.stdout.write(`Target: ${target}\n`);
 if (target === "rbac") {
   process.stdout.write(`Role: ${role}\n`);
   process.stdout.write(`Actor: ${actor || "<none>"}\n`);
+  process.stdout.write(`Scopes: ${customScopes.length > 0 ? customScopes.join(", ") : "<role-default>"}\n`);
   process.stdout.write(`Mode: ${appendMode ? "append" : "replace-same-role-actor"}\n`);
 }
 process.stdout.write(`Token: ${nextToken}\n`);
@@ -195,6 +208,12 @@ function parseTokenList(raw) {
     const token = String(entry.token || "").trim();
     const itemRole = entry.role === "viewer" ? "viewer" : "admin";
     const itemActor = typeof entry.actor === "string" ? entry.actor.trim() || null : null;
+    const itemScopes = Array.isArray(entry.scopes)
+      ? entry.scopes
+          .filter((scope) => typeof scope === "string")
+          .map((scope) => scope.trim().toLowerCase())
+          .filter((scope) => scope.length > 0)
+      : [];
 
     if (!token) {
       throw new Error(`ADMIN_TOKENS_JSON[${index}].token must be non-empty.`);
@@ -204,8 +223,18 @@ function parseTokenList(raw) {
       token,
       role: itemRole,
       actor: itemActor,
+      ...(itemScopes.length > 0 ? { scopes: [...new Set(itemScopes)] } : {}),
     };
   });
+}
+
+function parseScopeCsv(raw) {
+  return [...new Set(
+    raw
+      .split(",")
+      .map((scope) => scope.trim().toLowerCase())
+      .filter((scope) => scope.length > 0)
+  )];
 }
 
 function parseEnv(content) {

@@ -108,14 +108,18 @@ describe("ApiServer", () => {
     options?: {
       webhookSecret?: string | null;
       webhookTimestampToleranceSeconds?: number;
+      apiTokenScopes?: string[];
+      auditRecorder?: (event: unknown) => void;
     },
   ): Promise<string> {
     const server = new ApiServer(new Logger("error"), service, {
       host: "127.0.0.1",
       port: 0,
       apiToken: "secret-token",
+      apiTokenScopes: options?.apiTokenScopes,
       webhookSecret: options?.webhookSecret ?? null,
       webhookTimestampToleranceSeconds: options?.webhookTimestampToleranceSeconds ?? 300,
+      auditRecorder: options?.auditRecorder,
     });
     startedServers.push(server);
     await server.start();
@@ -145,6 +149,114 @@ describe("ApiServer", () => {
 
     expect(response.status).toBe(401);
     expect(service.calls).toHaveLength(0);
+  });
+
+  it("supports fine-grained API token scopes", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextQueryResult = buildQueryResult({
+      taskId: 7,
+      status: "pending",
+      stage: "queued",
+      errorSummary: null,
+    });
+    const baseUrl = await createApiServer(service, {
+      apiTokenScopes: ["tasks.read.api"],
+    });
+
+    const submitDenied = await fetchJson(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-type": "application/json",
+        "idempotency-key": "scope-denied-1",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        senderId: "@ci:example.com",
+        text: "run checks",
+      }),
+    });
+    expect(submitDenied.status).toBe(403);
+    expect(JSON.stringify(submitDenied.body)).toContain("tasks.submit.api");
+
+    const queryAllowed = await fetchJson(`${baseUrl}/api/tasks/7`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+    expect(queryAllowed.status).toBe(200);
+  });
+
+  it("supports submit-only API token scope", async () => {
+    const service = new FakeTaskSubmissionService();
+    service.nextResult = buildSubmitResult({ created: true, taskId: 9 });
+    service.nextQueryResult = buildQueryResult({
+      taskId: 9,
+      status: "pending",
+      stage: "queued",
+      errorSummary: null,
+    });
+    const baseUrl = await createApiServer(service, {
+      apiTokenScopes: ["tasks.submit.api"],
+    });
+
+    const submitAllowed = await fetchJson(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-type": "application/json",
+        "idempotency-key": "scope-submit-1",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        senderId: "@ci:example.com",
+        text: "run checks",
+      }),
+    });
+    expect(submitAllowed.status).toBe(202);
+
+    const queryDenied = await fetchJson(`${baseUrl}/api/tasks/9`, {
+      method: "GET",
+      headers: {
+        authorization: "Bearer secret-token",
+      },
+    });
+    expect(queryDenied.status).toBe(403);
+    expect(JSON.stringify(queryDenied.body)).toContain("tasks.read.api");
+  });
+
+  it("emits API audit events for denied requests", async () => {
+    const service = new FakeTaskSubmissionService();
+    const audits: unknown[] = [];
+    const baseUrl = await createApiServer(service, {
+      auditRecorder: (event) => audits.push(event),
+    });
+
+    const response = await fetchJson(`${baseUrl}/api/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "audit-denied-1",
+      },
+      body: JSON.stringify({
+        conversationId: "!room:example.com",
+        senderId: "@ci:example.com",
+        text: "run checks",
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toEqual(
+      expect.objectContaining({
+        surface: "api",
+        outcome: "denied",
+        reason: "unauthorized",
+        action: "tasks.submit.api",
+        path: "/api/tasks",
+      }),
+    );
   });
 
   it("rejects task submission without Idempotency-Key header", async () => {

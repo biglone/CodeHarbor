@@ -5,6 +5,7 @@ import {
   API_TOKEN_SCOPES,
   hasRequiredScopes,
   listMissingScopes,
+  normalizeTokenScopes,
   resolveApiScopeRequirement,
   resolveWebhookScopeRequirement,
   WEBHOOK_SIGNATURE_SCOPES,
@@ -43,8 +44,10 @@ interface ApiServerOptions {
   host: string;
   port: number;
   apiToken: string;
+  apiTokenScopes?: readonly string[];
   webhookSecret?: string | null;
   webhookTimestampToleranceSeconds?: number;
+  auditRecorder?: (event: ApiOperationAuditEvent) => void;
 }
 
 interface AddressInfo {
@@ -54,8 +57,23 @@ interface AddressInfo {
 
 interface ApiAuthIdentity {
   actor: string | null;
-  source: "legacy";
+  source: "legacy" | "webhook-signature";
   scopes: TokenScopePattern[];
+}
+
+export interface ApiOperationAuditEvent {
+  actor: string | null;
+  source: string;
+  surface: "api" | "webhook";
+  action: string;
+  resource: string;
+  method: string;
+  path: string;
+  outcome: "allowed" | "denied" | "error";
+  reason?: string | null;
+  requiredScopes: readonly string[];
+  grantedScopes: readonly string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface TaskSubmissionService {
@@ -78,8 +96,10 @@ export class ApiServer {
   private readonly host: string;
   private readonly port: number;
   private readonly apiToken: string;
+  private readonly apiTokenScopes: TokenScopePattern[];
   private readonly webhookSecret: string | null;
   private readonly webhookTimestampToleranceSeconds: number;
+  private readonly auditRecorder: ((event: ApiOperationAuditEvent) => void) | null;
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
 
@@ -89,11 +109,16 @@ export class ApiServer {
     this.host = options.host;
     this.port = options.port;
     this.apiToken = options.apiToken;
+    this.apiTokenScopes =
+      options.apiTokenScopes && options.apiTokenScopes.length > 0
+        ? normalizeTokenScopes(options.apiTokenScopes)
+        : [...API_TOKEN_SCOPES];
     this.webhookSecret = options.webhookSecret?.trim() || null;
     this.webhookTimestampToleranceSeconds = Math.max(
       0,
       options.webhookTimestampToleranceSeconds ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
     );
+    this.auditRecorder = options.auditRecorder ?? null;
   }
 
   getAddress(): AddressInfo | null {
@@ -151,8 +176,12 @@ export class ApiServer {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let auditBase: Omit<ApiOperationAuditEvent, "outcome" | "reason"> | null = null;
+    let auditWritten = false;
+
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const requestMethod = (req.method ?? "GET").toUpperCase();
       const taskDetailMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
       const isTaskSubmitRoute = url.pathname === "/api/tasks";
       const webhookMatch = /^\/api\/webhooks\/([^/]+)$/.exec(url.pathname);
@@ -166,12 +195,12 @@ export class ApiServer {
       if (!isTaskSubmitRoute && !taskDetailMatch && !webhookMatch) {
         this.sendJson(res, 404, {
           ok: false,
-          error: `Not found: ${req.method ?? "GET"} ${url.pathname}`,
+          error: `Not found: ${requestMethod} ${url.pathname}`,
         });
         return;
       }
 
-      if (req.method === "OPTIONS") {
+      if (requestMethod === "OPTIONS") {
         res.writeHead(204);
         res.end();
         return;
@@ -184,8 +213,31 @@ export class ApiServer {
 
       const scopeRequirement = resolveApiScopeRequirement(url.pathname);
       const authIdentity = scopeRequirement ? this.resolveApiIdentity(req) : null;
+      if (scopeRequirement) {
+        auditBase = {
+          actor: authIdentity?.actor ?? null,
+          source: authIdentity?.source ?? "none",
+          surface: "api",
+          action: scopeRequirement.action,
+          resource: url.pathname,
+          method: requestMethod,
+          path: url.pathname,
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: authIdentity?.scopes ?? [],
+        };
+      }
 
       if (scopeRequirement && !authIdentity) {
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            outcome: "denied",
+            reason: "unauthorized",
+            grantedScopes: [],
+            metadata: { statusCode: 401 },
+          });
+          auditWritten = true;
+        }
         this.sendJson(res, 401, {
           ok: false,
           error: "Unauthorized. Provide Authorization: Bearer <API_TOKEN>.",
@@ -194,6 +246,21 @@ export class ApiServer {
       }
       if (scopeRequirement && authIdentity && !hasRequiredScopes(authIdentity.scopes, scopeRequirement.requiredScopes)) {
         const missingScopes = listMissingScopes(authIdentity.scopes, scopeRequirement.requiredScopes);
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            actor: authIdentity.actor,
+            source: authIdentity.source,
+            grantedScopes: authIdentity.scopes,
+            outcome: "denied",
+            reason: `missing_scope:${missingScopes.join(",")}`,
+            metadata: {
+              statusCode: 403,
+              missingScopes,
+            },
+          });
+          auditWritten = true;
+        }
         this.sendJson(res, 403, {
           ok: false,
           error: `Forbidden. Missing required scope: ${missingScopes.join(", ")}.`,
@@ -202,11 +269,11 @@ export class ApiServer {
       }
 
       if (isTaskSubmitRoute) {
-        if (req.method !== "POST") {
+        if (requestMethod !== "POST") {
           res.setHeader("Allow", "POST, OPTIONS");
           this.sendJson(res, 405, {
             ok: false,
-            error: `Method not allowed: ${req.method ?? "GET"}.`,
+            error: `Method not allowed: ${requestMethod}.`,
           });
           return;
         }
@@ -222,14 +289,29 @@ export class ApiServer {
           ok: true,
           data: formatTaskSubmitResponse(result),
         });
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            actor: authIdentity?.actor ?? null,
+            source: authIdentity?.source ?? "none",
+            grantedScopes: authIdentity?.scopes ?? [],
+            outcome: "allowed",
+            metadata: {
+              statusCode: result.created ? 202 : 200,
+              created: result.created,
+              taskId: result.task.id,
+            },
+          });
+          auditWritten = true;
+        }
         return;
       }
 
-      if (req.method !== "GET") {
+      if (requestMethod !== "GET") {
         res.setHeader("Allow", "GET, OPTIONS");
         this.sendJson(res, 405, {
           ok: false,
-          error: `Method not allowed: ${req.method ?? "GET"}.`,
+          error: `Method not allowed: ${requestMethod}.`,
         });
         return;
       }
@@ -247,7 +329,32 @@ export class ApiServer {
         ok: true,
         data: formatTaskQueryResponse(result),
       });
+      if (auditBase) {
+        this.appendAuditEvent({
+          ...auditBase,
+          actor: authIdentity?.actor ?? null,
+          source: authIdentity?.source ?? "none",
+          grantedScopes: authIdentity?.scopes ?? [],
+          outcome: "allowed",
+          metadata: {
+            statusCode: 200,
+            taskId: result.taskId,
+            taskStatus: result.status,
+          },
+        });
+        auditWritten = true;
+      }
     } catch (error) {
+      if (auditBase && !auditWritten) {
+        const statusCode =
+          error instanceof HttpError ? error.statusCode : error instanceof ApiTaskIdempotencyConflictError ? 409 : 500;
+        this.appendAuditEvent({
+          ...auditBase,
+          outcome: "error",
+          reason: formatError(error),
+          metadata: { statusCode },
+        });
+      }
       if (error instanceof HttpError) {
         this.sendJson(res, error.statusCode, {
           ok: false,
@@ -277,54 +384,155 @@ export class ApiServer {
     res: http.ServerResponse,
     sourceParam: string | undefined,
   ): Promise<void> {
-    if (req.method !== "POST") {
+    const requestMethod = (req.method ?? "GET").toUpperCase();
+    const requestPath = `/api/webhooks/${sourceParam ?? ""}`;
+    const scopeRequirement = resolveWebhookScopeRequirement(requestPath);
+    let deniedAuditWritten = false;
+
+    if (requestMethod !== "POST") {
       res.setHeader("Allow", "POST, OPTIONS");
       this.sendJson(res, 405, {
         ok: false,
-        error: `Method not allowed: ${req.method ?? "GET"}.`,
+        error: `Method not allowed: ${requestMethod}.`,
       });
       return;
     }
 
     if (!this.webhookSecret) {
+      if (scopeRequirement) {
+        this.appendAuditEvent({
+          actor: null,
+          source: "none",
+          surface: "webhook",
+          action: scopeRequirement.action,
+          resource: requestPath,
+          method: requestMethod,
+          path: requestPath,
+          outcome: "denied",
+          reason: "webhook_unavailable",
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: [],
+          metadata: { statusCode: 503 },
+        });
+      }
       throw new HttpError(503, "Webhook is unavailable because API_WEBHOOK_SECRET is not configured.");
     }
 
-    const scopeRequirement = resolveWebhookScopeRequirement(`/api/webhooks/${sourceParam ?? ""}`);
     if (!scopeRequirement) {
       throw new HttpError(404, "Webhook route permission is not configured.");
     }
 
-    const source = parseWebhookSource(sourceParam);
-    const rawBody = await readBodyBuffer(req, API_MAX_JSON_BODY_BYTES);
-    const timestamp = readWebhookTimestamp(req);
-    verifyWebhookTimestamp(timestamp, this.webhookTimestampToleranceSeconds);
-    const signature = readWebhookSignature(req);
-    verifyWebhookSignature(rawBody, timestamp.raw, signature, this.webhookSecret);
+    let source: WebhookSource;
+    try {
+      source = parseWebhookSource(sourceParam);
+    } catch (error) {
+      this.appendAuditEvent({
+        actor: null,
+        source: "none",
+        surface: "webhook",
+        action: scopeRequirement.action,
+        resource: requestPath,
+        method: requestMethod,
+        path: requestPath,
+        outcome: "denied",
+        reason: formatError(error),
+        requiredScopes: scopeRequirement.requiredScopes,
+        grantedScopes: [],
+        metadata: { statusCode: 400 },
+      });
+      throw error;
+    }
+
     const webhookIdentity: ApiAuthIdentity = {
       actor: `webhook:${source}`,
-      source: "legacy",
+      source: "webhook-signature",
       scopes: [...WEBHOOK_SIGNATURE_SCOPES],
     };
-    if (!hasRequiredScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes)) {
-      const missingScopes = listMissingScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes);
-      throw new HttpError(403, `Webhook is missing required scope: ${missingScopes.join(", ")}.`);
-    }
-    const body = parseJsonBuffer(rawBody);
-    const mapped = mapWebhookPayload(source, body);
-    const idempotencyKey = buildWebhookIdempotencyKey(req, source, rawBody, mapped.idempotencyHint);
-    const result = this.taskService.submitApiTask({
-      ...mapped.taskInput,
-      idempotencyKey,
-    });
 
-    this.sendJson(res, result.created ? 202 : 200, {
-      ok: true,
-      data: {
-        source,
-        ...formatTaskSubmitResponse(result),
-      },
-    });
+    try {
+      const rawBody = await readBodyBuffer(req, API_MAX_JSON_BODY_BYTES);
+      const timestamp = readWebhookTimestamp(req);
+      verifyWebhookTimestamp(timestamp, this.webhookTimestampToleranceSeconds);
+      const signature = readWebhookSignature(req);
+      verifyWebhookSignature(rawBody, timestamp.raw, signature, this.webhookSecret);
+
+      if (!hasRequiredScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes)) {
+        const missingScopes = listMissingScopes(webhookIdentity.scopes, scopeRequirement.requiredScopes);
+        this.appendAuditEvent({
+          actor: webhookIdentity.actor,
+          source: webhookIdentity.source,
+          surface: "webhook",
+          action: scopeRequirement.action,
+          resource: requestPath,
+          method: requestMethod,
+          path: requestPath,
+          outcome: "denied",
+          reason: `missing_scope:${missingScopes.join(",")}`,
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: webhookIdentity.scopes,
+          metadata: {
+            statusCode: 403,
+            missingScopes,
+          },
+        });
+        deniedAuditWritten = true;
+        throw new HttpError(403, `Webhook is missing required scope: ${missingScopes.join(", ")}.`);
+      }
+
+      const body = parseJsonBuffer(rawBody);
+      const mapped = mapWebhookPayload(source, body);
+      const idempotencyKey = buildWebhookIdempotencyKey(req, source, rawBody, mapped.idempotencyHint);
+      const result = this.taskService.submitApiTask({
+        ...mapped.taskInput,
+        idempotencyKey,
+      });
+
+      this.sendJson(res, result.created ? 202 : 200, {
+        ok: true,
+        data: {
+          source,
+          ...formatTaskSubmitResponse(result),
+        },
+      });
+      this.appendAuditEvent({
+        actor: webhookIdentity.actor,
+        source: webhookIdentity.source,
+        surface: "webhook",
+        action: scopeRequirement.action,
+        resource: requestPath,
+        method: requestMethod,
+        path: requestPath,
+        outcome: "allowed",
+        requiredScopes: scopeRequirement.requiredScopes,
+        grantedScopes: webhookIdentity.scopes,
+        metadata: {
+          statusCode: result.created ? 202 : 200,
+          source,
+          created: result.created,
+          taskId: result.task.id,
+        },
+      });
+    } catch (error) {
+      if (!deniedAuditWritten) {
+        const statusCode =
+          error instanceof HttpError ? error.statusCode : error instanceof ApiTaskIdempotencyConflictError ? 409 : 500;
+        this.appendAuditEvent({
+          actor: webhookIdentity.actor,
+          source: webhookIdentity.source,
+          surface: "webhook",
+          action: scopeRequirement.action,
+          resource: requestPath,
+          method: requestMethod,
+          path: requestPath,
+          outcome: "denied",
+          reason: formatError(error),
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: webhookIdentity.scopes,
+          metadata: { statusCode },
+        });
+      }
+      throw error;
+    }
   }
 
   private resolveApiIdentity(req: http.IncomingMessage): ApiAuthIdentity | null {
@@ -335,8 +543,21 @@ export class ApiServer {
     return {
       actor: null,
       source: "legacy",
-      scopes: [...API_TOKEN_SCOPES],
+      scopes: [...this.apiTokenScopes],
     };
+  }
+
+  private appendAuditEvent(event: ApiOperationAuditEvent): void {
+    if (!this.auditRecorder) {
+      return;
+    }
+    try {
+      this.auditRecorder(event);
+    } catch (error) {
+      this.logger.warn("API audit recorder failed", {
+        error: formatError(error),
+      });
+    }
   }
 
   private setSecurityHeaders(res: http.ServerResponse): void {
