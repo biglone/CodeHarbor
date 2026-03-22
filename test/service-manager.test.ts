@@ -59,6 +59,7 @@ describe("service-manager unit templates", () => {
 
     expect(unit).toContain("Description=CodeHarbor admin service");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js admin serve");
+    expect(unit).toContain("NoNewPrivileges=false");
     expect(unit).toContain("ProtectHome=false");
   });
 

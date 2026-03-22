@@ -32,7 +32,7 @@ import {
   GLOBAL_RUNTIME_HOT_CONFIG_KEY,
   isHotGlobalConfigKey,
 } from "./runtime-hot-config";
-import { restartSystemdServices } from "./service-manager";
+import { queueAdminSystemdRestart, restartSystemdServices } from "./service-manager";
 import {
   ConfigRevisionRecord,
   HistoryCleanupRunRecord,
@@ -2563,9 +2563,14 @@ async function defaultRestartServices(restartAdmin: boolean): Promise<RestartSer
   } as unknown as NodeJS.WritableStream;
 
   restartSystemdServices({
-    restartAdmin,
+    restartAdmin: false,
     output,
   });
+  if (restartAdmin) {
+    queueAdminSystemdRestart({
+      output,
+    });
+  }
 
   return {
     restarted: restartAdmin ? ["codeharbor", "codeharbor-admin"] : ["codeharbor"],

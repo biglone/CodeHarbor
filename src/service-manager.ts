@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +21,17 @@ interface UnitBuildOptions {
 interface RestartSudoersPolicyOptions {
   runUser: string;
   systemctlPath: string;
+}
+
+interface RestartAdminSystemdServiceOptions {
+  output?: NodeJS.WritableStream;
+  allowSudoFallback?: boolean;
+}
+
+interface QueueAdminSystemdRestartOptions {
+  output?: NodeJS.WritableStream;
+  allowSudoFallback?: boolean;
+  delayMs?: number;
 }
 
 export interface InstallSystemdServicesOptions {
@@ -128,7 +139,7 @@ export function buildAdminServiceUnit(options: UnitBuildOptions): string {
     `ExecStart=${path.resolve(options.nodeBinPath)} ${path.resolve(options.cliScriptPath)} admin serve`,
     "Restart=always",
     "RestartSec=3",
-    "NoNewPrivileges=true",
+    "NoNewPrivileges=false",
     "PrivateTmp=true",
     "ProtectSystem=full",
     "ProtectHome=false",
@@ -281,6 +292,48 @@ export function restartSystemdServices(options: RestartSystemdServicesOptions): 
   output.write("Done.\n");
 }
 
+export function restartAdminSystemdService(options: RestartAdminSystemdServiceOptions = {}): void {
+  assertLinuxWithSystemd();
+
+  const output = options.output ?? process.stdout;
+  const runWithSudoFallback = options.allowSudoFallback ?? true;
+  const systemctlRunner =
+    hasRootPrivileges() || !runWithSudoFallback ? runSystemctl : runSystemctlWithNonInteractiveSudo;
+
+  systemctlRunner(["restart", ADMIN_SERVICE_NAME]);
+  output.write(`Restarted service: ${ADMIN_SERVICE_NAME}\n`);
+  output.write("Done.\n");
+}
+
+export function queueAdminSystemdRestart(options: QueueAdminSystemdRestartOptions = {}): void {
+  assertLinuxWithSystemd();
+
+  const output = options.output ?? process.stdout;
+  const runWithSudoFallback = options.allowSudoFallback ?? true;
+  const delayMs = Math.max(0, Math.floor(options.delayMs ?? 800));
+  const systemctlPath = resolveSystemctlPath();
+  const restartCommand =
+    hasRootPrivileges() || !runWithSudoFallback
+      ? `${shellEscape(systemctlPath)} restart ${shellEscape(ADMIN_SERVICE_NAME)}`
+      : `sudo -n ${shellEscape(systemctlPath)} restart ${shellEscape(ADMIN_SERVICE_NAME)}`;
+  const command = delayMs > 0 ? `sleep ${formatSleepSeconds(delayMs)}; ${restartCommand}` : restartCommand;
+
+  try {
+    const child = spawn("/bin/sh", ["-lc", command], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch (error) {
+    throw new Error(`Failed to queue admin service restart command: ${extractErrorMessage(error)}`, {
+      cause: error,
+    });
+  }
+
+  output.write(`Queued restart for service: ${ADMIN_SERVICE_NAME}\n`);
+  output.write("Done.\n");
+}
+
 function resolveUserHome(runUser: string): string | null {
   try {
     const passwdRaw = fs.readFileSync("/etc/passwd", "utf8");
@@ -355,10 +408,14 @@ function runSystemctlWithNonInteractiveSudo(args: string[]): void {
   try {
     runCommand("sudo", ["-n", systemctlPath, ...args]);
   } catch (error) {
-    throw new Error(
-      "Root privileges are required. Configure passwordless sudo for the CodeHarbor service user or run the CLI command manually with sudo.",
-      { cause: error },
-    );
+    const message = extractErrorMessage(error).toLowerCase();
+    if (isSudoPermissionError(message)) {
+      throw new Error(
+        "Root privileges are required. Configure passwordless sudo for the CodeHarbor service user or run the CLI command manually with sudo.",
+        { cause: error },
+      );
+    }
+    throw new Error(`Failed to restart service via sudo: ${extractErrorMessage(error)}`, { cause: error });
   }
 }
 
@@ -389,6 +446,35 @@ function resolveSystemctlPath(): string {
   }
 
   throw new Error("Unable to resolve absolute systemctl path.");
+}
+
+function isSudoPermissionError(message: string): boolean {
+  return (
+    message.includes("a password is required") ||
+    message.includes("a terminal is required") ||
+    message.includes("is not in the sudoers file") ||
+    message.includes("may not run sudo") ||
+    message.includes("not allowed to execute")
+  );
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function shellEscape(value: string): string {
+  if (/^[A-Za-z0-9_/:.-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function formatSleepSeconds(delayMs: number): string {
+  const seconds = Math.max(0, delayMs) / 1000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(3);
 }
 
 function runCommand(file: string, args: string[]): string {
