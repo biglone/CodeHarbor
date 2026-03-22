@@ -3,6 +3,11 @@ import path from "node:path";
 
 import dotenv from "dotenv";
 import { z } from "zod";
+import {
+  isValidTokenScopePattern,
+  normalizeTokenScopes,
+  type TokenScopePattern,
+} from "./auth/scope-matrix";
 import type { BackendModelRouteRule, BackendModelRouteTaskType } from "./routing/backend-model-router";
 
 export interface TriggerPolicy {
@@ -50,6 +55,7 @@ export interface AdminTokenConfig {
   token: string;
   role: AdminTokenRole;
   actor: string | null;
+  scopes?: TokenScopePattern[];
 }
 
 const configSchema = z
@@ -292,6 +298,7 @@ const configSchema = z
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().min(1).max(65535)),
     API_TOKEN: z.string().default(""),
+    API_TOKEN_SCOPES_JSON: z.string().default(""),
     API_WEBHOOK_SECRET: z.string().default(""),
     API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z
       .string()
@@ -396,6 +403,7 @@ const configSchema = z
     apiBindHost: v.API_BIND_HOST.trim() || "127.0.0.1",
     apiPort: v.API_PORT,
     apiToken: v.API_TOKEN.trim() || null,
+    apiTokenScopes: parseApiTokenScopes(v.API_TOKEN_SCOPES_JSON),
     apiWebhookSecret: v.API_WEBHOOK_SECRET.trim() || null,
     apiWebhookTimestampToleranceSeconds: v.API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
     adminBindHost: v.ADMIN_BIND_HOST.trim() || "127.0.0.1",
@@ -771,6 +779,44 @@ function parseMimeTypeCsvList(raw: string, fallback: string[]): string[] {
   return [...new Set(parsed)];
 }
 
+function parseApiTokenScopes(raw: string): TokenScopePattern[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("API_TOKEN_SCOPES_JSON must be valid JSON.");
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("API_TOKEN_SCOPES_JSON must be a JSON array.");
+  }
+
+  const rawScopes = parsed.map((scope, scopeIndex) => {
+    if (typeof scope !== "string") {
+      throw new Error(`API_TOKEN_SCOPES_JSON[${scopeIndex}] must be a string.`);
+    }
+    return scope;
+  });
+
+  const normalizedScopes = normalizeTokenScopes(rawScopes);
+  if (normalizedScopes.length === 0) {
+    throw new Error("API_TOKEN_SCOPES_JSON must include at least one non-empty scope.");
+  }
+
+  for (const scope of normalizedScopes) {
+    if (!isValidTokenScopePattern(scope)) {
+      throw new Error(`API_TOKEN_SCOPES_JSON contains invalid scope pattern: ${scope}.`);
+    }
+  }
+
+  return normalizedScopes;
+}
+
 function parseAdminTokens(raw: string): AdminTokenConfig[] {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -818,11 +864,43 @@ function parseAdminTokens(raw: string): AdminTokenConfig[] {
       throw new Error(`ADMIN_TOKENS_JSON[${index}].actor must be a string when provided.`);
     }
     const actor = typeof payload.actor === "string" ? payload.actor.trim() || null : null;
+    const scopes = parseAdminTokenScopes(payload.scopes, index);
 
     return {
       token,
       role,
       actor,
+      ...(scopes.length > 0 ? { scopes } : {}),
     };
   });
+}
+
+function parseAdminTokenScopes(value: unknown, tokenIndex: number): TokenScopePattern[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`ADMIN_TOKENS_JSON[${tokenIndex}].scopes must be an array of strings when provided.`);
+  }
+
+  const rawScopes = value.map((scope, scopeIndex) => {
+    if (typeof scope !== "string") {
+      throw new Error(`ADMIN_TOKENS_JSON[${tokenIndex}].scopes[${scopeIndex}] must be a string.`);
+    }
+    return scope;
+  });
+  const normalizedScopes = normalizeTokenScopes(rawScopes);
+
+  if (normalizedScopes.length === 0) {
+    throw new Error(`ADMIN_TOKENS_JSON[${tokenIndex}].scopes must include at least one non-empty scope.`);
+  }
+  for (const scope of normalizedScopes) {
+    if (!isValidTokenScopePattern(scope)) {
+      throw new Error(
+        `ADMIN_TOKENS_JSON[${tokenIndex}].scopes contains invalid scope pattern: ${scope}.`,
+      );
+    }
+  }
+
+  return normalizedScopes;
 }

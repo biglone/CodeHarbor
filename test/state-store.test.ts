@@ -180,6 +180,68 @@ describe("StateStore", () => {
     );
   });
 
+  it("stores operation audit entries with filters", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+
+    store.appendOperationAuditLog({
+      actor: "ops-admin",
+      source: "scoped",
+      surface: "admin",
+      action: "admin.write.config",
+      resource: "/api/admin/config/global",
+      method: "PUT",
+      path: "/api/admin/config/global",
+      outcome: "allowed",
+      requiredScopes: ["admin.write.config"],
+      grantedScopes: ["admin.write"],
+      metadata: {
+        statusCode: 200,
+      },
+    });
+    store.appendOperationAuditLog({
+      actor: null,
+      source: "none",
+      surface: "api",
+      action: "tasks.submit.api",
+      resource: "/api/tasks",
+      method: "POST",
+      path: "/api/tasks",
+      outcome: "denied",
+      reason: "unauthorized",
+      requiredScopes: ["tasks.submit.api"],
+      grantedScopes: [],
+      metadata: {
+        statusCode: 401,
+      },
+    });
+
+    const all = store.listOperationAuditLogs({ limit: 10 });
+    expect(all).toHaveLength(2);
+    expect(all[0]).toEqual(
+      expect.objectContaining({
+        surface: "api",
+        outcome: "denied",
+        reason: "unauthorized",
+      }),
+    );
+    expect(all[1]).toEqual(
+      expect.objectContaining({
+        surface: "admin",
+        outcome: "allowed",
+      }),
+    );
+    expect(all[1]?.requiredScopes).toEqual(["admin.write.config"]);
+    expect(all[1]?.grantedScopes).toEqual(["admin.write"]);
+
+    const deniedOnly = store.listOperationAuditLogs({
+      limit: 10,
+      outcome: "denied",
+    });
+    expect(deniedOnly).toHaveLength(1);
+    expect(deniedOnly[0]?.surface).toBe("api");
+  });
+
   it("stores runtime config snapshots with monotonic version", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 10, 30, 100);

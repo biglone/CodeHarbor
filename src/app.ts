@@ -101,8 +101,25 @@ export class CodeHarborApp {
             host: config.apiBindHost,
             port: config.apiPort,
             apiToken: config.apiToken,
+            apiTokenScopes: config.apiTokenScopes,
             webhookSecret: config.apiWebhookSecret,
             webhookTimestampToleranceSeconds: config.apiWebhookTimestampToleranceSeconds,
+            auditRecorder: (event) => {
+              this.stateStore.appendOperationAuditLog({
+                actor: event.actor,
+                source: event.source,
+                surface: event.surface,
+                action: event.action,
+                resource: event.resource,
+                method: event.method,
+                path: event.path,
+                outcome: event.outcome,
+                reason: event.reason ?? null,
+                requiredScopes: event.requiredScopes,
+                grantedScopes: event.grantedScopes,
+                metadata: event.metadata ?? null,
+              });
+            },
           })
         : null;
   }

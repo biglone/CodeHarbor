@@ -24,7 +24,7 @@ Why this baseline:
 
 - Local bind prevents accidental direct internet exposure.
 - Public access is delegated to the gateway/tunnel layer.
-- Token protects `/api/admin/*` operations (`ADMIN_TOKENS_JSON` supports viewer/admin RBAC).
+- Token protects `/api/admin/*` operations (`ADMIN_TOKENS_JSON` supports viewer/admin defaults and optional custom `scopes`).
 - Origin allowlist limits browser-based cross-origin access to trusted admin domains.
 
 ## 3) Start Admin Service Only
@@ -137,10 +137,17 @@ curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
 2. Do not treat tunnel as authentication. Keep `ADMIN_TOKEN` enabled.
 3. If exposing to broader audience, add additional gateway controls (WAF/Access rules).
 4. For config changes that are restart-scoped, restart related service after save.
+5. If Task API is enabled, use `API_TOKEN_SCOPES_JSON` to restrict API token capability (submit-only/read-only as needed).
 
 Token rotation helper (from repository root):
 
 ```bash
 ./scripts/rotate-admin-token.sh --target rbac --role admin --actor ops-admin
 ./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit
+./scripts/rotate-admin-token.sh --target rbac --role viewer --actor ops-audit --scopes admin.read.auth,admin.read.audit
 ```
+
+Audit query tips:
+
+- Config revisions: `GET /api/admin/audit?limit=20&kind=config`
+- Operation outcomes (Admin/API/Webhook): `GET /api/admin/audit?limit=20&kind=operations`

@@ -49,6 +49,48 @@ export interface ConfigRevisionRecord {
   createdAt: number;
 }
 
+export type OperationAuditSurface = "admin" | "api" | "webhook";
+export type OperationAuditOutcome = "allowed" | "denied" | "error";
+
+export interface OperationAuditAppendInput {
+  actor: string | null;
+  source: string | null;
+  surface: OperationAuditSurface;
+  action: string;
+  resource: string;
+  method: string;
+  path: string;
+  outcome: OperationAuditOutcome;
+  reason?: string | null;
+  requiredScopes?: readonly string[];
+  grantedScopes?: readonly string[];
+  metadata?: Record<string, unknown> | null;
+  createdAt?: number;
+}
+
+export interface OperationAuditQueryInput {
+  limit?: number;
+  surface?: OperationAuditSurface;
+  outcome?: OperationAuditOutcome;
+}
+
+export interface OperationAuditRecord {
+  id: number;
+  actor: string | null;
+  source: string | null;
+  surface: OperationAuditSurface;
+  action: string;
+  resource: string;
+  method: string;
+  path: string;
+  outcome: OperationAuditOutcome;
+  reason: string | null;
+  requiredScopes: string[];
+  grantedScopes: string[];
+  metadataJson: string | null;
+  createdAt: number;
+}
+
 export interface SessionMessageRecord {
   id: number;
   sessionKey: string;
@@ -298,6 +340,7 @@ const DEFAULT_HISTORY_RETENTION_DAYS = 30;
 const DEFAULT_HISTORY_CLEANUP_INTERVAL_MINUTES = 1_440;
 const DEFAULT_HISTORY_MAX_DELETE_SESSIONS = 500;
 const MAX_HISTORY_CLEANUP_RUN_QUERY_LIMIT = 200;
+const MAX_OPERATION_AUDIT_QUERY_LIMIT = 500;
 const HISTORY_CLEANUP_LOCK_NAME = "global_history_cleanup";
 
 export class StateStore {
@@ -579,6 +622,92 @@ export class StateStore {
       actor: row.actor,
       summary: row.summary,
       payloadJson: row.payload_json,
+      createdAt: row.created_at,
+    }));
+  }
+
+  appendOperationAuditLog(input: OperationAuditAppendInput): void {
+    const requiredScopes = normalizeJsonArray(input.requiredScopes);
+    const grantedScopes = normalizeJsonArray(input.grantedScopes);
+    const metadataJson = normalizeJsonObject(input.metadata);
+    this.db
+      .prepare(
+        `INSERT INTO operation_audit_logs
+          (actor, source, surface, action, resource, method, path, outcome, reason, required_scopes_json, granted_scopes_json, metadata_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+      )
+      .run(
+        input.actor,
+        input.source,
+        input.surface,
+        input.action,
+        input.resource,
+        input.method,
+        input.path,
+        input.outcome,
+        input.reason ?? null,
+        requiredScopes,
+        grantedScopes,
+        metadataJson,
+        input.createdAt ?? Date.now(),
+      );
+  }
+
+  listOperationAuditLogs(input: OperationAuditQueryInput = {}): OperationAuditRecord[] {
+    const safeLimit = Math.max(1, Math.min(MAX_OPERATION_AUDIT_QUERY_LIMIT, Math.floor(input.limit ?? 20)));
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (input.surface) {
+      clauses.push("surface = ?");
+      params.push(input.surface);
+    }
+    if (input.outcome) {
+      clauses.push("outcome = ?");
+      params.push(input.outcome);
+    }
+    params.push(safeLimit);
+
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(
+        `SELECT id, actor, source, surface, action, resource, method, path, outcome, reason, required_scopes_json, granted_scopes_json, metadata_json, created_at
+         FROM operation_audit_logs
+         ${whereClause}
+         ORDER BY id DESC
+         LIMIT ?`,
+      )
+      .all(...params) as Array<{
+      id: number;
+      actor: string | null;
+      source: string | null;
+      surface: OperationAuditSurface;
+      action: string;
+      resource: string;
+      method: string;
+      path: string;
+      outcome: OperationAuditOutcome;
+      reason: string | null;
+      required_scopes_json: string;
+      granted_scopes_json: string;
+      metadata_json: string | null;
+      created_at: number;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      actor: row.actor,
+      source: row.source,
+      surface: row.surface,
+      action: row.action,
+      resource: row.resource,
+      method: row.method,
+      path: row.path,
+      outcome: row.outcome,
+      reason: row.reason,
+      requiredScopes: parseStringArrayJson(row.required_scopes_json),
+      grantedScopes: parseStringArrayJson(row.granted_scopes_json),
+      metadataJson: row.metadata_json,
       createdAt: row.created_at,
     }));
   }
@@ -1980,6 +2109,27 @@ export class StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_config_revisions_created_at ON config_revisions(created_at);
 
+      CREATE TABLE IF NOT EXISTS operation_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT,
+        source TEXT,
+        surface TEXT NOT NULL,
+        action TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        reason TEXT,
+        required_scopes_json TEXT NOT NULL,
+        granted_scopes_json TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_created_at ON operation_audit_logs(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_surface_created_at ON operation_audit_logs(surface, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_audit_logs_outcome_created_at ON operation_audit_logs(outcome, created_at DESC, id DESC);
+
       CREATE TABLE IF NOT EXISTS upgrade_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         requested_by TEXT,
@@ -2356,6 +2506,25 @@ function boolToInt(value: boolean): number {
   return value ? 1 : 0;
 }
 
+function normalizeJsonArray(values: readonly string[] | undefined): string {
+  if (!values || values.length === 0) {
+    return "[]";
+  }
+  const normalized = values.map((value) => value.trim()).filter((value) => value.length > 0);
+  return JSON.stringify(normalized);
+}
+
+function normalizeJsonObject(value: Record<string, unknown> | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined);
+  if (entries.length === 0) {
+    return null;
+  }
+  return JSON.stringify(Object.fromEntries(entries));
+}
+
 function normalizeTaskFailureArchiveInput(input: TaskFailureArchiveInput | string): {
   error: string;
   retryReason: string;
@@ -2525,6 +2694,21 @@ function normalizeHistoryCleanupRunInput(input: HistoryCleanupRunAppendInput): H
 }
 
 function parseSessionKeyArrayJson(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function parseStringArrayJson(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) {

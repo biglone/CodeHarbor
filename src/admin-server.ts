@@ -1,21 +1,24 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { ConfigService } from "./config-service";
+import { buildConfigSnapshot, runConfigImportCommand } from "./config-snapshot";
 import { ADMIN_CONSOLE_HTML } from "./admin-console-html";
 import { AdminTokenConfig, AppConfig } from "./config";
 import { HistoryService } from "./history-service";
 import { applyEnvOverrides } from "./init";
 import { Logger } from "./logger";
 import {
+  hasAnyAdminWriteScope,
   hasRequiredScopes,
   listMissingScopes,
+  normalizeTokenScopes,
   resolveAdminScopeRequirement,
   scopesForAdminRole,
-  TOKEN_SCOPES,
   type TokenScopePattern,
 } from "./auth/scope-matrix";
 import { parseRuntimeMetricsSnapshot, renderPrometheusMetrics, type RuntimeMetricsSnapshot } from "./metrics";
@@ -34,6 +37,8 @@ import {
   ConfigRevisionRecord,
   HistoryCleanupRunRecord,
   HistoryRetentionPolicyRecord,
+  OperationAuditOutcome,
+  OperationAuditRecord,
   SessionHistoryRecord,
   SessionMessageRecord,
   StateStore,
@@ -65,6 +70,13 @@ interface MatrixHealthResult {
 
 interface RestartServicesResult {
   restarted: string[];
+}
+
+interface ConfigImportResult {
+  dryRun: boolean;
+  outputLines: string[];
+  roomCount: number;
+  restartRequired: boolean;
 }
 
 type AdminAccessRole = "admin" | "viewer";
@@ -214,6 +226,14 @@ export class AdminServer {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let operationAuditEnabled = false;
+    let appendResolvedOperationAudit = (
+      _outcome: OperationAuditOutcome,
+      _statusCode: number,
+      _reason: string | null = null,
+      _metadata: Record<string, unknown> = {},
+    ): void => {};
+
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       this.setSecurityHeaders(res);
@@ -254,9 +274,57 @@ export class AdminServer {
         return;
       }
 
-      const scopeRequirement = resolveAdminScopeRequirement(req.method, url.pathname);
+      const requestMethod = (req.method ?? "GET").toUpperCase();
+      const scopeRequirement = resolveAdminScopeRequirement(requestMethod, url.pathname);
       const authIdentity = scopeRequirement ? this.resolveAdminIdentity(req) : null;
+      operationAuditEnabled =
+        Boolean(scopeRequirement) &&
+        Boolean(authIdentity) &&
+        shouldLogSuccessfulAuthEvent(url.pathname, requestMethod);
+      const operationAuditActor = authIdentity ? resolveAuditActor(req, authIdentity) : null;
+      appendResolvedOperationAudit = (
+        outcome: OperationAuditOutcome,
+        statusCode: number,
+        reason: string | null = null,
+        metadata: Record<string, unknown> = {},
+      ): void => {
+        if (!scopeRequirement || !authIdentity || !operationAuditEnabled) {
+          return;
+        }
+        this.appendOperationAuditLog({
+          actor: operationAuditActor,
+          source: authIdentity.source,
+          surface: "admin",
+          action: scopeRequirement.action,
+          resource: url.pathname,
+          method: requestMethod,
+          path: url.pathname,
+          outcome,
+          reason,
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: authIdentity.scopes,
+          metadata: {
+            statusCode,
+            role: authIdentity.role,
+            ...metadata,
+          },
+        });
+      };
       if (scopeRequirement && !authIdentity) {
+        this.appendOperationAuditLog({
+          actor: resolveAuditActor(req, null),
+          source: "none",
+          surface: "admin",
+          action: scopeRequirement.action,
+          resource: url.pathname,
+          method: requestMethod,
+          path: url.pathname,
+          outcome: "denied",
+          reason: "unauthorized",
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: [],
+          metadata: { statusCode: 401 },
+        });
         this.sendJson(res, 401, {
           ok: false,
           error: "Unauthorized. Provide Authorization: Bearer <ADMIN_TOKEN> (or token from ADMIN_TOKENS_JSON).",
@@ -265,6 +333,23 @@ export class AdminServer {
       }
       if (scopeRequirement && authIdentity && !hasRequiredScopes(authIdentity.scopes, scopeRequirement.requiredScopes)) {
         const missingScopes = listMissingScopes(authIdentity.scopes, scopeRequirement.requiredScopes);
+        this.appendOperationAuditLog({
+          actor: resolveAuditActor(req, authIdentity),
+          source: authIdentity.source,
+          surface: "admin",
+          action: scopeRequirement.action,
+          resource: url.pathname,
+          method: requestMethod,
+          path: url.pathname,
+          outcome: "denied",
+          reason: `missing_scope:${missingScopes.join(",")}`,
+          requiredScopes: scopeRequirement.requiredScopes,
+          grantedScopes: authIdentity.scopes,
+          metadata: {
+            statusCode: 403,
+            missingScopes,
+          },
+        });
         this.sendJson(res, 403, {
           ok: false,
           error: `Forbidden. Missing required scope: ${missingScopes.join(", ")}.`,
@@ -287,7 +372,7 @@ export class AdminServer {
             source: authIdentity?.source ?? "none",
             actor: resolveIdentityActor(authIdentity),
             scopes: authIdentity ? [...authIdentity.scopes] : [],
-            canWrite: authIdentity ? hasRequiredScopes(authIdentity.scopes, [TOKEN_SCOPES.ADMIN_WRITE]) : false,
+            canWrite: authIdentity ? hasAnyAdminWriteScope(authIdentity.scopes) : false,
           },
         });
         return;
@@ -302,6 +387,152 @@ export class AdminServer {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/admin/config/validate") {
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "config validate payload");
+        const actor = resolveAuditActor(req, authIdentity);
+        const kind = normalizeString(body.kind, "", "kind").toLowerCase();
+        const data = "data" in body ? body.data : body;
+
+        if (kind === "global") {
+          const result = this.validateGlobalConfigPayload(data);
+          this.stateStore.appendConfigRevision(
+            actor,
+            `validate global config: ${result.checkedKeys.join(", ")}`,
+            JSON.stringify({
+              type: "config_validate_global",
+              checkedKeys: result.checkedKeys,
+              hotAppliedKeys: result.hotAppliedKeys,
+              restartRequiredKeys: result.restartRequiredKeys,
+            }),
+          );
+          this.sendJson(res, 200, {
+            ok: true,
+            data: {
+              kind: "global",
+              valid: true,
+              checkedKeys: result.checkedKeys,
+              hotAppliedKeys: result.hotAppliedKeys,
+              restartRequiredKeys: result.restartRequiredKeys,
+              restartRequired: result.restartRequiredKeys.length > 0,
+            },
+          });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            kind: "global",
+          });
+          return;
+        }
+
+        if (kind === "room") {
+          const result = this.validateRoomConfigPayload(data);
+          this.stateStore.appendConfigRevision(
+            actor,
+            `validate room config: ${result.roomId}`,
+            JSON.stringify({
+              type: "config_validate_room",
+              roomId: result.roomId,
+              workdir: result.workdir,
+            }),
+          );
+          this.sendJson(res, 200, {
+            ok: true,
+            data: {
+              kind: "room",
+              valid: true,
+              ...result,
+            },
+          });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            kind: "room",
+            roomId: result.roomId,
+          });
+          return;
+        }
+
+        if (kind === "snapshot") {
+          if (!("snapshot" in body)) {
+            throw new HttpError(400, "snapshot is required when kind=snapshot.");
+          }
+          const result = await this.runConfigImportFromSnapshot(body.snapshot, true, actor);
+          this.stateStore.appendConfigRevision(
+            actor,
+            "validate config snapshot (dry-run)",
+            JSON.stringify({
+              type: "config_validate_snapshot",
+              roomCount: result.roomCount,
+              outputLines: result.outputLines,
+            }),
+          );
+          this.sendJson(res, 200, {
+            ok: true,
+            data: {
+              kind: "snapshot",
+              valid: true,
+              ...result,
+            },
+          });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            kind: "snapshot",
+          });
+          return;
+        }
+
+        throw new HttpError(400, 'kind must be one of "global", "room", "snapshot".');
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/config/export") {
+        const actor = resolveAuditActor(req, authIdentity);
+        const snapshot = buildConfigSnapshot(this.config, this.configService.listRoomSettings(), new Date());
+        this.stateStore.appendConfigRevision(
+          actor,
+          "export config snapshot",
+          JSON.stringify({
+            type: "config_snapshot_export",
+            schemaVersion: snapshot.schemaVersion,
+            roomCount: snapshot.rooms.length,
+          }),
+        );
+        this.sendJson(res, 200, {
+          ok: true,
+          data: snapshot,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_export",
+          roomCount: snapshot.rooms.length,
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/admin/config/import") {
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "config import payload");
+        if (!("snapshot" in body)) {
+          throw new HttpError(400, "snapshot is required.");
+        }
+        const actor = resolveAuditActor(req, authIdentity);
+        const dryRun = "dryRun" in body ? normalizeBoolean(body.dryRun, false) : false;
+        const result = await this.runConfigImportFromSnapshot(body.snapshot, dryRun, actor);
+        if (dryRun) {
+          this.stateStore.appendConfigRevision(
+            actor,
+            "validate config snapshot (dry-run)",
+            JSON.stringify({
+              type: "config_snapshot_import_dry_run",
+              roomCount: result.roomCount,
+              outputLines: result.outputLines,
+            }),
+          );
+        }
+        this.sendJson(res, 200, {
+          ok: true,
+          data: result,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_import",
+          dryRun,
+          roomCount: result.roomCount,
+        });
+        return;
+      }
+
       if (req.method === "PUT" && url.pathname === "/api/admin/config/global") {
         const body = await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES);
         const actor = resolveAuditActor(req, authIdentity);
@@ -309,6 +540,11 @@ export class AdminServer {
         this.sendJson(res, 200, {
           ok: true,
           ...result,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_update_global",
+          updatedKeys: result.updatedKeys,
+          restartRequired: result.restartRequired,
         });
         return;
       }
@@ -339,6 +575,10 @@ export class AdminServer {
           const actor = resolveAuditActor(req, authIdentity);
           const room = this.updateRoomConfig(roomId, body, actor);
           this.sendJson(res, 200, { ok: true, data: room });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            type: "config_update_room",
+            roomId,
+          });
           return;
         }
 
@@ -346,15 +586,73 @@ export class AdminServer {
           const actor = resolveAuditActor(req, authIdentity);
           this.configService.deleteRoomSettings(roomId, actor);
           this.sendJson(res, 200, { ok: true, roomId });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            type: "config_delete_room",
+            roomId,
+          });
           return;
         }
       }
 
       if (req.method === "GET" && url.pathname === "/api/admin/audit") {
         const limit = normalizePositiveInt(url.searchParams.get("limit"), 20, 1, 200);
+        const kind = normalizeAuditKind(url.searchParams.get("kind"));
+        const surface = normalizeOptionalAuditSurface(url.searchParams.get("surface"));
+        const outcome = normalizeOptionalAuditOutcome(url.searchParams.get("outcome"));
+
+        if (kind === "config") {
+          this.sendJson(res, 200, {
+            ok: true,
+            data: this.stateStore.listConfigRevisions(limit).map((entry) => formatConfigAuditEntry(entry)),
+          });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            kind: "config",
+            limit,
+          });
+          return;
+        }
+
+        if (kind === "operations") {
+          this.sendJson(res, 200, {
+            ok: true,
+            data: this.stateStore
+              .listOperationAuditLogs({
+                limit,
+                surface,
+                outcome,
+              })
+              .map((entry) => formatOperationAuditEntry(entry)),
+          });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            kind: "operations",
+            limit,
+            ...(surface ? { surface } : {}),
+            ...(outcome ? { outcome } : {}),
+          });
+          return;
+        }
+
+        const configEntries = this.stateStore.listConfigRevisions(limit).map((entry) => formatConfigAuditEntry(entry));
+        const operationEntries = this.stateStore
+          .listOperationAuditLogs({
+            limit,
+            surface,
+            outcome,
+          })
+          .map((entry) => formatOperationAuditEntry(entry));
+        const merged = [...configEntries, ...operationEntries]
+          .sort((left, right) => right.createdAt - left.createdAt)
+          .slice(0, limit);
+
         this.sendJson(res, 200, {
           ok: true,
-          data: this.stateStore.listConfigRevisions(limit).map((entry) => formatAuditEntry(entry)),
+          data: merged,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          kind: "all",
+          limit,
+          ...(surface ? { surface } : {}),
+          ...(outcome ? { outcome } : {}),
         });
         return;
       }
@@ -454,6 +752,7 @@ export class AdminServer {
             ok: false,
             error: `Method not allowed: ${req.method ?? "GET"}.`,
           });
+          appendResolvedOperationAudit("denied", 405, "method_not_allowed");
           return;
         }
         const sessionKey = decodePathParam(sessionMessageMatch[1], "sessionKey");
@@ -500,6 +799,11 @@ export class AdminServer {
           ok: true,
           data: formatHistoryRetentionPolicyEntry(updated),
         });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "history_retention_update",
+          enabled: updated.enabled,
+          retentionDays: updated.retentionDays,
+        });
         return;
       }
 
@@ -529,9 +833,16 @@ export class AdminServer {
           maxDeleteSessions:
             "maxDeleteSessions" in body ? normalizePositiveInt(body.maxDeleteSessions, 500, 1, 10_000) : undefined,
         });
-        this.sendJson(res, run.status === "failed" ? 500 : 200, {
+        const cleanupStatusCode = run.status === "failed" ? 500 : 200;
+        this.sendJson(res, cleanupStatusCode, {
           ok: run.status !== "failed",
           data: formatHistoryCleanupRunEntry(run),
+        });
+        appendResolvedOperationAudit(run.status === "failed" ? "error" : "allowed", cleanupStatusCode, null, {
+          type: "history_cleanup",
+          runId: run.id,
+          dryRun: run.dryRun,
+          cleanupStatus: run.status,
         });
         return;
       }
@@ -549,6 +860,15 @@ export class AdminServer {
           matrix,
           app,
           timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/diagnostics") {
+        const diagnostics = await this.buildDiagnosticsSnapshot();
+        this.sendJson(res, 200, {
+          ok: diagnostics.ok,
+          data: diagnostics,
         });
         return;
       }
@@ -572,6 +892,11 @@ export class AdminServer {
             ok: true,
             restarted: result.restarted,
           });
+          appendResolvedOperationAudit("allowed", 200, null, {
+            type: "service_restart",
+            restartAdmin,
+            restarted: result.restarted,
+          });
           return;
         } catch (error) {
           throw new HttpError(
@@ -585,7 +910,12 @@ export class AdminServer {
         ok: false,
         error: `Not found: ${req.method ?? "GET"} ${url.pathname}`,
       });
+      appendResolvedOperationAudit("denied", 404, "not_found");
     } catch (error) {
+      if (operationAuditEnabled) {
+        const statusCode = error instanceof HttpError ? error.statusCode : 500;
+        appendResolvedOperationAudit(statusCode >= 500 ? "error" : "denied", statusCode, formatError(error));
+      }
       if (error instanceof HttpError) {
         this.sendJson(res, error.statusCode, {
           ok: false,
@@ -641,42 +971,71 @@ export class AdminServer {
 
     if ("rateLimiter" in body) {
       const limiter = asObject(body.rateLimiter, "rateLimiter");
+      let nextWindowMs = this.config.rateLimiter.windowMs;
+      let nextMaxRequestsPerUser = this.config.rateLimiter.maxRequestsPerUser;
+      let nextMaxRequestsPerRoom = this.config.rateLimiter.maxRequestsPerRoom;
+      let nextMaxConcurrentGlobal = this.config.rateLimiter.maxConcurrentGlobal;
+      let nextMaxConcurrentPerUser = this.config.rateLimiter.maxConcurrentPerUser;
+      let nextMaxConcurrentPerRoom = this.config.rateLimiter.maxConcurrentPerRoom;
       if ("windowMs" in limiter) {
-        const value = normalizePositiveInt(limiter.windowMs, this.config.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER);
-        this.config.rateLimiter.windowMs = value;
-        envUpdates.RATE_LIMIT_WINDOW_SECONDS = String(Math.max(1, Math.round(value / 1000)));
+        nextWindowMs = normalizePositiveInt(limiter.windowMs, this.config.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER);
         markUpdatedKey("rateLimiter.windowMs");
       }
       if ("maxRequestsPerUser" in limiter) {
-        const value = normalizeNonNegativeInt(limiter.maxRequestsPerUser, this.config.rateLimiter.maxRequestsPerUser);
-        this.config.rateLimiter.maxRequestsPerUser = value;
-        envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_USER = String(value);
+        nextMaxRequestsPerUser = normalizeNonNegativeInt(
+          limiter.maxRequestsPerUser,
+          this.config.rateLimiter.maxRequestsPerUser,
+        );
         markUpdatedKey("rateLimiter.maxRequestsPerUser");
       }
       if ("maxRequestsPerRoom" in limiter) {
-        const value = normalizeNonNegativeInt(limiter.maxRequestsPerRoom, this.config.rateLimiter.maxRequestsPerRoom);
-        this.config.rateLimiter.maxRequestsPerRoom = value;
-        envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_ROOM = String(value);
+        nextMaxRequestsPerRoom = normalizeNonNegativeInt(
+          limiter.maxRequestsPerRoom,
+          this.config.rateLimiter.maxRequestsPerRoom,
+        );
         markUpdatedKey("rateLimiter.maxRequestsPerRoom");
       }
       if ("maxConcurrentGlobal" in limiter) {
-        const value = normalizeNonNegativeInt(limiter.maxConcurrentGlobal, this.config.rateLimiter.maxConcurrentGlobal);
-        this.config.rateLimiter.maxConcurrentGlobal = value;
-        envUpdates.RATE_LIMIT_MAX_CONCURRENT_GLOBAL = String(value);
+        nextMaxConcurrentGlobal = normalizeNonNegativeInt(
+          limiter.maxConcurrentGlobal,
+          this.config.rateLimiter.maxConcurrentGlobal,
+        );
         markUpdatedKey("rateLimiter.maxConcurrentGlobal");
       }
       if ("maxConcurrentPerUser" in limiter) {
-        const value = normalizeNonNegativeInt(limiter.maxConcurrentPerUser, this.config.rateLimiter.maxConcurrentPerUser);
-        this.config.rateLimiter.maxConcurrentPerUser = value;
-        envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_USER = String(value);
+        nextMaxConcurrentPerUser = normalizeNonNegativeInt(
+          limiter.maxConcurrentPerUser,
+          this.config.rateLimiter.maxConcurrentPerUser,
+        );
         markUpdatedKey("rateLimiter.maxConcurrentPerUser");
       }
       if ("maxConcurrentPerRoom" in limiter) {
-        const value = normalizeNonNegativeInt(limiter.maxConcurrentPerRoom, this.config.rateLimiter.maxConcurrentPerRoom);
-        this.config.rateLimiter.maxConcurrentPerRoom = value;
-        envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM = String(value);
+        nextMaxConcurrentPerRoom = normalizeNonNegativeInt(
+          limiter.maxConcurrentPerRoom,
+          this.config.rateLimiter.maxConcurrentPerRoom,
+        );
         markUpdatedKey("rateLimiter.maxConcurrentPerRoom");
       }
+
+      if (nextMaxConcurrentGlobal > 0 && nextMaxConcurrentPerUser > nextMaxConcurrentGlobal) {
+        throw new HttpError(400, "rateLimiter.maxConcurrentGlobal must be greater than or equal to maxConcurrentPerUser.");
+      }
+      if (nextMaxConcurrentGlobal > 0 && nextMaxConcurrentPerRoom > nextMaxConcurrentGlobal) {
+        throw new HttpError(400, "rateLimiter.maxConcurrentGlobal must be greater than or equal to maxConcurrentPerRoom.");
+      }
+
+      this.config.rateLimiter.windowMs = nextWindowMs;
+      this.config.rateLimiter.maxRequestsPerUser = nextMaxRequestsPerUser;
+      this.config.rateLimiter.maxRequestsPerRoom = nextMaxRequestsPerRoom;
+      this.config.rateLimiter.maxConcurrentGlobal = nextMaxConcurrentGlobal;
+      this.config.rateLimiter.maxConcurrentPerUser = nextMaxConcurrentPerUser;
+      this.config.rateLimiter.maxConcurrentPerRoom = nextMaxConcurrentPerRoom;
+      envUpdates.RATE_LIMIT_WINDOW_SECONDS = String(Math.max(1, Math.round(nextWindowMs / 1000)));
+      envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_USER = String(nextMaxRequestsPerUser);
+      envUpdates.RATE_LIMIT_MAX_REQUESTS_PER_ROOM = String(nextMaxRequestsPerRoom);
+      envUpdates.RATE_LIMIT_MAX_CONCURRENT_GLOBAL = String(nextMaxConcurrentGlobal);
+      envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_USER = String(nextMaxConcurrentPerUser);
+      envUpdates.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM = String(nextMaxConcurrentPerRoom);
     }
 
     if ("defaultGroupTriggerPolicy" in body) {
@@ -999,6 +1358,439 @@ export class AdminServer {
     });
   }
 
+  private validateGlobalConfigPayload(rawBody: unknown): {
+    checkedKeys: string[];
+    hotAppliedKeys: string[];
+    restartRequiredKeys: string[];
+  } {
+    const body = asObject(rawBody, "global config payload");
+    const checkedKeys: string[] = [];
+    const hotAppliedKeys: string[] = [];
+    const restartRequiredKeys: string[] = [];
+    const markCheckedKey = (key: string): void => {
+      checkedKeys.push(key);
+      if (isHotGlobalConfigKey(key)) {
+        hotAppliedKeys.push(key);
+        return;
+      }
+      restartRequiredKeys.push(key);
+    };
+
+    let nextMaxConcurrentGlobal = this.config.rateLimiter.maxConcurrentGlobal;
+    let nextMaxConcurrentPerUser = this.config.rateLimiter.maxConcurrentPerUser;
+    let nextMaxConcurrentPerRoom = this.config.rateLimiter.maxConcurrentPerRoom;
+
+    if ("matrixCommandPrefix" in body) {
+      normalizeString(body.matrixCommandPrefix, this.config.matrixCommandPrefix, "matrixCommandPrefix");
+      markCheckedKey("matrixCommandPrefix");
+    }
+
+    if ("codexWorkdir" in body) {
+      const workdir = path.resolve(normalizeString(body.codexWorkdir, this.config.codexWorkdir, "codexWorkdir"));
+      ensureDirectory(workdir, "codexWorkdir");
+      markCheckedKey("codexWorkdir");
+    }
+
+    if ("rateLimiter" in body) {
+      const limiter = asObject(body.rateLimiter, "rateLimiter");
+      if ("windowMs" in limiter) {
+        normalizePositiveInt(limiter.windowMs, this.config.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("rateLimiter.windowMs");
+      }
+      if ("maxRequestsPerUser" in limiter) {
+        normalizeNonNegativeInt(limiter.maxRequestsPerUser, this.config.rateLimiter.maxRequestsPerUser);
+        markCheckedKey("rateLimiter.maxRequestsPerUser");
+      }
+      if ("maxRequestsPerRoom" in limiter) {
+        normalizeNonNegativeInt(limiter.maxRequestsPerRoom, this.config.rateLimiter.maxRequestsPerRoom);
+        markCheckedKey("rateLimiter.maxRequestsPerRoom");
+      }
+      if ("maxConcurrentGlobal" in limiter) {
+        nextMaxConcurrentGlobal = normalizeNonNegativeInt(limiter.maxConcurrentGlobal, this.config.rateLimiter.maxConcurrentGlobal);
+        markCheckedKey("rateLimiter.maxConcurrentGlobal");
+      }
+      if ("maxConcurrentPerUser" in limiter) {
+        nextMaxConcurrentPerUser = normalizeNonNegativeInt(limiter.maxConcurrentPerUser, this.config.rateLimiter.maxConcurrentPerUser);
+        markCheckedKey("rateLimiter.maxConcurrentPerUser");
+      }
+      if ("maxConcurrentPerRoom" in limiter) {
+        nextMaxConcurrentPerRoom = normalizeNonNegativeInt(limiter.maxConcurrentPerRoom, this.config.rateLimiter.maxConcurrentPerRoom);
+        markCheckedKey("rateLimiter.maxConcurrentPerRoom");
+      }
+    }
+
+    if (nextMaxConcurrentGlobal > 0 && nextMaxConcurrentPerUser > nextMaxConcurrentGlobal) {
+      throw new HttpError(400, "rateLimiter.maxConcurrentGlobal must be greater than or equal to maxConcurrentPerUser.");
+    }
+    if (nextMaxConcurrentGlobal > 0 && nextMaxConcurrentPerRoom > nextMaxConcurrentGlobal) {
+      throw new HttpError(400, "rateLimiter.maxConcurrentGlobal must be greater than or equal to maxConcurrentPerRoom.");
+    }
+
+    if ("defaultGroupTriggerPolicy" in body) {
+      const policy = asObject(body.defaultGroupTriggerPolicy, "defaultGroupTriggerPolicy");
+      if ("allowMention" in policy) {
+        normalizeBoolean(policy.allowMention, this.config.defaultGroupTriggerPolicy.allowMention);
+        markCheckedKey("defaultGroupTriggerPolicy.allowMention");
+      }
+      if ("allowReply" in policy) {
+        normalizeBoolean(policy.allowReply, this.config.defaultGroupTriggerPolicy.allowReply);
+        markCheckedKey("defaultGroupTriggerPolicy.allowReply");
+      }
+      if ("allowActiveWindow" in policy) {
+        normalizeBoolean(policy.allowActiveWindow, this.config.defaultGroupTriggerPolicy.allowActiveWindow);
+        markCheckedKey("defaultGroupTriggerPolicy.allowActiveWindow");
+      }
+      if ("allowPrefix" in policy) {
+        normalizeBoolean(policy.allowPrefix, this.config.defaultGroupTriggerPolicy.allowPrefix);
+        markCheckedKey("defaultGroupTriggerPolicy.allowPrefix");
+      }
+    }
+
+    if ("matrixProgressUpdates" in body) {
+      normalizeBoolean(body.matrixProgressUpdates, this.config.matrixProgressUpdates);
+      markCheckedKey("matrixProgressUpdates");
+    }
+
+    if ("matrixProgressMinIntervalMs" in body) {
+      normalizePositiveInt(body.matrixProgressMinIntervalMs, this.config.matrixProgressMinIntervalMs, 1, Number.MAX_SAFE_INTEGER);
+      markCheckedKey("matrixProgressMinIntervalMs");
+    }
+
+    if ("matrixTypingTimeoutMs" in body) {
+      normalizePositiveInt(body.matrixTypingTimeoutMs, this.config.matrixTypingTimeoutMs, 1, Number.MAX_SAFE_INTEGER);
+      markCheckedKey("matrixTypingTimeoutMs");
+    }
+
+    if ("sessionActiveWindowMinutes" in body) {
+      normalizePositiveInt(
+        body.sessionActiveWindowMinutes,
+        this.config.sessionActiveWindowMinutes,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      );
+      markCheckedKey("sessionActiveWindowMinutes");
+    }
+
+    if ("groupDirectModeEnabled" in body) {
+      normalizeBoolean(body.groupDirectModeEnabled, this.config.groupDirectModeEnabled);
+      markCheckedKey("groupDirectModeEnabled");
+    }
+
+    if ("updateCheck" in body) {
+      const updateCheck = asObject(body.updateCheck, "updateCheck");
+      if ("enabled" in updateCheck) {
+        normalizeBoolean(updateCheck.enabled, this.config.updateCheck.enabled);
+        markCheckedKey("updateCheck.enabled");
+      }
+      if ("timeoutMs" in updateCheck) {
+        normalizePositiveInt(updateCheck.timeoutMs, this.config.updateCheck.timeoutMs, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("updateCheck.timeoutMs");
+      }
+      if ("ttlMs" in updateCheck) {
+        normalizePositiveInt(updateCheck.ttlMs, this.config.updateCheck.ttlMs, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("updateCheck.ttlMs");
+      }
+    }
+
+    if ("cliCompat" in body) {
+      const compat = asObject(body.cliCompat, "cliCompat");
+      if ("enabled" in compat) {
+        normalizeBoolean(compat.enabled, this.config.cliCompat.enabled);
+        markCheckedKey("cliCompat.enabled");
+      }
+      if ("passThroughEvents" in compat) {
+        normalizeBoolean(compat.passThroughEvents, this.config.cliCompat.passThroughEvents);
+        markCheckedKey("cliCompat.passThroughEvents");
+      }
+      if ("preserveWhitespace" in compat) {
+        normalizeBoolean(compat.preserveWhitespace, this.config.cliCompat.preserveWhitespace);
+        markCheckedKey("cliCompat.preserveWhitespace");
+      }
+      if ("disableReplyChunkSplit" in compat) {
+        normalizeBoolean(compat.disableReplyChunkSplit, this.config.cliCompat.disableReplyChunkSplit);
+        markCheckedKey("cliCompat.disableReplyChunkSplit");
+      }
+      if ("progressThrottleMs" in compat) {
+        normalizeNonNegativeInt(compat.progressThrottleMs, this.config.cliCompat.progressThrottleMs);
+        markCheckedKey("cliCompat.progressThrottleMs");
+      }
+      if ("fetchMedia" in compat) {
+        normalizeBoolean(compat.fetchMedia, this.config.cliCompat.fetchMedia);
+        markCheckedKey("cliCompat.fetchMedia");
+      }
+      if ("transcribeAudio" in compat) {
+        normalizeBoolean(compat.transcribeAudio, this.config.cliCompat.transcribeAudio);
+        markCheckedKey("cliCompat.transcribeAudio");
+      }
+      if ("audioTranscribeModel" in compat) {
+        normalizeString(compat.audioTranscribeModel, this.config.cliCompat.audioTranscribeModel, "cliCompat.audioTranscribeModel");
+        markCheckedKey("cliCompat.audioTranscribeModel");
+      }
+      if ("audioTranscribeTimeoutMs" in compat) {
+        normalizePositiveInt(
+          compat.audioTranscribeTimeoutMs,
+          this.config.cliCompat.audioTranscribeTimeoutMs,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        markCheckedKey("cliCompat.audioTranscribeTimeoutMs");
+      }
+      if ("audioTranscribeMaxChars" in compat) {
+        normalizePositiveInt(
+          compat.audioTranscribeMaxChars,
+          this.config.cliCompat.audioTranscribeMaxChars,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        markCheckedKey("cliCompat.audioTranscribeMaxChars");
+      }
+      if ("audioTranscribeMaxRetries" in compat) {
+        normalizePositiveInt(compat.audioTranscribeMaxRetries, this.config.cliCompat.audioTranscribeMaxRetries, 0, 10);
+        markCheckedKey("cliCompat.audioTranscribeMaxRetries");
+      }
+      if ("audioTranscribeRetryDelayMs" in compat) {
+        normalizeNonNegativeInt(compat.audioTranscribeRetryDelayMs, this.config.cliCompat.audioTranscribeRetryDelayMs);
+        markCheckedKey("cliCompat.audioTranscribeRetryDelayMs");
+      }
+      if ("audioTranscribeMaxBytes" in compat) {
+        normalizePositiveInt(
+          compat.audioTranscribeMaxBytes,
+          this.config.cliCompat.audioTranscribeMaxBytes,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        markCheckedKey("cliCompat.audioTranscribeMaxBytes");
+      }
+      if ("audioLocalWhisperCommand" in compat) {
+        normalizeString(
+          compat.audioLocalWhisperCommand,
+          this.config.cliCompat.audioLocalWhisperCommand ?? "",
+          "cliCompat.audioLocalWhisperCommand",
+        );
+        markCheckedKey("cliCompat.audioLocalWhisperCommand");
+      }
+      if ("audioLocalWhisperTimeoutMs" in compat) {
+        normalizePositiveInt(
+          compat.audioLocalWhisperTimeoutMs,
+          this.config.cliCompat.audioLocalWhisperTimeoutMs,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        markCheckedKey("cliCompat.audioLocalWhisperTimeoutMs");
+      }
+    }
+
+    if ("agentWorkflow" in body) {
+      const workflow = asObject(body.agentWorkflow, "agentWorkflow");
+      const currentAgentWorkflow = ensureAgentWorkflowConfig(this.config);
+      if ("enabled" in workflow) {
+        normalizeBoolean(workflow.enabled, currentAgentWorkflow.enabled);
+        markCheckedKey("agentWorkflow.enabled");
+      }
+      if ("autoRepairMaxRounds" in workflow) {
+        normalizePositiveInt(workflow.autoRepairMaxRounds, currentAgentWorkflow.autoRepairMaxRounds, 0, 10);
+        markCheckedKey("agentWorkflow.autoRepairMaxRounds");
+      }
+    }
+
+    if (checkedKeys.length === 0) {
+      throw new HttpError(400, "No supported global config fields provided.");
+    }
+
+    return {
+      checkedKeys,
+      hotAppliedKeys,
+      restartRequiredKeys,
+    };
+  }
+
+  private validateRoomConfigPayload(rawBody: unknown): {
+    roomId: string;
+    enabled: boolean;
+    allowMention: boolean;
+    allowReply: boolean;
+    allowActiveWindow: boolean;
+    allowPrefix: boolean;
+    workdir: string;
+  } {
+    const body = asObject(rawBody, "room config payload");
+    const roomId = normalizeString(body.roomId, "", "roomId");
+    if (!roomId) {
+      throw new HttpError(400, "roomId is required.");
+    }
+    const current = this.configService.getRoomSettings(roomId);
+    const workdir = normalizeString(body.workdir, current?.workdir ?? this.config.codexWorkdir, "workdir");
+    const normalizedWorkdir = path.resolve(workdir);
+    ensureDirectory(normalizedWorkdir, "workdir");
+    return {
+      roomId,
+      enabled: normalizeBoolean(body.enabled, current?.enabled ?? true),
+      allowMention: normalizeBoolean(body.allowMention, current?.allowMention ?? true),
+      allowReply: normalizeBoolean(body.allowReply, current?.allowReply ?? true),
+      allowActiveWindow: normalizeBoolean(body.allowActiveWindow, current?.allowActiveWindow ?? true),
+      allowPrefix: normalizeBoolean(body.allowPrefix, current?.allowPrefix ?? true),
+      workdir: normalizedWorkdir,
+    };
+  }
+
+  private async runConfigImportFromSnapshot(snapshot: unknown, dryRun: boolean, actor: string | null): Promise<ConfigImportResult> {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-admin-config-"));
+    const snapshotPath = path.join(tempDir, "snapshot.json");
+    const outputChunks: string[] = [];
+    const output = {
+      write: (chunk: string | Uint8Array): boolean => {
+        outputChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+        return true;
+      },
+    } as unknown as NodeJS.WritableStream;
+
+    try {
+      fs.writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+      await runConfigImportCommand({
+        cwd: this.cwd,
+        filePath: snapshotPath,
+        dryRun,
+        output,
+        actor: actor ?? "admin-api:config-import",
+      });
+    } catch (error) {
+      throw new HttpError(400, formatError(error));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    const roomCount =
+      snapshot && typeof snapshot === "object" && Array.isArray((snapshot as { rooms?: unknown }).rooms)
+        ? ((snapshot as { rooms: unknown[] }).rooms.length ?? 0)
+        : 0;
+    const outputLines = outputChunks
+      .join("")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    return {
+      dryRun,
+      outputLines,
+      roomCount,
+      restartRequired: !dryRun,
+    };
+  }
+
+  private async buildDiagnosticsSnapshot(): Promise<{
+    ok: boolean;
+    timestamp: string;
+    cliProvider: AppConfig["aiCliProvider"];
+    health: {
+      codex: CodexHealthResult;
+      matrix: MatrixHealthResult;
+      app: Awaited<ReturnType<PackageUpdateChecker["getStatus"]>>;
+    };
+    runtime: {
+      metricsSnapshotAvailable: boolean;
+      metricsUpdatedAtIso: string | null;
+      requestTotal: number;
+      activeExecutions: number;
+      outcomes: RuntimeMetricsSnapshot["request"]["outcomes"] | null;
+      limiter: RuntimeMetricsSnapshot["limiter"] | null;
+      autodev: RuntimeMetricsSnapshot["autodev"] | null;
+      upgradeStats: ReturnType<StateStore["getUpgradeRunStats"]>;
+      latestUpgradeRun: {
+        id: number;
+        status: "running" | "succeeded" | "failed";
+        targetVersion: string | null;
+        installedVersion: string | null;
+        error: string | null;
+        startedAtIso: string;
+        finishedAtIso: string | null;
+      } | null;
+    };
+    config: {
+      roomSettingsCount: number;
+      runtimeHotConfigVersion: number | null;
+      retentionPolicy: ReturnType<typeof formatHistoryRetentionPolicyEntry>;
+      latestRevision: {
+        id: number;
+        actor: string | null;
+        summary: string;
+        createdAtIso: string;
+      } | null;
+    };
+    warnings: string[];
+  }> {
+    const [codex, matrix, app] = await Promise.all([
+      this.checkCodex(this.config.codexBin),
+      this.checkMatrix(this.config.matrixHomeserver, this.config.doctorHttpTimeoutMs),
+      this.packageUpdateChecker.getStatus(),
+    ]);
+
+    const metricsRecord = this.stateStore.getRuntimeMetricsSnapshot("orchestrator");
+    const metricsSnapshot = metricsRecord ? parseRuntimeMetricsSnapshot(metricsRecord.payloadJson) : null;
+    const runtimeHotSnapshot = this.stateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
+    const latestRevision = this.stateStore.listConfigRevisions(1)[0] ?? null;
+    const latestUpgradeRun = this.stateStore.getLatestUpgradeRun();
+    const warnings: string[] = [];
+
+    if (!codex.ok) {
+      warnings.push(`Codex health check failed: ${codex.error ?? "unknown error"}`);
+    }
+    if (!matrix.ok) {
+      warnings.push(`Matrix health check failed: ${matrix.error ?? "unknown error"}`);
+    }
+    if (!metricsSnapshot) {
+      warnings.push("Runtime metrics snapshot is unavailable.");
+    }
+    if (app.state === "unknown" && app.error && app.error.toLowerCase() !== "update check disabled") {
+      warnings.push(`Package update checker warning: ${app.error}`);
+    }
+
+    return {
+      ok: codex.ok && matrix.ok,
+      timestamp: new Date().toISOString(),
+      cliProvider: this.config.aiCliProvider,
+      health: {
+        codex,
+        matrix,
+        app,
+      },
+      runtime: {
+        metricsSnapshotAvailable: Boolean(metricsSnapshot),
+        metricsUpdatedAtIso: metricsRecord ? new Date(metricsRecord.updatedAt).toISOString() : null,
+        requestTotal: metricsSnapshot?.request.total ?? 0,
+        activeExecutions: metricsSnapshot?.activeExecutions ?? 0,
+        outcomes: metricsSnapshot?.request.outcomes ?? null,
+        limiter: metricsSnapshot?.limiter ?? null,
+        autodev: metricsSnapshot?.autodev ?? null,
+        upgradeStats: this.stateStore.getUpgradeRunStats(),
+        latestUpgradeRun: latestUpgradeRun
+          ? {
+              id: latestUpgradeRun.id,
+              status: latestUpgradeRun.status,
+              targetVersion: latestUpgradeRun.targetVersion,
+              installedVersion: latestUpgradeRun.installedVersion,
+              error: latestUpgradeRun.error,
+              startedAtIso: new Date(latestUpgradeRun.startedAt).toISOString(),
+              finishedAtIso: latestUpgradeRun.finishedAt ? new Date(latestUpgradeRun.finishedAt).toISOString() : null,
+            }
+          : null,
+      },
+      config: {
+        roomSettingsCount: this.configService.listRoomSettings().length,
+        runtimeHotConfigVersion: runtimeHotSnapshot?.version ?? null,
+        retentionPolicy: formatHistoryRetentionPolicyEntry(this.historyService.getRetentionPolicy()),
+        latestRevision: latestRevision
+          ? {
+              id: latestRevision.id,
+              actor: latestRevision.actor,
+              summary: latestRevision.summary,
+              createdAtIso: new Date(latestRevision.createdAt).toISOString(),
+            }
+          : null,
+      },
+      warnings,
+    };
+  }
+
   private resolveAdminIdentity(req: http.IncomingMessage): AdminAuthIdentity | null {
     if (!this.adminToken && this.adminTokens.size === 0) {
       return {
@@ -1123,6 +1915,36 @@ export class AdminServer {
     res.end(JSON.stringify(payload));
   }
 
+  private appendOperationAuditLog(input: {
+    actor: string | null;
+    source: string;
+    surface: "admin";
+    action: string;
+    resource: string;
+    method: string;
+    path: string;
+    outcome: OperationAuditOutcome;
+    reason?: string | null;
+    requiredScopes: readonly string[];
+    grantedScopes: readonly string[];
+    metadata?: Record<string, unknown>;
+  }): void {
+    this.stateStore.appendOperationAuditLog({
+      actor: input.actor,
+      source: input.source,
+      surface: input.surface,
+      action: input.action,
+      resource: input.resource,
+      method: input.method,
+      path: input.path,
+      outcome: input.outcome,
+      reason: input.reason ?? null,
+      requiredScopes: input.requiredScopes,
+      grantedScopes: input.grantedScopes,
+      metadata: input.metadata ?? null,
+    });
+  }
+
   private buildMetricsText(): string {
     let snapshot: RuntimeMetricsSnapshot | null = null;
     const record = this.stateStore.getRuntimeMetricsSnapshot("orchestrator");
@@ -1195,7 +2017,8 @@ function ensureAgentWorkflowConfig(config: AppConfig): AppConfig["agentWorkflow"
   return fallback;
 }
 
-function formatAuditEntry(entry: ConfigRevisionRecord): {
+function formatConfigAuditEntry(entry: ConfigRevisionRecord): {
+  kind: "config";
   id: number;
   actor: string | null;
   summary: string;
@@ -1205,11 +2028,53 @@ function formatAuditEntry(entry: ConfigRevisionRecord): {
   createdAtIso: string;
 } {
   return {
+    kind: "config",
     id: entry.id,
     actor: entry.actor,
     summary: entry.summary,
     payloadJson: entry.payloadJson,
     payload: parseJsonLoose(entry.payloadJson),
+    createdAt: entry.createdAt,
+    createdAtIso: new Date(entry.createdAt).toISOString(),
+  };
+}
+
+function formatOperationAuditEntry(entry: OperationAuditRecord): {
+  kind: "operation";
+  id: number;
+  actor: string | null;
+  source: string | null;
+  summary: string;
+  action: string;
+  resource: string;
+  method: string;
+  path: string;
+  outcome: OperationAuditOutcome;
+  reason: string | null;
+  requiredScopes: string[];
+  grantedScopes: string[];
+  metadataJson: string | null;
+  metadata: unknown;
+  createdAt: number;
+  createdAtIso: string;
+} {
+  const summaryParts = [entry.surface.toUpperCase(), entry.method, entry.path, entry.outcome.toUpperCase()];
+  return {
+    kind: "operation",
+    id: entry.id,
+    actor: entry.actor,
+    source: entry.source,
+    summary: summaryParts.join(" "),
+    action: entry.action,
+    resource: entry.resource,
+    method: entry.method,
+    path: entry.path,
+    outcome: entry.outcome,
+    reason: entry.reason,
+    requiredScopes: entry.requiredScopes,
+    grantedScopes: entry.grantedScopes,
+    metadataJson: entry.metadataJson,
+    metadata: parseJsonLoose(entry.metadataJson),
     createdAt: entry.createdAt,
     createdAtIso: new Date(entry.createdAt).toISOString(),
   };
@@ -1364,7 +2229,10 @@ function formatHistoryCleanupRunEntry(entry: HistoryCleanupRunRecord): {
   };
 }
 
-function parseJsonLoose(raw: string): unknown {
+function parseJsonLoose(raw: string | null): unknown {
+  if (raw === null || raw === "") {
+    return raw;
+  }
   try {
     return JSON.parse(raw) as unknown;
   } catch {
@@ -1398,6 +2266,7 @@ function isUiPath(pathname: string): boolean {
     pathname === "/settings/global" ||
     pathname === "/settings/rooms" ||
     pathname === "/health" ||
+    pathname === "/diagnostics" ||
     pathname === "/audit"
   );
 }
@@ -1578,6 +2447,61 @@ function normalizeBooleanQuery(value: string | null, fallback: boolean): boolean
   throw new HttpError(400, "Expected boolean query value.");
 }
 
+function normalizeAuditKind(value: string | null): "config" | "operations" | "all" {
+  if (!value) {
+    return "config";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "config" || normalized === "revision" || normalized === "revisions") {
+    return "config";
+  }
+  if (normalized === "operations" || normalized === "operation" || normalized === "ops") {
+    return "operations";
+  }
+  if (normalized === "all") {
+    return "all";
+  }
+  throw new HttpError(400, 'kind must be one of "config", "operations", or "all".');
+}
+
+function normalizeOptionalAuditSurface(value: string | null): "admin" | "api" | "webhook" | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "admin" || normalized === "api" || normalized === "webhook") {
+    return normalized;
+  }
+  throw new HttpError(400, 'surface must be one of "admin", "api", or "webhook".');
+}
+
+function normalizeOptionalAuditOutcome(value: string | null): OperationAuditOutcome | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "allowed" || normalized === "denied" || normalized === "error") {
+    return normalized;
+  }
+  throw new HttpError(400, 'outcome must be one of "allowed", "denied", or "error".');
+}
+
+function shouldLogSuccessfulAuthEvent(pathname: string, method: string): boolean {
+  if (pathname === "/metrics" || pathname === "/api/admin/auth/status") {
+    return false;
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    return true;
+  }
+  return pathname === "/api/admin/config/export" || pathname === "/api/admin/audit";
+}
+
 function decodePathParam(value: string, fieldName: string): string {
   try {
     const decoded = decodeURIComponent(value).trim();
@@ -1685,10 +2609,12 @@ function resolveAuditActor(req: http.IncomingMessage, identity: AdminAuthIdentit
 function buildAdminTokenMap(tokens: AdminTokenConfig[]): Map<string, Omit<AdminAuthIdentity, "source">> {
   const mapped = new Map<string, Omit<AdminAuthIdentity, "source">>();
   for (const token of tokens) {
+    const scopes =
+      token.scopes && token.scopes.length > 0 ? normalizeTokenScopes(token.scopes) : scopesForAdminRole(token.role);
     mapped.set(token.token, {
       role: token.role,
       actor: token.actor,
-      scopes: scopesForAdminRole(token.role),
+      scopes,
     });
   }
   return mapped;

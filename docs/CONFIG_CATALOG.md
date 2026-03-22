@@ -106,10 +106,17 @@ These must be valid before `codeharbor start`.
 | Key | Required | Default | Admin UI | Effect Timing | Notes |
 |---|---|---|---|---|---|
 | `DOCTOR_HTTP_TIMEOUT_MS` | No | `10000` | No | Restart | Doctor timeout |
+| `API_ENABLED` | No | `false` | No | Restart | Enable task API server (`/api/tasks`, `/api/webhooks/:source`) |
+| `API_BIND_HOST` | No | `127.0.0.1` | No | Restart | Task API listener host |
+| `API_PORT` | No | `8788` | No | Restart | Task API listener port |
+| `API_TOKEN` | No (functional), **Yes (`API_ENABLED=true`)** | empty | No | Restart | Bearer token for `/api/tasks*` |
+| `API_TOKEN_SCOPES_JSON` | No | empty | No | Restart | Optional API token scope override JSON array (for example `["tasks.submit.api"]` or `["tasks.read.api"]`) |
+| `API_WEBHOOK_SECRET` | No | empty | No | Restart | Enables webhook signature validation when set |
+| `API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` | No | `300` | No | Restart | Allowed webhook timestamp skew window |
 | `ADMIN_BIND_HOST` | No | `127.0.0.1` | No | Restart | Admin listener host |
 | `ADMIN_PORT` | No | `8787` | No | Restart | Admin listener port |
 | `ADMIN_TOKEN` | No (functional), **Yes (public exposure)** | empty | UI can set header only | Restart | API bearer auth. Required for non-loopback/public usage |
-| `ADMIN_TOKENS_JSON` | No | empty | UI can set header only | Restart | Optional RBAC token list (`admin`/`viewer`) |
+| `ADMIN_TOKENS_JSON` | No | empty | UI can set header only | Restart | Optional RBAC token list (`admin`/`viewer` defaults, optional custom `scopes`) |
 | `ADMIN_IP_ALLOWLIST` | No | empty | No | Restart | Optional client IP allowlist |
 | `ADMIN_ALLOWED_ORIGINS` | No | empty | No | Restart | Optional browser origin allowlist for CORS (`https://admin.example.com`) |
 | `LOG_LEVEL` | No | `info` | No | Restart | Logger level |
@@ -117,8 +124,10 @@ These must be valid before `codeharbor start`.
 `ADMIN_TOKENS_JSON` example:
 
 ```json
-[{"token":"admin-secret","role":"admin","actor":"ops-admin"},{"token":"viewer-secret","role":"viewer","actor":"ops-audit"}]
+[{"token":"admin-secret","role":"admin","actor":"ops-admin"},{"token":"viewer-secret","role":"viewer","actor":"ops-audit","scopes":["admin.read.auth","admin.read.audit"]}]
 ```
+
+`scopes` is optional. When present, it overrides role defaults for that token and supports wildcard patterns (for example `admin.read.*` or `*`).
 
 ## Recommended Operating Profiles
 
@@ -149,7 +158,8 @@ These must be valid before `codeharbor start`.
    - `codeharbor config import backups/pre-hot-update.json`
    - `codeharbor service restart` (or `codeharbor service restart --with-admin`)
 4. Verify and audit:
-   - `GET /api/admin/audit?limit=20`
+   - `GET /api/admin/audit?limit=20&kind=config`
+   - `GET /api/admin/audit?limit=20&kind=operations`
    - `GET /api/admin/health`
    - send a Matrix smoke request in one room
 

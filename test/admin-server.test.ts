@@ -102,6 +102,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     apiBindHost: "127.0.0.1",
     apiPort: 8788,
     apiToken: null,
+    apiTokenScopes: [],
     apiWebhookSecret: null,
     apiWebhookTimestampToleranceSeconds: 300,
     adminBindHost: "127.0.0.1",
@@ -194,6 +195,273 @@ describe("AdminServer", () => {
     expect(audit.status).toBe(200);
     expect(JSON.stringify(audit.body)).toContain("bind room");
     expect(JSON.stringify(audit.body)).toContain("createdAtIso");
+  });
+
+  it("validates global and room config payloads before apply", async () => {
+    const { dir, db, legacy } = createPaths();
+    const roomWorkdir = path.join(dir, "room-workdir");
+    fs.mkdirSync(roomWorkdir, { recursive: true });
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const invalidGlobal = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          rateLimiter: {
+            maxConcurrentGlobal: 1,
+            maxConcurrentPerUser: 2,
+          },
+        },
+      }),
+    });
+    expect(invalidGlobal.status).toBe(400);
+    expect(JSON.stringify(invalidGlobal.body)).toContain("maxConcurrentPerUser");
+
+    const validGlobal = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          matrixTypingTimeoutMs: 15000,
+        },
+      }),
+    });
+    expect(validGlobal.status).toBe(200);
+    expect(JSON.stringify(validGlobal.body)).toContain("matrixTypingTimeoutMs");
+
+    const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "room",
+        data: {
+          roomId: "!room-validate:example.com",
+          workdir: path.join(dir, "missing"),
+        },
+      }),
+    });
+    expect(invalidRoom.status).toBe(400);
+    expect(JSON.stringify(invalidRoom.body)).toContain("workdir");
+
+    const validRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "room",
+        data: {
+          roomId: "!room-validate:example.com",
+          enabled: true,
+          allowMention: true,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: true,
+          workdir: roomWorkdir,
+        },
+      }),
+    });
+    expect(validRoom.status).toBe(200);
+    expect(JSON.stringify(validRoom.body)).toContain("roomId");
+  });
+
+  it("supports diagnostics plus config export and import", async () => {
+    const { dir, db, legacy } = createPaths();
+    const roomA = path.join(dir, "project-a");
+    const roomB = path.join(dir, "project-b");
+    fs.mkdirSync(roomA, { recursive: true });
+    fs.mkdirSync(roomB, { recursive: true });
+
+    const config = createBaseConfig(dir, db, legacy);
+    config.adminPort = 8787;
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    stateStore.upsertRoomSettings({
+      roomId: "!room-a:example.com",
+      enabled: true,
+      allowMention: true,
+      allowReply: false,
+      allowActiveWindow: true,
+      allowPrefix: true,
+      workdir: roomA,
+    });
+    stateStore.upsertRuntimeMetricsSnapshot(
+      "orchestrator",
+      JSON.stringify({
+        generatedAt: "2026-03-22T00:00:10.000Z",
+        startedAt: "2026-03-22T00:00:00.000Z",
+        activeExecutions: 2,
+        request: {
+          total: 5,
+          outcomes: {
+            success: 4,
+            failed: 1,
+            timeout: 0,
+            cancelled: 0,
+            rate_limited: 0,
+            ignored: 0,
+            duplicate: 0,
+          },
+          queueDurationMs: {
+            buckets: [10, 50],
+            counts: [1, 1, 3],
+            count: 5,
+            sum: 130,
+          },
+          executionDurationMs: {
+            buckets: [100, 500],
+            counts: [1, 1, 3],
+            count: 5,
+            sum: 2100,
+          },
+          sendDurationMs: {
+            buckets: [10, 100],
+            counts: [2, 1, 2],
+            count: 5,
+            sum: 68,
+          },
+        },
+        limiter: {
+          activeGlobal: 2,
+          activeUsers: 2,
+          activeRooms: 1,
+        },
+        autodev: {
+          runs: {
+            succeeded: 2,
+            failed: 1,
+            cancelled: 0,
+          },
+          loopStops: {
+            no_task: 0,
+            drained: 1,
+            max_runs: 0,
+            deadline: 0,
+            stop_requested: 0,
+            task_incomplete: 0,
+          },
+          tasksBlocked: 0,
+        },
+      }),
+    );
+
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const diagnostics = await fetchJson(`${baseUrl}/api/admin/diagnostics`);
+    expect(diagnostics.status).toBe(200);
+    expect(JSON.stringify(diagnostics.body)).toContain('"metricsSnapshotAvailable":true');
+    expect(JSON.stringify(diagnostics.body)).toContain('"roomSettingsCount":1');
+
+    const exported = await fetchJson(`${baseUrl}/api/admin/config/export`);
+    expect(exported.status).toBe(200);
+    expect(JSON.stringify(exported.body)).toContain('"schemaVersion":1');
+    expect(JSON.stringify(exported.body)).toContain("!room-a:example.com");
+
+    const exportedPayload = exported.body as {
+      data?: {
+        env?: Record<string, string>;
+        rooms?: Array<{
+          roomId: string;
+          enabled: boolean;
+          allowMention: boolean;
+          allowReply: boolean;
+          allowActiveWindow: boolean;
+          allowPrefix: boolean;
+          workdir: string;
+        }>;
+      };
+    };
+    const snapshot = exportedPayload.data;
+    expect(snapshot).toBeDefined();
+    expect(snapshot?.env).toBeDefined();
+    expect(snapshot?.rooms).toBeDefined();
+    snapshot!.env!.MATRIX_COMMAND_PREFIX = "!imported";
+    snapshot!.rooms = [
+      {
+        roomId: "!room-b:example.com",
+        enabled: true,
+        allowMention: true,
+        allowReply: true,
+        allowActiveWindow: true,
+        allowPrefix: true,
+        workdir: roomB,
+      },
+    ];
+
+    const dryRun = await fetchJson(`${baseUrl}/api/admin/config/import`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "tester-import",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+        snapshot,
+      }),
+    });
+    expect(dryRun.status).toBe(200);
+    expect(JSON.stringify(dryRun.body)).toContain('"dryRun":true');
+
+    const imported = await fetchJson(`${baseUrl}/api/admin/config/import`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "tester-import",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+        snapshot,
+      }),
+    });
+    expect(imported.status).toBe(200);
+    expect(JSON.stringify(imported.body)).toContain('"restartRequired":true');
+
+    const envRaw = fs.readFileSync(path.join(dir, ".env"), "utf8");
+    expect(envRaw).toContain('MATRIX_COMMAND_PREFIX="!imported"');
+
+    const rooms = await fetchJson(`${baseUrl}/api/admin/config/rooms`);
+    expect(rooms.status).toBe(200);
+    expect(JSON.stringify(rooms.body)).toContain("!room-b:example.com");
+
+    const audit = await fetchJson(`${baseUrl}/api/admin/audit?limit=20`);
+    expect(audit.status).toBe(200);
+    expect(JSON.stringify(audit.body)).toContain("config_snapshot_import");
   });
 
   it("returns app version info in health response", async () => {
@@ -611,6 +879,14 @@ describe("AdminServer", () => {
     });
     expect(viewerRead.status).toBe(200);
 
+    const viewerExport = await fetchJson(`${baseUrl}/api/admin/config/export`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerExport.status).toBe(403);
+    expect(JSON.stringify(viewerExport.body)).toContain("admin.write");
+
     const viewerSessionsRead = await fetchJson(`${baseUrl}/api/admin/sessions`, {
       headers: {
         authorization: "Bearer viewer-token",
@@ -650,6 +926,120 @@ describe("AdminServer", () => {
       }),
     });
     expect(adminWrite.status).toBe(200);
+
+    const adminExport = await fetchJson(`${baseUrl}/api/admin/config/export`, {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(adminExport.status).toBe(200);
+    expect(JSON.stringify(adminExport.body)).toContain('"schemaVersion":1');
+  });
+
+  it("supports custom token scopes and exposes operation audit logs", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        {
+          token: "audit-token",
+          role: "viewer",
+          actor: "ops-audit",
+          scopes: ["admin.read.auth", "admin.read.audit"],
+        },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const deniedRead = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      headers: {
+        authorization: "Bearer audit-token",
+      },
+    });
+    expect(deniedRead.status).toBe(403);
+    expect(JSON.stringify(deniedRead.body)).toContain("admin.read.config");
+
+    const operations = await fetchJson(`${baseUrl}/api/admin/audit?kind=operations&limit=20`, {
+      headers: {
+        authorization: "Bearer audit-token",
+      },
+    });
+    expect(operations.status).toBe(200);
+    const operationsText = JSON.stringify(operations.body);
+    expect(operationsText).toContain('"kind":"operation"');
+    expect(operationsText).toContain('"outcome":"denied"');
+    expect(operationsText).toContain("/api/admin/config/global");
+    expect(operationsText).toContain("missing_scope:admin.read.config");
+    expect(operationsText).toContain('"actor":"ops-audit"');
+  });
+
+  it("records service restart failures as operation audit errors", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        {
+          token: "service-admin",
+          role: "admin",
+          actor: "ops-service",
+          scopes: ["admin.write.service", "admin.read.audit"],
+        },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+      restartServices: async () => {
+        throw new Error("systemctl permission denied");
+      },
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const restart = await fetchJson(`${baseUrl}/api/admin/service/restart`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer service-admin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        withAdmin: true,
+      }),
+    });
+    expect(restart.status).toBe(500);
+    expect(JSON.stringify(restart.body)).toContain("Service restart failed");
+
+    const operations = await fetchJson(`${baseUrl}/api/admin/audit?kind=operations&limit=20`, {
+      headers: {
+        authorization: "Bearer service-admin",
+      },
+    });
+    expect(operations.status).toBe(200);
+    const operationsText = JSON.stringify(operations.body);
+    expect(operationsText).toContain('"/api/admin/service/restart"');
+    expect(operationsText).toContain('"outcome":"error"');
+    expect(operationsText).toContain('"statusCode":500');
+    expect(operationsText).toContain("Service restart failed");
+    expect(operationsText).not.toContain('"outcome":"allowed"');
   });
 
   it("rejects oversized JSON request payloads", async () => {

@@ -225,6 +225,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         <nav class="tabs">
           <a class="tab" data-page="settings-global" href="#/settings/global" data-i18n="tab.global">全局</a>
           <a class="tab" data-page="settings-rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间</a>
+          <a class="tab" data-page="diagnostics" href="#/diagnostics" data-i18n="tab.diagnostics">诊断</a>
           <a class="tab" data-page="health" href="#/health" data-i18n="tab.health">健康</a>
           <a class="tab" data-page="audit" href="#/audit" data-i18n="tab.audit">审计</a>
         </nav>
@@ -372,11 +373,26 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         </div>
         <div class="actions">
           <button id="global-save-btn" type="button" data-i18n="global.save">保存全局配置</button>
+          <button id="global-validate-btn" type="button" class="secondary" data-i18n="global.validate">校验全局配置</button>
           <button id="global-reload-btn" type="button" class="secondary" data-i18n="global.reload">重新加载</button>
           <button id="global-restart-main-btn" type="button" class="secondary" data-i18n="global.restartMain">重启主服务</button>
           <button id="global-restart-all-btn" type="button" class="secondary" data-i18n="global.restartAll">重启主服务+管理后台</button>
         </div>
         <p class="muted" data-i18n="global.restartHint">保存全局配置会更新 .env，并需要重启后完全生效。</p>
+        <h3 class="panel-title" style="margin-top: 18px;" data-i18n="snapshot.title">配置导入/导出</h3>
+        <div class="actions">
+          <button id="config-export-btn" type="button" class="secondary" data-i18n="snapshot.export">导出配置快照</button>
+        </div>
+        <div class="grid">
+          <label class="field full">
+            <span class="field-label" data-i18n="snapshot.importFile">导入文件（JSON）</span>
+            <input id="config-import-file" type="file" accept="application/json,.json" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="config-import-dry-run-btn" type="button" class="secondary" data-i18n="snapshot.importDryRun">先执行 dry-run</button>
+          <button id="config-import-apply-btn" type="button" data-i18n="snapshot.importApply">应用导入</button>
+        </div>
       </section>
 
       <section class="panel" data-view="settings-rooms" hidden>
@@ -403,6 +419,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         <div class="actions">
           <button id="room-load-btn" type="button" class="secondary" data-i18n="rooms.load">加载房间</button>
           <button id="room-save-btn" type="button" data-i18n="rooms.save">保存房间</button>
+          <button id="room-validate-btn" type="button" class="secondary" data-i18n="rooms.validate">校验房间</button>
           <button id="room-delete-btn" type="button" class="danger" data-i18n="rooms.delete">删除房间</button>
           <button id="room-refresh-btn" type="button" class="secondary" data-i18n="rooms.refresh">刷新列表</button>
         </div>
@@ -417,6 +434,34 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               </tr>
             </thead>
             <tbody id="room-list-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" data-view="diagnostics" hidden>
+        <h2 class="panel-title" data-i18n="diagnostics.title">运行诊断</h2>
+        <div class="actions">
+          <button id="diagnostics-refresh-btn" type="button" data-i18n="diagnostics.refresh">刷新诊断</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="diagnostics.summary.key">项</th>
+                <th data-i18n="diagnostics.summary.value">值</th>
+              </tr>
+            </thead>
+            <tbody id="diagnostics-summary-body"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="diagnostics.warn.title">告警</th>
+              </tr>
+            </thead>
+            <tbody id="diagnostics-warning-body"></tbody>
           </table>
         </div>
       </section>
@@ -473,12 +518,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var routeToView = {
           "#/settings/global": "settings-global",
           "#/settings/rooms": "settings-rooms",
+          "#/diagnostics": "diagnostics",
           "#/health": "health",
           "#/audit": "audit"
         };
         var pathToRoute = {
           "/settings/global": "#/settings/global",
           "/settings/rooms": "#/settings/rooms",
+          "/diagnostics": "#/diagnostics",
           "/health": "#/health",
           "/audit": "#/audit"
         };
@@ -489,9 +536,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var i18n = {
           zh: {
             "header.title": "CodeHarbor 管理后台",
-            "header.subtitle": "管理全局配置、房间策略、健康检查与配置审计记录。",
+            "header.subtitle": "管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
             "tab.global": "全局",
             "tab.rooms": "房间",
+            "tab.diagnostics": "诊断",
             "tab.health": "健康",
             "tab.audit": "审计",
             "auth.token.label": "管理员令牌（可选）",
@@ -548,14 +596,29 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentEnabled": "启用多智能体工作流",
             "global.agentRounds": "工作流自动修复轮次",
             "global.save": "保存全局配置",
+            "global.validate": "校验全局配置",
             "global.reload": "重新加载",
             "global.restartMain": "重启主服务",
             "global.restartAll": "重启主服务+管理后台",
             "global.restartHint": "保存全局配置会更新 .env，并需要重启后完全生效。",
+            "snapshot.title": "配置导入/导出",
+            "snapshot.export": "导出配置快照",
+            "snapshot.importFile": "导入文件（JSON）",
+            "snapshot.importDryRun": "先执行 dry-run",
+            "snapshot.importApply": "应用导入",
             "notice.globalLoaded": "全局配置已加载。",
             "notice.globalLoadFailed": "加载全局配置失败：{error}",
             "notice.globalSaved": "保存成功：{keys}。需要重启后生效。",
+            "notice.globalValidated": "全局配置校验通过：{keys}",
+            "notice.globalValidateFailed": "全局配置校验失败：{error}",
             "notice.globalSaveFailed": "保存全局配置失败：{error}",
+            "notice.snapshotExported": "配置快照已导出：{filename}",
+            "notice.snapshotExportFailed": "导出配置快照失败：{error}",
+            "notice.snapshotFileRequired": "请先选择导入文件。",
+            "notice.snapshotJsonInvalid": "导入文件不是有效 JSON：{error}",
+            "notice.snapshotDryRunDone": "快照 dry-run 校验通过。",
+            "notice.snapshotImportDone": "配置快照已导入，建议重启服务。",
+            "notice.snapshotImportFailed": "导入配置快照失败：{error}",
             "notice.restartRequested": "已请求重启：{services}。{suffix}",
             "notice.restartFailed": "重启服务失败：{error}",
             "notice.restartSuffixAll": "管理后台页面可能在重启期间短暂断连。",
@@ -572,6 +635,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "rooms.allowPrefix": "允许前缀触发",
             "rooms.load": "加载房间",
             "rooms.save": "保存房间",
+            "rooms.validate": "校验房间",
             "rooms.delete": "删除房间",
             "rooms.refresh": "刷新列表",
             "rooms.table.roomId": "房间 ID",
@@ -584,11 +648,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.roomIdRequired": "房间 ID 不能为空。",
             "notice.roomLoaded": "房间配置已加载：{roomId}。",
             "notice.roomLoadFailed": "加载房间配置失败：{error}",
+            "notice.roomValidated": "房间配置校验通过：{roomId}。",
+            "notice.roomValidateFailed": "房间配置校验失败：{error}",
             "notice.roomSaved": "房间配置已保存：{roomId}。",
             "notice.roomSaveFailed": "保存房间配置失败：{error}",
             "notice.roomDeleted": "房间配置已删除：{roomId}。",
             "notice.roomDeleteFailed": "删除房间配置失败：{error}",
             "confirm.roomDelete": "确认删除房间配置：{roomId}？",
+            "diagnostics.title": "运行诊断",
+            "diagnostics.refresh": "刷新诊断",
+            "diagnostics.summary.key": "项",
+            "diagnostics.summary.value": "值",
+            "diagnostics.warn.title": "告警",
+            "notice.diagnosticsLoaded": "诊断信息已刷新。",
+            "notice.diagnosticsLoadFailed": "加载诊断信息失败：{error}",
+            "notice.diagnosticsWarningEmpty": "暂无告警。",
+            "diagnostics.key.provider": "CLI 提供方",
+            "diagnostics.key.runtimeMetrics": "运行时指标快照",
+            "diagnostics.key.metricsUpdatedAt": "指标更新时间",
+            "diagnostics.key.requestTotal": "累计请求数",
+            "diagnostics.key.activeExecutions": "当前执行中请求",
+            "diagnostics.key.roomSettings": "房间配置数量",
+            "diagnostics.key.runtimeHotVersion": "热更新配置版本",
+            "diagnostics.key.retention": "历史保留策略",
+            "diagnostics.key.latestRevision": "最近审计摘要",
             "health.title": "健康检查",
             "health.run": "执行健康检查",
             "health.table.component": "组件",
@@ -624,9 +707,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           },
           en: {
             "header.title": "CodeHarbor Admin Console",
-            "header.subtitle": "Manage global settings, room policies, health checks, and config audit records.",
+            "header.subtitle": "Manage global settings, room policies, diagnostics, health checks, and config audit records.",
             "tab.global": "Global",
             "tab.rooms": "Rooms",
+            "tab.diagnostics": "Diagnostics",
             "tab.health": "Health",
             "tab.audit": "Audit",
             "auth.token.label": "Admin Token (optional)",
@@ -683,14 +767,29 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentEnabled": "Enable multi-agent workflow",
             "global.agentRounds": "Workflow auto-repair rounds",
             "global.save": "Save Global Config",
+            "global.validate": "Validate Global Config",
             "global.reload": "Reload",
             "global.restartMain": "Restart Main Service",
             "global.restartAll": "Restart Main + Admin",
             "global.restartHint": "Saving global config updates .env and requires restart to fully take effect.",
+            "snapshot.title": "Config Import/Export",
+            "snapshot.export": "Export Config Snapshot",
+            "snapshot.importFile": "Import file (JSON)",
+            "snapshot.importDryRun": "Run dry-run first",
+            "snapshot.importApply": "Apply Import",
             "notice.globalLoaded": "Global config loaded.",
             "notice.globalLoadFailed": "Failed to load global config: {error}",
             "notice.globalSaved": "Saved: {keys}. Restart is required.",
+            "notice.globalValidated": "Global config validation passed: {keys}",
+            "notice.globalValidateFailed": "Global config validation failed: {error}",
             "notice.globalSaveFailed": "Failed to save global config: {error}",
+            "notice.snapshotExported": "Config snapshot exported: {filename}",
+            "notice.snapshotExportFailed": "Failed to export config snapshot: {error}",
+            "notice.snapshotFileRequired": "Please choose a snapshot file first.",
+            "notice.snapshotJsonInvalid": "Snapshot file is not valid JSON: {error}",
+            "notice.snapshotDryRunDone": "Snapshot dry-run validation passed.",
+            "notice.snapshotImportDone": "Snapshot imported. Restart is recommended.",
+            "notice.snapshotImportFailed": "Failed to import snapshot: {error}",
             "notice.restartRequested": "Restart requested: {services}. {suffix}",
             "notice.restartFailed": "Failed to restart service(s): {error}",
             "notice.restartSuffixAll": "Admin page may reconnect during restart.",
@@ -707,6 +806,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "rooms.allowPrefix": "Allow prefix trigger",
             "rooms.load": "Load Room",
             "rooms.save": "Save Room",
+            "rooms.validate": "Validate Room",
             "rooms.delete": "Delete Room",
             "rooms.refresh": "Refresh List",
             "rooms.table.roomId": "Room ID",
@@ -719,11 +819,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.roomIdRequired": "Room ID is required.",
             "notice.roomLoaded": "Room config loaded for {roomId}.",
             "notice.roomLoadFailed": "Failed to load room config: {error}",
+            "notice.roomValidated": "Room config validation passed for {roomId}.",
+            "notice.roomValidateFailed": "Room config validation failed: {error}",
             "notice.roomSaved": "Room config saved for {roomId}.",
             "notice.roomSaveFailed": "Failed to save room config: {error}",
             "notice.roomDeleted": "Room config deleted for {roomId}.",
             "notice.roomDeleteFailed": "Failed to delete room config: {error}",
             "confirm.roomDelete": "Delete room config for {roomId}?",
+            "diagnostics.title": "Diagnostics",
+            "diagnostics.refresh": "Refresh Diagnostics",
+            "diagnostics.summary.key": "Key",
+            "diagnostics.summary.value": "Value",
+            "diagnostics.warn.title": "Warnings",
+            "notice.diagnosticsLoaded": "Diagnostics refreshed.",
+            "notice.diagnosticsLoadFailed": "Failed to load diagnostics: {error}",
+            "notice.diagnosticsWarningEmpty": "No warnings.",
+            "diagnostics.key.provider": "CLI provider",
+            "diagnostics.key.runtimeMetrics": "Runtime metrics snapshot",
+            "diagnostics.key.metricsUpdatedAt": "Metrics updated at",
+            "diagnostics.key.requestTotal": "Total requests",
+            "diagnostics.key.activeExecutions": "Active executions",
+            "diagnostics.key.roomSettings": "Room settings count",
+            "diagnostics.key.runtimeHotVersion": "Runtime hot config version",
+            "diagnostics.key.retention": "History retention policy",
+            "diagnostics.key.latestRevision": "Latest audit summary",
             "health.title": "Health Check",
             "health.run": "Run Health Check",
             "health.table.component": "Component",
@@ -765,6 +884,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var loaded = {
           "settings-global": false,
           "settings-rooms": false,
+          diagnostics: false,
           health: false,
           audit: false
         };
@@ -775,6 +895,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var noticeNode = document.getElementById("notice");
         var authRoleNode = document.getElementById("auth-role");
         var roomListBody = document.getElementById("room-list-body");
+        var diagnosticsSummaryBody = document.getElementById("diagnostics-summary-body");
+        var diagnosticsWarningBody = document.getElementById("diagnostics-warning-body");
         var healthBody = document.getElementById("health-body");
         var auditBody = document.getElementById("audit-body");
 
@@ -806,6 +928,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         });
 
         document.getElementById("global-save-btn").addEventListener("click", saveGlobal);
+        document.getElementById("global-validate-btn").addEventListener("click", validateGlobalConfig);
         document.getElementById("global-reload-btn").addEventListener("click", loadGlobal);
         document.getElementById("global-restart-main-btn").addEventListener("click", function () {
           restartManagedServices(false);
@@ -813,10 +936,19 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         document.getElementById("global-restart-all-btn").addEventListener("click", function () {
           restartManagedServices(true);
         });
+        document.getElementById("config-export-btn").addEventListener("click", exportConfigSnapshot);
+        document.getElementById("config-import-dry-run-btn").addEventListener("click", function () {
+          importConfigSnapshot(true);
+        });
+        document.getElementById("config-import-apply-btn").addEventListener("click", function () {
+          importConfigSnapshot(false);
+        });
         document.getElementById("room-load-btn").addEventListener("click", loadRoom);
         document.getElementById("room-save-btn").addEventListener("click", saveRoom);
+        document.getElementById("room-validate-btn").addEventListener("click", validateRoomConfig);
         document.getElementById("room-delete-btn").addEventListener("click", deleteRoom);
         document.getElementById("room-refresh-btn").addEventListener("click", refreshRoomList);
+        document.getElementById("diagnostics-refresh-btn").addEventListener("click", loadDiagnostics);
         document.getElementById("health-refresh-btn").addEventListener("click", loadHealth);
         document.getElementById("audit-refresh-btn").addEventListener("click", loadAudit);
 
@@ -862,6 +994,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             loadGlobal();
           } else if (view === "settings-rooms") {
             refreshRoomList();
+          } else if (view === "diagnostics") {
+            loadDiagnostics();
           } else if (view === "health") {
             loadHealth();
           } else if (view === "audit") {
@@ -913,6 +1047,74 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         function asText(inputId) {
           return document.getElementById(inputId).value.trim();
+        }
+
+        function numberInRange(value, min, max) {
+          return Number.isFinite(value) && value >= min && value <= max;
+        }
+
+        function validateGlobalPayloadLocal(payload) {
+          var errors = [];
+          if (!payload.codexWorkdir) {
+            errors.push("global.defaultWorkdir");
+          }
+          if (!numberInRange(payload.matrixProgressMinIntervalMs, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.progressInterval");
+          }
+          if (!numberInRange(payload.matrixTypingTimeoutMs, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.typingTimeout");
+          }
+          if (!numberInRange(payload.sessionActiveWindowMinutes, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.sessionWindow");
+          }
+          if (!numberInRange(payload.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.rateWindow");
+          }
+          if (!numberInRange(payload.rateLimiter.maxRequestsPerUser, 0, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.rateUser");
+          }
+          if (!numberInRange(payload.rateLimiter.maxRequestsPerRoom, 0, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.rateRoom");
+          }
+          if (!numberInRange(payload.rateLimiter.maxConcurrentGlobal, 0, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.concurrentGlobal");
+          }
+          if (!numberInRange(payload.rateLimiter.maxConcurrentPerUser, 0, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.concurrentUser");
+          }
+          if (!numberInRange(payload.rateLimiter.maxConcurrentPerRoom, 0, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.concurrentRoom");
+          }
+          if (
+            payload.rateLimiter.maxConcurrentGlobal > 0 &&
+            payload.rateLimiter.maxConcurrentPerUser > payload.rateLimiter.maxConcurrentGlobal
+          ) {
+            errors.push("rateLimiter.maxConcurrentGlobal >= rateLimiter.maxConcurrentPerUser");
+          }
+          if (
+            payload.rateLimiter.maxConcurrentGlobal > 0 &&
+            payload.rateLimiter.maxConcurrentPerRoom > payload.rateLimiter.maxConcurrentGlobal
+          ) {
+            errors.push("rateLimiter.maxConcurrentGlobal >= rateLimiter.maxConcurrentPerRoom");
+          }
+          if (!numberInRange(payload.cliCompat.audioTranscribeMaxRetries, 0, 10)) {
+            errors.push("global.audioMaxRetries");
+          }
+          if (!numberInRange(payload.agentWorkflow.autoRepairMaxRounds, 0, 10)) {
+            errors.push("global.agentRounds");
+          }
+          return errors;
+        }
+
+        function validateRoomPayloadLocal(payload) {
+          var errors = [];
+          if (!payload.roomId) {
+            errors.push("rooms.roomId");
+          }
+          if (!payload.workdir) {
+            errors.push("rooms.workdir");
+          }
+          return errors;
         }
 
         function t(key, vars) {
@@ -1054,57 +1256,89 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           }
         }
 
+        function buildGlobalPayloadFromForm() {
+          return {
+            matrixCommandPrefix: asText("global-matrix-prefix"),
+            codexWorkdir: asText("global-workdir"),
+            matrixProgressUpdates: asBool("global-progress-enabled"),
+            matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
+            matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),
+            sessionActiveWindowMinutes: asNumber("global-active-window", 20),
+            updateCheck: {
+              enabled: asBool("global-update-check-enabled"),
+              timeoutMs: asNumber("global-update-check-timeout", 3000),
+              ttlMs: asNumber("global-update-check-ttl", 21600000)
+            },
+            groupDirectModeEnabled: asBool("global-direct-mode"),
+            rateLimiter: {
+              windowMs: asNumber("global-rate-window", 60000),
+              maxRequestsPerUser: asNumber("global-rate-user", 20),
+              maxRequestsPerRoom: asNumber("global-rate-room", 120),
+              maxConcurrentGlobal: asNumber("global-concurrency-global", 8),
+              maxConcurrentPerUser: asNumber("global-concurrency-user", 1),
+              maxConcurrentPerRoom: asNumber("global-concurrency-room", 4)
+            },
+            defaultGroupTriggerPolicy: {
+              allowMention: asBool("global-trigger-mention"),
+              allowReply: asBool("global-trigger-reply"),
+              allowActiveWindow: asBool("global-trigger-window"),
+              allowPrefix: asBool("global-trigger-prefix")
+            },
+            cliCompat: {
+              enabled: asBool("global-cli-enabled"),
+              passThroughEvents: asBool("global-cli-pass"),
+              preserveWhitespace: asBool("global-cli-whitespace"),
+              disableReplyChunkSplit: asBool("global-cli-disable-split"),
+              progressThrottleMs: asNumber("global-cli-throttle", 300),
+              fetchMedia: asBool("global-cli-fetch-media"),
+              transcribeAudio: asBool("global-cli-transcribe-audio"),
+              audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
+              audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
+              audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000),
+              audioTranscribeMaxRetries: asNumber("global-cli-audio-max-retries", 1),
+              audioTranscribeRetryDelayMs: asNumber("global-cli-audio-retry-delay", 800),
+              audioTranscribeMaxBytes: asNumber("global-cli-audio-max-bytes", 26214400),
+              audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
+              audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000)
+            },
+            agentWorkflow: {
+              enabled: asBool("global-agent-enabled"),
+              autoRepairMaxRounds: asNumber("global-agent-repair-rounds", 1)
+            }
+          };
+        }
+
+        async function validateGlobalConfig() {
+          try {
+            var payload = buildGlobalPayloadFromForm();
+            var localErrors = validateGlobalPayloadLocal(payload);
+            if (localErrors.length > 0) {
+              throw new Error(localErrors.join(", "));
+            }
+            var response = await apiRequest("/api/admin/config/validate", "POST", {
+              kind: "global",
+              data: payload
+            });
+            var keys = response && response.data && Array.isArray(response.data.checkedKeys)
+              ? response.data.checkedKeys.join(", ")
+              : "global config";
+            showNotice("ok", t("notice.globalValidated", { keys: keys }));
+          } catch (error) {
+            showNotice("error", t("notice.globalValidateFailed", { error: error.message }));
+          }
+        }
+
         async function saveGlobal() {
           try {
-            var body = {
-              matrixCommandPrefix: asText("global-matrix-prefix"),
-              codexWorkdir: asText("global-workdir"),
-              matrixProgressUpdates: asBool("global-progress-enabled"),
-              matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
-              matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),
-              sessionActiveWindowMinutes: asNumber("global-active-window", 20),
-              updateCheck: {
-                enabled: asBool("global-update-check-enabled"),
-                timeoutMs: asNumber("global-update-check-timeout", 3000),
-                ttlMs: asNumber("global-update-check-ttl", 21600000)
-              },
-              groupDirectModeEnabled: asBool("global-direct-mode"),
-              rateLimiter: {
-                windowMs: asNumber("global-rate-window", 60000),
-                maxRequestsPerUser: asNumber("global-rate-user", 20),
-                maxRequestsPerRoom: asNumber("global-rate-room", 120),
-                maxConcurrentGlobal: asNumber("global-concurrency-global", 8),
-                maxConcurrentPerUser: asNumber("global-concurrency-user", 1),
-                maxConcurrentPerRoom: asNumber("global-concurrency-room", 4)
-              },
-              defaultGroupTriggerPolicy: {
-                allowMention: asBool("global-trigger-mention"),
-                allowReply: asBool("global-trigger-reply"),
-                allowActiveWindow: asBool("global-trigger-window"),
-                allowPrefix: asBool("global-trigger-prefix")
-              },
-              cliCompat: {
-                enabled: asBool("global-cli-enabled"),
-                passThroughEvents: asBool("global-cli-pass"),
-                preserveWhitespace: asBool("global-cli-whitespace"),
-                disableReplyChunkSplit: asBool("global-cli-disable-split"),
-                progressThrottleMs: asNumber("global-cli-throttle", 300),
-                fetchMedia: asBool("global-cli-fetch-media"),
-                transcribeAudio: asBool("global-cli-transcribe-audio"),
-                audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
-                audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
-                audioTranscribeMaxChars: asNumber("global-cli-audio-max-chars", 6000),
-                audioTranscribeMaxRetries: asNumber("global-cli-audio-max-retries", 1),
-                audioTranscribeRetryDelayMs: asNumber("global-cli-audio-retry-delay", 800),
-                audioTranscribeMaxBytes: asNumber("global-cli-audio-max-bytes", 26214400),
-                audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
-                audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000)
-              },
-              agentWorkflow: {
-                enabled: asBool("global-agent-enabled"),
-                autoRepairMaxRounds: asNumber("global-agent-repair-rounds", 1)
-              }
-            };
+            var body = buildGlobalPayloadFromForm();
+            var localErrors = validateGlobalPayloadLocal(body);
+            if (localErrors.length > 0) {
+              throw new Error(localErrors.join(", "));
+            }
+            await apiRequest("/api/admin/config/validate", "POST", {
+              kind: "global",
+              data: body
+            });
             var response = await apiRequest("/api/admin/config/global", "PUT", body);
             var keys = Array.isArray(response.updatedKeys) ? response.updatedKeys.join(", ") : "global config";
             showNotice("warn", t("notice.globalSaved", { keys: keys }));
@@ -1124,6 +1358,70 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             showNotice("warn", t("notice.restartRequested", { services: restarted, suffix: suffix }));
           } catch (error) {
             showNotice("error", t("notice.restartFailed", { error: error.message }));
+          }
+        }
+
+        async function exportConfigSnapshot() {
+          try {
+            var response = await apiRequest("/api/admin/config/export", "GET");
+            var snapshot = response.data || {};
+            var timestamp = typeof snapshot.exportedAt === "string" ? snapshot.exportedAt : new Date().toISOString();
+            var filename =
+              "codeharbor-config-" +
+              timestamp.replace(/[:]/g, "-").replace(/[.][0-9]{3}Z$/, "Z") +
+              ".json";
+            var raw = JSON.stringify(snapshot, null, 2) + "\n";
+            var blob = new Blob([raw], { type: "application/json;charset=utf-8" });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showNotice("ok", t("notice.snapshotExported", { filename: filename }));
+          } catch (error) {
+            showNotice("error", t("notice.snapshotExportFailed", { error: error.message }));
+          }
+        }
+
+        async function readImportSnapshotFile() {
+          var input = document.getElementById("config-import-file");
+          var file = input && input.files && input.files[0] ? input.files[0] : null;
+          if (!file) {
+            throw new Error(t("notice.snapshotFileRequired"));
+          }
+          var raw = await file.text();
+          try {
+            return {
+              fileName: file.name,
+              snapshot: JSON.parse(raw)
+            };
+          } catch (error) {
+            var message = error && error.message ? String(error.message) : "invalid JSON";
+            throw new Error(t("notice.snapshotJsonInvalid", { error: message }));
+          }
+        }
+
+        async function importConfigSnapshot(dryRun) {
+          try {
+            var loadedFile = await readImportSnapshotFile();
+            var response = await apiRequest("/api/admin/config/import", "POST", {
+              dryRun: Boolean(dryRun),
+              snapshot: loadedFile.snapshot
+            });
+            if (dryRun) {
+              showNotice("ok", t("notice.snapshotDryRunDone"));
+              return;
+            }
+            showNotice("warn", t("notice.snapshotImportDone"));
+            await Promise.all([loadGlobal(), refreshRoomList(), loadAudit(), loadDiagnostics()]);
+            if (response && response.data && Array.isArray(response.data.outputLines) && response.data.outputLines.length > 0) {
+              console.log("[config-import]", response.data.outputLines.join(" | "));
+            }
+          } catch (error) {
+            showNotice("error", t("notice.snapshotImportFailed", { error: error.message }));
           }
         }
 
@@ -1182,6 +1480,36 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           document.getElementById("room-workdir").value = data.workdir || "";
         }
 
+        function buildRoomPayloadFromForm() {
+          return {
+            roomId: asText("room-id"),
+            enabled: asBool("room-enabled"),
+            allowMention: asBool("room-mention"),
+            allowReply: asBool("room-reply"),
+            allowActiveWindow: asBool("room-window"),
+            allowPrefix: asBool("room-prefix"),
+            workdir: asText("room-workdir"),
+            summary: asText("room-summary")
+          };
+        }
+
+        async function validateRoomConfig() {
+          try {
+            var payload = buildRoomPayloadFromForm();
+            var localErrors = validateRoomPayloadLocal(payload);
+            if (localErrors.length > 0) {
+              throw new Error(localErrors.join(", "));
+            }
+            await apiRequest("/api/admin/config/validate", "POST", {
+              kind: "room",
+              data: payload
+            });
+            showNotice("ok", t("notice.roomValidated", { roomId: payload.roomId }));
+          } catch (error) {
+            showNotice("error", t("notice.roomValidateFailed", { error: error.message }));
+          }
+        }
+
         async function saveRoom() {
           var roomId = asText("room-id");
           if (!roomId) {
@@ -1189,14 +1517,23 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             return;
           }
           try {
+            var payload = buildRoomPayloadFromForm();
+            var localErrors = validateRoomPayloadLocal(payload);
+            if (localErrors.length > 0) {
+              throw new Error(localErrors.join(", "));
+            }
+            await apiRequest("/api/admin/config/validate", "POST", {
+              kind: "room",
+              data: payload
+            });
             var body = {
-              enabled: asBool("room-enabled"),
-              allowMention: asBool("room-mention"),
-              allowReply: asBool("room-reply"),
-              allowActiveWindow: asBool("room-window"),
-              allowPrefix: asBool("room-prefix"),
-              workdir: asText("room-workdir"),
-              summary: asText("room-summary")
+              enabled: payload.enabled,
+              allowMention: payload.allowMention,
+              allowReply: payload.allowReply,
+              allowActiveWindow: payload.allowActiveWindow,
+              allowPrefix: payload.allowPrefix,
+              workdir: payload.workdir,
+              summary: payload.summary
             };
             await apiRequest("/api/admin/config/rooms/" + encodeURIComponent(roomId), "PUT", body);
             showNotice("ok", t("notice.roomSaved", { roomId: roomId }));
@@ -1224,6 +1561,74 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           } catch (error) {
             showNotice("error", t("notice.roomDeleteFailed", { error: error.message }));
           }
+        }
+
+        async function loadDiagnostics() {
+          try {
+            var response = await apiRequest("/api/admin/diagnostics", "GET");
+            var data = response.data || {};
+            var health = data.health || {};
+            var runtime = data.runtime || {};
+            var config = data.config || {};
+            diagnosticsSummaryBody.innerHTML = "";
+            appendDiagnosticsRow(t("diagnostics.key.provider"), data.cliProvider || "-");
+            appendDiagnosticsRow(
+              t("diagnostics.key.runtimeMetrics"),
+              runtime.metricsSnapshotAvailable ? t("health.status.ok") : t("health.status.fail")
+            );
+            appendDiagnosticsRow(t("diagnostics.key.metricsUpdatedAt"), runtime.metricsUpdatedAtIso || "-");
+            appendDiagnosticsRow(t("diagnostics.key.requestTotal"), String(runtime.requestTotal || 0));
+            appendDiagnosticsRow(t("diagnostics.key.activeExecutions"), String(runtime.activeExecutions || 0));
+            appendDiagnosticsRow(t("diagnostics.key.roomSettings"), String(config.roomSettingsCount || 0));
+            appendDiagnosticsRow(t("diagnostics.key.runtimeHotVersion"), String(config.runtimeHotConfigVersion || 0));
+            var retention = config.retentionPolicy || {};
+            appendDiagnosticsRow(
+              t("diagnostics.key.retention"),
+              (retention.enabled ? "on" : "off") + " / " + String(retention.retentionDays || 0) + "d"
+            );
+            appendDiagnosticsRow(
+              t("diagnostics.key.latestRevision"),
+              config.latestRevision ? String(config.latestRevision.summary || "-") : "-"
+            );
+            appendDiagnosticsRow(
+              t("health.component.codex"),
+              health.codex && health.codex.ok ? t("health.status.ok") : t("health.status.fail")
+            );
+            appendDiagnosticsRow(
+              t("health.component.matrix"),
+              health.matrix && health.matrix.ok ? t("health.status.ok") : t("health.status.fail")
+            );
+
+            diagnosticsWarningBody.innerHTML = "";
+            var warnings = Array.isArray(data.warnings) ? data.warnings : [];
+            if (warnings.length === 0) {
+              var emptyWarningRow = document.createElement("tr");
+              var emptyWarningCell = document.createElement("td");
+              emptyWarningCell.textContent = t("notice.diagnosticsWarningEmpty");
+              emptyWarningRow.appendChild(emptyWarningCell);
+              diagnosticsWarningBody.appendChild(emptyWarningRow);
+            } else {
+              for (var i = 0; i < warnings.length; i += 1) {
+                var warningRow = document.createElement("tr");
+                var warningCell = document.createElement("td");
+                warningCell.textContent = String(warnings[i]);
+                warningRow.appendChild(warningCell);
+                diagnosticsWarningBody.appendChild(warningRow);
+              }
+            }
+            showNotice("ok", t("notice.diagnosticsLoaded"));
+          } catch (error) {
+            showNotice("error", t("notice.diagnosticsLoadFailed", { error: error.message }));
+            renderEmptyRow(diagnosticsSummaryBody, 2, t("table.loadFailed"));
+            renderEmptyRow(diagnosticsWarningBody, 1, t("table.loadFailed"));
+          }
+        }
+
+        function appendDiagnosticsRow(key, value) {
+          var row = document.createElement("tr");
+          appendCell(row, key);
+          appendCell(row, value);
+          diagnosticsSummaryBody.appendChild(row);
         }
 
         async function loadHealth() {

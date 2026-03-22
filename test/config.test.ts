@@ -40,6 +40,30 @@ describe("loadConfig ADMIN_TOKENS_JSON", () => {
     ]);
   });
 
+  it("parses optional token scopes and normalizes scope patterns", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        ADMIN_TOKENS_JSON: JSON.stringify([
+          {
+            token: "audit-secret",
+            role: "viewer",
+            actor: "ops-audit",
+            scopes: [" Admin.Read.Audit ", "admin.read.auth", "admin.read.audit"],
+          },
+        ]),
+      }),
+    );
+
+    expect(config.adminTokens).toEqual([
+      {
+        token: "audit-secret",
+        role: "viewer",
+        actor: "ops-audit",
+        scopes: ["admin.read.audit", "admin.read.auth"],
+      },
+    ]);
+  });
+
   it("rejects invalid JSON payload", () => {
     expect(() =>
       loadConfig(
@@ -79,6 +103,22 @@ describe("loadConfig ADMIN_TOKENS_JSON", () => {
         }),
       ),
     ).toThrow(/"admin" or "viewer"/);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          ADMIN_TOKENS_JSON: JSON.stringify([{ token: "x", scopes: [] }]),
+        }),
+      ),
+    ).toThrow(/must include at least one non-empty scope/i);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          ADMIN_TOKENS_JSON: JSON.stringify([{ token: "x", scopes: ["bad scope"] }]),
+        }),
+      ),
+    ).toThrow(/invalid scope pattern/i);
   });
 });
 
@@ -358,6 +398,7 @@ describe("loadConfig API task server", () => {
     expect(config.apiBindHost).toBe("127.0.0.1");
     expect(config.apiPort).toBe(8788);
     expect(config.apiToken).toBeNull();
+    expect(config.apiTokenScopes).toEqual([]);
     expect(config.apiWebhookSecret).toBeNull();
     expect(config.apiWebhookTimestampToleranceSeconds).toBe(300);
   });
@@ -377,13 +418,41 @@ describe("loadConfig API task server", () => {
       createBaseEnv({
         API_ENABLED: "true",
         API_TOKEN: "secret-token",
+        API_TOKEN_SCOPES_JSON: JSON.stringify([" tasks.submit.api ", "tasks.read.api", "tasks.submit.api"]),
         API_WEBHOOK_SECRET: "whsec_test_123",
         API_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: "900",
       }),
     );
 
+    expect(config.apiTokenScopes).toEqual(["tasks.submit.api", "tasks.read.api"]);
     expect(config.apiWebhookSecret).toBe("whsec_test_123");
     expect(config.apiWebhookTimestampToleranceSeconds).toBe(900);
+  });
+
+  it("rejects invalid API token scope config", () => {
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          API_TOKEN_SCOPES_JSON: "{bad-json",
+        }),
+      ),
+    ).toThrow(/API_TOKEN_SCOPES_JSON/);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          API_TOKEN_SCOPES_JSON: JSON.stringify([]),
+        }),
+      ),
+    ).toThrow(/at least one non-empty scope/i);
+
+    expect(() =>
+      loadConfig(
+        createBaseEnv({
+          API_TOKEN_SCOPES_JSON: JSON.stringify(["bad scope"]),
+        }),
+      ),
+    ).toThrow(/invalid scope pattern/i);
   });
 
   it("rejects invalid webhook tolerance", () => {
