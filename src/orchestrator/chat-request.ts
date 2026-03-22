@@ -7,9 +7,11 @@ import type { DocumentContextItem } from "../document-context";
 import type { AudioTranscript } from "../audio-transcriber";
 import type { CodexExecutionHandle, CodexProgressEvent } from "../executor/codex-executor";
 import type { CodexSessionRuntime } from "../executor/codex-session-runtime";
+import type { OutputLanguage } from "../config";
 import { formatDurationMs, formatError, summarizeSingleLine } from "./helpers";
 import { shouldRetryClaudeImageFailure } from "./media-progress";
 import { buildFailureProgressSummary, classifyExecutionOutcome } from "./workflow-status";
+import { byOutputLanguage } from "./output-language";
 
 interface SendProgressContext {
   conversationId: string;
@@ -62,6 +64,7 @@ interface MediaMetricsLike {
 
 interface ExecuteChatRequestDeps {
   logger: Logger;
+  outputLanguage: OutputLanguage;
   sessionActiveWindowMs: number;
   cliCompat: { enabled: boolean; passThroughEvents: boolean };
   stateStore: StateStoreLike;
@@ -142,6 +145,7 @@ export async function executeChatRequest(
   deps: ExecuteChatRequestDeps,
   input: ExecuteChatRequestInput,
 ): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
   const previousCodexSessionId = deps.stateStore.getCodexSessionId(input.sessionKey);
   const allowBridgeContext =
@@ -286,7 +290,10 @@ export async function executeChatRequest(
       });
       await deps.sendNotice(
         input.message.conversationId,
-        `[CodeHarbor] 检测到 Claude 图片处理失败，已自动降级为纯文本重试。原因: ${reason}`,
+        localize(
+          `[CodeHarbor] 检测到 Claude 图片处理失败，已自动降级为纯文本重试。原因: ${reason}`,
+          `[CodeHarbor] Claude image processing failed. Automatically retrying in text-only mode. Reason: ${reason}`,
+        ),
       );
       deps.logger.warn("Claude image execution failed, retrying without image inputs", {
         requestId: input.requestId,
@@ -330,7 +337,10 @@ export async function executeChatRequest(
           progressNoticeEventId = next;
         },
       },
-      `处理完成（后端工具: ${deps.formatBackendToolLabel(input.backendProfile)}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+      localize(
+        `处理完成（后端工具: ${deps.formatBackendToolLabel(input.backendProfile)}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+        `Completed (backend: ${deps.formatBackendToolLabel(input.backendProfile)}; elapsed: ${formatDurationMs(Date.now() - requestStartedAt)})`,
+      ),
     );
     sendDurationMs = Date.now() - sendStartedAt;
 
@@ -359,12 +369,18 @@ export async function executeChatRequest(
           progressNoticeEventId = next;
         },
       },
-      buildFailureProgressSummary(status, requestStartedAt, error),
+      buildFailureProgressSummary(status, requestStartedAt, error, deps.outputLanguage),
     );
 
     if (status !== "cancelled" && !input.deferFailureHandlingToQueue) {
       try {
-        await deps.sendMessage(input.message.conversationId, `[CodeHarbor] Failed to process request: ${formatError(error)}`);
+        await deps.sendMessage(
+          input.message.conversationId,
+          localize(
+            `[CodeHarbor] 请求处理失败: ${formatError(error)}`,
+            `[CodeHarbor] Failed to process request: ${formatError(error)}`,
+          ),
+        );
       } catch (sendError) {
         deps.logger.error("Failed to send error reply to Matrix", sendError);
       }

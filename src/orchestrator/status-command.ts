@@ -157,7 +157,7 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
     backendRouteMode === "auto" && backendRouteReasonRaw === "manual_override"
       ? "none"
       : backendDecision?.ruleId ?? "none";
-  const backendRouteReasonDesc = describeBackendRouteReason(backendRouteReason);
+  const backendRouteReasonDesc = describeBackendRouteReason(backendRouteReason, deps.outputLanguage);
   const backendRouteFallback = isBackendRouteFallbackReason(backendRouteReason) ? "yes" : "no";
 
   await deps.sendNotice(

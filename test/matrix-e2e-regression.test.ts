@@ -1513,6 +1513,10 @@ describe("Matrix e2e regression", () => {
 
     await orchestrator.handleMessage(makeInbound({ isDirectMessage: true, text: "explode" }));
 
-    expect(channel.sent.some((entry) => entry.text.includes("Failed to process request: boom"))).toBe(true);
+    expect(
+      channel.sent.some(
+        (entry) => entry.text.includes("请求处理失败: boom") || entry.text.includes("Failed to process request: boom"),
+      ),
+    ).toBe(true);
   });
 });

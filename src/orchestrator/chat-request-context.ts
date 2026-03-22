@@ -9,6 +9,7 @@ type ChatRequestDispatchContext = Parameters<typeof executeChatRequest>[0];
 
 interface ChatRequestContextInput {
   logger: ChatRequestDispatchContext["logger"];
+  outputLanguage: ChatRequestDispatchContext["outputLanguage"];
   sessionActiveWindowMs: number;
   cliCompat: ChatRequestDispatchContext["cliCompat"];
   stateStore: ChatRequestDispatchContext["stateStore"];
@@ -35,6 +36,7 @@ interface ChatRequestContextInput {
 export function buildChatRequestDispatchContext(input: ChatRequestContextInput): ChatRequestDispatchContext {
   return {
     logger: input.logger,
+    outputLanguage: input.outputLanguage,
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     cliCompat: input.cliCompat,
     stateStore: input.stateStore,
@@ -61,6 +63,7 @@ export function buildChatRequestDispatchContext(input: ChatRequestContextInput):
 
 interface ChatRequestRuntimeContextInput {
   logger: Logger;
+  outputLanguage: ChatRequestDispatchContext["outputLanguage"];
   sessionActiveWindowMs: number;
   cliCompatEnabled: boolean;
   cliCompatPassThroughEvents: boolean;
@@ -98,6 +101,7 @@ export function buildChatRequestDispatchContextFromRuntime(
   const contextBridgeMaxChars = Math.max(0, Math.floor(input.contextBridgeMaxChars));
   return buildChatRequestDispatchContext({
     logger: input.logger,
+    outputLanguage: input.outputLanguage,
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     cliCompat: {
       enabled: input.cliCompatEnabled,

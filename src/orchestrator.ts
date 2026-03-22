@@ -804,6 +804,7 @@ export class Orchestrator {
   ): Promise<void> {
     await runSendQueuedTaskFailureNotice(
       {
+        outputLanguage: this.outputLanguage,
         taskQueueRetryMaxAttempts: this.taskQueueRetryPolicy.maxAttempts,
         sendMessage: (targetConversationId, text) => this.channel.sendMessage(targetConversationId, text),
         logger: this.logger,
@@ -1114,6 +1115,7 @@ export class Orchestrator {
   private buildChatRequestDispatchContext(): Parameters<typeof executeChatRequest>[0] {
     return runBuildChatRequestDispatchContextFromRuntime({
       logger: this.logger,
+      outputLanguage: this.outputLanguage,
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       cliCompatEnabled: this.cliCompat.enabled,
       cliCompatPassThroughEvents: this.cliCompat.passThroughEvents,
@@ -1638,6 +1640,7 @@ export class Orchestrator {
   private buildUpgradeCommandDispatchContext(): Parameters<typeof runSendUpgradeCommand>[0] {
     return runBuildUpgradeCommandDispatchContext({
       logger: this.logger,
+      outputLanguage: this.outputLanguage,
       botNoticePrefix: this.botNoticePrefix,
       upgradeMutex: this.upgradeMutex,
       authorizeUpgradeRequest: (targetMessage) => this.authorizeUpgradeRequest(targetMessage),
@@ -1757,6 +1760,7 @@ export class Orchestrator {
 
   private buildBackendCommandDispatchContext(): Parameters<typeof runSendBackendCommand>[0] {
     return runBuildBackendCommandDispatchContextFromRuntime({
+      outputLanguage: this.outputLanguage,
       sessionActiveWindowMs: this.sessionActiveWindowMs,
       canCreateBackendRuntime: Boolean(this.executorFactory),
       state: {
@@ -1807,6 +1811,7 @@ export class Orchestrator {
 
   private buildDiagCommandDispatchContext(): Parameters<typeof runSendDiagCommand>[0] {
     return runBuildDiagCommandDispatchContextFromRuntime({
+      outputLanguage: this.outputLanguage,
       botNoticePrefix: this.botNoticePrefix,
       processStartedAtIso: this.processStartedAtIso,
       defaultBackendProfile: this.defaultBackendProfile,

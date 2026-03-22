@@ -1,7 +1,9 @@
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { InboundMessage } from "../types";
+import type { OutputLanguage } from "../config";
 import { isSameBackendProfile, parseBackendTarget } from "./command-routing";
 import { describeBackendRouteReason, isBackendRouteFallbackReason } from "./diagnostic-formatters";
+import { byOutputLanguage } from "./output-language";
 
 interface SessionBackendOverrideLike {
   profile: BackendModelRouteProfile;
@@ -21,6 +23,7 @@ interface StateStoreLike {
 }
 
 interface HandleBackendCommandDeps {
+  outputLanguage: OutputLanguage;
   sessionActiveWindowMs: number;
   canCreateBackendRuntime: boolean;
   sessionBackendOverrides: Map<string, SessionBackendOverrideLike>;
@@ -52,6 +55,7 @@ export async function handleBackendCommand(
   deps: HandleBackendCommandDeps,
   input: HandleBackendCommandInput,
 ): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const target = parseBackendTarget(input.message.text);
   const manualOverride = deps.sessionBackendOverrides.get(input.sessionKey);
   const statusProfile = deps.resolveSessionBackendStatusProfile(input.sessionKey);
@@ -61,24 +65,45 @@ export async function handleBackendCommand(
     const rawReason = manualOverride ? "manual_override" : decision?.reasonCode ?? "default_fallback";
     const reason = !manualOverride && rawReason === "manual_override" ? "default_fallback" : rawReason;
     const rule = !manualOverride && rawReason === "manual_override" ? "none" : decision?.ruleId ?? "none";
-    const reasonDesc = describeBackendRouteReason(reason);
+    const reasonDesc = describeBackendRouteReason(reason, deps.outputLanguage);
     const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
     await deps.sendNotice(
       input.message.conversationId,
-      `[CodeHarbor] 当前后端工具: ${deps.formatBackendToolLabel(statusProfile)}\n路由模式: ${mode}\n命中原因: ${reason}\n原因说明: ${reasonDesc}\n命中规则: ${rule}\n是否回退: ${fallback}\n可用命令: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
+      localize(
+        `[CodeHarbor] 当前后端工具: ${deps.formatBackendToolLabel(statusProfile)}
+路由模式: ${mode}
+命中原因: ${reason}
+原因说明: ${reasonDesc}
+命中规则: ${rule}
+是否回退: ${fallback}
+可用命令: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
+        `[CodeHarbor] Current backend tool: ${deps.formatBackendToolLabel(statusProfile)}
+routeMode: ${mode}
+reason: ${reason}
+reasonDesc: ${reasonDesc}
+rule: ${rule}
+fallback: ${fallback}
+usage: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
+      ),
     );
     return;
   }
 
   if (target.kind === "auto") {
     if (!manualOverride) {
-      await deps.sendNotice(input.message.conversationId, "[CodeHarbor] 当前已经处于自动路由模式。");
+      await deps.sendNotice(
+        input.message.conversationId,
+        localize("[CodeHarbor] 当前已经处于自动路由模式。", "[CodeHarbor] Already in auto routing mode."),
+      );
       return;
     }
     if (deps.runningExecutions.has(input.sessionKey)) {
       await deps.sendNotice(
         input.message.conversationId,
-        "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
+        localize(
+          "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
+          "[CodeHarbor] Active task detected in this session. Please wait for completion before switching backend.",
+        ),
       );
       return;
     }
@@ -92,7 +117,10 @@ export async function handleBackendCommand(
     deps.autoDevSnapshots.delete(input.sessionKey);
     await deps.sendNotice(
       input.message.conversationId,
-      "[CodeHarbor] 已恢复自动路由模式。下一个请求会自动注入最近本地会话历史作为桥接上下文。",
+      localize(
+        "[CodeHarbor] 已恢复自动路由模式。下一个请求会自动注入最近本地会话历史作为桥接上下文。",
+        "[CodeHarbor] Auto routing mode restored. Next request will inject recent local session history as bridge context.",
+      ),
     );
     return;
   }
@@ -104,7 +132,10 @@ export async function handleBackendCommand(
   ) {
     await deps.sendNotice(
       input.message.conversationId,
-      `[CodeHarbor] 后端工具已是 ${deps.formatBackendToolLabel(targetProfile)}（manual）。`,
+      localize(
+        `[CodeHarbor] 后端工具已是 ${deps.formatBackendToolLabel(targetProfile)}（manual）。`,
+        `[CodeHarbor] Backend tool is already ${deps.formatBackendToolLabel(targetProfile)} (manual).`,
+      ),
     );
     return;
   }
@@ -124,7 +155,10 @@ export async function handleBackendCommand(
     deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
     await deps.sendNotice(
       input.message.conversationId,
-      `[CodeHarbor] 已固定当前后端工具为 ${deps.formatBackendToolLabel(targetProfile)}（manual）。当前会话保持不变。`,
+      localize(
+        `[CodeHarbor] 已固定当前后端工具为 ${deps.formatBackendToolLabel(targetProfile)}（manual）。当前会话保持不变。`,
+        `[CodeHarbor] Backend tool pinned to ${deps.formatBackendToolLabel(targetProfile)} (manual). Current session stays unchanged.`,
+      ),
     );
     return;
   }
@@ -132,14 +166,20 @@ export async function handleBackendCommand(
   if (!deps.canCreateBackendRuntime && !deps.hasBackendRuntime(targetProfile)) {
     await deps.sendNotice(
       input.message.conversationId,
-      "[CodeHarbor] 当前运行模式不支持会话内切换后端，请修改 .env 后重启服务。",
+      localize(
+        "[CodeHarbor] 当前运行模式不支持会话内切换后端，请修改 .env 后重启服务。",
+        "[CodeHarbor] Current runtime mode does not support in-session backend switching. Update .env and restart service.",
+      ),
     );
     return;
   }
   if (deps.runningExecutions.has(input.sessionKey)) {
     await deps.sendNotice(
       input.message.conversationId,
-      "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
+      localize(
+        "[CodeHarbor] 检测到当前会话仍有运行中任务，请等待任务完成后再切换后端工具。",
+        "[CodeHarbor] Active task detected in this session. Please wait for completion before switching backend.",
+      ),
     );
     return;
   }
@@ -164,6 +204,9 @@ export async function handleBackendCommand(
 
   await deps.sendNotice(
     input.message.conversationId,
-    `[CodeHarbor] 已切换后端工具为 ${deps.formatBackendToolLabel(targetProfile)}（manual）。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
+    localize(
+      `[CodeHarbor] 已切换后端工具为 ${deps.formatBackendToolLabel(targetProfile)}（manual）。下一个请求会自动注入最近本地会话历史作为桥接上下文。`,
+      `[CodeHarbor] Backend switched to ${deps.formatBackendToolLabel(targetProfile)} (manual). Next request will inject recent local session history as bridge context.`,
+    ),
   );
 }

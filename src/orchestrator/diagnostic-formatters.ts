@@ -70,7 +70,7 @@ export function formatAutoDevGitCommitRecords(records: AutoDevGitCommitRecordLik
     .join("\n");
 }
 
-export function formatBackendRouteDiagRecords(records: BackendRouteDiagRecordLike[]): string {
+export function formatBackendRouteDiagRecords(records: BackendRouteDiagRecordLike[], outputLanguage: OutputLanguage = "zh"): string {
   if (records.length === 0) {
     return "- (empty)";
   }
@@ -78,7 +78,7 @@ export function formatBackendRouteDiagRecords(records: BackendRouteDiagRecordLik
     .map((record) => {
       return [
         `- at=${record.at} taskType=${record.taskType} backend=${formatBackendRouteProfile(record.profile)}`,
-        `  source=${record.source} reason=${record.reasonCode}(${describeBackendRouteReason(record.reasonCode)}) rule=${
+        `  source=${record.source} reason=${record.reasonCode}(${describeBackendRouteReason(record.reasonCode, outputLanguage)}) rule=${
           record.ruleId ?? "none"
         } fallback=${isBackendRouteFallbackReason(record.reasonCode) ? "yes" : "no"}`,
       ].join("\n");
@@ -97,17 +97,23 @@ export function isBackendRouteFallbackReason(reasonCode: BackendRouteReasonCode)
   return reasonCode === "default_fallback" || reasonCode === "factory_unavailable";
 }
 
-export function describeBackendRouteReason(reasonCode: BackendRouteReasonCode): string {
+export function describeBackendRouteReason(reasonCode: BackendRouteReasonCode, outputLanguage: OutputLanguage = "zh"): string {
   if (reasonCode === "manual_override") {
-    return "会话已通过 /backend 手动固定后端";
+    return outputLanguage === "en"
+      ? "Session backend is pinned manually via /backend"
+      : "会话已通过 /backend 手动固定后端";
   }
   if (reasonCode === "rule_match") {
-    return "命中路由规则并使用规则目标";
+    return outputLanguage === "en"
+      ? "Matched routing rule and selected rule target backend"
+      : "命中路由规则并使用规则目标";
   }
   if (reasonCode === "factory_unavailable") {
-    return "命中规则但目标执行器不可用，回退默认后端";
+    return outputLanguage === "en"
+      ? "Matched rule but target executor is unavailable; fallback to default backend"
+      : "命中规则但目标执行器不可用，回退默认后端";
   }
-  return "未命中规则，使用默认后端";
+  return outputLanguage === "en" ? "No rule matched; using default backend" : "未命中规则，使用默认后端";
 }
 
 export function formatQueuePendingSessions(sessions: QueuePendingSessionLike[]): string {
@@ -164,3 +170,4 @@ export function formatAutoDevReleaseResult(result: AutoDevReleaseResultLike): st
   }
   return `failed (${result.error ?? "unknown"})`;
 }
+import type { OutputLanguage } from "../config";

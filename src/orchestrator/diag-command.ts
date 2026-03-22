@@ -4,6 +4,7 @@ import { formatPackageUpdateHint, type PackageUpdateStatus } from "../package-up
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord, UpgradeRunStats } from "../store/state-store";
 import type { InboundMessage } from "../types";
+import type { OutputLanguage } from "../config";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import {
   parseDiagTarget,
@@ -78,6 +79,7 @@ interface MediaMetricsLike {
 }
 
 interface DiagCommandDeps {
+  outputLanguage: OutputLanguage;
   botNoticePrefix: string;
   processStartedAtIso: string;
   defaultBackendProfile: BackendModelRouteProfile;
@@ -129,7 +131,7 @@ interface DiagCommandDeps {
 export async function handleDiagCommand(deps: DiagCommandDeps, message: InboundMessage): Promise<void> {
   const target = parseDiagTarget(message.text);
   if (!target || target.kind === "help") {
-    await deps.sendNotice(message.conversationId, buildDiagUsageNotice());
+    await deps.sendNotice(message.conversationId, buildDiagUsageNotice(deps.outputLanguage));
     return;
   }
 
@@ -170,7 +172,7 @@ async function handleVersionDiag(deps: DiagCommandDeps, conversationId: string):
       latestHint: formatPackageUpdateHint(packageUpdate),
       checkedAt: packageUpdate.checkedAt,
       cliScriptPath: process.argv[1] ? path.resolve(process.argv[1]) : "unknown",
-    }),
+    }, deps.outputLanguage),
   );
 }
 
@@ -187,7 +189,7 @@ async function handleMediaDiag(deps: DiagCommandDeps, conversationId: string, ta
       audioPolicy,
       counters: snapshot.counters,
       recordsText: formatMediaDiagEvents(snapshot.recentEvents),
-    }),
+    }, deps.outputLanguage),
   );
 }
 
@@ -241,7 +243,7 @@ async function handleAutoDevDiag(
       },
       commitText,
       recordsText,
-    }),
+    }, deps.outputLanguage),
   );
 }
 
@@ -259,7 +261,7 @@ async function handleRouteDiag(
   const rawReason = backendOverride ? "manual_override" : backendDecision?.reasonCode ?? "default_fallback";
   const reason = !backendOverride && rawReason === "manual_override" ? "default_fallback" : rawReason;
   const rule = !backendOverride && rawReason === "manual_override" ? "none" : backendDecision?.ruleId ?? "none";
-  const reasonDesc = describeBackendRouteReason(reason);
+  const reasonDesc = describeBackendRouteReason(reason, deps.outputLanguage);
   const fallback = isBackendRouteFallbackReason(reason) ? "yes" : "no";
   const ruleStats = deps.getBackendModelRouterStats();
   const records = deps.listBackendRouteDiagRecords(target.limit, sessionKey);
@@ -277,8 +279,8 @@ async function handleRouteDiag(
       rule,
       reasonDesc,
       fallback,
-      recordsText: formatBackendRouteDiagRecords(records),
-    }),
+      recordsText: formatBackendRouteDiagRecords(records, deps.outputLanguage),
+    }, deps.outputLanguage),
   );
 }
 
@@ -289,7 +291,7 @@ async function handleQueueDiag(
 ): Promise<void> {
   const queueStore = deps.getTaskQueueStateStore();
   if (!queueStore) {
-    await deps.sendNotice(conversationId, buildDiagQueueUnavailableNotice(deps.botNoticePrefix));
+    await deps.sendNotice(conversationId, buildDiagQueueUnavailableNotice(deps.botNoticePrefix, deps.outputLanguage));
     return;
   }
   const counts = queueStore.getTaskQueueStatusCounts();
@@ -315,7 +317,7 @@ async function handleQueueDiag(
       earliestRetryAtIso: earliestRetryAt === null ? "N/A" : new Date(earliestRetryAt).toISOString(),
       sessionsText: formatQueuePendingSessions(sessions),
       archiveText: formatQueueFailureArchive(archive),
-    }),
+    }, deps.outputLanguage),
   );
 }
 
@@ -335,6 +337,6 @@ async function handleUpgradeDiag(
       lockText: formatUpgradeLockSummary(lock),
       stats,
       recordsText: formatUpgradeDiagRecords(runs),
-    }),
+    }, deps.outputLanguage),
   );
 }

@@ -3,6 +3,7 @@ import { sendBackendCommand as runSendBackendCommand } from "./backend-command-d
 type BackendCommandDispatchContext = Parameters<typeof runSendBackendCommand>[0];
 
 interface BackendCommandContextInput {
+  outputLanguage: BackendCommandDispatchContext["outputLanguage"];
   sessionActiveWindowMs: number;
   canCreateBackendRuntime: boolean;
   sessionBackendOverrides: BackendCommandDispatchContext["sessionBackendOverrides"];
@@ -23,6 +24,7 @@ interface BackendCommandContextInput {
 }
 
 interface BackendCommandRuntimeContextInput {
+  outputLanguage: BackendCommandDispatchContext["outputLanguage"];
   sessionActiveWindowMs: number;
   canCreateBackendRuntime: boolean;
   state: Pick<
@@ -52,6 +54,7 @@ export function buildBackendCommandDispatchContext(
   input: BackendCommandContextInput,
 ): BackendCommandDispatchContext {
   return {
+    outputLanguage: input.outputLanguage,
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     canCreateBackendRuntime: input.canCreateBackendRuntime,
     sessionBackendOverrides: input.sessionBackendOverrides,
@@ -76,6 +79,7 @@ export function buildBackendCommandDispatchContextFromRuntime(
   input: BackendCommandRuntimeContextInput,
 ): BackendCommandDispatchContext {
   return buildBackendCommandDispatchContext({
+    outputLanguage: input.outputLanguage,
     sessionActiveWindowMs: input.sessionActiveWindowMs,
     canCreateBackendRuntime: input.canCreateBackendRuntime,
     sessionBackendOverrides: input.state.sessionBackendOverrides,

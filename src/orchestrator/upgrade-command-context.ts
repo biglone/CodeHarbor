@@ -4,6 +4,7 @@ type UpgradeCommandDispatchContext = Parameters<typeof runSendUpgradeCommand>[0]
 
 interface UpgradeCommandContextInput {
   logger: UpgradeCommandDispatchContext["logger"];
+  outputLanguage: UpgradeCommandDispatchContext["outputLanguage"];
   botNoticePrefix: string;
   upgradeMutex: UpgradeCommandDispatchContext["upgradeMutex"];
   authorizeUpgradeRequest: UpgradeCommandDispatchContext["authorizeUpgradeRequest"];
@@ -22,6 +23,7 @@ export function buildUpgradeCommandDispatchContext(
 ): UpgradeCommandDispatchContext {
   return {
     logger: input.logger,
+    outputLanguage: input.outputLanguage,
     botNoticePrefix: input.botNoticePrefix,
     upgradeMutex: input.upgradeMutex,
     authorizeUpgradeRequest: input.authorizeUpgradeRequest,

@@ -4017,10 +4017,34 @@ describe("Orchestrator", () => {
         eventId: "$workflow-en",
       }),
     );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/backend status",
+        eventId: "$backend-en",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/diag version",
+        eventId: "$diag-en",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/agents status",
+        eventId: "$agents-status-en",
+      }),
+    );
 
     expect(channel.notices.some((entry) => entry.text.includes("Available commands"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow started"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("Planner started plan generation"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Current backend tool:"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Diagnosis (version)"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow status"))).toBe(true);
   });
 
   it("supports /autodev skills mode switch and injects role skills into workflow prompts", async () => {

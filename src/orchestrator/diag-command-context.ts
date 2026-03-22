@@ -7,6 +7,7 @@ import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
 type DiagCommandDispatchContext = Parameters<typeof runSendDiagCommand>[0];
 
 interface DiagCommandContextInput {
+  outputLanguage: DiagCommandDispatchContext["outputLanguage"];
   botNoticePrefix: string;
   processStartedAtIso: string;
   defaultBackendProfile: BackendModelRouteProfile;
@@ -48,6 +49,7 @@ interface DiagCommandContextInput {
 }
 
 interface DiagCommandRuntimeContextInput {
+  outputLanguage: DiagCommandDispatchContext["outputLanguage"];
   botNoticePrefix: string;
   processStartedAtIso: string;
   defaultBackendProfile: BackendModelRouteProfile;
@@ -85,6 +87,7 @@ interface DiagCommandRuntimeContextInput {
 
 export function buildDiagCommandDispatchContext(input: DiagCommandContextInput): DiagCommandDispatchContext {
   return {
+    outputLanguage: input.outputLanguage,
     botNoticePrefix: input.botNoticePrefix,
     processStartedAtIso: input.processStartedAtIso,
     defaultBackendProfile: input.defaultBackendProfile,
@@ -123,6 +126,7 @@ export function buildDiagCommandDispatchContextFromRuntime(
   input: DiagCommandRuntimeContextInput,
 ): DiagCommandDispatchContext {
   return buildDiagCommandDispatchContext({
+    outputLanguage: input.outputLanguage,
     botNoticePrefix: input.botNoticePrefix,
     processStartedAtIso: input.processStartedAtIso,
     defaultBackendProfile: input.defaultBackendProfile,

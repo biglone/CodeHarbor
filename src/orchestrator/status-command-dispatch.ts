@@ -148,6 +148,7 @@ export async function sendStatusCommand(
 export async function sendWorkflowStatusCommand(
   context: Pick<
     StatusCommandDispatchContext,
+    | "outputLanguage"
     | "workflowPlanContextMaxChars"
     | "workflowOutputContextMaxChars"
     | "workflowFeedbackContextMaxChars"
@@ -159,6 +160,7 @@ export async function sendWorkflowStatusCommand(
 ): Promise<void> {
   await runWorkflowStatusCommand(
     {
+      outputLanguage: context.outputLanguage,
       workflowPlanContextMaxChars: context.workflowPlanContextMaxChars,
       workflowOutputContextMaxChars: context.workflowOutputContextMaxChars,
       workflowFeedbackContextMaxChars: context.workflowFeedbackContextMaxChars,
