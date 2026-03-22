@@ -96,6 +96,27 @@ The release commit updates:
 - `package-lock.json` (if present)
 - `CHANGELOG.md`
 
+AutoDev release mapping parser only reads the dedicated section whose heading contains `发布映射` (or `release mapping`) in `TASK_LIST.md`.
+This avoids accidentally reading community-priority/milestone tables that are not release contracts.
+
+Recommended section template:
+
+```md
+## 大功能 -> 发布映射（执行约定）
+| 大功能任务 | 完成后目标版本 | 发布提交示例 | 发布状态 |
+|------------|----------------|--------------|----------|
+| T8.7 | v0.1.58 | `release: v0.1.58 [publish-npm]` | ⬜ 待发布 |
+```
+
+Current roadmap-based release milestones (updated on 2026-03-22):
+
+| Community priority | Executable milestone | Tasks | Version window |
+|--------------------|----------------------|-------|----------------|
+| Experience & delivery | M1: multimodal + install/upgrade | T8.1,T8.2,T8.3 | v0.1.53 ~ v0.1.54 |
+| Governance & security | M2: admin + audit hardening | T8.4,T8.5 | v0.1.55 ~ v0.1.56 |
+| Ecosystem integration | M3: Matrix workflow + external integrations | T8.6 | v0.1.57 |
+| Release convergence | M4: mapping + docs acceptance | T8.7,T8.8 | v0.1.58 ~ v0.1.59 |
+
 After pushing to `main`, `Release NPM` workflow is triggered by `[publish-npm]`.
 
 ## Rollback Playbook

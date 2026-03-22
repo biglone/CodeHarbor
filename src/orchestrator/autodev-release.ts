@@ -183,7 +183,7 @@ export async function tryAutoDevTaskRelease(input: {
 async function loadTaskReleaseVersionMap(taskListPath: string): Promise<Map<string, string>> {
   const content = await fs.readFile(taskListPath, "utf8");
   const output = new Map<string, string>();
-  for (const rawLine of splitLines(content)) {
+  for (const rawLine of extractReleaseMappingSectionLines(content)) {
     const line = rawLine.trim();
     if (!line.startsWith("|")) {
       continue;
@@ -207,6 +207,36 @@ async function loadTaskReleaseVersionMap(taskListPath: string): Promise<Map<stri
 
 function splitLines(content: string): string[] {
   return content.split(/\r?\n/);
+}
+
+function extractReleaseMappingSectionLines(content: string): string[] {
+  const lines = splitLines(content);
+  const releaseMappingHeadingPattern = /^#{1,6}\s+.*(?:发布映射|release mapping)/i;
+  const markdownHeadingPattern = /^#{1,6}\s+/;
+  let sectionStart = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (!releaseMappingHeadingPattern.test(line)) {
+      continue;
+    }
+    sectionStart = index;
+    break;
+  }
+  if (sectionStart < 0) {
+    return [];
+  }
+
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (!markdownHeadingPattern.test(line)) {
+      continue;
+    }
+    sectionEnd = index;
+    break;
+  }
+
+  return lines.slice(sectionStart + 1, sectionEnd);
 }
 
 function normalizeTaskId(raw: string): string | null {

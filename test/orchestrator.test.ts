@@ -3220,6 +3220,108 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("uses release mapping section when non-release milestone table has conflicting versions", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-release-mapping-section-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- implement T8.1\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T8.1 | big feature one | ⬜ |",
+        "",
+        "## 大功能 -> 发布映射（执行约定）",
+        "| 大功能任务 | 完成后目标版本 | 发布提交示例 |",
+        "|------------|----------------|--------------|",
+        "| T8.1 | v0.1.52 | `release: v0.1.52 [publish-npm]` |",
+        "",
+        "## 社区优先级 -> 可执行里程碑（排序参考，不用于自动发布）",
+        "| 任务ID | 社区讨论目标版本 | 说明 |",
+        "|--------|------------------|------|",
+        "| T8.1 | v0.9.99 | should be ignored by auto release parser |",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tempRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "codeharbor-release-test",
+          version: "0.1.51",
+          private: true,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tempRoot, "package-lock.json"),
+      JSON.stringify(
+        {
+          name: "codeharbor-release-test",
+          version: "0.1.51",
+          lockfileVersion: 3,
+          requires: true,
+          packages: {
+            "": {
+              name: "codeharbor-release-test",
+              version: "0.1.51",
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tempRoot, "CHANGELOG.md"),
+      ["# Changelog", "", "## [Unreleased]", "", "- (none yet)", ""].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init release test"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T8.1",
+          eventId: "$autodev-run-release-mapping-section",
+        }),
+      );
+
+      const latest = await execFileAsync("git", ["log", "--oneline", "-n", "1"], { cwd: tempRoot });
+      expect(latest.stdout).toContain("release: v0.1.52 [publish-npm]");
+      const packageJson = JSON.parse(await fs.readFile(path.join(tempRoot, "package.json"), "utf8")) as { version: string };
+      expect(packageJson.version).toBe("0.1.52");
+      expect(channel.notices.some((entry) => entry.text.includes("release: released v0.1.52"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("skips autodev release when auto-release is disabled", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-release-disabled-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- implement T8.1\n", "utf8");

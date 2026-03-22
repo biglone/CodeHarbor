@@ -700,7 +700,9 @@ AutoDev (`/autodev`) conventions:
 - Commit language policy: for a brand-new project (no history) the first AutoDev commit defaults to English; for existing projects, AutoDev follows the recent repository commit language trend.
 - AutoDev commit body includes `Task-ID`, `Changed-files`, and `Generated-by` for traceability.
 - AutoDev result notice always includes git commit status and changed files (`git changed files`).
-- If `TASK_LIST.md` has a release mapping row like `| T8.4 | v0.1.55 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
+- If `TASK_LIST.md` has a dedicated `发布映射` section with rows like `| T8.4 | v0.1.55 | ... |`, AutoDev can create a follow-up release commit after task completion: `release: vX.Y.Z [publish-npm]` (updates `package.json`/`package-lock.json`/`CHANGELOG.md`).
+- AutoDev release mapping parser only reads the `发布映射` section; keep community-priority/milestone tables in separate headings (for example `社区优先级 -> 可执行里程碑`) to avoid ambiguous version parsing.
+- Current community roadmap milestones are aligned as: `T8.1~T8.3 -> v0.1.53~v0.1.54`, `T8.4~T8.5 -> v0.1.55~v0.1.56`, `T8.6 -> v0.1.57`, `T8.7~T8.8 -> v0.1.58~v0.1.59`.
 - When CI detects that the target version already exists on npm, the release workflow skips publishing and prints `Suggested next version` to keep release flow idempotent.
 - If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
