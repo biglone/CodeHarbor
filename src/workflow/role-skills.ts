@@ -57,7 +57,14 @@ const DEFAULT_ROLE_SKILL_ROOT = path.join(os.homedir(), ".codex", "skills");
 const DEFAULT_ROLE_ASSIGNMENTS: Record<WorkflowRole, string[]> = {
   planner: ["task-planner", "requirements-doc", "builtin-planner-core", "dependency-analyzer"],
   executor: ["autonomous-dev", "bug-finder", "test-generator", "builtin-executor-core", "refactoring"],
-  reviewer: ["code-reviewer", "security-audit", "builtin-reviewer-core", "changelog-generator", "commit-message"],
+  reviewer: [
+    "code-reviewer",
+    "security-audit",
+    "review-repair-contract",
+    "builtin-reviewer-core",
+    "changelog-generator",
+    "commit-message",
+  ],
 };
 
 const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
@@ -524,6 +531,29 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
     ].join("\n"),
   },
   {
+    id: "review-repair-contract",
+    title: "Review Repair Contract",
+    source: "builtin",
+    summary: "Convert rejected reviews into actionable blocker contracts with explicit acceptance checks.",
+    content: [
+      "You are the review-repair-contract skill:",
+      "1) For every REJECTED decision, produce explicit blocker boundaries executor can act on directly.",
+      "2) Each blocker must include ID, severity, issue boundary, minimal fix path, and acceptance check.",
+      "3) Prefer evidence-backed findings (file/behavior/repro) over abstract quality statements.",
+      "4) Keep blockers minimal and non-overlapping; merge duplicates.",
+      "5) Separate must-fix blockers from optional improvements.",
+      "6) If blocker contract is incomplete, mark contract status as INCOMPLETE instead of vague rejection.",
+      "7) Ensure repair instructions are implementable in one bounded execution round.",
+      "8) Keep output machine-readable for downstream repair automation.",
+      "Output contract:",
+      "VERDICT: APPROVED | REJECTED",
+      "SUMMARY: one-line rationale",
+      "BLOCKERS:",
+      "- [B1][critical] issue=<boundary>; evidence=<file/behavior>; fix=<minimal remediation>; accept=<verifiable check>",
+      "REPAIR_CONTRACT_STATUS: COMPLETE | INCOMPLETE",
+    ].join("\n"),
+  },
+  {
     id: "builtin-reviewer-core",
     title: "Reviewer Core",
     source: "builtin",
@@ -537,7 +567,8 @@ const BUILTIN_ROLE_SKILLS: WorkflowSkillEntry[] = [
       "5) If rejected, include a compact SUMMARY and top issues in priority order.",
       "6) If approved, call out residual risks and monitoring suggestions.",
       "7) Keep findings precise enough for direct executor action.",
-      "8) Keep output machine-readable with VERDICT/SUMMARY/ISSUES/SUGGESTIONS blocks.",
+      "8) Keep output machine-readable with VERDICT/SUMMARY/ISSUES/SUGGESTIONS/BLOCKERS blocks.",
+      "9) If REJECTED, include blocker IDs with fix + acceptance checks for each must-fix issue.",
     ].join("\n"),
   },
   {

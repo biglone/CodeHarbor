@@ -53,12 +53,56 @@ interface ExecuteRoleResult {
   replyChars: number;
 }
 
+interface ReviewerBlocker {
+  id: string;
+  severity: "critical" | "major" | "minor" | "info";
+  issue: string;
+  evidence: string | null;
+  fix: string;
+  accept: string;
+  source: "section" | "issue_suggestion" | "fallback";
+  issueProvided: boolean;
+  fixProvided: boolean;
+  acceptProvided: boolean;
+}
+
+interface ReviewerVerdict {
+  verdict: "APPROVED" | "REJECTED" | "UNKNOWN";
+  approved: boolean;
+  summary: string;
+  feedback: string;
+  blockers: ReviewerBlocker[];
+  contractComplete: boolean;
+  contractActionable: boolean;
+}
+
 const DEFAULT_WORKFLOW_EXECUTION_TIMEOUT_MS = 30 * 60 * 1_000;
+const DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS = 2;
 
 interface WorkflowPromptContextLimits {
   plan: number | null;
   output: number | null;
   feedback: number | null;
+}
+
+interface ReviewerContractRepairInput {
+  objective: string;
+  plan: string;
+  output: string;
+  round: number;
+  workdir: string;
+  roleTimeoutMs: number;
+  roleSkillPolicy?: WorkflowRoleSkillPolicyOverride;
+  onProgress?: (event: MultiAgentWorkflowProgressEvent) => void | Promise<void>;
+  getCancelled: () => boolean;
+  setActiveHandle: (handle: CodexExecutionHandle | null) => void;
+  reviewReply: string;
+  verdict: ReviewerVerdict;
+}
+
+interface ReviewerContractRepairResult {
+  reviewReply: string;
+  verdict: ReviewerVerdict;
 }
 
 export class MultiAgentWorkflowRunner {
@@ -193,16 +237,56 @@ export class MultiAgentWorkflowRunner {
       );
       finalReviewReply = reviewResult.reply;
 
-      const verdict = parseReviewerVerdict(finalReviewReply);
+      let verdict = parseReviewerVerdict(finalReviewReply);
       await emitProgress(input, {
         stage: "reviewer",
         round: attempt,
         message: `Reviewer 审查完成（agent=reviewer, round=${attempt + 1}, verdict=${
-          verdict.approved ? "APPROVED" : "REJECTED"
-        }, ${formatRoleExecutionStats(reviewResult)}）${verdict.approved ? "" : `，summary=${extractReviewSummary(finalReviewReply)}`}`,
+          verdict.verdict
+        }, ${formatRoleExecutionStats(reviewResult)}）${
+          verdict.approved ? "" : `，summary=${verdict.summary}，contract=${formatReviewerContractStatus(verdict)}`
+        }`,
       });
+
+      const contractRepairResult = await this.ensureReviewerRepairContract({
+        objective,
+        plan,
+        output: outputResult.reply,
+        round: attempt,
+        workdir: input.workdir,
+        roleTimeoutMs,
+        roleSkillPolicy: input.roleSkillPolicy,
+        onProgress: input.onProgress,
+        getCancelled: () => cancelled,
+        setActiveHandle: (handle) => {
+          activeHandle = handle;
+        },
+        reviewReply: finalReviewReply,
+        verdict,
+      });
+      verdict = contractRepairResult.verdict;
+      finalReviewReply = contractRepairResult.reviewReply;
+
       if (verdict.approved) {
         approved = true;
+        break;
+      }
+      if (!hasActionableRepairContract(verdict)) {
+        this.logger.warn("Reviewer failed to produce actionable repair contract; stop workflow repair loop.", {
+          objective,
+          round: attempt + 1,
+          verdict: verdict.verdict,
+          summary: verdict.summary,
+          contractStatus: formatReviewerContractStatus(verdict),
+          blockerCount: verdict.blockers.length,
+        });
+        await emitProgress(input, {
+          stage: "reviewer",
+          round: attempt,
+          message: `Reviewer REJECTED 但未提供可执行修复契约，已停止自动修复（round=${attempt + 1}, contract=${formatReviewerContractStatus(
+            verdict,
+          )}）`,
+        });
         break;
       }
 
@@ -315,6 +399,90 @@ export class MultiAgentWorkflowRunner {
     return this.roleSkillCatalog.buildPrompt(input);
   }
 
+  private async ensureReviewerRepairContract(input: ReviewerContractRepairInput): Promise<ReviewerContractRepairResult> {
+    let reviewReply = input.reviewReply;
+    let verdict = input.verdict;
+
+    for (let repairRound = 1; repairRound <= DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS; repairRound += 1) {
+      if (verdict.approved || hasActionableRepairContract(verdict)) {
+        break;
+      }
+
+      this.logger.warn("Reviewer contract is not actionable, requesting contract repair.", {
+        objective: input.objective,
+        reviewRound: input.round + 1,
+        contractRepairRound: repairRound,
+        verdict: verdict.verdict,
+        contractStatus: formatReviewerContractStatus(verdict),
+        summary: verdict.summary,
+        blockerCount: verdict.blockers.length,
+      });
+      await emitProgress(
+        {
+          objective: input.objective,
+          workdir: input.workdir,
+          onProgress: input.onProgress,
+        },
+        {
+          stage: "reviewer",
+          round: input.round,
+          message: `Reviewer 契约补全启动（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+            DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+          }, status=${formatReviewerContractStatus(verdict)}）`,
+        },
+      );
+
+      const reviewerSkillPrompt = this.buildRoleSkillPrompt({
+        role: "reviewer",
+        stage: "reviewer",
+        round: input.round,
+        policy: input.roleSkillPolicy,
+      });
+      const repairResult = await this.executeRole(
+        "reviewer",
+        buildReviewerContractRepairPrompt(
+          input.objective,
+          input.plan,
+          input.output,
+          reviewReply,
+          verdict.feedback,
+          repairRound,
+          this.promptContextLimits,
+          reviewerSkillPrompt.text,
+        ),
+        null,
+        input.workdir,
+        input.roleTimeoutMs,
+        input.getCancelled,
+        input.setActiveHandle,
+      );
+      reviewReply = repairResult.reply;
+      verdict = parseReviewerVerdict(reviewReply);
+
+      await emitProgress(
+        {
+          objective: input.objective,
+          workdir: input.workdir,
+          onProgress: input.onProgress,
+        },
+        {
+          stage: "reviewer",
+          round: input.round,
+          message: `Reviewer 契约补全完成（reviewRound=${input.round + 1}, contractRound=${repairRound}/${
+            DEFAULT_REVIEWER_CONTRACT_REPAIR_ROUNDS
+          }, verdict=${verdict.verdict}, status=${formatReviewerContractStatus(verdict)}, ${formatRoleExecutionStats(
+            repairResult,
+          )}）`,
+        },
+      );
+    }
+
+    return {
+      reviewReply,
+      verdict,
+    };
+  }
+
   private resolveRoleTimeoutMs(): number {
     const configured = this.config.executionTimeoutMs;
     if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
@@ -399,6 +567,9 @@ function buildReviewerPrompt(
     "SUGGESTIONS:",
     "- suggestion 1",
     "- suggestion 2",
+    "BLOCKERS:",
+    "- [B1][critical] issue=<边界>; fix=<可执行修复>; accept=<可验证验收>; evidence=<文件/行为>",
+    "规则：REJECTED 时 BLOCKERS 至少 1 条，且 issue/fix/accept 不得为空。",
     "",
     `目标：${objective}`,
     "",
@@ -409,6 +580,62 @@ function buildReviewerPrompt(
     "[executor_output]",
     outputContext,
     "[/executor_output]",
+  );
+  return sections.join("\n");
+}
+
+function buildReviewerContractRepairPrompt(
+  objective: string,
+  plan: string,
+  output: string,
+  previousReview: string,
+  normalizedFeedback: string,
+  round: number,
+  limits: WorkflowPromptContextLimits,
+  roleSkillBlock: string | null,
+): string {
+  const planContext = clampPromptContext("planner_plan", plan, limits.plan);
+  const outputContext = clampPromptContext("executor_output", output, limits.output);
+  const previousReviewContext = clampPromptContext("reviewer_previous_feedback", previousReview, limits.feedback);
+  const normalizedFeedbackContext = clampPromptContext("reviewer_normalized_feedback", normalizedFeedback, limits.feedback);
+  const sections = ["[role:reviewer]", "[reviewer_contract_repair_request]"];
+  if (roleSkillBlock) {
+    sections.push(roleSkillBlock);
+  }
+  sections.push(
+    `你上一版审查在第 ${round} 轮未提供可执行 repair contract。请只修复审查契约，不要改目标范围。`,
+    "硬性规则：",
+    "1) 输出必须包含 VERDICT / SUMMARY / BLOCKERS / REPAIR_CONTRACT_STATUS。",
+    "2) 若 VERDICT=REJECTED，则 BLOCKERS 至少一条，且每条都要有 issue/evidence/fix/accept。",
+    "3) issue 必须描述问题边界（文件、行为或复现条件）。",
+    "4) fix 必须是 executor 可直接执行的最小修复动作。",
+    "5) accept 必须是可验证验收（测试命令、断言或行为对比）。",
+    "6) 禁止占位词：TBD/TODO/N/A/待补充/同上/later。",
+    "",
+    "输出模板：",
+    "VERDICT: APPROVED 或 REJECTED",
+    "SUMMARY: 一句话总结",
+    "BLOCKERS:",
+    "- [B1][major] issue=<边界>; evidence=<文件/行为>; fix=<可执行修复>; accept=<可验证验收>",
+    "REPAIR_CONTRACT_STATUS: COMPLETE 或 INCOMPLETE",
+    "",
+    `目标：${objective}`,
+    "",
+    "[planner_plan]",
+    planContext,
+    "[/planner_plan]",
+    "",
+    "[executor_output]",
+    outputContext,
+    "[/executor_output]",
+    "",
+    "[reviewer_previous_feedback]",
+    previousReviewContext,
+    "[/reviewer_previous_feedback]",
+    "",
+    "[reviewer_normalized_feedback]",
+    normalizedFeedbackContext,
+    "[/reviewer_normalized_feedback]",
   );
   return sections.join("\n");
 }
@@ -432,6 +659,13 @@ function buildRepairPrompt(
   sections.push(
     `你是软件执行代理。请根据审查反馈进行第 ${round} 轮修复并输出最终版本。`,
     "要求：保持正确内容，修复问题，不要丢失已完成部分。",
+    "必须优先按 [normalized_blockers] 逐条完成修复，每条都要有明确处理结果。",
+    "输出必须包含：",
+    "BLOCKER_STATUS:",
+    "- B1: fixed|partial|not-fixed | evidence=<文件/命令/测试>",
+    "- B2: ...",
+    "DELIVERY_DIFF: 简要列出改动点",
+    "VALIDATION: 列出验证命令与结果",
     "",
     `目标：${objective}`,
     "",
@@ -450,20 +684,89 @@ function buildRepairPrompt(
   return sections.join("\n");
 }
 
-function parseReviewerVerdict(review: string): { approved: boolean; feedback: string } {
-  const approved = /\bVERDICT\s*:\s*APPROVED\b/i.test(review);
-  const rejected = /\bVERDICT\s*:\s*REJECTED\b/i.test(review);
-  if (approved) {
-    return { approved: true, feedback: review };
-  }
-  if (rejected) {
-    return { approved: false, feedback: review };
+function parseReviewerVerdict(review: string): ReviewerVerdict {
+  const verdict = parseReviewerVerdictToken(review);
+  const summary = extractReviewSummary(review);
+  if (verdict === "APPROVED") {
+    return {
+      verdict,
+      approved: true,
+      summary,
+      feedback: review,
+      blockers: [],
+      contractComplete: true,
+      contractActionable: true,
+    };
   }
 
+  const sections = parseReviewerSections(review);
+  const blockersFromSection = sections.blockers.map((item, index) => parseBlockerItem(item, index));
+  const blockersFromIssueSuggestion = pairIssuesWithSuggestions(sections.issues, sections.suggestions);
+  const normalizedBlockers =
+    blockersFromSection.length > 0
+      ? blockersFromSection
+      : blockersFromIssueSuggestion.length > 0
+      ? blockersFromIssueSuggestion
+      : [buildFallbackBlocker(summary || "Reviewer did not provide actionable blocker boundaries.")];
+
+  const contractComplete =
+    verdict === "REJECTED" &&
+    blockersFromSection.length > 0 &&
+    blockersFromSection.every((blocker) => blocker.issueProvided && blocker.fixProvided && blocker.acceptProvided);
+  const contractActionable = contractComplete && blockersFromSection.every(isActionableReviewerBlocker);
+  const resolvedSummary = resolveReviewerSummary(verdict, summary);
+
   return {
+    verdict,
     approved: false,
-    feedback: review.trim() || "Reviewer 未返回规范 verdict，默认按 REJECTED 处理。",
+    summary: resolvedSummary,
+    feedback: buildNormalizedReviewerFeedback(review, normalizedBlockers, verdict, contractComplete, contractActionable),
+    blockers: normalizedBlockers,
+    contractComplete,
+    contractActionable,
   };
+}
+
+function parseReviewerVerdictToken(review: string): "APPROVED" | "REJECTED" | "UNKNOWN" {
+  const verdictMatches = review
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^verdict\s*:/i.test(line))
+    .map((line) => {
+      const value = line.replace(/^verdict\s*:/i, "").trim().toUpperCase();
+      const match = value.match(/\b(APPROVED|REJECTED)\b/);
+      return match?.[1] ?? "UNKNOWN";
+    });
+
+  if (verdictMatches.length === 0) {
+    const approved = /\bVERDICT\s*:\s*APPROVED\b/i.test(review);
+    const rejected = /\bVERDICT\s*:\s*REJECTED\b/i.test(review);
+    if (approved && !rejected) {
+      return "APPROVED";
+    }
+    if (rejected && !approved) {
+      return "REJECTED";
+    }
+    return "UNKNOWN";
+  }
+
+  const uniqueVerdicts = new Set(verdictMatches);
+  if (uniqueVerdicts.size !== 1) {
+    return "UNKNOWN";
+  }
+  const onlyVerdict = verdictMatches[0];
+  if (onlyVerdict === "APPROVED" || onlyVerdict === "REJECTED") {
+    return onlyVerdict;
+  }
+  return "UNKNOWN";
+}
+
+function resolveReviewerSummary(verdict: "APPROVED" | "REJECTED" | "UNKNOWN", summary: string): string {
+  if (verdict !== "UNKNOWN") {
+    return summary;
+  }
+  const fallback = summary && summary !== "(no summary)" ? ` (${summary})` : "";
+  return `Reviewer verdict missing or conflicting; default to REJECTED.${fallback}`;
 }
 
 function extractReviewSummary(review: string): string {
@@ -480,6 +783,228 @@ function extractReviewSummary(review: string): string {
     return summarizeSingleLine(verdictLine, 120);
   }
   return summarizeSingleLine(lines[0] ?? "(no summary)", 120);
+}
+
+function parseReviewerSections(review: string): { issues: string[]; suggestions: string[]; blockers: string[] } {
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+  const blockers: string[] = [];
+  let active: "issues" | "suggestions" | "blockers" | null = null;
+
+  for (const rawLine of review.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (/^issues?\s*:?\s*$/i.test(line) || /^问题\s*:?\s*$/.test(line)) {
+      active = "issues";
+      continue;
+    }
+    if (/^suggestions?\s*:?\s*$/i.test(line) || /^建议\s*:?\s*$/.test(line)) {
+      active = "suggestions";
+      continue;
+    }
+    if (/^blockers?\s*:?\s*$/i.test(line) || /^阻塞项\s*:?\s*$/.test(line) || /^修复清单\s*:?\s*$/.test(line)) {
+      active = "blockers";
+      continue;
+    }
+    const bullet = normalizeReviewerBullet(line);
+    if (!bullet || !active) {
+      continue;
+    }
+    if (active === "issues") {
+      issues.push(bullet);
+      continue;
+    }
+    if (active === "suggestions") {
+      suggestions.push(bullet);
+      continue;
+    }
+    blockers.push(bullet);
+  }
+
+  return {
+    issues,
+    suggestions,
+    blockers,
+  };
+}
+
+function normalizeReviewerBullet(line: string): string | null {
+  const withoutMarker = line.replace(/^[-*+•]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  if (!withoutMarker) {
+    return null;
+  }
+  if (/^(none|n\/a|无|没有)$/i.test(withoutMarker)) {
+    return null;
+  }
+  return withoutMarker;
+}
+
+function parseBlockerItem(item: string, index: number): ReviewerBlocker {
+  const idMatch = item.match(/\[\s*(B\d+)\s*]/i);
+  const severityMatch = item.match(/\[\s*(critical|major|minor|info)\s*]/i);
+  const issueField = matchNamedField(item, ["issue", "problem", "问题"]);
+  const evidenceField = matchNamedField(item, ["evidence", "proof", "证据"]);
+  const fixField = matchNamedField(item, ["fix", "remediation", "repair", "修复"]);
+  const acceptField = matchNamedField(item, ["accept", "acceptance", "验收"]);
+  const plainIssue = stripBracketTokens(item);
+  const issue = issueField ?? plainIssue;
+  return {
+    id: (idMatch?.[1] ?? `B${index + 1}`).toUpperCase(),
+    severity: normalizeSeverity(severityMatch?.[1] ?? issue),
+    issue: issue || "问题边界未明确，需要补充。",
+    evidence: evidenceField ?? null,
+    fix: fixField ?? "给出最小可执行修复步骤并落到代码/配置。",
+    accept: acceptField ?? "提供可验证证据（测试、命令或行为对比）。",
+    source: "section",
+    issueProvided: Boolean(issueField ?? plainIssue),
+    fixProvided: Boolean(fixField),
+    acceptProvided: Boolean(acceptField),
+  };
+}
+
+function pairIssuesWithSuggestions(issues: string[], suggestions: string[]): ReviewerBlocker[] {
+  return issues.map((issue, index) => {
+    const suggestion = suggestions[index] ?? suggestions[0] ?? "补充最小可执行修复步骤并落地。";
+    return {
+      id: `B${index + 1}`,
+      severity: normalizeSeverity(issue),
+      issue,
+      evidence: null,
+      fix: suggestion,
+      accept: "提供可验证证据（测试、命令或行为对比）。",
+      source: "issue_suggestion",
+      issueProvided: true,
+      fixProvided: Boolean(suggestion),
+      acceptProvided: false,
+    };
+  });
+}
+
+function buildFallbackBlocker(issue: string): ReviewerBlocker {
+  return {
+    id: "B1",
+    severity: normalizeSeverity(issue),
+    issue,
+    evidence: null,
+    fix: "请先明确问题边界（文件/行为/复现条件）并给出最小可执行修复方案，然后落实到交付物。",
+    accept: "提交修复后给出验证命令、结果与风险说明。",
+    source: "fallback",
+    issueProvided: Boolean(issue),
+    fixProvided: false,
+    acceptProvided: false,
+  };
+}
+
+function buildNormalizedReviewerFeedback(
+  originalReview: string,
+  blockers: ReviewerBlocker[],
+  verdict: "APPROVED" | "REJECTED" | "UNKNOWN",
+  contractComplete: boolean,
+  contractActionable: boolean,
+): string {
+  const contractStatus = contractComplete ? (contractActionable ? "COMPLETE_ACTIONABLE" : "COMPLETE_NOT_ACTIONABLE") : "INCOMPLETE";
+  const sections = [
+    "[reviewer_raw_feedback]",
+    originalReview.trim() || "(empty)",
+    "[/reviewer_raw_feedback]",
+    "",
+    "[normalized_blockers]",
+    ...blockers.map((blocker) =>
+      `- [${blocker.id}][${blocker.severity}] issue=${blocker.issue}; evidence=${
+        blocker.evidence ?? "n/a"
+      }; fix=${blocker.fix}; accept=${blocker.accept}`,
+    ),
+    "[/normalized_blockers]",
+    "",
+    `VERDICT_NORMALIZED: ${verdict}`,
+    `REPAIR_CONTRACT_STATUS: ${contractStatus}`,
+  ];
+  return sections.join("\n");
+}
+
+function isActionableReviewerBlocker(blocker: ReviewerBlocker): boolean {
+  if (!blocker.issueProvided || !blocker.fixProvided || !blocker.acceptProvided) {
+    return false;
+  }
+  return (
+    isActionableContractField(blocker.issue) &&
+    isActionableContractField(blocker.fix) &&
+    isActionableContractField(blocker.accept)
+  );
+}
+
+function isActionableContractField(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^(tbd|todo|n\/a|none|null|unknown|later|pending|待补充|待确认|同上|暂无)$/i.test(normalized)) {
+    return false;
+  }
+  if (/\b(to be determined|to be confirmed|same as above)\b/i.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+function hasActionableRepairContract(verdict: ReviewerVerdict): boolean {
+  return !verdict.approved && verdict.contractComplete && verdict.contractActionable && verdict.blockers.length > 0;
+}
+
+function formatReviewerContractStatus(verdict: ReviewerVerdict): string {
+  if (verdict.approved) {
+    return "approved";
+  }
+  if (!verdict.contractComplete) {
+    return "incomplete";
+  }
+  if (!verdict.contractActionable) {
+    return "complete_not_actionable";
+  }
+  return "actionable";
+}
+
+function normalizeSeverity(input: string): "critical" | "major" | "minor" | "info" {
+  const lower = input.toLowerCase();
+  if (
+    lower.includes("critical") ||
+    lower.includes("高危") ||
+    lower.includes("严重") ||
+    lower.includes("security") ||
+    lower.includes("权限")
+  ) {
+    return "critical";
+  }
+  if (lower.includes("major") || lower.includes("high") || lower.includes("关键") || lower.includes("阻塞")) {
+    return "major";
+  }
+  if (lower.includes("minor") || lower.includes("low") || lower.includes("次要")) {
+    return "minor";
+  }
+  return "info";
+}
+
+function stripBracketTokens(value: string): string {
+  return value
+    .replace(/\[\s*B\d+\s*]/gi, "")
+    .replace(/\[\s*(critical|major|minor|info)\s*]/gi, "")
+    .replace(/^[:\-–—\s]+/, "")
+    .trim();
+}
+
+function matchNamedField(text: string, names: string[]): string | null {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`${escaped}\\s*=\\s*([^;]+)`, "i");
+    const match = text.match(regex);
+    const value = match?.[1]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function summarizeSingleLine(value: string, maxLen: number): string {

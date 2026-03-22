@@ -115,6 +115,7 @@ describe("WorkflowRoleSkillCatalog", () => {
     expect(snapshot.loadedSkills.executor.some((entry) => entry.includes("autonomous-dev(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.executor.some((entry) => entry.includes("refactoring(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("code-reviewer(builtin)"))).toBe(true);
+    expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("review-repair-contract(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("changelog-generator(builtin)"))).toBe(true);
     expect(snapshot.loadedSkills.reviewer.some((entry) => entry.includes("commit-message(builtin)"))).toBe(true);
 

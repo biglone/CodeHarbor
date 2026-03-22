@@ -111,7 +111,9 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(progress.filter((entry) => entry === "planner:0").length).toBeGreaterThanOrEqual(2);
     expect(progress.filter((entry) => entry === "executor:0").length).toBeGreaterThanOrEqual(2);
     expect(progress.filter((entry) => entry === "reviewer:0").length).toBeGreaterThanOrEqual(2);
-    expect(executor.calls).toHaveLength(3);
+    expect(executor.calls).toHaveLength(5);
+    expect(executor.calls.filter((call) => call.prompt.includes("[reviewer_contract_repair_request]"))).toHaveLength(2);
+    expect(executor.calls.some((call) => call.prompt.includes("[reviewer_feedback]"))).toBe(false);
     expect(executor.calls.every((call) => call.workdir === "/tmp/workflow-unit")).toBe(true);
   });
 
@@ -129,7 +131,12 @@ describe("MultiAgentWorkflowRunner", () => {
         return {
           result: Promise.resolve({
             sessionId: input.sessionId ?? "reviewer-thread",
-            reply: `VERDICT: REJECTED\nSUMMARY: round ${reviewCount} rejected`,
+            reply: [
+              "VERDICT: REJECTED",
+              `SUMMARY: round ${reviewCount} rejected`,
+              "BLOCKERS:",
+              `- [B1][major] issue=missing validation guard in round ${reviewCount}; evidence=src/workflow.ts; fix=add guard branch for round ${reviewCount}; accept=run unit workflow tests`,
+            ].join("\n"),
           }),
           cancel: () => {},
         };
@@ -167,6 +174,254 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(reviewCount).toBe(3);
     expect(executor.calls).toHaveLength(7);
     expect(executor.calls.every((call) => call.sessionId === null)).toBe(true);
+    const repairPrompt = executor.calls.find((call) => call.prompt.includes("[reviewer_feedback]"))?.prompt ?? "";
+    expect(repairPrompt).toContain("[normalized_blockers]");
+    expect(repairPrompt).toContain("REPAIR_CONTRACT_STATUS");
+    expect(repairPrompt).toContain("[B1]");
+  });
+
+  it("requests reviewer contract repair before executor repair", async () => {
+    let reviewerCount = 0;
+    let contractRepairCount = 0;
+    let executorRepairCount = 0;
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: input.sessionId ?? "planner-thread", reply: "plan-v1" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_contract_repair_request]")) {
+        contractRepairCount += 1;
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: [
+              "VERDICT: REJECTED",
+              "SUMMARY: blocker contract repaired",
+              "BLOCKERS:",
+              "- [B1][major] issue=matrix image summary misses alt text; evidence=src/channels/matrix-channel.ts; fix=render text fallback when media summary exists; accept=matrix channel test covers media summary text",
+            ].join("\n"),
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        reviewerCount += 1;
+        if (reviewerCount === 1) {
+          return {
+            result: Promise.resolve({
+              sessionId: input.sessionId ?? "reviewer-thread",
+              reply: "VERDICT: REJECTED\nSUMMARY: missing actionable blockers\nISSUES:\n- media summary not verifiable",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: APPROVED\nSUMMARY: repaired output accepted",
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_feedback]")) {
+        executorRepairCount += 1;
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "executor-thread",
+            reply: "repaired-output",
+          }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "executor-thread",
+          reply: "initial-output",
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 1,
+    });
+
+    const result = await runner.run({
+      objective: "repair reviewer contract",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    expect(result.approved).toBe(true);
+    expect(result.repairRounds).toBe(1);
+    expect(contractRepairCount).toBe(1);
+    expect(executorRepairCount).toBe(1);
+
+    const contractRepairIndex = executor.calls.findIndex((call) =>
+      call.prompt.includes("[reviewer_contract_repair_request]"),
+    );
+    const executorRepairIndex = executor.calls.findIndex((call) => call.prompt.includes("[reviewer_feedback]"));
+    expect(contractRepairIndex).toBeGreaterThanOrEqual(0);
+    expect(executorRepairIndex).toBeGreaterThan(contractRepairIndex);
+
+    const repairPrompt = executor.calls.find((call) => call.prompt.includes("[reviewer_feedback]"))?.prompt ?? "";
+    expect(repairPrompt).toContain("REPAIR_CONTRACT_STATUS: COMPLETE_ACTIONABLE");
+  });
+
+  it("does not count reviewer contract repair rounds as executor repair rounds", async () => {
+    let reviewerCount = 0;
+    let contractRepairCount = 0;
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: input.sessionId ?? "planner-thread", reply: "plan-v1" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_contract_repair_request]")) {
+        contractRepairCount += 1;
+        if (contractRepairCount === 1) {
+          return {
+            result: Promise.resolve({
+              sessionId: input.sessionId ?? "reviewer-thread",
+              reply: [
+                "VERDICT: REJECTED",
+                "SUMMARY: still incomplete contract",
+                "BLOCKERS:",
+                "- [B1][major] issue=missing release guard; fix=add release guard in publish flow",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: [
+              "VERDICT: REJECTED",
+              "SUMMARY: contract complete now",
+              "BLOCKERS:",
+              "- [B1][major] issue=missing release guard in publish workflow; evidence=src/orchestrator/autodev-release.ts; fix=block release when reviewer approval is false; accept=autodev release unit tests cover approval false path",
+            ].join("\n"),
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        reviewerCount += 1;
+        if (reviewerCount === 1) {
+          return {
+            result: Promise.resolve({
+              sessionId: input.sessionId ?? "reviewer-thread",
+              reply: "VERDICT: REJECTED\nSUMMARY: first review without blocker contract",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: APPROVED\nSUMMARY: all fixed",
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_feedback]")) {
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "executor-thread",
+            reply: "repaired-output",
+          }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "executor-thread",
+          reply: "initial-output",
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 1,
+    });
+
+    const result = await runner.run({
+      objective: "do not count contract rounds as repair rounds",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    expect(result.approved).toBe(true);
+    expect(result.repairRounds).toBe(1);
+    expect(contractRepairCount).toBe(2);
+  });
+
+  it("stops workflow repair when reviewer contract remains non-actionable", async () => {
+    let contractRepairCount = 0;
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: input.sessionId ?? "planner-thread", reply: "plan-v1" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_contract_repair_request]")) {
+        contractRepairCount += 1;
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: [
+              "VERDICT: REJECTED",
+              "SUMMARY: still no actionable contract",
+              "BLOCKERS:",
+              "- [B1][major] issue=TBD; evidence=n/a; fix=TODO; accept=TBD",
+            ].join("\n"),
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: REJECTED\nSUMMARY: contract missing",
+          }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "executor-thread",
+          reply: "initial-output",
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 2,
+    });
+
+    const progressMessages: string[] = [];
+    const result = await runner.run({
+      objective: "hard stop on non actionable reviewer contract",
+      workdir: "/tmp/workflow-unit",
+      onProgress: (event) => {
+        progressMessages.push(event.message);
+      },
+    });
+
+    expect(result.approved).toBe(false);
+    expect(result.repairRounds).toBe(0);
+    expect(contractRepairCount).toBe(2);
+    expect(executor.calls.some((call) => call.prompt.includes("[reviewer_feedback]"))).toBe(false);
+    expect(progressMessages.some((line) => line.includes("已停止自动修复"))).toBe(true);
   });
 
   it("cancels active role execution when registered cancel callback is invoked", async () => {
