@@ -1278,6 +1278,34 @@ export class AdminServer {
         envUpdates.CLI_COMPAT_FETCH_MEDIA = String(value);
         markUpdatedKey("cliCompat.fetchMedia");
       }
+      if ("imageMaxBytes" in compat) {
+        const value = normalizePositiveInt(
+          compat.imageMaxBytes,
+          this.config.cliCompat.imageMaxBytes,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.imageMaxBytes = value;
+        envUpdates.CLI_COMPAT_IMAGE_MAX_BYTES = String(value);
+        markUpdatedKey("cliCompat.imageMaxBytes");
+      }
+      if ("imageMaxCount" in compat) {
+        const value = normalizePositiveInt(
+          compat.imageMaxCount,
+          this.config.cliCompat.imageMaxCount,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        this.config.cliCompat.imageMaxCount = value;
+        envUpdates.CLI_COMPAT_IMAGE_MAX_COUNT = String(value);
+        markUpdatedKey("cliCompat.imageMaxCount");
+      }
+      if ("imageAllowedMimeTypes" in compat) {
+        const value = normalizeMimeTypeCsv(compat.imageAllowedMimeTypes, this.config.cliCompat.imageAllowedMimeTypes);
+        this.config.cliCompat.imageAllowedMimeTypes = value;
+        envUpdates.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES = value.join(",");
+        markUpdatedKey("cliCompat.imageAllowedMimeTypes");
+      }
       if ("transcribeAudio" in compat) {
         const value = normalizeBoolean(compat.transcribeAudio, this.config.cliCompat.transcribeAudio);
         this.config.cliCompat.transcribeAudio = value;
@@ -1367,6 +1395,12 @@ export class AdminServer {
         this.config.cliCompat.audioLocalWhisperTimeoutMs = value;
         envUpdates.CLI_COMPAT_AUDIO_LOCAL_WHISPER_TIMEOUT_MS = String(value);
         markUpdatedKey("cliCompat.audioLocalWhisperTimeoutMs");
+      }
+      if ("recordPath" in compat) {
+        const value = normalizeString(compat.recordPath, this.config.cliCompat.recordPath ?? "", "cliCompat.recordPath");
+        this.config.cliCompat.recordPath = value ? path.resolve(value) : null;
+        envUpdates.CLI_COMPAT_RECORD_PATH = this.config.cliCompat.recordPath ?? "";
+        markUpdatedKey("cliCompat.recordPath");
       }
     }
 
@@ -1642,6 +1676,18 @@ export class AdminServer {
         normalizeBoolean(compat.fetchMedia, this.config.cliCompat.fetchMedia);
         markCheckedKey("cliCompat.fetchMedia");
       }
+      if ("imageMaxBytes" in compat) {
+        normalizePositiveInt(compat.imageMaxBytes, this.config.cliCompat.imageMaxBytes, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("cliCompat.imageMaxBytes");
+      }
+      if ("imageMaxCount" in compat) {
+        normalizePositiveInt(compat.imageMaxCount, this.config.cliCompat.imageMaxCount, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("cliCompat.imageMaxCount");
+      }
+      if ("imageAllowedMimeTypes" in compat) {
+        normalizeMimeTypeCsv(compat.imageAllowedMimeTypes, this.config.cliCompat.imageAllowedMimeTypes);
+        markCheckedKey("cliCompat.imageAllowedMimeTypes");
+      }
       if ("transcribeAudio" in compat) {
         normalizeBoolean(compat.transcribeAudio, this.config.cliCompat.transcribeAudio);
         markCheckedKey("cliCompat.transcribeAudio");
@@ -1701,6 +1747,10 @@ export class AdminServer {
           Number.MAX_SAFE_INTEGER,
         );
         markCheckedKey("cliCompat.audioLocalWhisperTimeoutMs");
+      }
+      if ("recordPath" in compat) {
+        normalizeString(compat.recordPath, this.config.cliCompat.recordPath ?? "", "cliCompat.recordPath");
+        markCheckedKey("cliCompat.recordPath");
       }
     }
 
@@ -2785,6 +2835,35 @@ function normalizeOptionalPositiveInt(value: unknown, fallback: number | null): 
     return null;
   }
   return normalizePositiveInt(value, fallback ?? 1, 1, Number.MAX_SAFE_INTEGER);
+}
+
+function normalizeMimeTypeCsv(value: unknown, fallback: string[]): string[] {
+  if (value === undefined) {
+    return [...fallback];
+  }
+  const source: string[] = [];
+  if (typeof value === "string") {
+    source.push(...value.split(","));
+  } else if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      if (typeof entry !== "string") {
+        throw new HttpError(400, `cliCompat.imageAllowedMimeTypes[${index}] must be a string.`);
+      }
+      source.push(entry);
+    }
+  } else {
+    throw new HttpError(400, "cliCompat.imageAllowedMimeTypes must be a CSV string or string array.");
+  }
+
+  const normalized = source
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0)
+    .filter((entry) => /^[-\w.+]+\/[-\w.+]+$/.test(entry));
+
+  if (normalized.length === 0) {
+    throw new HttpError(400, "cliCompat.imageAllowedMimeTypes must contain at least one valid MIME type.");
+  }
+  return [...new Set(normalized)];
 }
 
 function normalizeRoleSkillDisclosureMode(

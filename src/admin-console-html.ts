@@ -337,6 +337,18 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-cli-throttle" type="number" min="0" />
           </label>
           <label class="checkbox"><input id="global-cli-fetch-media" type="checkbox" /><span data-i18n="global.cliFetchMedia">下载媒体附件</span></label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.cliImageMaxBytes">图片最大字节数</span>
+            <input id="global-cli-image-max-bytes" type="number" min="1" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.cliImageMaxCount">图片最大数量</span>
+            <input id="global-cli-image-max-count" type="number" min="1" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.cliImageMimeTypes">图片允许 MIME（逗号分隔）</span>
+            <input id="global-cli-image-mime-types" type="text" />
+          </label>
           <label class="checkbox"><input id="global-cli-transcribe-audio" type="checkbox" /><span data-i18n="global.cliTranscribeAudio">转写音频附件</span></label>
           <label class="field">
             <span class="field-label" data-i18n="global.audioModel">音频转写模型</span>
@@ -369,6 +381,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <label class="field">
             <span class="field-label" data-i18n="global.audioLocalTimeout">本地 Whisper 超时（毫秒）</span>
             <input id="global-cli-audio-local-timeout" type="number" min="1" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.cliRecordPath">CLI 回放记录文件路径（可选）</span>
+            <input id="global-cli-record-path" type="text" placeholder="./logs/cli-record.ndjson" data-i18n-placeholder="global.cliRecordPathPlaceholder" />
           </label>
           <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span data-i18n="global.agentEnabled">启用多智能体工作流</span></label>
           <label class="field">
@@ -614,6 +630,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.cliDisableSplit": "禁用回复分片",
             "global.cliThrottle": "CLI 进度节流（毫秒）",
             "global.cliFetchMedia": "下载媒体附件",
+            "global.cliImageMaxBytes": "图片最大字节数",
+            "global.cliImageMaxCount": "图片最大数量",
+            "global.cliImageMimeTypes": "图片允许 MIME（逗号分隔）",
             "global.cliTranscribeAudio": "转写音频附件",
             "global.audioModel": "音频转写模型",
             "global.audioTimeout": "音频转写超时（毫秒）",
@@ -624,6 +643,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalCommand": "本地 Whisper 命令",
             "global.audioLocalCommandPlaceholder": "python3 /opt/whisper/transcribe.py --input {input}",
             "global.audioLocalTimeout": "本地 Whisper 超时（毫秒）",
+            "global.cliRecordPath": "CLI 回放记录文件路径（可选）",
+            "global.cliRecordPathPlaceholder": "./logs/cli-record.ndjson",
             "global.agentEnabled": "启用多智能体工作流",
             "global.agentRounds": "工作流自动修复轮次",
             "global.agentSkillsEnabled": "启用角色技能注入",
@@ -793,6 +814,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.cliDisableSplit": "Disable reply split",
             "global.cliThrottle": "CLI progress throttle (ms)",
             "global.cliFetchMedia": "Fetch media attachments",
+            "global.cliImageMaxBytes": "Image max bytes",
+            "global.cliImageMaxCount": "Image max count",
+            "global.cliImageMimeTypes": "Image allowed MIME types (comma-separated)",
             "global.cliTranscribeAudio": "Transcribe audio attachments",
             "global.audioModel": "Audio transcribe model",
             "global.audioTimeout": "Audio transcribe timeout (ms)",
@@ -803,6 +827,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalCommand": "Local whisper command",
             "global.audioLocalCommandPlaceholder": "python3 /opt/whisper/transcribe.py --input {input}",
             "global.audioLocalTimeout": "Local whisper timeout (ms)",
+            "global.cliRecordPath": "CLI replay record path (optional)",
+            "global.cliRecordPathPlaceholder": "./logs/cli-record.ndjson",
             "global.agentEnabled": "Enable multi-agent workflow",
             "global.agentRounds": "Workflow auto-repair rounds",
             "global.agentSkillsEnabled": "Enable role skill injection",
@@ -1231,6 +1257,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!numberInRange(payload.cliCompat.audioTranscribeMaxRetries, 0, 10)) {
             errors.push("global.audioMaxRetries");
           }
+          if (!numberInRange(payload.cliCompat.imageMaxBytes, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.cliImageMaxBytes");
+          }
+          if (!numberInRange(payload.cliCompat.imageMaxCount, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.cliImageMaxCount");
+          }
+          if (!payload.cliCompat.imageAllowedMimeTypes || payload.cliCompat.imageAllowedMimeTypes.length === 0) {
+            errors.push("global.cliImageMimeTypes");
+          }
           if (!numberInRange(payload.agentWorkflow.autoRepairMaxRounds, 0, 10)) {
             errors.push("global.agentRounds");
           }
@@ -1379,6 +1414,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-disable-split").checked = Boolean(cliCompat.disableReplyChunkSplit);
             document.getElementById("global-cli-throttle").value = String(cliCompat.progressThrottleMs || 0);
             document.getElementById("global-cli-fetch-media").checked = Boolean(cliCompat.fetchMedia);
+            document.getElementById("global-cli-image-max-bytes").value = String(cliCompat.imageMaxBytes || 10485760);
+            document.getElementById("global-cli-image-max-count").value = String(cliCompat.imageMaxCount || 4);
+            document.getElementById("global-cli-image-mime-types").value = Array.isArray(cliCompat.imageAllowedMimeTypes)
+              ? cliCompat.imageAllowedMimeTypes.join(",")
+              : "image/png,image/jpeg,image/webp,image/gif";
             document.getElementById("global-cli-transcribe-audio").checked = Boolean(cliCompat.transcribeAudio);
             document.getElementById("global-cli-audio-model").value = cliCompat.audioTranscribeModel || "gpt-4o-mini-transcribe";
             document.getElementById("global-cli-audio-timeout").value = String(cliCompat.audioTranscribeTimeoutMs || 120000);
@@ -1390,6 +1430,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-audio-max-bytes").value = String(cliCompat.audioTranscribeMaxBytes || 26214400);
             document.getElementById("global-cli-audio-local-command").value = cliCompat.audioLocalWhisperCommand || "";
             document.getElementById("global-cli-audio-local-timeout").value = String(cliCompat.audioLocalWhisperTimeoutMs || 180000);
+            document.getElementById("global-cli-record-path").value = cliCompat.recordPath || "";
             document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
             document.getElementById("global-agent-repair-rounds").value = String(
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
@@ -1448,6 +1489,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               disableReplyChunkSplit: asBool("global-cli-disable-split"),
               progressThrottleMs: asNumber("global-cli-throttle", 300),
               fetchMedia: asBool("global-cli-fetch-media"),
+              imageMaxBytes: asNumber("global-cli-image-max-bytes", 10485760),
+              imageMaxCount: asNumber("global-cli-image-max-count", 4),
+              imageAllowedMimeTypes: parseCsvText(asText("global-cli-image-mime-types")),
               transcribeAudio: asBool("global-cli-transcribe-audio"),
               audioTranscribeModel: asText("global-cli-audio-model") || "gpt-4o-mini-transcribe",
               audioTranscribeTimeoutMs: asNumber("global-cli-audio-timeout", 120000),
@@ -1456,7 +1500,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               audioTranscribeRetryDelayMs: asNumber("global-cli-audio-retry-delay", 800),
               audioTranscribeMaxBytes: asNumber("global-cli-audio-max-bytes", 26214400),
               audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
-              audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000)
+              audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000),
+              recordPath: asText("global-cli-record-path")
             },
             agentWorkflow: {
               enabled: asBool("global-agent-enabled"),

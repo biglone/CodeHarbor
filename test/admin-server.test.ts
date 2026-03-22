@@ -311,6 +311,23 @@ describe("AdminServer", () => {
     expect(validRoleSkills.status).toBe(200);
     expect(JSON.stringify(validRoleSkills.body)).toContain("agentWorkflow.roleSkills.mode");
 
+    const invalidCliMimeTypes = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          cliCompat: {
+            imageAllowedMimeTypes: "not-a-mime",
+          },
+        },
+      }),
+    });
+    expect(invalidCliMimeTypes.status).toBe(400);
+    expect(JSON.stringify(invalidCliMimeTypes.body)).toContain("imageAllowedMimeTypes");
+
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -1250,6 +1267,10 @@ describe("AdminServer", () => {
         "AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS=",
         "AGENT_WORKFLOW_ROLE_SKILLS_ROOTS=",
         "AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON=",
+        "CLI_COMPAT_IMAGE_MAX_BYTES=10485760",
+        "CLI_COMPAT_IMAGE_MAX_COUNT=4",
+        "CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif",
+        "CLI_COMPAT_RECORD_PATH=",
       ].join("\n"),
       "utf8",
     );
@@ -1297,6 +1318,12 @@ describe("AdminServer", () => {
             },
           },
         },
+        cliCompat: {
+          imageMaxBytes: 2097152,
+          imageMaxCount: 6,
+          imageAllowedMimeTypes: ["image/png", "image/webp"],
+          recordPath: path.join(dir, "logs", "cli-record.ndjson"),
+        },
         updateCheck: {
           enabled: false,
           timeoutMs: 2000,
@@ -1320,6 +1347,10 @@ describe("AdminServer", () => {
     expect(envRaw).toContain(
       'AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON="{\\"planner\\":[\\"task-planner\\",\\"builtin-planner-core\\"],\\"executor\\":[\\"autonomous-dev\\"],\\"reviewer\\":[\\"code-reviewer\\",\\"builtin-reviewer-core\\"]}"',
     );
+    expect(envRaw).toContain("CLI_COMPAT_IMAGE_MAX_BYTES=2097152");
+    expect(envRaw).toContain("CLI_COMPAT_IMAGE_MAX_COUNT=6");
+    expect(envRaw).toContain('CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES="image/png,image/webp"');
+    expect(envRaw).toContain(`CLI_COMPAT_RECORD_PATH=${path.join(dir, "logs", "cli-record.ndjson")}`);
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_ENABLED=false");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TIMEOUT_MS=2000");
     expect(envRaw).toContain("PACKAGE_UPDATE_CHECK_TTL_MS=600000");
