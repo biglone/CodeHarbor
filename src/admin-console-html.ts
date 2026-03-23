@@ -124,12 +124,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         min-height: 96px;
       }
       .notice {
-        margin: 12px 0 0;
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 1000;
+        max-width: min(560px, calc(100vw - 32px));
+        margin: 0;
         border-radius: 10px;
         padding: 8px 10px;
         font-size: 13px;
         border: 1px solid #334155;
         color: var(--muted);
+        background: #0b1224ee;
+        box-shadow: 0 12px 28px #020617aa;
+        opacity: 0;
+        transform: translateY(8px);
+        pointer-events: none;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+      }
+      .notice.visible {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
       }
       .notice.ok {
         border-color: #065f46;
@@ -985,6 +1003,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var actorInput = document.getElementById("auth-actor");
         var langSelect = document.getElementById("lang-select");
         var noticeNode = document.getElementById("notice");
+        var noticeTimer = null;
         var authRoleNode = document.getElementById("auth-role");
         var roomListBody = document.getElementById("room-list-body");
         var diagnosticsSummaryBody = document.getElementById("diagnostics-summary-body");
@@ -1371,8 +1390,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         }
 
         function showNotice(type, message) {
-          noticeNode.className = "notice " + type;
+          if (noticeTimer) {
+            window.clearTimeout(noticeTimer);
+          }
+          noticeNode.className = "notice " + type + " visible";
           noticeNode.textContent = message;
+          var timeoutMs = type === "error" ? 12000 : type === "warn" ? 8000 : 5000;
+          noticeTimer = window.setTimeout(function () {
+            noticeNode.className = "notice " + type;
+          }, timeoutMs);
         }
 
         async function refreshAuthStatus() {
