@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.62] - 2026-03-23
+
+- admin-ui: move operation notices to floating toasts so feedback remains visible while working at the bottom of long pages.
+- admin-ui: add manual dismiss action for notice toasts with dedicated message rendering.
+- accessibility: add `role`/`aria-live` semantics and localized dismiss labels for screen-reader friendly notifications.
+- mobile: optimize toast placement on small screens to reduce overlap with form controls.
+
 ## [0.1.61] - 2026-03-23
 
 - admin: fix `/api/admin/service/restart` failure when restarting main + admin from the web console.
