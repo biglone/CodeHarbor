@@ -293,10 +293,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <button id="auth-save-btn" type="button" class="secondary" data-i18n="auth.save">保存认证</button>
           <button id="auth-clear-btn" type="button" class="secondary" data-i18n="auth.clear">清除认证</button>
         </div>
-        <div id="notice" class="notice">
+        <div id="notice" class="notice" role="status" aria-live="polite" aria-atomic="true">
           <div class="notice-content">
             <span id="notice-text" class="notice-text" data-i18n="notice.ready">就绪。</span>
-            <button id="notice-close-btn" class="notice-close" type="button" aria-label="Dismiss notice">×</button>
+            <button id="notice-close-btn" class="notice-close" type="button" data-i18n-aria-label="notice.dismiss">×</button>
           </div>
         </div>
         <p id="auth-role" class="muted" data-i18n="auth.permission.unknown">权限：未知</p>
@@ -657,6 +657,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "auth.permission.prefix": "权限：{role}{source}{actor}",
             "auth.permission.actorSuffix": "（用户：{actor}）",
             "notice.ready": "就绪。",
+            "notice.dismiss": "关闭提示",
             "notice.authSaved": "认证设置已保存到 localStorage。",
             "notice.authCleared": "认证设置已清除。",
             "global.title": "全局配置",
@@ -845,6 +846,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "auth.permission.prefix": "Permission: {role}{source}{actor}",
             "auth.permission.actorSuffix": " as {actor}",
             "notice.ready": "Ready.",
+            "notice.dismiss": "Dismiss notice",
             "notice.authSaved": "Auth settings saved to localStorage.",
             "notice.authCleared": "Auth settings cleared.",
             "global.title": "Global Config",
@@ -1415,6 +1417,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             }
             input.setAttribute("placeholder", t(placeholderKey));
           }
+          var ariaLabelNodes = document.querySelectorAll("[data-i18n-aria-label]");
+          for (var k = 0; k < ariaLabelNodes.length; k += 1) {
+            var ariaLabelNode = ariaLabelNodes[k];
+            var ariaLabelKey = ariaLabelNode.getAttribute("data-i18n-aria-label");
+            if (!ariaLabelKey) {
+              continue;
+            }
+            ariaLabelNode.setAttribute("aria-label", t(ariaLabelKey));
+          }
           document.documentElement.lang = currentLang === "en" ? "en" : "zh-CN";
           if (langSelect.value !== currentLang) {
             langSelect.value = currentLang;
@@ -1431,6 +1442,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         function showNotice(type, message) {
           hideNotice();
+          noticeNode.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+          noticeNode.setAttribute("role", type === "error" ? "alert" : "status");
           noticeNode.className = "notice " + type + " visible";
           noticeTextNode.textContent = message;
           var timeoutMs = type === "error" ? 12000 : type === "warn" ? 8000 : 5000;
