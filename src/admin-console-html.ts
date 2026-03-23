@@ -260,6 +260,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           grid-template-columns: 1fr;
         }
       }
+      @media (max-width: 640px) {
+        .notice {
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+          max-width: none;
+        }
+      }
     </style>
   </head>
   <body>
