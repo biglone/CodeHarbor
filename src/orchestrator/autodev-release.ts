@@ -6,12 +6,14 @@ import { promisify } from "node:util";
 import type { Logger } from "../logger";
 import type { AutoDevTask } from "../workflow/autodev";
 import type { AutoDevGitCommitResult } from "./autodev-git";
-import { formatError } from "./helpers";
+import { formatError, summarizeSingleLine } from "./helpers";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_FILE = "package.json";
 const PACKAGE_LOCK_FILE = "package-lock.json";
 const CHANGELOG_FILE = "CHANGELOG.md";
+const RELEASE_PRECHECK_TIMEOUT_MS = 30 * 60_000;
+const RELEASE_PRECHECK_MAX_BUFFER = 16 * 1024 * 1024;
 
 export interface AutoDevReleaseSettings {
   enabled: boolean;
@@ -81,6 +83,14 @@ export async function tryAutoDevTaskRelease(input: {
       return {
         kind: "skipped",
         reason: "未检测到 git 仓库",
+      };
+    }
+
+    const coveragePrecheck = await runReleaseCoveragePrecheck(input.workdir);
+    if (!coveragePrecheck.ok) {
+      return {
+        kind: "failed",
+        error: coveragePrecheck.error,
       };
     }
 
@@ -420,11 +430,71 @@ async function runGitCommand(workdir: string, args: string[]): Promise<string> {
 }
 
 async function runNpmCommand(workdir: string, args: string[]): Promise<string> {
+  return runNpmCommandWithOptions(workdir, args, {});
+}
+
+async function runNpmCommandWithOptions(
+  workdir: string,
+  args: string[],
+  options: { timeoutMs?: number; maxBuffer?: number },
+): Promise<string> {
   const { stdout } = await execFileAsync("npm", args, {
     cwd: workdir,
-    timeout: 30_000,
-    maxBuffer: 1024 * 1024,
+    timeout: options.timeoutMs ?? 30_000,
+    maxBuffer: options.maxBuffer ?? 1024 * 1024,
     windowsHide: true,
   });
   return String(stdout ?? "");
+}
+
+async function runReleaseCoveragePrecheck(workdir: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await runNpmCommandWithOptions(workdir, ["run", "test:coverage"], {
+      timeoutMs: RELEASE_PRECHECK_TIMEOUT_MS,
+      maxBuffer: RELEASE_PRECHECK_MAX_BUFFER,
+    });
+    return { ok: true };
+  } catch (error) {
+    const detail = summarizeSingleLine(extractCommandErrorDetail(error), 260);
+    return {
+      ok: false,
+      error: `release precheck failed: npm run test:coverage (${detail})`,
+    };
+  }
+}
+
+function extractCommandErrorDetail(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return formatError(error);
+  }
+  const record = error as {
+    message?: unknown;
+    stderr?: unknown;
+    stdout?: unknown;
+  };
+  const stderr = normalizeCommandOutput(record.stderr);
+  if (stderr) {
+    return stderr;
+  }
+  const stdout = normalizeCommandOutput(record.stdout);
+  if (stdout) {
+    return stdout;
+  }
+  if (typeof record.message === "string" && record.message.trim()) {
+    return record.message.trim();
+  }
+  return formatError(error);
+}
+
+function normalizeCommandOutput(value: unknown): string {
+  const raw =
+    typeof value === "string"
+      ? value
+      : Buffer.isBuffer(value)
+        ? value.toString("utf8")
+        : "";
+  if (!raw.trim()) {
+    return "";
+  }
+  return raw.replace(/\s+/g, " ").trim();
 }
