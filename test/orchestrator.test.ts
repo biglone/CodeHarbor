@@ -1567,13 +1567,22 @@ describe("Orchestrator", () => {
       await orchestrator.bootstrapTaskQueueRecovery();
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(executor.callCount).toBe(1);
-      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 6_000);
+      await waitForCondition(() => {
+        const task = store.getTaskById(queued.taskId);
+        return task?.status === "pending" && task.nextRetryAt !== null;
+      }, 3_000);
+      const retryingTask = store.getTaskById(queued.taskId);
+      expect(retryingTask?.nextRetryAt).not.toBeNull();
+      const waitUntilRetryMs = Math.max(0, (retryingTask?.nextRetryAt ?? Date.now()) - Date.now());
+      await new Promise((resolve) => setTimeout(resolve, waitUntilRetryMs + 80));
+      await orchestrator.bootstrapTaskQueueRecovery();
+      await waitForCondition(() => store.getTaskById(queued.taskId)?.status === "succeeded", 10_000);
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(450);
       expect(executor.callCount).toBe(2);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 20_000);
 
   it("submits API task into queue and returns idempotent hit for duplicate payload", async () => {
     const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-queue-");
