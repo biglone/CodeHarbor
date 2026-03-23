@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.63] - 2026-03-23
+
+- i18n: remove mixed Chinese text in English command replies for `/status`, `/upgrade`, `/autodev status`, and historical stage traces.
+- i18n: localize package update hints, recent upgrade summaries, and upgrade post-check details by output language.
+- help/status UX: align English `/help` aliases line and progress summary separators for consistent English-only output.
+- tests: add workflow-diag localization coverage and extend package-update hint language assertions.
+
 ## [0.1.62] - 2026-03-23
 
 - admin-ui: move operation notices to floating toasts so feedback remains visible while working at the bottom of long pages.
