@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { OutputLanguage } from "./config";
+
 type PackageUpdateState = "up_to_date" | "update_available" | "unknown";
 
 export interface PackageUpdateQuery {
@@ -203,14 +205,21 @@ export class NpmRegistryUpdateChecker implements PackageUpdateChecker {
   }
 }
 
-export function formatPackageUpdateHint(status: PackageUpdateStatus): string {
+export function formatPackageUpdateHint(status: PackageUpdateStatus, outputLanguage: OutputLanguage = "zh"): string {
+  const isEnglish = outputLanguage === "en";
   if (status.state === "update_available" && status.latestVersion) {
-    return `发现新版本 ${status.latestVersion}，建议执行：${status.upgradeCommand}`;
+    return isEnglish
+      ? `new version ${status.latestVersion} is available; recommended command: ${status.upgradeCommand}`
+      : `发现新版本 ${status.latestVersion}，建议执行：${status.upgradeCommand}`;
   }
   if (status.state === "up_to_date") {
-    return `已是最新版本${status.latestVersion ? `（${status.latestVersion}）` : ""}`;
+    return isEnglish
+      ? `already up to date${status.latestVersion ? ` (${status.latestVersion})` : ""}`
+      : `已是最新版本${status.latestVersion ? `（${status.latestVersion}）` : ""}`;
   }
-  return `暂时无法检查更新${status.error ? `（${status.error}）` : ""}`;
+  return isEnglish
+    ? `unable to check updates currently${status.error ? ` (${status.error})` : ""}`
+    : `暂时无法检查更新${status.error ? `（${status.error}）` : ""}`;
 }
 
 export function resolvePackageVersion(packagePath?: string): string {

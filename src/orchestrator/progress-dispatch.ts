@@ -2,6 +2,7 @@ import type { Channel } from "../channels/channel";
 import type { CodexProgressEvent } from "../executor/codex-executor";
 import type { Logger } from "../logger";
 import { formatPackageUpdateHint, type PackageUpdateChecker } from "../package-update-checker";
+import type { OutputLanguage } from "../config";
 import { mapProgressText } from "./media-progress";
 
 export interface SendProgressContext {
@@ -12,6 +13,7 @@ export interface SendProgressContext {
 }
 
 export interface ProgressDispatchContext {
+  outputLanguage: OutputLanguage;
   progressUpdatesEnabled: boolean;
   progressMinIntervalMs: number;
   typingTimeoutMs: number;
@@ -109,7 +111,8 @@ export async function finishProgress(
   let updateHint = "";
   try {
     const packageUpdate = await context.packageUpdateChecker.getStatus();
-    updateHint = `；${formatPackageUpdateHint(packageUpdate)}`;
+    const delimiter = context.outputLanguage === "en" ? "; " : "；";
+    updateHint = `${delimiter}${formatPackageUpdateHint(packageUpdate, context.outputLanguage)}`;
   } catch (error) {
     context.logger.debug("Failed to resolve package update status for progress summary", { error });
   }

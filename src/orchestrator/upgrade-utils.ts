@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import type { OutputLanguage } from "../config";
 import type { Logger } from "../logger";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord } from "../store/state-store";
 import { buildManualRestartCommands, resolveLaunchdLabelConfig, resolveUpgradePlatform } from "../upgrade-platform";
@@ -239,7 +240,10 @@ export function evaluateUpgradePostCheck(input: {
   targetVersion: string | null;
   selfUpdateVersion: string | null;
   versionProbe: UpgradeVersionProbeResult;
+  outputLanguage?: OutputLanguage;
 }): { ok: boolean; installedVersion: string | null; checkDetail: string } {
+  const outputLanguage = input.outputLanguage ?? "zh";
+  const isEnglish = outputLanguage === "en";
   const installedVersion = input.versionProbe.version ?? input.selfUpdateVersion;
   const source = input.versionProbe.version ? `version probe (${input.versionProbe.source})` : "self-update output";
 
@@ -248,7 +252,7 @@ export function evaluateUpgradePostCheck(input: {
     return {
       ok: false,
       installedVersion: null,
-      checkDetail: `无法确认安装版本${probeError}`,
+      checkDetail: isEnglish ? `unable to determine installed version${probeError}` : `无法确认安装版本${probeError}`,
     };
   }
 
@@ -256,7 +260,9 @@ export function evaluateUpgradePostCheck(input: {
     return {
       ok: false,
       installedVersion,
-      checkDetail: `期望 ${input.targetVersion}，实际 ${installedVersion}`,
+      checkDetail: isEnglish
+        ? `expected ${input.targetVersion}, got ${installedVersion}`
+        : `期望 ${input.targetVersion}，实际 ${installedVersion}`,
     };
   }
 
@@ -287,26 +293,41 @@ export function formatSelfUpdateError(error: unknown): string {
   return sanitizeSelfUpdateErrorText(maybeError.message?.trim() || formatError(error)) || "unknown self-update error";
 }
 
-export function formatLatestUpgradeSummary(run: UpgradeRunRecord | null): string {
+export function formatLatestUpgradeSummary(run: UpgradeRunRecord | null, outputLanguage: OutputLanguage = "zh"): string {
+  const isEnglish = outputLanguage === "en";
   if (!run) {
-    return "暂无记录";
+    return isEnglish ? "none" : "暂无记录";
   }
   if (run.status === "running") {
-    return `#${run.id} 进行中（startedAt=${new Date(run.startedAt).toISOString()}）`;
+    return isEnglish
+      ? `#${run.id} running (startedAt=${new Date(run.startedAt).toISOString()})`
+      : `#${run.id} 进行中（startedAt=${new Date(run.startedAt).toISOString()}）`;
   }
   if (run.status === "succeeded") {
-    return `#${run.id} 成功（target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
-      run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
-    }）`;
+    return isEnglish
+      ? `#${run.id} succeeded (target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
+          run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+        })`
+      : `#${run.id} 成功（target=${run.targetVersion ?? "latest"}, installed=${run.installedVersion ?? "unknown"}, at=${
+          run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+        }）`;
   }
-  return `#${run.id} 失败（target=${run.targetVersion ?? "latest"}, at=${
-    run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
-  }, error=${run.error ?? "unknown"}）`;
+  return isEnglish
+    ? `#${run.id} failed (target=${run.targetVersion ?? "latest"}, at=${
+        run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+      }, error=${run.error ?? "unknown"})`
+    : `#${run.id} 失败（target=${run.targetVersion ?? "latest"}, at=${
+        run.finishedAt ? new Date(run.finishedAt).toISOString() : "unknown"
+      }, error=${run.error ?? "unknown"}）`;
 }
 
-export function formatRecentUpgradeRunsSummary(runs: UpgradeRunRecord[]): string {
+export function formatRecentUpgradeRunsSummary(
+  runs: UpgradeRunRecord[],
+  outputLanguage: OutputLanguage = "zh",
+): string {
+  const isEnglish = outputLanguage === "en";
   if (runs.length === 0) {
-    return "暂无记录";
+    return isEnglish ? "none" : "暂无记录";
   }
   return runs
     .map((run) => {

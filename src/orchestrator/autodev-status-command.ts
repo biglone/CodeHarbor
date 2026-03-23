@@ -8,6 +8,7 @@ import { formatError, formatRunWindowDuration, formatWorkflowDiagRunDuration } f
 import {
   formatAutoDevStatusRunSummaries,
   formatAutoDevStatusStageTrace,
+  localizeWorkflowDiagMessageForDisplay,
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunRecord,
 } from "./workflow-diag";
@@ -70,10 +71,17 @@ export async function handleAutoDevStatusCommand(
     const stageEvents = latestRun ? deps.listWorkflowDiagEvents(latestRun.runId, 12) : [];
     const latestStageEvent = stageEvents.length > 0 ? stageEvents[stageEvents.length - 1] : null;
     const latestStageSummary = latestStageEvent
-      ? `stage=${latestStageEvent.stage}, round=${latestStageEvent.round}, at=${latestStageEvent.at}, message=${latestStageEvent.message}`
+      ? `stage=${latestStageEvent.stage}, round=${latestStageEvent.round}, at=${latestStageEvent.at}, message=${localizeWorkflowDiagMessageForDisplay(
+          latestStageEvent.message,
+          deps.outputLanguage,
+        )}`
       : "N/A";
     const latestRunLastStage = latestRun?.lastStage
-      ? `${latestRun.lastStage}${latestRun.lastMessage ? `(${latestRun.lastMessage})` : ""}`
+      ? `${latestRun.lastStage}${
+          latestRun.lastMessage
+            ? `(${localizeWorkflowDiagMessageForDisplay(latestRun.lastMessage, deps.outputLanguage)})`
+            : ""
+        }`
       : "N/A";
     const autoReleasePushWarning =
       deps.autoDevAutoReleaseEnabled && !deps.autoDevAutoReleasePush
@@ -84,11 +92,15 @@ export async function handleAutoDevStatusCommand(
         : "";
     const currentTask =
       snapshot.taskId && snapshot.taskDescription
-        ? `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
+        ? deps.outputLanguage === "en"
+          ? snapshot.taskId
+          : `${snapshot.taskId} ${snapshot.taskDescription}`.trim()
         : snapshot.taskId
           ? snapshot.taskId
           : inProgressTask
-            ? formatTaskForDisplay(inProgressTask)
+            ? deps.outputLanguage === "en"
+              ? inProgressTask.id
+              : formatTaskForDisplay(inProgressTask)
             : "N/A";
 
     if (deps.outputLanguage === "en") {
@@ -120,9 +132,9 @@ export async function handleAutoDevStatusCommand(
 - workflowDiagLastStage: ${latestRunLastStage}
 - workflowStage: ${latestStageSummary}
 - recentRuns:
-${formatAutoDevStatusRunSummaries(recentRuns)}
+${formatAutoDevStatusRunSummaries(recentRuns, deps.outputLanguage)}
 - stageTrace:
-${formatAutoDevStatusStageTrace(stageEvents)}`,
+${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
       );
       return;
     }
@@ -155,9 +167,9 @@ ${formatAutoDevStatusStageTrace(stageEvents)}`,
 - workflowDiagLastStage: ${latestRunLastStage}
 - workflowStage: ${latestStageSummary}
 - recentRuns:
-${formatAutoDevStatusRunSummaries(recentRuns)}
+${formatAutoDevStatusRunSummaries(recentRuns, deps.outputLanguage)}
 - stageTrace:
-${formatAutoDevStatusStageTrace(stageEvents)}`,
+${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
     );
   } catch (error) {
     await deps.sendNotice(

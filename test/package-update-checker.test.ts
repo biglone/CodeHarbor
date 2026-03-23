@@ -199,4 +199,18 @@ describe("formatPackageUpdateHint", () => {
       }),
     ).toContain("暂时无法检查更新");
   });
+
+  it("formats english hint when output language is en", () => {
+    expect(
+      formatPackageUpdateHint(
+        {
+          ...base,
+          state: "up_to_date",
+          latestVersion: "0.1.24",
+          error: null,
+        },
+        "en",
+      ),
+    ).toContain("already up to date");
+  });
 });

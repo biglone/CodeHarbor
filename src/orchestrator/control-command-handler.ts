@@ -85,8 +85,8 @@ export async function handleControlCommand(
     await deps.sendNotice(
       input.message.conversationId,
       localize(
-        `${deps.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate)}\n- 检查时间: ${packageUpdate.checkedAt}`,
-        `${deps.botNoticePrefix} Version\n- currentVersion: ${packageUpdate.currentVersion}\n- updateHint: ${formatPackageUpdateHint(packageUpdate)}\n- checkedAt: ${packageUpdate.checkedAt}`,
+        `${deps.botNoticePrefix} 版本信息\n- 当前版本: ${packageUpdate.currentVersion}\n- 更新检查: ${formatPackageUpdateHint(packageUpdate, deps.outputLanguage)}\n- 检查时间: ${packageUpdate.checkedAt}`,
+        `${deps.botNoticePrefix} Version\n- currentVersion: ${packageUpdate.currentVersion}\n- updateHint: ${formatPackageUpdateHint(packageUpdate, deps.outputLanguage)}\n- checkedAt: ${packageUpdate.checkedAt}`,
       ),
     );
     return;

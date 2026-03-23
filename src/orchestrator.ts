@@ -1336,6 +1336,7 @@ export class Orchestrator {
 
   private buildProgressDispatchContext(): Parameters<typeof runHandleProgress>[0] {
     return {
+      outputLanguage: this.outputLanguage,
       progressUpdatesEnabled: this.progressUpdatesEnabled,
       progressMinIntervalMs: this.progressMinIntervalMs,
       typingTimeoutMs: this.typingTimeoutMs,

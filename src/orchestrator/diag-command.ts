@@ -169,7 +169,7 @@ async function handleVersionDiag(deps: DiagCommandDeps, conversationId: string):
       uptimeText: formatDurationMs(uptimeMs),
       backendLabel: deps.formatBackendToolLabel(),
       currentVersion: packageUpdate.currentVersion,
-      latestHint: formatPackageUpdateHint(packageUpdate),
+      latestHint: formatPackageUpdateHint(packageUpdate, deps.outputLanguage),
       checkedAt: packageUpdate.checkedAt,
       cliScriptPath: process.argv[1] ? path.resolve(process.argv[1]) : "unknown",
     }, deps.outputLanguage),
@@ -221,7 +221,11 @@ async function handleAutoDevDiag(
     commitRecords.length > 0
       ? formatAutoDevGitCommitRecords(commitRecords)
       : deps.listRecentAutoDevGitCommitEventSummaries(target.limit).join("\n") || "- (empty)";
-  const recordsText = formatAutoDevDiagRuns(runs, (runId) => deps.listWorkflowDiagEvents(runId, 5));
+  const recordsText = formatAutoDevDiagRuns(
+    runs,
+    (runId) => deps.listWorkflowDiagEvents(runId, 5),
+    deps.outputLanguage,
+  );
 
   await deps.sendNotice(
     message.conversationId,

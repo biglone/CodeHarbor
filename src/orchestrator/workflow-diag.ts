@@ -1,3 +1,5 @@
+import type { OutputLanguage } from "../config";
+
 import {
   formatDurationMs,
   formatWorkflowDiagRunDuration,
@@ -82,20 +84,30 @@ export function parseWorkflowDiagStorePayload(payloadJson: string | null): Workf
 export function formatAutoDevDiagRuns(
   runs: WorkflowDiagRunRecord[],
   resolveEvents: (runId: string) => WorkflowDiagEventRecord[],
+  outputLanguage: OutputLanguage = "zh",
 ): string {
   if (runs.length === 0) {
     return "- (empty)";
   }
   return runs
     .map((run) => {
-      const stageText = run.lastStage ? `${run.lastStage}${run.lastMessage ? `(${run.lastMessage})` : ""}` : "N/A";
+      const localizedLastMessage =
+        run.lastMessage === null ? null : localizeWorkflowDiagMessageForDisplay(run.lastMessage, outputLanguage);
+      const stageText = run.lastStage ? `${run.lastStage}${localizedLastMessage ? `(${localizedLastMessage})` : ""}` : "N/A";
       const durationText = run.durationMs === null ? "running" : formatDurationMs(run.durationMs);
       const errorText = run.error ?? "none";
       const events = resolveEvents(run.runId);
       const eventSummary =
         events.length === 0
           ? "events=n/a"
-          : `events=${events.map((event) => `${event.stage}#${event.round}`).join(" -> ")}`;
+          : `events=${events
+              .map((event) =>
+                summarizeSingleLine(
+                  `${event.stage}#${event.round}:${localizeWorkflowDiagMessageForDisplay(event.message, outputLanguage)}`,
+                  48,
+                ),
+              )
+              .join(" -> ")}`;
       return [
         `- run=${run.runId} status=${run.status} task=${run.taskId ?? "N/A"} approved=${
           run.approved === null ? "N/A" : run.approved ? "yes" : "no"
@@ -108,31 +120,89 @@ export function formatAutoDevDiagRuns(
     .join("\n");
 }
 
-export function formatAutoDevStatusRunSummaries(runs: WorkflowDiagRunRecord[]): string {
+export function formatAutoDevStatusRunSummaries(
+  runs: WorkflowDiagRunRecord[],
+  outputLanguage: OutputLanguage = "zh",
+): string {
   if (runs.length === 0) {
     return "- (empty)";
   }
   return runs
     .map((run) => {
+      const taskDescription =
+        outputLanguage === "en"
+          ? null
+          : run.taskDescription;
       const task = run.taskId
-        ? `${run.taskId}${run.taskDescription ? ` ${run.taskDescription}` : ""}`.trim()
+        ? `${run.taskId}${taskDescription ? ` ${taskDescription}` : ""}`.trim()
         : "N/A";
-      const stage = run.lastStage ? `${run.lastStage}${run.lastMessage ? `(${run.lastMessage})` : ""}` : "N/A";
+      const localizedLastMessage =
+        run.lastMessage === null ? null : localizeWorkflowDiagMessageForDisplay(run.lastMessage, outputLanguage);
+      const stage = run.lastStage ? `${run.lastStage}${localizedLastMessage ? `(${localizedLastMessage})` : ""}` : "N/A";
       const approvedText = run.approved === null ? "N/A" : run.approved ? "yes" : "no";
       return `- run=${run.runId} status=${run.status} task=${task} approved=${approvedText} duration=${formatWorkflowDiagRunDuration(run)} updatedAt=${run.updatedAt} lastStage=${summarizeSingleLine(stage, 180)}`;
     })
     .join("\n");
 }
 
-export function formatAutoDevStatusStageTrace(events: WorkflowDiagEventRecord[]): string {
+export function formatAutoDevStatusStageTrace(
+  events: WorkflowDiagEventRecord[],
+  outputLanguage: OutputLanguage = "zh",
+): string {
   if (events.length === 0) {
     return "- (empty)";
   }
   return events
     .map((event, index) => {
-      return `- #${index + 1} at=${event.at} stage=${event.stage} round=${event.round} message=${summarizeSingleLine(event.message, 180)}`;
+      return `- #${index + 1} at=${event.at} stage=${event.stage} round=${event.round} message=${summarizeSingleLine(localizeWorkflowDiagMessageForDisplay(event.message, outputLanguage), 180)}`;
     })
     .join("\n");
+}
+
+export function localizeWorkflowDiagMessageForDisplay(message: string, outputLanguage: OutputLanguage): string {
+  if (outputLanguage !== "en") {
+    return message;
+  }
+  const normalized = message
+    .replaceAll("（", "(")
+    .replaceAll("）", ")")
+    .replaceAll("，", ", ")
+    .replaceAll("：", ": ");
+  const replacements: Array<[string, string]> = [
+    ["AutoDev 启动任务", "AutoDev started task"],
+    ["AutoDev 任务结果", "AutoDev task result"],
+    ["AutoDev 失败", "AutoDev failed"],
+    ["AutoDev 循环执行完成", "AutoDev loop completed"],
+    ["多智能体流程启动", "Multi-Agent workflow started"],
+    ["Multi-Agent workflow 启动", "Multi-Agent workflow started"],
+    ["规划代理", "Planner"],
+    ["执行代理", "Executor"],
+    ["审查代理", "Reviewer"],
+    ["开始生成执行计划", "started plan generation"],
+    ["执行完成", "completed"],
+    ["开始根据计划执行任务", "started execution from plan"],
+    ["初版交付完成", "initial delivery completed"],
+    ["开始质量审查", "started quality review"],
+    ["审查完成", "review completed"],
+    ["开始按审查反馈修复", "started repair from review feedback"],
+    ["修复轮次完成", "repair round completed"],
+    ["契约补全启动", "contract repair started"],
+    ["契约补全完成", "contract repair completed"],
+    ["已拒绝但未提供可执行修复契约，已停止自动修复", "rejected without actionable repair contract; auto-repair stopped"],
+    ["轮次", "round"],
+    ["耗时", "duration"],
+  ];
+
+  let localized = normalized;
+  for (const [pattern, replacement] of replacements) {
+    localized = localized.split(pattern).join(replacement);
+  }
+
+  localized = localized.replace(/(AutoDev started task [^:]+):\s*.+$/i, "$1");
+  if (/[\u4e00-\u9fff]/.test(localized)) {
+    localized = localized.replace(/[\u4e00-\u9fff]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  }
+  return localized || "historical workflow message";
 }
 
 function isWorkflowDiagRunRecord(value: unknown): value is WorkflowDiagRunRecord {

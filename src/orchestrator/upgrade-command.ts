@@ -98,6 +98,7 @@ export async function handleUpgradeCommand(
           targetVersion: parsed.version,
           selfUpdateVersion: result.installedVersion,
           versionProbe,
+          outputLanguage: deps.outputLanguage,
         });
         const recoveryAdvice = buildUpgradeRecoveryAdvice({
           previousVersion: baselineVersionProbe.version,
@@ -106,6 +107,7 @@ export async function handleUpgradeCommand(
           includeAdminService: true,
           manualRestartCommands: restartPlan.manualCommands ?? null,
         });
+        const restartPlanSummary = localizeRestartPlanSummary(restartPlan.summary, deps.outputLanguage);
         const elapsed = formatDurationMs(Date.now() - startedAt);
         if (postCheck.ok) {
           const installedVersion = postCheck.installedVersion ?? "unknown";
@@ -117,7 +119,7 @@ export async function handleUpgradeCommand(
 - 目标版本: ${targetLabel}
 - 已安装版本: ${installedVersion}
 - 升级校验: 通过（${postCheck.checkDetail}）
-- 服务重启: ${restartPlan.summary}
+- 服务重启: ${restartPlanSummary}
 - 失败恢复命令: ${recoveryAdvice.rollbackCommand}
 - 重启命令: ${formatRestartCommandSummary(recoveryAdvice)}
 - 校验建议: 稍后发送 /diag version 或 /version`,
@@ -126,7 +128,7 @@ export async function handleUpgradeCommand(
 - targetVersion: ${targetLabel}
 - installedVersion: ${installedVersion}
 - postCheck: pass (${postCheck.checkDetail})
-- restartPlan: ${restartPlan.summary}
+- restartPlan: ${restartPlanSummary}
 - rollbackCommand: ${recoveryAdvice.rollbackCommand}
 - restartCommand: ${formatRestartCommandSummary(recoveryAdvice)}
 - verifyHint: run /diag version or /version later`,
@@ -147,7 +149,7 @@ export async function handleUpgradeCommand(
 - 目标版本: ${targetLabel}
 - 观测版本: ${observedVersion}
 - 失败原因: ${postCheck.checkDetail}
-- 服务重启: ${restartPlan.summary}
+- 服务重启: ${restartPlanSummary}
 - 回滚命令: ${recoveryAdvice.rollbackCommand}
 - 重启命令: ${formatRestartCommandSummary(recoveryAdvice)}
 - 诊断命令: /diag upgrade 5`,
@@ -156,7 +158,7 @@ export async function handleUpgradeCommand(
 - targetVersion: ${targetLabel}
 - observedVersion: ${observedVersion}
 - reason: ${postCheck.checkDetail}
-- restartPlan: ${restartPlan.summary}
+- restartPlan: ${restartPlanSummary}
 - rollbackCommand: ${recoveryAdvice.rollbackCommand}
 - restartCommand: ${formatRestartCommandSummary(recoveryAdvice)}
 - diagnostics: /diag upgrade 5`,
@@ -244,6 +246,51 @@ function localizeUpgradeAuthReason(reason: string, outputLanguage: OutputLanguag
     return "This account is not in MATRIX_ADMIN_USERS and cannot run /upgrade.";
   }
   return reason;
+}
+
+function localizeRestartPlanSummary(summary: string, outputLanguage: OutputLanguage): string {
+  if (outputLanguage !== "en") {
+    return summary;
+  }
+  const normalized = summary.trim();
+  if (!normalized) {
+    return "N/A";
+  }
+
+  if (normalized === "已触发（systemd signal, main+admin）") {
+    return "triggered (systemd signal, main+admin)";
+  }
+  if (normalized === "已触发（systemd signal, main）") {
+    return "triggered (systemd signal, main)";
+  }
+  if (normalized === "已触发（launchd signal, main）") {
+    return "triggered (launchd signal, main)";
+  }
+  if (normalized === "需手工重启（未检测到 systemctl）") {
+    return "manual restart required (systemctl not detected)";
+  }
+  if (normalized === "需手工重启（未检测到 codeharbor.service）") {
+    return "manual restart required (codeharbor.service not detected)";
+  }
+  if (normalized === "需手工重启（当前非 systemd 服务上下文）") {
+    return "manual restart required (not running under systemd service context)";
+  }
+  if (normalized === "需手工重启（未检测到 launchctl）") {
+    return "manual restart required (launchctl not detected)";
+  }
+  if (normalized === "需手工重启（当前非 launchd 服务上下文）") {
+    return "manual restart required (not running under launchd service context)";
+  }
+  if (normalized === "需手工重启（Windows Service）") {
+    return "manual restart required (Windows Service)";
+  }
+
+  const platformMatch = /^需手工重启（平台\s+(.+)）$/.exec(normalized);
+  if (platformMatch) {
+    return `manual restart required (platform ${platformMatch[1]})`;
+  }
+
+  return /[\u4e00-\u9fff]/.test(normalized) ? "manual restart required" : normalized;
 }
 
 function localizeUpgradeParseReason(reason: string, outputLanguage: OutputLanguage): string {

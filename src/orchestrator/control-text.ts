@@ -28,7 +28,7 @@ export function buildHelpNotice(input: {
 - /reset: Clear current session context
 - /stop: Stop current execution
 - If Matrix client intercepts / commands, use //autodev run T6.2 (also supports //agents, //diag, //upgrade)
-- help|帮助|菜单: text aliases of /help`;
+- help aliases: help | menu | localized aliases of /help`;
   }
   return `${input.botNoticePrefix} 可用命令
 - /help: 查看命令帮助

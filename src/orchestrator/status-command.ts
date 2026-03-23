@@ -26,6 +26,7 @@ import { byOutputLanguage } from "./output-language";
 import {
   type WorkflowDiagEventRecord,
   type WorkflowDiagRunRecord,
+  localizeWorkflowDiagMessageForDisplay,
 } from "./workflow-diag";
 
 interface SessionStatusLike {
@@ -120,7 +121,9 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
   const autoDev = deps.getAutoDevSnapshot(input.sessionKey) ?? createIdleAutoDevSnapshot();
   const autoDevTask =
     autoDev.taskId && autoDev.taskDescription
-      ? `${autoDev.taskId} ${autoDev.taskDescription}`.trim()
+      ? deps.outputLanguage === "en"
+        ? autoDev.taskId
+        : `${autoDev.taskId} ${autoDev.taskDescription}`.trim()
       : autoDev.taskId
         ? autoDev.taskId
         : "N/A";
@@ -137,7 +140,10 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
     : autoDevDiagRun?.lastStage
       ? `${autoDevDiagRun.lastStage}@${autoDevDiagRun.updatedAt}`
       : "N/A";
-  const autoDevStageMessage = autoDevLatestStageEvent?.message ?? autoDevDiagRun?.lastMessage ?? "N/A";
+  const autoDevStageMessage = localizeWorkflowDiagMessageForDisplay(
+    autoDevLatestStageEvent?.message ?? autoDevDiagRun?.lastMessage ?? "N/A",
+    deps.outputLanguage,
+  );
   const roleSkillStatus = deps.buildWorkflowRoleSkillStatus(input.sessionKey);
   const packageUpdate = await deps.getPackageUpdateStatus();
   const latestUpgrade = deps.getLatestUpgradeRun();
@@ -177,11 +183,11 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       backendRouteReasonDesc,
       backendRouteFallback,
       currentVersion: packageUpdate.currentVersion,
-      updateHint: formatPackageUpdateHint(packageUpdate),
+      updateHint: formatPackageUpdateHint(packageUpdate, deps.outputLanguage),
       checkedAt: packageUpdate.checkedAt,
       updateCacheTtlText: formatCacheTtl(deps.updateCheckTtlMs),
-      latestUpgradeSummary: formatLatestUpgradeSummary(latestUpgrade),
-      recentUpgradesSummary: formatRecentUpgradeRunsSummary(recentUpgrades),
+      latestUpgradeSummary: formatLatestUpgradeSummary(latestUpgrade, deps.outputLanguage),
+      recentUpgradesSummary: formatRecentUpgradeRunsSummary(recentUpgrades, deps.outputLanguage),
       upgradeStats,
       upgradeLockSummary: formatUpgradeLockSummary(upgradeLock),
       metrics,
