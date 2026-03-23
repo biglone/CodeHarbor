@@ -144,6 +144,28 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           opacity 0.2s ease,
           transform 0.2s ease;
       }
+      .notice-content {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+      }
+      .notice-text {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .notice-close {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        padding: 0 2px;
+        line-height: 1;
+        font-size: 16px;
+        opacity: 0.9;
+      }
+      .notice-close:hover {
+        opacity: 1;
+      }
       .notice.visible {
         opacity: 1;
         transform: translateY(0);
@@ -271,7 +293,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <button id="auth-save-btn" type="button" class="secondary" data-i18n="auth.save">保存认证</button>
           <button id="auth-clear-btn" type="button" class="secondary" data-i18n="auth.clear">清除认证</button>
         </div>
-        <div id="notice" class="notice" data-i18n="notice.ready">就绪。</div>
+        <div id="notice" class="notice">
+          <div class="notice-content">
+            <span id="notice-text" class="notice-text" data-i18n="notice.ready">就绪。</span>
+            <button id="notice-close-btn" class="notice-close" type="button" aria-label="Dismiss notice">×</button>
+          </div>
+        </div>
         <p id="auth-role" class="muted" data-i18n="auth.permission.unknown">权限：未知</p>
       </section>
 
@@ -1003,6 +1030,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var actorInput = document.getElementById("auth-actor");
         var langSelect = document.getElementById("lang-select");
         var noticeNode = document.getElementById("notice");
+        var noticeTextNode = document.getElementById("notice-text");
+        var noticeCloseBtn = document.getElementById("notice-close-btn");
         var noticeTimer = null;
         var authRoleNode = document.getElementById("auth-role");
         var roomListBody = document.getElementById("room-list-body");
@@ -1037,6 +1066,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           localStorage.removeItem(storageActorKey);
           showNotice("warn", t("notice.authCleared"));
           void refreshAuthStatus();
+        });
+        noticeCloseBtn.addEventListener("click", function () {
+          hideNotice();
         });
 
         document.getElementById("global-save-btn").addEventListener("click", saveGlobal);
@@ -1389,15 +1421,22 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           }
         }
 
-        function showNotice(type, message) {
+        function hideNotice() {
           if (noticeTimer) {
             window.clearTimeout(noticeTimer);
+            noticeTimer = null;
           }
+          noticeNode.className = "notice";
+        }
+
+        function showNotice(type, message) {
+          hideNotice();
           noticeNode.className = "notice " + type + " visible";
-          noticeNode.textContent = message;
+          noticeTextNode.textContent = message;
           var timeoutMs = type === "error" ? 12000 : type === "warn" ? 8000 : 5000;
           noticeTimer = window.setTimeout(function () {
             noticeNode.className = "notice " + type;
+            noticeTimer = null;
           }, timeoutMs);
         }
 
