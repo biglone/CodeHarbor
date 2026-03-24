@@ -33,7 +33,7 @@ export type AutoDevCommand =
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
-  | { kind: "init"; path: string | null; from: string | null }
+  | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" };
 
@@ -73,6 +73,14 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     if (fromInlineMatch) {
       remainder = remainder.replace(fromInlineMatch[0], " ").trim();
     }
+    const dryRun = /(?:^|\s)--dry-?run(?=\s|$)/i.test(remainder);
+    if (dryRun) {
+      remainder = remainder.replace(/(?:^|\s)--dry-?run(?=\s|$)/gi, " ").trim();
+    }
+    const force = /(?:^|\s)--force(?=\s|$)/i.test(remainder);
+    if (force) {
+      remainder = remainder.replace(/(?:^|\s)--force(?=\s|$)/gi, " ").trim();
+    }
     const legacySkillInlineMatch = remainder.match(/(?:^|\s)--skill(?:=|\s+)[A-Za-z0-9._-]+/i);
     if (legacySkillInlineMatch) {
       remainder = remainder.replace(legacySkillInlineMatch[0], " ").trim();
@@ -81,6 +89,8 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
       kind: "init",
       path: stripWrappingQuotes(remainder) || null,
       from,
+      dryRun,
+      force,
     };
   }
   if (action === "progress") {

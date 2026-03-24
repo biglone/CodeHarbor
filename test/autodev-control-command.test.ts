@@ -74,6 +74,8 @@ describe("AutoDev control command helpers", () => {
         message: createMessage("/autodev init"),
         path: tempRoot,
         from: null,
+        dryRun: false,
+        force: false,
         roomWorkdir: "/home/fallback",
       });
 
@@ -134,6 +136,8 @@ describe("AutoDev control command helpers", () => {
         message: createMessage("/autodev init StrawBerry"),
         path: "StrawBerry",
         from: null,
+        dryRun: false,
+        force: false,
         roomWorkdir,
       });
       expect(overrides.get("session-3")).toBe(path.resolve(siblingProject));
@@ -160,6 +164,8 @@ describe("AutoDev control command helpers", () => {
         message: createMessage("/autodev init --from docs/技术方案.md"),
         path: tempRoot,
         from: "docs/技术方案.md",
+        dryRun: false,
+        force: false,
         roomWorkdir: "/home/fallback",
       });
 
@@ -190,6 +196,8 @@ describe("AutoDev control command helpers", () => {
         message: createMessage("/autodev init"),
         path: tempRoot,
         from: null,
+        dryRun: false,
+        force: false,
         roomWorkdir: "/home/fallback",
       });
 
@@ -218,12 +226,66 @@ describe("AutoDev control command helpers", () => {
         message: createMessage("/autodev init"),
         path: tempRoot,
         from: null,
+        dryRun: false,
+        force: false,
         roomWorkdir: "/home/fallback",
       });
 
       const taskListText = await fs.readFile(path.join(tempRoot, "TASK_LIST.md"), "utf8");
       expect(taskListText).toContain("| T0.1 |");
       expect(notices.at(-1)).toContain("initEnhancement: fallback to stage-A baseline");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("supports --dry-run without writing files", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-init-dry-run-"));
+    const { deps, notices, overrides } = createDeps();
+    try {
+      await handleAutoDevInitCommand(deps, {
+        sessionKey: "session-7",
+        message: createMessage("/autodev init --dry-run"),
+        path: tempRoot,
+        from: null,
+        dryRun: true,
+        force: false,
+        roomWorkdir: "/home/fallback",
+      });
+
+      await expect(fs.access(path.join(tempRoot, "REQUIREMENTS.md"))).rejects.toThrow();
+      await expect(fs.access(path.join(tempRoot, "TASK_LIST.md"))).rejects.toThrow();
+      expect(notices.at(-1)).toContain("mode: dry-run");
+      expect(notices.at(-1)).toContain("plannedFiles: REQUIREMENTS.md, TASK_LIST.md, docs/AUTODEV_TASK_COMPASS.md");
+      expect(overrides.has("session-7")).toBe(false);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("supports --force and overwrites existing scaffold files", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-init-force-"));
+    await fs.mkdir(path.join(tempRoot, "docs"), { recursive: true });
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# old requirements\n", "utf8");
+    await fs.writeFile(path.join(tempRoot, "TASK_LIST.md"), "# old task list\n", "utf8");
+    await fs.writeFile(path.join(tempRoot, "docs", "AUTODEV_TASK_COMPASS.md"), "# old compass\n", "utf8");
+
+    const { deps, notices } = createDeps();
+    try {
+      await handleAutoDevInitCommand(deps, {
+        sessionKey: "session-8",
+        message: createMessage("/autodev init --force"),
+        path: tempRoot,
+        from: null,
+        dryRun: false,
+        force: true,
+        roomWorkdir: "/home/fallback",
+      });
+
+      const requirementsText = await fs.readFile(path.join(tempRoot, "REQUIREMENTS.md"), "utf8");
+      expect(requirementsText).toContain("# REQUIREMENTS");
+      expect(notices.at(-1)).toContain("force: on");
+      expect(notices.at(-1)).toContain("overwrittenFiles: REQUIREMENTS.md, TASK_LIST.md, docs/AUTODEV_TASK_COMPASS.md");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

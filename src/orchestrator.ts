@@ -1058,6 +1058,8 @@ export class Orchestrator {
     message: InboundMessage,
     targetPath: string | null,
     from: string | null,
+    dryRun: boolean,
+    force: boolean,
     roomWorkdir: string,
   ): Promise<void> {
     await runAutoDevInitCommand(
@@ -1067,6 +1069,8 @@ export class Orchestrator {
         message,
         path: targetPath,
         from,
+        dryRun,
+        force,
         roomWorkdir,
       },
     );

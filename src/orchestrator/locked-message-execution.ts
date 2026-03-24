@@ -72,6 +72,8 @@ interface ExecuteLockedMessageDeps {
     message: InboundMessage,
     path: string | null,
     from: string | null,
+    dryRun: boolean,
+    force: boolean,
     roomWorkdir: string,
   ) => Promise<void>;
   getTaskQueueStateStore: () => {
@@ -206,8 +208,8 @@ export async function executeLockedMessage(
       handleAutoDevLoopStopCommand: (sessionKey, message) => deps.handleAutoDevLoopStopCommand(sessionKey, message),
       handleAutoDevWorkdirCommand: (sessionKey, message, mode, commandPath, roomWorkdir) =>
         deps.handleAutoDevWorkdirCommand(sessionKey, message, mode, commandPath, roomWorkdir),
-      handleAutoDevInitCommand: (sessionKey, message, commandPath, from, roomWorkdir) =>
-        deps.handleAutoDevInitCommand(sessionKey, message, commandPath, from, roomWorkdir),
+      handleAutoDevInitCommand: (sessionKey, message, commandPath, from, dryRun, force, roomWorkdir) =>
+        deps.handleAutoDevInitCommand(sessionKey, message, commandPath, from, dryRun, force, roomWorkdir),
     },
     {
       route,

@@ -32,32 +32,75 @@ describe("AutoDev workflow helpers", () => {
       mode: "set",
       path: "~/workspace/StrawBerry",
     });
-    expect(parseAutoDevCommand("/autodev init")).toEqual({ kind: "init", path: null, from: null });
-    expect(parseAutoDevCommand("/autodev i")).toEqual({ kind: "init", path: null, from: null });
+    expect(parseAutoDevCommand("/autodev init")).toEqual({
+      kind: "init",
+      path: null,
+      from: null,
+      dryRun: false,
+      force: false,
+    });
+    expect(parseAutoDevCommand("/autodev i")).toEqual({
+      kind: "init",
+      path: null,
+      from: null,
+      dryRun: false,
+      force: false,
+    });
     expect(parseAutoDevCommand("/autodev init ~/workspace/StrawBerry")).toEqual({
       kind: "init",
       path: "~/workspace/StrawBerry",
       from: null,
+      dryRun: false,
+      force: false,
     });
     expect(parseAutoDevCommand("/autodev i StrawBerry")).toEqual({
       kind: "init",
       path: "StrawBerry",
       from: null,
+      dryRun: false,
+      force: false,
     });
     expect(parseAutoDevCommand("/autodev init --from docs/技术方案.md")).toEqual({
       kind: "init",
       path: null,
       from: "docs/技术方案.md",
+      dryRun: false,
+      force: false,
     });
     expect(parseAutoDevCommand("/autodev init ~/workspace/StrawBerry --skill requirements-doc")).toEqual({
       kind: "init",
       path: "~/workspace/StrawBerry",
       from: null,
+      dryRun: false,
+      force: false,
     });
     expect(parseAutoDevCommand("/autodev init StrawBerry --from docs/design.md --skill requirements-doc")).toEqual({
       kind: "init",
       path: "StrawBerry",
       from: "docs/design.md",
+      dryRun: false,
+      force: false,
+    });
+    expect(parseAutoDevCommand("/autodev init StrawBerry --dry-run")).toEqual({
+      kind: "init",
+      path: "StrawBerry",
+      from: null,
+      dryRun: true,
+      force: false,
+    });
+    expect(parseAutoDevCommand("/autodev init StrawBerry --force")).toEqual({
+      kind: "init",
+      path: "StrawBerry",
+      from: null,
+      dryRun: false,
+      force: true,
+    });
+    expect(parseAutoDevCommand("/autodev init StrawBerry --dry-run --force --from docs/spec.md")).toEqual({
+      kind: "init",
+      path: "StrawBerry",
+      from: "docs/spec.md",
+      dryRun: true,
+      force: true,
     });
     expect(parseAutoDevCommand("/autodev progress")).toEqual({ kind: "progress", mode: "status" });
     expect(parseAutoDevCommand("/autodev progress status")).toEqual({ kind: "progress", mode: "status" });

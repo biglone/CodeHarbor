@@ -47,6 +47,8 @@ interface HandleLockedRouteCommandDeps {
     message: InboundMessage,
     path: string | null,
     from: string | null,
+    dryRun: boolean,
+    force: boolean,
     roomWorkdir: string,
   ) => Promise<void>;
 }
@@ -119,6 +121,8 @@ export async function handleLockedRouteCommand(
       input.message,
       autoDevCommand.path,
       autoDevCommand.from,
+      autoDevCommand.dryRun,
+      autoDevCommand.force,
       input.workdir,
     );
     deps.markEventProcessed(input.sessionKey, input.message.eventId);

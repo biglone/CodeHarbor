@@ -65,6 +65,8 @@ interface AutoDevWorkdirCommandInput extends AutoDevControlCommandInput {
 interface AutoDevInitCommandInput extends AutoDevControlCommandInput {
   path: string | null;
   from: string | null;
+  dryRun: boolean;
+  force: boolean;
   roomWorkdir: string;
 }
 
@@ -263,27 +265,43 @@ export async function handleAutoDevInitCommand(
 ): Promise<void> {
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const noneText = localize("无", "none");
+  const modeText = input.dryRun ? localize("dry-run", "dry-run") : localize("apply", "apply");
   const baseWorkdir = deps.getAutoDevWorkdirOverride(input.sessionKey) ?? input.roomWorkdir;
   const targetWorkdir = resolveTargetPath(input.path, baseWorkdir);
   try {
     await assertDirectoryExists(targetWorkdir);
-    deps.setAutoDevWorkdirOverride(input.sessionKey, targetWorkdir);
+    if (!input.dryRun) {
+      deps.setAutoDevWorkdirOverride(input.sessionKey, targetWorkdir);
+    }
 
-    const scaffoldResult = await scaffoldAutoDevCompassFiles(targetWorkdir, input.from);
-    const createdFiles = scaffoldResult.createdFiles;
-    const baselineSnapshot = await takeInitCoreSnapshot(targetWorkdir);
-    await assertInitCoreArtifactsValid(targetWorkdir);
-    const initEnhancement = await runAutoDevInitEnhancementWithFallback(deps, {
-      sessionKey: input.sessionKey,
-      message: input.message,
-      targetWorkdir,
-      sourceDocs: scaffoldResult.sourceDocs,
-      createdFiles,
-      baselineSnapshot,
+    const scaffoldResult = await scaffoldAutoDevCompassFiles(targetWorkdir, input.from, {
+      force: input.force,
+      dryRun: input.dryRun,
     });
+    const createdFiles = scaffoldResult.createdFiles;
+    const overwrittenFiles = scaffoldResult.overwrittenFiles;
+    const plannedFiles = scaffoldResult.plannedFiles;
+    let initEnhancement: InitEnhancementStatus = {
+      kind: "skipped",
+      detail: input.dryRun ? "dry-run" : "no enhancement runner",
+    };
+    if (!input.dryRun) {
+      const baselineSnapshot = await takeInitCoreSnapshot(targetWorkdir);
+      await assertInitCoreArtifactsValid(targetWorkdir);
+      initEnhancement = await runAutoDevInitEnhancementWithFallback(deps, {
+        sessionKey: input.sessionKey,
+        message: input.message,
+        targetWorkdir,
+        sourceDocs: scaffoldResult.sourceDocs,
+        createdFiles: [...createdFiles, ...overwrittenFiles],
+        baselineSnapshot,
+      });
+    }
     const context = await loadAutoDevContext(targetWorkdir);
     const summary = summarizeAutoDevTasks(context.tasks);
     const createdText = createdFiles.length > 0 ? createdFiles.join(", ") : noneText;
+    const overwrittenText = overwrittenFiles.length > 0 ? overwrittenFiles.join(", ") : noneText;
+    const plannedText = plannedFiles.length > 0 ? plannedFiles.join(", ") : noneText;
     const initEnhancementText = formatInitEnhancementStatus(initEnhancement, deps.outputLanguage);
 
     await deps.sendNotice(
@@ -291,20 +309,28 @@ export async function handleAutoDevInitCommand(
       localize(
         `[CodeHarbor] AutoDev 任务罗盘已就绪
 - targetWorkdir: ${targetWorkdir}
+- mode: ${modeText}
+- force: ${input.force ? "on" : "off"}
+- plannedFiles: ${plannedText}
 - createdFiles: ${createdText}
+- overwrittenFiles: ${overwrittenText}
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - initEnhancement: ${initEnhancementText}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- next: 执行 /autodev run（或 /autodev run T0.1）`,
+- next: ${input.dryRun ? "dry-run 完成；如确认执行可去掉 --dry-run 再运行 /autodev init" : "执行 /autodev run（或 /autodev run T0.1）"}`,
         `[CodeHarbor] AutoDev task compass is ready
 - targetWorkdir: ${targetWorkdir}
+- mode: ${modeText}
+- force: ${input.force ? "on" : "off"}
+- plannedFiles: ${plannedText}
 - createdFiles: ${createdText}
+- overwrittenFiles: ${overwrittenText}
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - initEnhancement: ${initEnhancementText}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
-- next: run /autodev run (or /autodev run T0.1)`,
+- next: ${input.dryRun ? "dry-run completed; remove --dry-run and run /autodev init to apply" : "run /autodev run (or /autodev run T0.1)"}`,
       ),
     );
   } catch (error) {
@@ -539,36 +565,77 @@ const ACCEPTANCE_KEYWORDS = ["acceptance", "验收", "must", "should", "成功",
 
 interface AutoDevCompassScaffoldResult {
   createdFiles: string[];
+  overwrittenFiles: string[];
+  plannedFiles: string[];
   sourceDocs: InitSourceDoc[];
+}
+
+interface AutoDevCompassScaffoldOptions {
+  force: boolean;
+  dryRun: boolean;
 }
 
 async function scaffoldAutoDevCompassFiles(
   targetWorkdir: string,
   explicitFrom: string | null,
+  options?: AutoDevCompassScaffoldOptions,
 ): Promise<AutoDevCompassScaffoldResult> {
   const sourceDocs = await resolveInitSourceDocs(targetWorkdir, explicitFrom);
+  const force = options?.force ?? false;
+  const dryRun = options?.dryRun ?? false;
   const created: string[] = [];
+  const overwritten: string[] = [];
+  const planned: string[] = [];
   const requirementsPath = path.join(targetWorkdir, "REQUIREMENTS.md");
   const taskListPath = path.join(targetWorkdir, "TASK_LIST.md");
   const docsDir = path.join(targetWorkdir, "docs");
   const compassPath = path.join(docsDir, "AUTODEV_TASK_COMPASS.md");
+  const filePlans = [
+    {
+      label: "REQUIREMENTS.md",
+      absolutePath: requirementsPath,
+      content: buildRequirementsTemplate(sourceDocs),
+      ensureDir: null,
+    },
+    {
+      label: "TASK_LIST.md",
+      absolutePath: taskListPath,
+      content: buildTaskListTemplate(sourceDocs),
+      ensureDir: null,
+    },
+    {
+      label: "docs/AUTODEV_TASK_COMPASS.md",
+      absolutePath: compassPath,
+      content: buildCompassTemplate(sourceDocs),
+      ensureDir: docsDir,
+    },
+  ] as const;
 
-  if (!(await fileExists(requirementsPath))) {
-    await fs.writeFile(requirementsPath, buildRequirementsTemplate(sourceDocs), "utf8");
-    created.push("REQUIREMENTS.md");
-  }
-  if (!(await fileExists(taskListPath))) {
-    await fs.writeFile(taskListPath, buildTaskListTemplate(sourceDocs), "utf8");
-    created.push("TASK_LIST.md");
-  }
-  if (!(await fileExists(compassPath))) {
-    await fs.mkdir(docsDir, { recursive: true });
-    await fs.writeFile(compassPath, buildCompassTemplate(sourceDocs), "utf8");
-    created.push("docs/AUTODEV_TASK_COMPASS.md");
+  for (const filePlan of filePlans) {
+    const exists = await fileExists(filePlan.absolutePath);
+    const shouldWrite = !exists || force;
+    if (!shouldWrite) {
+      continue;
+    }
+    planned.push(filePlan.label);
+    if (dryRun) {
+      continue;
+    }
+    if (filePlan.ensureDir) {
+      await fs.mkdir(filePlan.ensureDir, { recursive: true });
+    }
+    await fs.writeFile(filePlan.absolutePath, filePlan.content, "utf8");
+    if (exists) {
+      overwritten.push(filePlan.label);
+    } else {
+      created.push(filePlan.label);
+    }
   }
 
   return {
     createdFiles: created,
+    overwrittenFiles: overwritten,
+    plannedFiles: planned,
     sourceDocs,
   };
 }
