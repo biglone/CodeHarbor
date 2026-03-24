@@ -94,6 +94,9 @@ describe("config snapshot commands", () => {
     expect(parsed.env.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES).toBe("image/png,image/jpeg,image/webp,image/gif");
     expect(parsed.env).toHaveProperty("AUTODEV_LOOP_MAX_RUNS");
     expect(parsed.env).toHaveProperty("AUTODEV_AUTO_RELEASE_ENABLED");
+    expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_ENABLED");
+    expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS");
+    expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_MAX_CHARS");
     expect(parsed.env).toHaveProperty("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS");
     expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_MAIN_LABEL");
     expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_ADMIN_LABEL");

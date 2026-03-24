@@ -356,6 +356,42 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-progress-enabled" type="checkbox" />
             <span data-i18n="global.progressEnabled">启用进度更新</span>
           </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.autodevLoopMaxRuns">AutoDev 循环最大轮次</span>
+            <input id="global-autodev-loop-max-runs" type="number" min="1" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.autodevLoopMaxMinutes">AutoDev 循环最大分钟</span>
+            <input id="global-autodev-loop-max-minutes" type="number" min="1" />
+          </label>
+          <label class="checkbox">
+            <input id="global-autodev-auto-commit" type="checkbox" />
+            <span data-i18n="global.autodevAutoCommit">AutoDev 自动提交</span>
+          </label>
+          <label class="checkbox">
+            <input id="global-autodev-auto-release-enabled" type="checkbox" />
+            <span data-i18n="global.autodevAutoReleaseEnabled">AutoDev 自动发布</span>
+          </label>
+          <label class="checkbox">
+            <input id="global-autodev-auto-release-push" type="checkbox" />
+            <span data-i18n="global.autodevAutoReleasePush">AutoDev 自动推送发布提交</span>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.autodevMaxConsecutiveFailures">AutoDev 最大连续失败次数</span>
+            <input id="global-autodev-max-consecutive-failures" type="number" min="1" />
+          </label>
+          <label class="checkbox">
+            <input id="global-autodev-init-enhancement-enabled" type="checkbox" />
+            <span data-i18n="global.autodevInitEnhancementEnabled">启用 /autodev init Stage-B 增强</span>
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.autodevInitEnhancementTimeout">Stage-B 增强超时（毫秒）</span>
+            <input id="global-autodev-init-enhancement-timeout" type="number" min="1" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="global.autodevInitEnhancementMaxChars">Stage-B 增强提示预算（字符）</span>
+            <input id="global-autodev-init-enhancement-max-chars" type="number" min="1" />
+          </label>
 
           <label class="field">
             <span class="field-label" data-i18n="global.rateWindow">限流窗口（毫秒）</span>
@@ -679,6 +715,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.updateCheckTimeout": "更新检查超时（毫秒）",
             "global.updateCheckTtl": "更新检查缓存时间（毫秒）",
             "global.progressEnabled": "启用进度更新",
+            "global.autodevLoopMaxRuns": "AutoDev 循环最大轮次",
+            "global.autodevLoopMaxMinutes": "AutoDev 循环最大分钟",
+            "global.autodevAutoCommit": "AutoDev 自动提交",
+            "global.autodevAutoReleaseEnabled": "AutoDev 自动发布",
+            "global.autodevAutoReleasePush": "AutoDev 自动推送发布提交",
+            "global.autodevMaxConsecutiveFailures": "AutoDev 最大连续失败次数",
+            "global.autodevInitEnhancementEnabled": "启用 /autodev init Stage-B 增强",
+            "global.autodevInitEnhancementTimeout": "Stage-B 增强超时（毫秒）",
+            "global.autodevInitEnhancementMaxChars": "Stage-B 增强提示预算（字符）",
             "global.rateWindow": "限流窗口（毫秒）",
             "global.rateUser": "单用户窗口最大请求数",
             "global.rateRoom": "单房间窗口最大请求数",
@@ -868,6 +913,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.updateCheckTimeout": "Update check timeout (ms)",
             "global.updateCheckTtl": "Update check cache TTL (ms)",
             "global.progressEnabled": "Enable progress updates",
+            "global.autodevLoopMaxRuns": "AutoDev loop max runs",
+            "global.autodevLoopMaxMinutes": "AutoDev loop max minutes",
+            "global.autodevAutoCommit": "AutoDev auto commit",
+            "global.autodevAutoReleaseEnabled": "AutoDev auto release",
+            "global.autodevAutoReleasePush": "AutoDev auto push release commits",
+            "global.autodevMaxConsecutiveFailures": "AutoDev max consecutive failures",
+            "global.autodevInitEnhancementEnabled": "Enable /autodev init Stage-B enhancement",
+            "global.autodevInitEnhancementTimeout": "Stage-B enhancement timeout (ms)",
+            "global.autodevInitEnhancementMaxChars": "Stage-B enhancement prompt budget (chars)",
             "global.rateWindow": "Rate Window (ms)",
             "global.rateUser": "Rate Max Requests / User",
             "global.rateRoom": "Rate Max Requests / Room",
@@ -1323,6 +1377,21 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!numberInRange(payload.sessionActiveWindowMinutes, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.sessionWindow");
           }
+          if (!numberInRange(payload.autoDev.loopMaxRuns, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.autodevLoopMaxRuns");
+          }
+          if (!numberInRange(payload.autoDev.loopMaxMinutes, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.autodevLoopMaxMinutes");
+          }
+          if (!numberInRange(payload.autoDev.maxConsecutiveFailures, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.autodevMaxConsecutiveFailures");
+          }
+          if (!numberInRange(payload.autoDev.initEnhancementTimeoutMs, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.autodevInitEnhancementTimeout");
+          }
+          if (!numberInRange(payload.autoDev.initEnhancementMaxChars, 1, Number.MAX_SAFE_INTEGER)) {
+            errors.push("global.autodevInitEnhancementMaxChars");
+          }
           if (!numberInRange(payload.rateLimiter.windowMs, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.rateWindow");
           }
@@ -1508,6 +1577,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var agentWorkflow = data.agentWorkflow || {};
             var roleSkills = agentWorkflow.roleSkills || {};
             var updateCheck = data.updateCheck || {};
+            var autoDev = data.autoDev || {};
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
             document.getElementById("global-workdir").value = data.codexWorkdir || "";
@@ -1520,6 +1590,25 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               updateCheck.enabled === undefined ? true : Boolean(updateCheck.enabled);
             document.getElementById("global-update-check-timeout").value = String(updateCheck.timeoutMs || 3000);
             document.getElementById("global-update-check-ttl").value = String(updateCheck.ttlMs || 21600000);
+            document.getElementById("global-autodev-loop-max-runs").value = String(autoDev.loopMaxRuns || 20);
+            document.getElementById("global-autodev-loop-max-minutes").value = String(autoDev.loopMaxMinutes || 120);
+            document.getElementById("global-autodev-auto-commit").checked =
+              autoDev.autoCommit === undefined ? true : Boolean(autoDev.autoCommit);
+            document.getElementById("global-autodev-auto-release-enabled").checked =
+              autoDev.autoReleaseEnabled === undefined ? true : Boolean(autoDev.autoReleaseEnabled);
+            document.getElementById("global-autodev-auto-release-push").checked =
+              autoDev.autoReleasePush === undefined ? false : Boolean(autoDev.autoReleasePush);
+            document.getElementById("global-autodev-max-consecutive-failures").value = String(
+              autoDev.maxConsecutiveFailures || 3
+            );
+            document.getElementById("global-autodev-init-enhancement-enabled").checked =
+              autoDev.initEnhancementEnabled === undefined ? true : Boolean(autoDev.initEnhancementEnabled);
+            document.getElementById("global-autodev-init-enhancement-timeout").value = String(
+              autoDev.initEnhancementTimeoutMs || 480000
+            );
+            document.getElementById("global-autodev-init-enhancement-max-chars").value = String(
+              autoDev.initEnhancementMaxChars || 4000
+            );
             document.getElementById("global-rate-window").value = String(rateLimiter.windowMs || 60000);
             document.getElementById("global-rate-user").value = String(rateLimiter.maxRequestsPerUser || 0);
             document.getElementById("global-rate-room").value = String(rateLimiter.maxRequestsPerRoom || 0);
@@ -1594,6 +1683,17 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               enabled: asBool("global-update-check-enabled"),
               timeoutMs: asNumber("global-update-check-timeout", 3000),
               ttlMs: asNumber("global-update-check-ttl", 21600000)
+            },
+            autoDev: {
+              loopMaxRuns: asNumber("global-autodev-loop-max-runs", 20),
+              loopMaxMinutes: asNumber("global-autodev-loop-max-minutes", 120),
+              autoCommit: asBool("global-autodev-auto-commit"),
+              autoReleaseEnabled: asBool("global-autodev-auto-release-enabled"),
+              autoReleasePush: asBool("global-autodev-auto-release-push"),
+              maxConsecutiveFailures: asNumber("global-autodev-max-consecutive-failures", 3),
+              initEnhancementEnabled: asBool("global-autodev-init-enhancement-enabled"),
+              initEnhancementTimeoutMs: asNumber("global-autodev-init-enhancement-timeout", 480000),
+              initEnhancementMaxChars: asNumber("global-autodev-init-enhancement-max-chars", 4000)
             },
             groupDirectModeEnabled: asBool("global-direct-mode"),
             rateLimiter: {

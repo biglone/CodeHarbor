@@ -268,6 +268,31 @@ describe("AdminServer", () => {
     expect(validGlobal.status).toBe(200);
     expect(JSON.stringify(validGlobal.body)).toContain("matrixTypingTimeoutMs");
 
+    const validAutoDevConfig = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          autoDev: {
+            loopMaxRuns: 12,
+            loopMaxMinutes: 90,
+            autoCommit: true,
+            autoReleaseEnabled: true,
+            autoReleasePush: true,
+            maxConsecutiveFailures: 4,
+            initEnhancementEnabled: true,
+            initEnhancementTimeoutMs: 120000,
+            initEnhancementMaxChars: 2500,
+          },
+        },
+      }),
+    });
+    expect(validAutoDevConfig.status).toBe(200);
+    expect(JSON.stringify(validAutoDevConfig.body)).toContain("autoDev.initEnhancementTimeoutMs");
+
     const invalidRoleSkills = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -1397,6 +1422,17 @@ describe("AdminServer", () => {
             },
           },
         },
+        autoDev: {
+          loopMaxRuns: 11,
+          loopMaxMinutes: 75,
+          autoCommit: true,
+          autoReleaseEnabled: true,
+          autoReleasePush: false,
+          maxConsecutiveFailures: 4,
+          initEnhancementEnabled: true,
+          initEnhancementTimeoutMs: 240000,
+          initEnhancementMaxChars: 3200,
+        },
         cliCompat: {
           imageMaxBytes: 2097152,
           imageMaxCount: 6,
@@ -1454,6 +1490,9 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
     expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");
+    expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_ENABLED=true");
+    expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS=240000");
+    expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_MAX_CHARS=3200");
     expect(envRaw).toContain("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS=7000");
     expect(envRaw).toContain("AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS=10000");
     expect(envRaw).toContain("AGENT_WORKFLOW_FEEDBACK_CONTEXT_MAX_CHARS=");

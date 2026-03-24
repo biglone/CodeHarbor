@@ -61,6 +61,7 @@ const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_AUTO_COMMIT",
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
+  "AUTODEV_INIT_ENHANCEMENT_ENABLED",
 ]);
 const OPTIONAL_POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
   "AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS",
@@ -71,6 +72,8 @@ const POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_LOOP_MAX_RUNS",
   "AUTODEV_LOOP_MAX_MINUTES",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
+  "AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS",
+  "AUTODEV_INIT_ENHANCEMENT_MAX_CHARS",
 ]);
 const LAUNCHD_LABEL_ENV_OVERRIDE_KEYS = new Set<string>([
   "CODEHARBOR_LAUNCHD_MAIN_LABEL",
@@ -1265,6 +1268,55 @@ export class AdminServer {
       }
     }
 
+    if ("autoDev" in body) {
+      const autoDev = asObject(body.autoDev, "autoDev");
+      if ("loopMaxRuns" in autoDev) {
+        const value = normalizePositiveInt(autoDev.loopMaxRuns, 20, 1, Number.MAX_SAFE_INTEGER);
+        envUpdates.AUTODEV_LOOP_MAX_RUNS = String(value);
+        markUpdatedKey("autoDev.loopMaxRuns");
+      }
+      if ("loopMaxMinutes" in autoDev) {
+        const value = normalizePositiveInt(autoDev.loopMaxMinutes, 120, 1, Number.MAX_SAFE_INTEGER);
+        envUpdates.AUTODEV_LOOP_MAX_MINUTES = String(value);
+        markUpdatedKey("autoDev.loopMaxMinutes");
+      }
+      if ("autoCommit" in autoDev) {
+        const value = normalizeBoolean(autoDev.autoCommit, true);
+        envUpdates.AUTODEV_AUTO_COMMIT = String(value);
+        markUpdatedKey("autoDev.autoCommit");
+      }
+      if ("autoReleaseEnabled" in autoDev) {
+        const value = normalizeBoolean(autoDev.autoReleaseEnabled, true);
+        envUpdates.AUTODEV_AUTO_RELEASE_ENABLED = String(value);
+        markUpdatedKey("autoDev.autoReleaseEnabled");
+      }
+      if ("autoReleasePush" in autoDev) {
+        const value = normalizeBoolean(autoDev.autoReleasePush, false);
+        envUpdates.AUTODEV_AUTO_RELEASE_PUSH = String(value);
+        markUpdatedKey("autoDev.autoReleasePush");
+      }
+      if ("maxConsecutiveFailures" in autoDev) {
+        const value = normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
+        envUpdates.AUTODEV_MAX_CONSECUTIVE_FAILURES = String(value);
+        markUpdatedKey("autoDev.maxConsecutiveFailures");
+      }
+      if ("initEnhancementEnabled" in autoDev) {
+        const value = normalizeBoolean(autoDev.initEnhancementEnabled, true);
+        envUpdates.AUTODEV_INIT_ENHANCEMENT_ENABLED = String(value);
+        markUpdatedKey("autoDev.initEnhancementEnabled");
+      }
+      if ("initEnhancementTimeoutMs" in autoDev) {
+        const value = normalizePositiveInt(autoDev.initEnhancementTimeoutMs, 480_000, 1, Number.MAX_SAFE_INTEGER);
+        envUpdates.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS = String(value);
+        markUpdatedKey("autoDev.initEnhancementTimeoutMs");
+      }
+      if ("initEnhancementMaxChars" in autoDev) {
+        const value = normalizePositiveInt(autoDev.initEnhancementMaxChars, 4_000, 1, Number.MAX_SAFE_INTEGER);
+        envUpdates.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS = String(value);
+        markUpdatedKey("autoDev.initEnhancementMaxChars");
+      }
+    }
+
     if ("cliCompat" in body) {
       const compat = asObject(body.cliCompat, "cliCompat");
       if ("enabled" in compat) {
@@ -1699,6 +1751,46 @@ export class AdminServer {
       if ("ttlMs" in updateCheck) {
         normalizePositiveInt(updateCheck.ttlMs, this.config.updateCheck.ttlMs, 1, Number.MAX_SAFE_INTEGER);
         markCheckedKey("updateCheck.ttlMs");
+      }
+    }
+
+    if ("autoDev" in body) {
+      const autoDev = asObject(body.autoDev, "autoDev");
+      if ("loopMaxRuns" in autoDev) {
+        normalizePositiveInt(autoDev.loopMaxRuns, 20, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("autoDev.loopMaxRuns");
+      }
+      if ("loopMaxMinutes" in autoDev) {
+        normalizePositiveInt(autoDev.loopMaxMinutes, 120, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("autoDev.loopMaxMinutes");
+      }
+      if ("autoCommit" in autoDev) {
+        normalizeBoolean(autoDev.autoCommit, true);
+        markCheckedKey("autoDev.autoCommit");
+      }
+      if ("autoReleaseEnabled" in autoDev) {
+        normalizeBoolean(autoDev.autoReleaseEnabled, true);
+        markCheckedKey("autoDev.autoReleaseEnabled");
+      }
+      if ("autoReleasePush" in autoDev) {
+        normalizeBoolean(autoDev.autoReleasePush, false);
+        markCheckedKey("autoDev.autoReleasePush");
+      }
+      if ("maxConsecutiveFailures" in autoDev) {
+        normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("autoDev.maxConsecutiveFailures");
+      }
+      if ("initEnhancementEnabled" in autoDev) {
+        normalizeBoolean(autoDev.initEnhancementEnabled, true);
+        markCheckedKey("autoDev.initEnhancementEnabled");
+      }
+      if ("initEnhancementTimeoutMs" in autoDev) {
+        normalizePositiveInt(autoDev.initEnhancementTimeoutMs, 480_000, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("autoDev.initEnhancementTimeoutMs");
+      }
+      if ("initEnhancementMaxChars" in autoDev) {
+        normalizePositiveInt(autoDev.initEnhancementMaxChars, 4_000, 1, Number.MAX_SAFE_INTEGER);
+        markCheckedKey("autoDev.initEnhancementMaxChars");
       }
     }
 
@@ -2243,6 +2335,17 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   sessionActiveWindowMinutes: number;
   updateCheck: AppConfig["updateCheck"];
   cliCompat: AppConfig["cliCompat"];
+  autoDev: {
+    loopMaxRuns: number;
+    loopMaxMinutes: number;
+    autoCommit: boolean;
+    autoReleaseEnabled: boolean;
+    autoReleasePush: boolean;
+    maxConsecutiveFailures: number;
+    initEnhancementEnabled: boolean;
+    initEnhancementTimeoutMs: number;
+    initEnhancementMaxChars: number;
+  };
   agentWorkflow: AppConfig["agentWorkflow"];
 } {
   const agentWorkflow = ensureAgentWorkflowConfig(config);
@@ -2260,6 +2363,32 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
+    autoDev: {
+      loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 1, Number.MAX_SAFE_INTEGER),
+      loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 1, Number.MAX_SAFE_INTEGER),
+      autoCommit: normalizeBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
+      autoReleaseEnabled: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, true),
+      autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
+      maxConsecutiveFailures: normalizePositiveInt(
+        process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES,
+        3,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      initEnhancementEnabled: normalizeBoolean(process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED, true),
+      initEnhancementTimeoutMs: normalizePositiveInt(
+        process.env.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+        480_000,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      initEnhancementMaxChars: normalizePositiveInt(
+        process.env.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS,
+        4_000,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    },
     agentWorkflow: {
       enabled: agentWorkflow.enabled,
       autoRepairMaxRounds: agentWorkflow.autoRepairMaxRounds,
