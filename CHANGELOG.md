@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.66] - 2026-03-24
+
+- autodev loop guardrails: support `0` as unlimited for both `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`.
+- autodev loop behavior: reaching run/time limit now pauses safely with remaining-task summary and explicit resume hint (`/autodev run`) instead of hard stop wording.
+- admin console + config API: allow and validate non-negative (`>=0`) loop guard values, and show `0 = unlimited` guidance in UI labels.
+- config snapshot: align import/export schema normalization for non-negative AutoDev loop guard values.
+- docs/manual: add explicit loop guardrail rules and long-run recommended settings under AutoDev sections.
+
 ## [0.1.65] - 2026-03-24
 
 - autodev loop: stop loop early when a round yields no `TASK_LIST.md` state progress (new `no_progress` loop-stop reason and metrics).
