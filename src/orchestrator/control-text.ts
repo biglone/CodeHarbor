@@ -29,9 +29,9 @@ export function buildHelpNotice(input: {
 - /upgrade [version]: Upgrade and auto-restart services (DM only; MATRIX_UPGRADE_ALLOWED_USERS first, then MATRIX_ADMIN_USERS)
 - /backend codex|claude [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
 - /reset: Clear current session context
-- /stop: Stop current execution (aliases: /cancel, /esc, /撤回, /撤销)
+- /stop: Stop current execution (aliases: /cancel, /esc)
 - If Matrix client intercepts / commands, use //autodev init StrawBerry (also supports //autodev run T6.2, //agents, //diag, //upgrade)
-- help aliases: help | menu | localized aliases of /help`;
+- help aliases: help | menu`;
   }
   return `${input.botNoticePrefix} 可用命令
 - /help: 查看命令帮助

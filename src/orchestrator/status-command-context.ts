@@ -31,6 +31,9 @@ interface StatusCommandContextInput {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevInitEnhancementEnabled: boolean;
+  autoDevInitEnhancementTimeoutMs: number;
+  autoDevInitEnhancementMaxChars: number;
   stateStore: {
     getSessionStatus: (sessionKey: string) => {
       isActive: boolean;
@@ -97,6 +100,9 @@ interface StatusCommandRuntimeConfigInput {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevInitEnhancementEnabled: boolean;
+  autoDevInitEnhancementTimeoutMs: number;
+  autoDevInitEnhancementMaxChars: number;
 }
 
 interface StatusCommandRuntimeSnapshotInput {
@@ -154,6 +160,9 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevAutoReleaseEnabled: input.autoDevAutoReleaseEnabled,
     autoDevAutoReleasePush: input.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
+    autoDevInitEnhancementEnabled: input.autoDevInitEnhancementEnabled,
+    autoDevInitEnhancementTimeoutMs: input.autoDevInitEnhancementTimeoutMs,
+    autoDevInitEnhancementMaxChars: input.autoDevInitEnhancementMaxChars,
     getSessionStatus: (sessionKey: string) => input.stateStore.getSessionStatus(sessionKey),
     resolveRoomRuntimeConfig: (conversationId: string) => input.resolveRoomRuntimeConfig(conversationId),
     getRuntimeMetricsSnapshot: () => input.getRuntimeMetricsSnapshot(),
@@ -202,6 +211,9 @@ export function buildStatusCommandDispatchContextFromRuntime(
     autoDevAutoReleaseEnabled: input.config.autoDevAutoReleaseEnabled,
     autoDevAutoReleasePush: input.config.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
+    autoDevInitEnhancementEnabled: input.config.autoDevInitEnhancementEnabled,
+    autoDevInitEnhancementTimeoutMs: input.config.autoDevInitEnhancementTimeoutMs,
+    autoDevInitEnhancementMaxChars: input.config.autoDevInitEnhancementMaxChars,
     stateStore: input.snapshots.stateStore,
     workflowSnapshots: input.snapshots.workflowSnapshots,
     autoDevSnapshots: input.snapshots.autoDevSnapshots,

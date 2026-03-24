@@ -189,6 +189,15 @@ export function localizeWorkflowDiagMessageForDisplay(message: string, outputLan
     ["契约补全启动", "contract repair started"],
     ["契约补全完成", "contract repair completed"],
     ["已拒绝但未提供可执行修复契约，已停止自动修复", "rejected without actionable repair contract; auto-repair stopped"],
+    ["未检测到 git 仓库", "git repository not found"],
+    ["运行前存在未提交改动，已跳过自动提交", "skipped auto-commit: worktree was dirty before run"],
+    ["无文件改动可提交", "no file changes to commit"],
+    ["任务未完成，跳过自动发布", "task not completed; auto-release skipped"],
+    ["任务代码未自动提交，跳过自动发布", "task code was not auto-committed; auto-release skipped"],
+    ["任务未配置大功能发布映射", "task has no big-feature release mapping"],
+    ["发布未产生可提交文件", "release produced no committable files"],
+    ["版本比较失败", "version comparison failed"],
+    ["git status 读取失败", "git status read failed"],
     ["轮次", "round"],
     ["耗时", "duration"],
   ];
@@ -197,6 +206,7 @@ export function localizeWorkflowDiagMessageForDisplay(message: string, outputLan
   for (const [pattern, replacement] of replacements) {
     localized = localized.split(pattern).join(replacement);
   }
+  localized = localized.replace(/检测到\s*(\d+)\s*项未提交改动/g, "detected $1 uncommitted changes");
 
   localized = localized.replace(/(AutoDev started task [^:]+):\s*.+$/i, "$1");
   if (/[\u4e00-\u9fff]/.test(localized)) {

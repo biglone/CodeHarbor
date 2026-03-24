@@ -965,6 +965,9 @@ export class Orchestrator {
         autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
         autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        autoDevInitEnhancementEnabled: this.autoDevInitEnhancementEnabled,
+        autoDevInitEnhancementTimeoutMs: this.autoDevInitEnhancementTimeoutMs,
+        autoDevInitEnhancementMaxChars: this.autoDevInitEnhancementMaxChars,
       },
       snapshots: {
         stateStore: this.stateStore,

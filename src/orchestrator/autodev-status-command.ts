@@ -31,6 +31,9 @@ interface AutoDevStatusCommandDeps {
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevInitEnhancementEnabled: boolean;
+  autoDevInitEnhancementTimeoutMs: number;
+  autoDevInitEnhancementMaxChars: number;
   getAutoDevSnapshot: (sessionKey: string) => AutoDevRunSnapshot | null;
   hasActiveAutoDevLoopSession: (sessionKey: string) => boolean;
   hasPendingAutoDevLoopStopRequest: (sessionKey: string) => boolean;
@@ -69,6 +72,15 @@ export async function handleAutoDevStatusCommand(
     const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 3);
     const latestRun = recentRuns[0] ?? null;
     const stageEvents = latestRun ? deps.listWorkflowDiagEvents(latestRun.runId, 12) : [];
+    const gitPreflightReason = gitPreflight.reason
+      ? localizeWorkflowDiagMessageForDisplay(gitPreflight.reason, deps.outputLanguage)
+      : "N/A";
+    const runGitCommitSummary = snapshot.lastGitCommitSummary
+      ? localizeWorkflowDiagMessageForDisplay(snapshot.lastGitCommitSummary, deps.outputLanguage)
+      : "N/A";
+    const runReleaseSummary = snapshot.lastReleaseSummary
+      ? localizeWorkflowDiagMessageForDisplay(snapshot.lastReleaseSummary, deps.outputLanguage)
+      : "N/A";
     const latestStageEvent = stageEvents.length > 0 ? stageEvents[stageEvents.length - 1] : null;
     const latestStageSummary = latestStageEvent
       ? `stage=${latestStageEvent.stage}, round=${latestStageEvent.round}, at=${latestStageEvent.at}, message=${localizeWorkflowDiagMessageForDisplay(
@@ -112,8 +124,8 @@ export async function handleAutoDevStatusCommand(
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
-- gitPreflightReason: ${gitPreflight.reason ?? "N/A"}${autoReleasePushWarning}
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
 - runState: ${snapshot.state}
@@ -124,9 +136,9 @@ export async function handleAutoDevStatusCommand(
 - runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - runError: ${snapshot.error ?? "N/A"}
-- runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
+- runGitCommit: ${runGitCommitSummary}
 - runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
-- runRelease: ${snapshot.lastReleaseSummary ?? "N/A"}
+- runRelease: ${runReleaseSummary}
 - runReleaseAt: ${snapshot.lastReleaseAt ?? "N/A"}
 - workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
 - workflowDiagLastStage: ${latestRunLastStage}
@@ -147,8 +159,8 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
-- gitPreflightReason: ${gitPreflight.reason ?? "N/A"}${autoReleasePushWarning}
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
 - runState: ${snapshot.state}
@@ -159,9 +171,9 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - runError: ${snapshot.error ?? "N/A"}
-- runGitCommit: ${snapshot.lastGitCommitSummary ?? "N/A"}
+- runGitCommit: ${runGitCommitSummary}
 - runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
-- runRelease: ${snapshot.lastReleaseSummary ?? "N/A"}
+- runRelease: ${runReleaseSummary}
 - runReleaseAt: ${snapshot.lastReleaseAt ?? "N/A"}
 - workflowDiag: runId=${latestRun?.runId ?? "N/A"}, status=${latestRun?.status ?? "N/A"}, startedAt=${latestRun?.startedAt ?? "N/A"}, updatedAt=${latestRun?.updatedAt ?? "N/A"}, duration=${latestRun ? formatWorkflowDiagRunDuration(latestRun) : "N/A"}
 - workflowDiagLastStage: ${latestRunLastStage}

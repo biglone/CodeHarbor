@@ -88,6 +88,9 @@ interface AutoDevStatusContext extends StatusCommandDispatchContext {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevInitEnhancementEnabled: boolean;
+  autoDevInitEnhancementTimeoutMs: number;
+  autoDevInitEnhancementMaxChars: number;
 }
 
 interface StatusCommandDispatchInput {
@@ -183,6 +186,9 @@ export async function sendAutoDevStatusCommand(
     | "autoDevAutoReleaseEnabled"
     | "autoDevAutoReleasePush"
     | "autoDevMaxConsecutiveFailures"
+    | "autoDevInitEnhancementEnabled"
+    | "autoDevInitEnhancementTimeoutMs"
+    | "autoDevInitEnhancementMaxChars"
     | "autoDevDetailedProgressDefaultEnabled"
     | "getAutoDevSnapshot"
     | "hasActiveAutoDevLoopSession"
@@ -205,6 +211,9 @@ export async function sendAutoDevStatusCommand(
       autoDevAutoReleaseEnabled: context.autoDevAutoReleaseEnabled,
       autoDevAutoReleasePush: context.autoDevAutoReleasePush,
       autoDevMaxConsecutiveFailures: context.autoDevMaxConsecutiveFailures,
+      autoDevInitEnhancementEnabled: context.autoDevInitEnhancementEnabled,
+      autoDevInitEnhancementTimeoutMs: context.autoDevInitEnhancementTimeoutMs,
+      autoDevInitEnhancementMaxChars: context.autoDevInitEnhancementMaxChars,
       autoDevDetailedProgressDefaultEnabled: context.autoDevDetailedProgressDefaultEnabled,
       getAutoDevSnapshot: (sessionKey) => context.getAutoDevSnapshot(sessionKey),
       hasActiveAutoDevLoopSession: (sessionKey) => context.hasActiveAutoDevLoopSession(sessionKey),
