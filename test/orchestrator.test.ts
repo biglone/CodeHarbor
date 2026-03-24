@@ -4220,6 +4220,166 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("Multi-Agent workflow status"))).toBe(true);
   });
 
+  it("keeps core english command and autodev status notices free from CJK text", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-i18n-en-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n\n## Scope\n- English only\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| Task ID | Task Description | Status |",
+        "|---------|-------------------|--------|",
+        "| T1.1 | English i18n consistency task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        packageUpdateChecker: {
+          getStatus: async () => ({
+            packageName: "codeharbor",
+            currentVersion: "0.1.64",
+            latestVersion: "0.1.64",
+            state: "up_to_date",
+            checkedAt: "2026-03-24T00:00:00.000Z",
+            error: null,
+            upgradeCommand: "npm install -g codeharbor@latest",
+          }),
+        },
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/help",
+          eventId: "$help-en-cjk-check",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/status",
+          eventId: "$status-en-cjk-check",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T1.1",
+          eventId: "$autodev-run-en-cjk-check",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status-en-cjk-check",
+        }),
+      );
+
+      const cjkPattern = /[\u3400-\u9FFF]/;
+      const helpNotice = channel.notices.find((entry) => entry.text.includes("Available commands"))?.text ?? "";
+      const statusNotice = channel.notices.find((entry) => entry.text.includes("Current status"))?.text ?? "";
+      const autoDevStatusNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("[CodeHarbor] AutoDev status"))?.text ?? "";
+
+      expect(helpNotice).not.toMatch(cjkPattern);
+      expect(statusNotice).not.toMatch(cjkPattern);
+      expect(autoDevStatusNotice).not.toMatch(cjkPattern);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("covers init -> status -> run for sibling, subdir, and empty repo targets", async () => {
+    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-init-e2e-"));
+    const roomWorkdir = path.join(workspaceRoot, "CodeHarbor");
+    await fs.mkdir(roomWorkdir, { recursive: true });
+
+    const scenarios = [
+      { name: "sibling", arg: "StrawBerry", targetWorkdir: path.join(workspaceRoot, "StrawBerry") },
+      { name: "subdir", arg: "apps/strawberry", targetWorkdir: path.join(roomWorkdir, "apps", "strawberry") },
+      { name: "empty", arg: path.join(workspaceRoot, "empty-repo"), targetWorkdir: path.join(workspaceRoot, "empty-repo") },
+    ];
+
+    try {
+      for (const scenario of scenarios) {
+        await fs.mkdir(scenario.targetWorkdir, { recursive: true });
+
+        const channel = new FakeChannel();
+        const executor = new WorkflowExecutor();
+        const store = new FakeStateStore();
+        const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+          commandPrefix: "!code",
+          matrixUserId: "@bot:example.com",
+          progressUpdatesEnabled: false,
+          outputLanguage: "en",
+          defaultCodexWorkdir: roomWorkdir,
+          multiAgentWorkflow: {
+            enabled: true,
+            autoRepairMaxRounds: 0,
+          },
+        });
+
+        await orchestrator.handleMessage(
+          makeInbound({
+            isDirectMessage: true,
+            text: `/autodev init ${scenario.arg}`,
+            eventId: `$autodev-init-e2e-${scenario.name}`,
+          }),
+        );
+        const initNotice = [...channel.notices]
+          .reverse()
+          .find((entry) => entry.text.includes("AutoDev task compass is ready"))?.text ?? "";
+        expect(initNotice).toContain(`targetWorkdir: ${scenario.targetWorkdir}`);
+
+        await orchestrator.handleMessage(
+          makeInbound({
+            isDirectMessage: true,
+            text: "/autodev status",
+            eventId: `$autodev-status-e2e-${scenario.name}`,
+          }),
+        );
+        const statusNotice = [...channel.notices]
+          .reverse()
+          .find((entry) => entry.text.includes("[CodeHarbor] AutoDev status"))?.text ?? "";
+        expect(statusNotice).toContain(`workdir: ${scenario.targetWorkdir}`);
+        expect(statusNotice).toContain("pending=");
+
+        await orchestrator.handleMessage(
+          makeInbound({
+            isDirectMessage: true,
+            text: "/autodev run",
+            eventId: `$autodev-run-e2e-${scenario.name}`,
+          }),
+        );
+        expect(channel.notices.some((entry) => entry.text.includes("No executable tasks"))).toBe(false);
+        const resultNotice = [...channel.notices]
+          .reverse()
+          .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+        expect(resultNotice).toContain("task status:");
+
+        const taskListRaw = await fs.readFile(path.join(scenario.targetWorkdir, "TASK_LIST.md"), "utf8");
+        expect(taskListRaw).toContain("T0.1");
+      }
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("supports /autodev skills mode switch and injects role skills into workflow prompts", async () => {
     const channel = new FakeChannel();
     const executor = new WorkflowExecutor();
