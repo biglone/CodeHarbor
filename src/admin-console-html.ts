@@ -357,12 +357,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span data-i18n="global.progressEnabled">启用进度更新</span>
           </label>
           <label class="field">
-            <span class="field-label" data-i18n="global.autodevLoopMaxRuns">AutoDev 循环最大轮次</span>
-            <input id="global-autodev-loop-max-runs" type="number" min="1" />
+            <span class="field-label" data-i18n="global.autodevLoopMaxRuns">AutoDev 循环最大轮次（0=不限制）</span>
+            <input id="global-autodev-loop-max-runs" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label" data-i18n="global.autodevLoopMaxMinutes">AutoDev 循环最大分钟</span>
-            <input id="global-autodev-loop-max-minutes" type="number" min="1" />
+            <span class="field-label" data-i18n="global.autodevLoopMaxMinutes">AutoDev 循环最大分钟（0=不限制）</span>
+            <input id="global-autodev-loop-max-minutes" type="number" min="0" />
           </label>
           <label class="checkbox">
             <input id="global-autodev-auto-commit" type="checkbox" />
@@ -715,8 +715,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.updateCheckTimeout": "更新检查超时（毫秒）",
             "global.updateCheckTtl": "更新检查缓存时间（毫秒）",
             "global.progressEnabled": "启用进度更新",
-            "global.autodevLoopMaxRuns": "AutoDev 循环最大轮次",
-            "global.autodevLoopMaxMinutes": "AutoDev 循环最大分钟",
+            "global.autodevLoopMaxRuns": "AutoDev 循环最大轮次（0=不限制）",
+            "global.autodevLoopMaxMinutes": "AutoDev 循环最大分钟（0=不限制）",
             "global.autodevAutoCommit": "AutoDev 自动提交",
             "global.autodevAutoReleaseEnabled": "AutoDev 自动发布",
             "global.autodevAutoReleasePush": "AutoDev 自动推送发布提交",
@@ -913,8 +913,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.updateCheckTimeout": "Update check timeout (ms)",
             "global.updateCheckTtl": "Update check cache TTL (ms)",
             "global.progressEnabled": "Enable progress updates",
-            "global.autodevLoopMaxRuns": "AutoDev loop max runs",
-            "global.autodevLoopMaxMinutes": "AutoDev loop max minutes",
+            "global.autodevLoopMaxRuns": "AutoDev loop max runs (0 = unlimited)",
+            "global.autodevLoopMaxMinutes": "AutoDev loop max minutes (0 = unlimited)",
             "global.autodevAutoCommit": "AutoDev auto commit",
             "global.autodevAutoReleaseEnabled": "AutoDev auto release",
             "global.autodevAutoReleasePush": "AutoDev auto push release commits",
@@ -1377,10 +1377,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!numberInRange(payload.sessionActiveWindowMinutes, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.sessionWindow");
           }
-          if (!numberInRange(payload.autoDev.loopMaxRuns, 1, Number.MAX_SAFE_INTEGER)) {
+          if (!numberInRange(payload.autoDev.loopMaxRuns, 0, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.autodevLoopMaxRuns");
           }
-          if (!numberInRange(payload.autoDev.loopMaxMinutes, 1, Number.MAX_SAFE_INTEGER)) {
+          if (!numberInRange(payload.autoDev.loopMaxMinutes, 0, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.autodevLoopMaxMinutes");
           }
           if (!numberInRange(payload.autoDev.maxConsecutiveFailures, 1, Number.MAX_SAFE_INTEGER)) {
@@ -1590,8 +1590,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               updateCheck.enabled === undefined ? true : Boolean(updateCheck.enabled);
             document.getElementById("global-update-check-timeout").value = String(updateCheck.timeoutMs || 3000);
             document.getElementById("global-update-check-ttl").value = String(updateCheck.ttlMs || 21600000);
-            document.getElementById("global-autodev-loop-max-runs").value = String(autoDev.loopMaxRuns || 20);
-            document.getElementById("global-autodev-loop-max-minutes").value = String(autoDev.loopMaxMinutes || 120);
+            document.getElementById("global-autodev-loop-max-runs").value = String(
+              typeof autoDev.loopMaxRuns === "number" ? autoDev.loopMaxRuns : 20
+            );
+            document.getElementById("global-autodev-loop-max-minutes").value = String(
+              typeof autoDev.loopMaxMinutes === "number" ? autoDev.loopMaxMinutes : 120
+            );
             document.getElementById("global-autodev-auto-commit").checked =
               autoDev.autoCommit === undefined ? true : Boolean(autoDev.autoCommit);
             document.getElementById("global-autodev-auto-release-enabled").checked =

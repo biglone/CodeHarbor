@@ -1271,12 +1271,12 @@ export class AdminServer {
     if ("autoDev" in body) {
       const autoDev = asObject(body.autoDev, "autoDev");
       if ("loopMaxRuns" in autoDev) {
-        const value = normalizePositiveInt(autoDev.loopMaxRuns, 20, 1, Number.MAX_SAFE_INTEGER);
+        const value = normalizePositiveInt(autoDev.loopMaxRuns, 20, 0, Number.MAX_SAFE_INTEGER);
         envUpdates.AUTODEV_LOOP_MAX_RUNS = String(value);
         markUpdatedKey("autoDev.loopMaxRuns");
       }
       if ("loopMaxMinutes" in autoDev) {
-        const value = normalizePositiveInt(autoDev.loopMaxMinutes, 120, 1, Number.MAX_SAFE_INTEGER);
+        const value = normalizePositiveInt(autoDev.loopMaxMinutes, 120, 0, Number.MAX_SAFE_INTEGER);
         envUpdates.AUTODEV_LOOP_MAX_MINUTES = String(value);
         markUpdatedKey("autoDev.loopMaxMinutes");
       }
@@ -1757,11 +1757,11 @@ export class AdminServer {
     if ("autoDev" in body) {
       const autoDev = asObject(body.autoDev, "autoDev");
       if ("loopMaxRuns" in autoDev) {
-        normalizePositiveInt(autoDev.loopMaxRuns, 20, 1, Number.MAX_SAFE_INTEGER);
+        normalizePositiveInt(autoDev.loopMaxRuns, 20, 0, Number.MAX_SAFE_INTEGER);
         markCheckedKey("autoDev.loopMaxRuns");
       }
       if ("loopMaxMinutes" in autoDev) {
-        normalizePositiveInt(autoDev.loopMaxMinutes, 120, 1, Number.MAX_SAFE_INTEGER);
+        normalizePositiveInt(autoDev.loopMaxMinutes, 120, 0, Number.MAX_SAFE_INTEGER);
         markCheckedKey("autoDev.loopMaxMinutes");
       }
       if ("autoCommit" in autoDev) {
@@ -2364,8 +2364,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
     autoDev: {
-      loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 1, Number.MAX_SAFE_INTEGER),
-      loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 1, Number.MAX_SAFE_INTEGER),
+      loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 0, Number.MAX_SAFE_INTEGER),
+      loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 0, Number.MAX_SAFE_INTEGER),
       autoCommit: normalizeBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
       autoReleaseEnabled: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, true),
       autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),

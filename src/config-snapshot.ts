@@ -193,8 +193,8 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     CODEX_APPROVAL_POLICY: z.string(),
     CODEX_EXTRA_ARGS: z.string(),
     CODEX_EXTRA_ENV_JSON: jsonObjectStringSchema("CODEX_EXTRA_ENV_JSON", true),
-    AUTODEV_LOOP_MAX_RUNS: integerStringSchema("AUTODEV_LOOP_MAX_RUNS", 1).default("20"),
-    AUTODEV_LOOP_MAX_MINUTES: integerStringSchema("AUTODEV_LOOP_MAX_MINUTES", 1).default("120"),
+    AUTODEV_LOOP_MAX_RUNS: integerStringSchema("AUTODEV_LOOP_MAX_RUNS", 0).default("20"),
+    AUTODEV_LOOP_MAX_MINUTES: integerStringSchema("AUTODEV_LOOP_MAX_MINUTES", 0).default("120"),
     AUTODEV_AUTO_COMMIT: booleanStringSchema("AUTODEV_AUTO_COMMIT").default("true"),
     AUTODEV_AUTO_RELEASE_ENABLED: booleanStringSchema("AUTODEV_AUTO_RELEASE_ENABLED").default("true"),
     AUTODEV_AUTO_RELEASE_PUSH: booleanStringSchema("AUTODEV_AUTO_RELEASE_PUSH").default("false"),
@@ -496,8 +496,8 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     CODEX_APPROVAL_POLICY: config.codexApprovalPolicy ?? "",
     CODEX_EXTRA_ARGS: config.codexExtraArgs.join(" "),
     CODEX_EXTRA_ENV_JSON: serializeJsonObject(config.codexExtraEnv),
-    AUTODEV_LOOP_MAX_RUNS: normalizePositiveIntegerEnv(process.env.AUTODEV_LOOP_MAX_RUNS, "20"),
-    AUTODEV_LOOP_MAX_MINUTES: normalizePositiveIntegerEnv(process.env.AUTODEV_LOOP_MAX_MINUTES, "120"),
+    AUTODEV_LOOP_MAX_RUNS: normalizeNonNegativeIntegerEnv(process.env.AUTODEV_LOOP_MAX_RUNS, "20"),
+    AUTODEV_LOOP_MAX_MINUTES: normalizeNonNegativeIntegerEnv(process.env.AUTODEV_LOOP_MAX_MINUTES, "120"),
     AUTODEV_AUTO_COMMIT: normalizeBooleanEnv(process.env.AUTODEV_AUTO_COMMIT, "true"),
     AUTODEV_AUTO_RELEASE_ENABLED: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_ENABLED, "true"),
     AUTODEV_AUTO_RELEASE_PUSH: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_PUSH, "false"),
@@ -731,6 +731,18 @@ function normalizePositiveIntegerEnv(value: string | undefined, fallback: string
   }
   const parsed = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return String(parsed);
+}
+
+function normalizeNonNegativeIntegerEnv(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed || !INTEGER_STRING.test(trimmed)) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;
   }
   return String(parsed);

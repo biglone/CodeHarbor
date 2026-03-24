@@ -2937,12 +2937,65 @@ describe("Orchestrator", () => {
       expect(updated).toContain("| T12.1 | first | ✅ |");
       expect(updated).toContain("| T12.2 | second | ✅ |");
       expect(updated).toContain("| T12.3 | third | ⬜ |");
-      expect(channel.notices.some((entry) => entry.text.includes("循环执行已达到上限"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("循环执行已达到轮次上限，已暂停"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("loopMaxRuns: 2"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("继续执行: /autodev run"))).toBe(true);
       const runtime = orchestrator.getRuntimeMetricsSnapshot();
       expect(runtime.autodev.runs.succeeded).toBe(2);
       expect(runtime.autodev.loopStops.max_runs).toBe(1);
       expect(runtime.autodev.tasksBlocked).toBe(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats loop max runs = 0 as unlimited", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-unlimited-runs-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T12.4 | first | ⬜ |",
+        "| T12.5 | second | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevLoopMaxRuns: 0,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-unlimited-runs",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T12.4 | first | ✅ |");
+      expect(updated).toContain("| T12.5 | second | ✅ |");
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 循环执行完成"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("轮次上限"))).toBe(false);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.runs.succeeded).toBe(2);
+      expect(runtime.autodev.loopStops.max_runs).toBe(0);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

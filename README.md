@@ -692,9 +692,9 @@ Backend/model rule routing:
     - execution/testing: `performance-optimizer`, `auto-code-pipeline`, `migration-helper`, `tdd-workflow`, `webapp-testing`, `ui-ux-pro-max`, `pptx`, `ralph-loop`
     - review/release: `commit-message`, `code-simplifier`, `multi-agent-code-review`
 - `AUTODEV_LOOP_MAX_RUNS`
-  - max task attempts for one `/autodev run` loop execution (default `20`)
+  - max task attempts for one `/autodev run` loop execution (default `20`, `0` = unlimited)
 - `AUTODEV_LOOP_MAX_MINUTES`
-  - max wall-clock minutes for one `/autodev run` loop execution (default `120`)
+  - max wall-clock minutes for one `/autodev run` loop execution (default `120`, `0` = unlimited)
 - `AUTODEV_AUTO_COMMIT=true|false`
   - enable/disable AutoDev git auto-commit after reviewer `APPROVED` (default `true`)
 - `AUTODEV_AUTO_RELEASE_ENABLED=true|false`
@@ -716,9 +716,16 @@ AutoDev (`/autodev`) conventions:
 - `/autodev workdir|wd [path]|status|clear` inspects or changes session-level workdir override.
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
 - `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
-- `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit stops safely with a summary notice.
+- `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit pauses safely with a summary notice, and you can resume with `/autodev run`.
 - `/autodev run <taskId>` runs only the specified task.
 - `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
+- Loop guardrail rules:
+  - `AUTODEV_LOOP_MAX_RUNS=0` means unlimited loop rounds.
+  - `AUTODEV_LOOP_MAX_MINUTES=0` means unlimited loop wall-clock time.
+  - Hitting run/time limit is a safe **pause** (not hard failure): AutoDev prints remaining task summary and resume hint.
+  - Resume command is always `/autodev run` (or `/autodev run <taskId>` for targeted rerun).
+  - `/autodev run <taskId>` is single-task mode and does not consume loop run/time budgets.
+  - Recommended for long roadmap execution: set both loop limits to `0`, and keep `AUTODEV_MAX_CONSECUTIVE_FAILURES` + no-progress detection enabled as safety rails.
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
 - When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.

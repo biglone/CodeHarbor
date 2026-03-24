@@ -195,13 +195,20 @@ codeharbor admin serve
     - 规划/设计：`api-designer`, `superpowers-workflow`, `brainstorming`, `planning-with-files`
     - 执行/测试：`performance-optimizer`, `auto-code-pipeline`, `migration-helper`, `tdd-workflow`, `webapp-testing`, `ui-ux-pro-max`, `pptx`, `ralph-loop`
     - 审查/发布：`commit-message`, `code-simplifier`, `multi-agent-code-review`
-- `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20）
-- `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120）
+- `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20，`0` 表示不限制）
+- `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120，`0` 表示不限制）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
+  - 当达到轮次/时间上限时会“暂停”并输出剩余任务摘要，可再次执行 `/autodev run` 续跑
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
+- 循环护栏规则（建议）：
+  - `AUTODEV_LOOP_MAX_RUNS=0`：轮次不限制
+  - `AUTODEV_LOOP_MAX_MINUTES=0`：总时长不限制
+  - 达到轮次/时间上限时是“安全暂停”而不是失败，可直接 `/autodev run` 续跑
+  - `/autodev run [taskId]` 属于单任务模式，不消耗循环轮次/时间预算
+  - 长周期任务建议将轮次/时长都设为 `0`，并保留 `AUTODEV_MAX_CONSECUTIVE_FAILURES` 与“无进展停止”作为安全护栏
 - `/autodev workdir|wd [path]|status|clear`：查看/设置/清除当前会话 AutoDev 工作目录覆盖
 - `/autodev init|i [path] [--from 文件]`：在目标项目初始化 `REQUIREMENTS.md`、`TASK_LIST.md`、`docs/AUTODEV_TASK_COMPASS.md`
   - 推荐移动端短流程：`//autodev init StrawBerry` -> `//autodev run`

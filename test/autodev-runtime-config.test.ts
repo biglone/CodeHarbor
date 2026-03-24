@@ -31,6 +31,24 @@ afterEach(() => {
 });
 
 describe("resolveAutoDevRuntimeConfig", () => {
+  it("accepts zero loop limits as unlimited", () => {
+    process.env.AUTODEV_LOOP_MAX_RUNS = "0";
+    process.env.AUTODEV_LOOP_MAX_MINUTES = "0";
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevLoopMaxRuns).toBe(0);
+    expect(config.autoDevLoopMaxMinutes).toBe(0);
+  });
+
+  it("falls back to defaults for invalid negative loop limits", () => {
+    process.env.AUTODEV_LOOP_MAX_RUNS = "-1";
+    process.env.AUTODEV_LOOP_MAX_MINUTES = "-10";
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevLoopMaxRuns).toBe(20);
+    expect(config.autoDevLoopMaxMinutes).toBe(120);
+  });
+
   it("reads init enhancement budget from env", () => {
     process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED = "false";
     process.env.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS = "180000";

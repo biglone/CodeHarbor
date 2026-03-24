@@ -168,7 +168,7 @@ export async function runAutoDevCommand(
     mode: requestedTaskId ? "single" : "loop",
     loopRound: requestedTaskId ? 1 : 0,
     loopCompletedRuns: 0,
-    loopMaxRuns: requestedTaskId ? 1 : deps.autoDevLoopMaxRuns,
+    loopMaxRuns: requestedTaskId ? 1 : Math.max(0, deps.autoDevLoopMaxRuns),
     loopDeadlineAt:
       requestedTaskId || deps.autoDevLoopMaxMinutes <= 0
         ? null
@@ -245,8 +245,10 @@ export async function runAutoDevCommand(
         if (shouldStopLoop) {
           return;
         }
-        if (attemptedRuns >= activeContext.loopMaxRuns) {
+        if (activeContext.loopMaxRuns > 0 && attemptedRuns >= activeContext.loopMaxRuns) {
           deps.autoDevMetrics.recordLoopStop("max_runs");
+          const pausedContext = await loadAutoDevContext(input.workdir);
+          const remaining = summarizeAutoDevTasks(pausedContext.tasks);
           const endedAtIso = new Date().toISOString();
           deps.setAutoDevSnapshot(input.sessionKey, {
             state: "succeeded",
@@ -268,20 +270,26 @@ export async function runAutoDevCommand(
           await deps.channelSendNotice(
             input.message.conversationId,
             localize(
-              `[CodeHarbor] AutoDev 循环执行已达到上限，已停止。
+              `[CodeHarbor] AutoDev 循环执行已达到轮次上限，已暂停。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
-- loopMaxRuns: ${activeContext.loopMaxRuns}`,
-              `[CodeHarbor] AutoDev loop stopped at run limit.
+- loopMaxRuns: ${activeContext.loopMaxRuns}
+- remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
+- 继续执行: /autodev run`,
+              `[CodeHarbor] AutoDev loop paused at run limit.
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
-- loopMaxRuns: ${activeContext.loopMaxRuns}`,
+- loopMaxRuns: ${activeContext.loopMaxRuns}
+- remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
+- continue: /autodev run`,
             ),
           );
           return;
         }
         if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
           deps.autoDevMetrics.recordLoopStop("deadline");
+          const pausedContext = await loadAutoDevContext(input.workdir);
+          const remaining = summarizeAutoDevTasks(pausedContext.tasks);
           const endedAtIso = new Date().toISOString();
           deps.setAutoDevSnapshot(input.sessionKey, {
             state: "succeeded",
@@ -303,14 +311,18 @@ export async function runAutoDevCommand(
           await deps.channelSendNotice(
             input.message.conversationId,
             localize(
-              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已停止。
+              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已暂停。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
-- loopDeadlineAt: ${loopDeadlineAtIso}`,
-              `[CodeHarbor] AutoDev loop stopped at time limit.
+- loopDeadlineAt: ${loopDeadlineAtIso}
+- remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
+- 继续执行: /autodev run`,
+              `[CodeHarbor] AutoDev loop paused at time limit.
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
-- loopDeadlineAt: ${loopDeadlineAtIso}`,
+- loopDeadlineAt: ${loopDeadlineAtIso}
+- remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
+- continue: /autodev run`,
             ),
           );
           return;
@@ -506,7 +518,8 @@ export async function runAutoDevCommand(
     mode: activeContext.mode,
     loopRound: Math.max(1, activeContext.loopRound),
     loopCompletedRuns: Math.max(0, activeContext.loopCompletedRuns),
-    loopMaxRuns: Math.max(1, activeContext.loopMaxRuns),
+    loopMaxRuns:
+      activeContext.mode === "loop" ? Math.max(0, activeContext.loopMaxRuns) : Math.max(1, activeContext.loopMaxRuns),
     loopDeadlineAt: activeContext.loopDeadlineAt,
   };
   if (effectiveContext.mode !== "loop") {

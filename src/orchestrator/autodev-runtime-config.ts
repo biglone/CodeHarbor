@@ -10,7 +10,7 @@ import {
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
 } from "./orchestrator-constants";
 import type { OrchestratorOptions } from "./orchestrator-config-types";
-import { parseEnvBoolean, parseEnvPositiveInt } from "./helpers";
+import { parseEnvBoolean, parseEnvNonNegativeInt, parseEnvPositiveInt } from "./helpers";
 
 export interface AutoDevRuntimeConfig {
   autoDevLoopMaxRuns: number;
@@ -28,14 +28,14 @@ export interface AutoDevRuntimeConfig {
 export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): AutoDevRuntimeConfig {
   return {
     autoDevLoopMaxRuns: Math.max(
-      1,
+      0,
       options?.autoDevLoopMaxRuns ??
-        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, DEFAULT_AUTODEV_LOOP_MAX_RUNS),
+        parseEnvNonNegativeInt(process.env.AUTODEV_LOOP_MAX_RUNS, DEFAULT_AUTODEV_LOOP_MAX_RUNS),
     ),
     autoDevLoopMaxMinutes: Math.max(
-      1,
+      0,
       options?.autoDevLoopMaxMinutes ??
-        parseEnvPositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, DEFAULT_AUTODEV_LOOP_MAX_MINUTES),
+        parseEnvNonNegativeInt(process.env.AUTODEV_LOOP_MAX_MINUTES, DEFAULT_AUTODEV_LOOP_MAX_MINUTES),
     ),
     autoDevAutoCommit: options?.autoDevAutoCommit ?? parseEnvBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
     autoDevAutoReleaseEnabled:

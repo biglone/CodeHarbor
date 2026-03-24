@@ -216,6 +216,18 @@ export function parseEnvPositiveInt(raw: string | undefined, fallback: number): 
   return parsed;
 }
 
+export function parseEnvNonNegativeInt(raw: string | undefined, fallback: number): number {
+  const normalized = raw?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
 export function parseEnvOptionalPositiveInt(raw: string | undefined): number | null {
   const normalized = raw?.trim();
   if (!normalized) {
