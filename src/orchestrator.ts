@@ -172,6 +172,8 @@ import {
   handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
   handleAutoDevWorkdirCommand as runAutoDevWorkdirCommand,
   type AutoDevControlCommandDeps,
+  type AutoDevInitEnhancementInput,
+  type AutoDevInitEnhancementResult,
 } from "./orchestrator/autodev-control-command";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./orchestrator/workflow-run-dispatch";
@@ -307,6 +309,8 @@ type TaskQueueStateStore = Pick<
   | "getNextPendingRetryAt"
   | "getTaskQueueStatusCounts"
 >;
+
+const AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS = 8 * 60 * 1_000;
 
 export class Orchestrator {
   private readonly channel: Channel;
@@ -1053,7 +1057,7 @@ export class Orchestrator {
     sessionKey: string,
     message: InboundMessage,
     targetPath: string | null,
-    skill: string | null,
+    from: string | null,
     roomWorkdir: string,
   ): Promise<void> {
     await runAutoDevInitCommand(
@@ -1062,7 +1066,7 @@ export class Orchestrator {
         sessionKey,
         message,
         path: targetPath,
-        skill,
+        from,
         roomWorkdir,
       },
     );
@@ -1086,7 +1090,94 @@ export class Orchestrator {
       clearAutoDevWorkdirOverride: (targetSessionKey) => {
         this.autoDevWorkdirOverrides.delete(targetSessionKey);
       },
+      runAutoDevInitEnhancement: (input) => this.runAutoDevInitEnhancement(input),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+    };
+  }
+
+  private async runAutoDevInitEnhancement(
+    input: AutoDevInitEnhancementInput,
+  ): Promise<AutoDevInitEnhancementResult> {
+    const roleSkillPolicy = this.resolveWorkflowRoleSkillPolicy(input.sessionKey);
+    const plannerSkillPrompt = this.workflowRoleSkillCatalog.buildPrompt({
+      role: "planner",
+      stage: "planner",
+      round: 0,
+      policy: roleSkillPolicy,
+    });
+    const prompt = this.buildAutoDevInitEnhancementPrompt(input, plannerSkillPrompt.text);
+    const backendDecision = this.resolveSessionBackendDecision({
+      sessionKey: input.sessionKey,
+      message: input.message,
+      taskType: "autodev_run",
+      routePrompt: "/autodev init",
+    });
+    const backendRuntime = this.prepareBackendRuntimeForSession(input.sessionKey, backendDecision.profile);
+    this.sessionLastBackendDecisions.set(input.sessionKey, backendDecision);
+    this.recordBackendRouteDecision({
+      sessionKey: input.sessionKey,
+      message: input.message,
+      taskType: "autodev_run",
+      decision: backendDecision,
+    });
+
+    const previousCodexSessionId = this.stateStore.getCodexSessionId(input.sessionKey);
+    const executionResult = await backendRuntime.executor.execute(prompt, previousCodexSessionId, undefined, {
+      workdir: input.workdir,
+      timeoutMs: AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+    });
+    this.stateStore.setCodexSessionId(input.sessionKey, executionResult.sessionId);
+    return this.parseAutoDevInitEnhancementResult(executionResult.reply);
+  }
+
+  private buildAutoDevInitEnhancementPrompt(
+    input: AutoDevInitEnhancementInput,
+    plannerSkillPrompt: string | null,
+  ): string {
+    const sourceDocs =
+      input.sourceDocs.length > 0
+        ? input.sourceDocs.map((doc) => `- ${doc}`).join("\n")
+        : "- (none; rely on workspace docs)";
+    const skillBlock = plannerSkillPrompt ? `${plannerSkillPrompt}\n\n` : "";
+    return [
+      "You are executing Stage B for `/autodev init` in this repository.",
+      "",
+      "Goal:",
+      "- Improve `REQUIREMENTS.md` and `TASK_LIST.md` from generated baseline using available project design documents.",
+      "",
+      "Hard constraints:",
+      "- Edit only `REQUIREMENTS.md` and `TASK_LIST.md`.",
+      "- Keep markdown structure valid and concise.",
+      "- `TASK_LIST.md` must remain parseable as task table rows for AutoDev.",
+      "- Keep clear dependencies and executable acceptance criteria.",
+      "- If uncertain, keep baseline content; do not invent external facts.",
+      "",
+      "Focus source documents:",
+      sourceDocs,
+      "",
+      "Target files:",
+      `- ${input.requirementsPath}`,
+      `- ${input.taskListPath}`,
+      "",
+      "Return format (strict):",
+      "INIT_ENHANCEMENT: APPLIED | SKIPPED",
+      "SUMMARY: <one line>",
+      "",
+      skillBlock,
+      "Now perform the file edits directly in workspace and return the strict format.",
+    ]
+      .join("\n")
+      .trim();
+  }
+
+  private parseAutoDevInitEnhancementResult(reply: string): AutoDevInitEnhancementResult {
+    const trimmed = reply.trim();
+    const statusMatch = trimmed.match(/INIT_ENHANCEMENT:\s*(APPLIED|SKIPPED)/i);
+    const summaryMatch = trimmed.match(/SUMMARY:\s*(.+)/i);
+    const summary = summaryMatch?.[1]?.trim() || trimmed.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || null;
+    return {
+      applied: (statusMatch?.[1] ?? "APPLIED").toUpperCase() === "APPLIED",
+      summary,
     };
   }
 

@@ -9,7 +9,7 @@ export type AutoDevCommandLike =
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
-  | { kind: "init"; path: string | null; skill: string | null }
+  | { kind: "init"; path: string | null; from: string | null }
   | { kind: "progress"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" }
   | null;

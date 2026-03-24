@@ -73,7 +73,7 @@ describe("orchestrator command routing helpers", () => {
     expect(classifyBackendTaskType(null, { kind: "status" })).toBe("autodev_status");
     expect(classifyBackendTaskType(null, { kind: "progress", mode: "on" })).toBe("autodev_status");
     expect(classifyBackendTaskType(null, { kind: "workdir", mode: "status", path: null })).toBe("autodev_status");
-    expect(classifyBackendTaskType(null, { kind: "init", path: null, skill: null })).toBe("autodev_status");
+    expect(classifyBackendTaskType(null, { kind: "init", path: null, from: null })).toBe("autodev_status");
     expect(classifyBackendTaskType(null, { kind: "stop" })).toBe("autodev_stop");
     expect(classifyBackendTaskType(null, null)).toBe("chat");
   });

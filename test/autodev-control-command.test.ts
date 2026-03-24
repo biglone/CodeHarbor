@@ -27,7 +27,10 @@ function createMessage(text: string): InboundMessage {
   };
 }
 
-function createDeps(options?: { outputLanguage?: OutputLanguage }) {
+function createDeps(options?: {
+  outputLanguage?: OutputLanguage;
+  runAutoDevInitEnhancement?: AutoDevControlCommandDeps["runAutoDevInitEnhancement"];
+}) {
   const notices: string[] = [];
   const overrides = new Map<string, string>();
   const deps: AutoDevControlCommandDeps = {
@@ -53,6 +56,7 @@ function createDeps(options?: { outputLanguage?: OutputLanguage }) {
     clearAutoDevWorkdirOverride: (sessionKey) => {
       overrides.delete(sessionKey);
     },
+    runAutoDevInitEnhancement: options?.runAutoDevInitEnhancement,
     sendNotice: async (_conversationId, text) => {
       notices.push(text);
     },
@@ -69,7 +73,7 @@ describe("AutoDev control command helpers", () => {
         sessionKey: "session-1",
         message: createMessage("/autodev init"),
         path: tempRoot,
-        skill: "requirements-doc",
+        from: null,
         roomWorkdir: "/home/fallback",
       });
 
@@ -129,13 +133,99 @@ describe("AutoDev control command helpers", () => {
         sessionKey: "session-3",
         message: createMessage("/autodev init StrawBerry"),
         path: "StrawBerry",
-        skill: null,
+        from: null,
         roomWorkdir,
       });
       expect(overrides.get("session-3")).toBe(path.resolve(siblingProject));
       await expect(fs.access(path.join(siblingProject, "TASK_LIST.md"))).resolves.toBeUndefined();
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses explicit --from document as generation source", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-from-"));
+    const docsDir = path.join(tempRoot, "docs");
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(docsDir, "技术方案.md"),
+      ["# StrawBerry Messaging Platform", "", "## Message Routing", "- must support DM and group", "## Security", "- enforce RBAC"].join("\n"),
+      "utf8",
+    );
+
+    const { deps } = createDeps();
+    try {
+      await handleAutoDevInitCommand(deps, {
+        sessionKey: "session-4",
+        message: createMessage("/autodev init --from docs/技术方案.md"),
+        path: tempRoot,
+        from: "docs/技术方案.md",
+        roomWorkdir: "/home/fallback",
+      });
+
+      const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+      const requirementsText = await fs.readFile(requirementsPath, "utf8");
+      expect(requirementsText).toContain("docs/技术方案.md");
+      expect(requirementsText).toContain("StrawBerry Messaging Platform");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies init enhancement when AI result is valid", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-enhance-ok-"));
+    const { deps, notices } = createDeps({
+      runAutoDevInitEnhancement: async ({ requirementsPath }) => {
+        const current = await fs.readFile(requirementsPath, "utf8");
+        await fs.writeFile(requirementsPath, `${current}\n## Delivery Notes\n- refined by init enhancement\n`, "utf8");
+        return {
+          applied: true,
+          summary: "Applied source-aware refinement.",
+        };
+      },
+    });
+    try {
+      await handleAutoDevInitCommand(deps, {
+        sessionKey: "session-5",
+        message: createMessage("/autodev init"),
+        path: tempRoot,
+        from: null,
+        roomWorkdir: "/home/fallback",
+      });
+
+      const requirementsText = await fs.readFile(path.join(tempRoot, "REQUIREMENTS.md"), "utf8");
+      expect(requirementsText).toContain("refined by init enhancement");
+      expect(notices.at(-1)).toContain("initEnhancement: applied");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to stage-A baseline when enhancement output is invalid", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-enhance-fallback-"));
+    const { deps, notices } = createDeps({
+      runAutoDevInitEnhancement: async ({ taskListPath }) => {
+        await fs.writeFile(taskListPath, "# TASK_LIST\n\ninvalid content without task rows\n", "utf8");
+        return {
+          applied: true,
+          summary: "Wrote invalid task list to trigger fallback",
+        };
+      },
+    });
+    try {
+      await handleAutoDevInitCommand(deps, {
+        sessionKey: "session-6",
+        message: createMessage("/autodev init"),
+        path: tempRoot,
+        from: null,
+        roomWorkdir: "/home/fallback",
+      });
+
+      const taskListText = await fs.readFile(path.join(tempRoot, "TASK_LIST.md"), "utf8");
+      expect(taskListText).toContain("| T0.1 |");
+      expect(notices.at(-1)).toContain("initEnhancement: fallback to stage-A baseline");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
 });

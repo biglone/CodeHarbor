@@ -32,22 +32,32 @@ describe("AutoDev workflow helpers", () => {
       mode: "set",
       path: "~/workspace/StrawBerry",
     });
-    expect(parseAutoDevCommand("/autodev init")).toEqual({ kind: "init", path: null, skill: null });
-    expect(parseAutoDevCommand("/autodev i")).toEqual({ kind: "init", path: null, skill: null });
+    expect(parseAutoDevCommand("/autodev init")).toEqual({ kind: "init", path: null, from: null });
+    expect(parseAutoDevCommand("/autodev i")).toEqual({ kind: "init", path: null, from: null });
     expect(parseAutoDevCommand("/autodev init ~/workspace/StrawBerry")).toEqual({
       kind: "init",
       path: "~/workspace/StrawBerry",
-      skill: null,
+      from: null,
     });
     expect(parseAutoDevCommand("/autodev i StrawBerry")).toEqual({
       kind: "init",
       path: "StrawBerry",
-      skill: null,
+      from: null,
+    });
+    expect(parseAutoDevCommand("/autodev init --from docs/技术方案.md")).toEqual({
+      kind: "init",
+      path: null,
+      from: "docs/技术方案.md",
     });
     expect(parseAutoDevCommand("/autodev init ~/workspace/StrawBerry --skill requirements-doc")).toEqual({
       kind: "init",
       path: "~/workspace/StrawBerry",
-      skill: "requirements-doc",
+      from: null,
+    });
+    expect(parseAutoDevCommand("/autodev init StrawBerry --from docs/design.md --skill requirements-doc")).toEqual({
+      kind: "init",
+      path: "StrawBerry",
+      from: "docs/design.md",
     });
     expect(parseAutoDevCommand("/autodev progress")).toEqual({ kind: "progress", mode: "status" });
     expect(parseAutoDevCommand("/autodev progress status")).toEqual({ kind: "progress", mode: "status" });

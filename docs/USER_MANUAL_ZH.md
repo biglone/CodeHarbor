@@ -203,8 +203,11 @@ codeharbor admin serve
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
 - `/autodev workdir|wd [path]|status|clear`：查看/设置/清除当前会话 AutoDev 工作目录覆盖
-- `/autodev init|i [path]`：在目标项目初始化 `REQUIREMENTS.md`、`TASK_LIST.md`、`docs/AUTODEV_TASK_COMPASS.md`
+- `/autodev init|i [path] [--from 文件]`：在目标项目初始化 `REQUIREMENTS.md`、`TASK_LIST.md`、`docs/AUTODEV_TASK_COMPASS.md`
   - 推荐移动端短流程：`//autodev init StrawBerry` -> `//autodev run`
+  - 不传 `--from` 时会自动发现项目内设计/方案文档并用于初始化；传 `--from` 可强制指定来源文档
+  - 初始化采用三阶段：Stage-A 固定模板生成、Stage-B AI 增强、Stage-C 硬校验（不合规自动回退到 Stage-A 基线）
+  - Stage-B 仅在本次 `init` 新建了 `REQUIREMENTS.md` 与 `TASK_LIST.md` 时执行；若已有同名文件则默认保留并跳过增强
 - `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <business-summary> (<taskId>)`（按任务目标与改动文件自动推断）

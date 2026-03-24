@@ -46,7 +46,7 @@ interface HandleLockedRouteCommandDeps {
     sessionKey: string,
     message: InboundMessage,
     path: string | null,
-    skill: string | null,
+    from: string | null,
     roomWorkdir: string,
   ) => Promise<void>;
 }
@@ -118,7 +118,7 @@ export async function handleLockedRouteCommand(
       input.sessionKey,
       input.message,
       autoDevCommand.path,
-      autoDevCommand.skill,
+      autoDevCommand.from,
       input.workdir,
     );
     deps.markEventProcessed(input.sessionKey, input.message.eventId);

@@ -604,8 +604,9 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
   - `/autodev stop` graceful loop stop: finish current task, then stop before next task
   - `/autodev workdir|wd [path]|status|clear` show/set/clear AutoDev workdir override for current session
-  - `/autodev init|i [path]` initialize `REQUIREMENTS.md` + `TASK_LIST.md` + `docs/AUTODEV_TASK_COMPASS.md` in target project
+  - `/autodev init|i [path] [--from file]` initialize `REQUIREMENTS.md` + `TASK_LIST.md` + `docs/AUTODEV_TASK_COMPASS.md` in target project
     - short mobile-friendly flow: `//autodev init StrawBerry` -> `//autodev run`
+    - omit `--from` to auto-discover design/spec docs in project; use `--from` to force one source file
   - `/autodev skills [on|off|summary|progressive|full|status]` control role-skill injection and disclosure mode per session
 
 Version update check controls:
@@ -706,7 +707,10 @@ Backend/model rule routing:
 AutoDev (`/autodev`) conventions:
 
 - Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
-- `/autodev init|i [path]` scaffolds missing AutoDev files and binds workdir override for current session.
+- `/autodev init|i [path] [--from file]` scaffolds missing AutoDev files and binds workdir override for current session.
+  - when `--from` is omitted, CodeHarbor auto-discovers design/spec docs and uses them to generate initial REQUIREMENTS/TASK_LIST templates.
+  - init uses a 3-stage flow: Stage-A deterministic scaffold, Stage-B AI enhancement, Stage-C hard validation with fallback to Stage-A baseline on invalid output.
+  - Stage-B AI enhancement runs only when both `REQUIREMENTS.md` and `TASK_LIST.md` were generated in this init run (existing files are preserved).
   - if `path` is a project name (no `/`), CodeHarbor resolves both `<room_workdir>/<name>` and sibling `<parent>/<name>`.
   - when target path is missing/not-directory, init fails explicitly and keeps current workdir unchanged.
 - `/autodev workdir|wd [path]|status|clear` inspects or changes session-level workdir override.
