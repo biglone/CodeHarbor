@@ -2,6 +2,9 @@ import {
   DEFAULT_AUTODEV_AUTO_RELEASE_ENABLED,
   DEFAULT_AUTODEV_AUTO_RELEASE_PUSH,
   DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
+  DEFAULT_AUTODEV_INIT_ENHANCEMENT_ENABLED,
+  DEFAULT_AUTODEV_INIT_ENHANCEMENT_MAX_CHARS,
+  DEFAULT_AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
   DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
   DEFAULT_AUTODEV_LOOP_MAX_RUNS,
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
@@ -17,6 +20,9 @@ export interface AutoDevRuntimeConfig {
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevInitEnhancementEnabled: boolean;
+  autoDevInitEnhancementTimeoutMs: number;
+  autoDevInitEnhancementMaxChars: number;
 }
 
 export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): AutoDevRuntimeConfig {
@@ -45,5 +51,21 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
     ),
     autoDevDetailedProgressDefaultEnabled:
       options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
+    autoDevInitEnhancementEnabled:
+      options?.autoDevInitEnhancementEnabled ??
+      parseEnvBoolean(process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED, DEFAULT_AUTODEV_INIT_ENHANCEMENT_ENABLED),
+    autoDevInitEnhancementTimeoutMs: Math.max(
+      1,
+      options?.autoDevInitEnhancementTimeoutMs ??
+        parseEnvPositiveInt(
+          process.env.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+          DEFAULT_AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+        ),
+    ),
+    autoDevInitEnhancementMaxChars: Math.max(
+      1,
+      options?.autoDevInitEnhancementMaxChars ??
+        parseEnvPositiveInt(process.env.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS, DEFAULT_AUTODEV_INIT_ENHANCEMENT_MAX_CHARS),
+    ),
   };
 }

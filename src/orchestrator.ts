@@ -310,8 +310,6 @@ type TaskQueueStateStore = Pick<
   | "getTaskQueueStatusCounts"
 >;
 
-const AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS = 8 * 60 * 1_000;
-
 export class Orchestrator {
   private readonly channel: Channel;
   private readonly executorFactory: ((provider: "codex" | "claude", model?: string | null) => CodexExecutor) | null;
@@ -375,6 +373,9 @@ export class Orchestrator {
   private readonly autoDevAutoReleasePush: boolean;
   private readonly autoDevMaxConsecutiveFailures: number;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
+  private readonly autoDevInitEnhancementEnabled: boolean;
+  private readonly autoDevInitEnhancementTimeoutMs: number;
+  private readonly autoDevInitEnhancementMaxChars: number;
   private readonly autoDevDetailedProgressOverrides = new Map<string, boolean>();
   private readonly workflowRoleSkillCatalog: WorkflowRoleSkillCatalog;
   private readonly workflowRoleSkillDefaultPolicy: WorkflowRoleSkillPolicyOverride;
@@ -453,6 +454,9 @@ export class Orchestrator {
     this.autoDevAutoReleasePush = autoDevRuntimeConfig.autoDevAutoReleasePush;
     this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
+    this.autoDevInitEnhancementEnabled = autoDevRuntimeConfig.autoDevInitEnhancementEnabled;
+    this.autoDevInitEnhancementTimeoutMs = autoDevRuntimeConfig.autoDevInitEnhancementTimeoutMs;
+    this.autoDevInitEnhancementMaxChars = autoDevRuntimeConfig.autoDevInitEnhancementMaxChars;
     const serviceRuntimeConfig = runResolveServiceRuntimeConfig(options);
     this.botNoticePrefix = serviceRuntimeConfig.botNoticePrefix;
     this.packageUpdateChecker = serviceRuntimeConfig.packageUpdateChecker;
@@ -1102,6 +1106,12 @@ export class Orchestrator {
   private async runAutoDevInitEnhancement(
     input: AutoDevInitEnhancementInput,
   ): Promise<AutoDevInitEnhancementResult> {
+    if (!this.autoDevInitEnhancementEnabled) {
+      return {
+        applied: false,
+        summary: "disabled by AUTODEV_INIT_ENHANCEMENT_ENABLED=false",
+      };
+    }
     const roleSkillPolicy = this.resolveWorkflowRoleSkillPolicy(input.sessionKey);
     const plannerSkillPrompt = this.workflowRoleSkillCatalog.buildPrompt({
       role: "planner",
@@ -1128,7 +1138,7 @@ export class Orchestrator {
     const previousCodexSessionId = this.stateStore.getCodexSessionId(input.sessionKey);
     const executionResult = await backendRuntime.executor.execute(prompt, previousCodexSessionId, undefined, {
       workdir: input.workdir,
-      timeoutMs: AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+      timeoutMs: this.autoDevInitEnhancementTimeoutMs,
     });
     this.stateStore.setCodexSessionId(input.sessionKey, executionResult.sessionId);
     return this.parseAutoDevInitEnhancementResult(executionResult.reply);
@@ -1138,11 +1148,13 @@ export class Orchestrator {
     input: AutoDevInitEnhancementInput,
     plannerSkillPrompt: string | null,
   ): string {
-    const sourceDocs =
+    const sourceDocsRaw =
       input.sourceDocs.length > 0
         ? input.sourceDocs.map((doc) => `- ${doc}`).join("\n")
         : "- (none; rely on workspace docs)";
-    const skillBlock = plannerSkillPrompt ? `${plannerSkillPrompt}\n\n` : "";
+    const sourceDocs = this.truncateInitEnhancementPromptSection(sourceDocsRaw);
+    const skillPrompt = this.truncateInitEnhancementPromptSection(plannerSkillPrompt ?? "");
+    const skillBlock = skillPrompt ? `${skillPrompt}\n\n` : "";
     return [
       "You are executing Stage B for `/autodev init` in this repository.",
       "",
@@ -1172,6 +1184,18 @@ export class Orchestrator {
     ]
       .join("\n")
       .trim();
+  }
+
+  private truncateInitEnhancementPromptSection(text: string): string {
+    const normalized = text.trim();
+    if (!normalized) {
+      return "";
+    }
+    if (normalized.length <= this.autoDevInitEnhancementMaxChars) {
+      return normalized;
+    }
+    const sliced = normalized.slice(0, Math.max(0, this.autoDevInitEnhancementMaxChars)).trimEnd();
+    return `${sliced}\n... [truncated by AUTODEV_INIT_ENHANCEMENT_MAX_CHARS=${this.autoDevInitEnhancementMaxChars}]`;
   }
 
   private parseAutoDevInitEnhancementResult(reply: string): AutoDevInitEnhancementResult {

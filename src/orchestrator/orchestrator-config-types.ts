@@ -71,5 +71,8 @@ export interface OrchestratorOptions {
   autoDevAutoReleasePush?: boolean;
   autoDevMaxConsecutiveFailures?: number;
   autoDevDetailedProgressEnabled?: boolean;
+  autoDevInitEnhancementEnabled?: boolean;
+  autoDevInitEnhancementTimeoutMs?: number;
+  autoDevInitEnhancementMaxChars?: number;
   onApiTaskLifecycleEvent?: (event: ApiTaskLifecycleEvent) => void;
 }
