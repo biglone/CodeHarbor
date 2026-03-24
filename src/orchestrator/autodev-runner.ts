@@ -139,7 +139,9 @@ interface AutoDevRunnerDeps {
   }) => Promise<AutoDevFailurePolicyResult>;
   autoDevMetrics: {
     recordRunOutcome: (outcome: "succeeded" | "failed" | "cancelled") => void;
-    recordLoopStop: (reason: "no_task" | "drained" | "max_runs" | "deadline" | "stop_requested" | "task_incomplete") => void;
+    recordLoopStop: (
+      reason: "no_task" | "drained" | "max_runs" | "deadline" | "stop_requested" | "no_progress" | "task_incomplete",
+    ) => void;
     recordTaskBlocked: () => void;
   };
 }
@@ -389,6 +391,7 @@ export async function runAutoDevCommand(
           return;
         }
 
+        const taskListBeforeRun = loopContext.taskListContent ?? "";
         attemptedRuns += 1;
         await runAutoDevCommand(deps, {
           ...input,
@@ -404,6 +407,46 @@ export async function runAutoDevCommand(
         });
 
         const refreshed = await loadAutoDevContext(input.workdir);
+        const taskListAfterRun = refreshed.taskListContent ?? "";
+        if (taskListAfterRun === taskListBeforeRun) {
+          deps.autoDevMetrics.recordLoopStop("no_progress");
+          const endedAtIso = new Date().toISOString();
+          deps.setAutoDevSnapshot(input.sessionKey, {
+            state: "failed",
+            startedAt: new Date(loopStartedAt).toISOString(),
+            endedAt: endedAtIso,
+            taskId: loopTask.id,
+            taskDescription: loopTask.description,
+            approved: null,
+            repairRounds: 0,
+            error: localize("循环执行未产生任务状态变化", "loop run produced no task state change"),
+            mode: "loop",
+            loopRound: attemptedRuns,
+            loopCompletedRuns: completedRuns,
+            loopMaxRuns: activeContext.loopMaxRuns,
+            loopDeadlineAt: loopDeadlineAtIso,
+            lastGitCommitSummary: null,
+            lastGitCommitAt: null,
+            lastReleaseSummary: null,
+            lastReleaseAt: null,
+          });
+          await deps.channelSendNotice(
+            input.message.conversationId,
+            localize(
+              `[CodeHarbor] AutoDev 循环执行已停止：检测到本轮未产生任务状态变化。
+- task: ${loopTask.id}
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- reason: no task-state change`,
+              `[CodeHarbor] AutoDev loop stopped: no task state change detected in this round.
+- task: ${loopTask.id}
+- attemptedRuns: ${attemptedRuns}
+- completedRuns: ${completedRuns}
+- reason: no task-state change`,
+            ),
+          );
+          return;
+        }
         const refreshedTask = resolveAutoDevTask(refreshed.tasks, loopTask.id, loopTask.lineIndex);
         if (refreshedTask?.status === "completed") {
           completedRuns += 1;

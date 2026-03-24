@@ -57,7 +57,7 @@ interface HandleAutoDevRunCommandDeps {
   autoDevMetrics: {
     recordRunOutcome: (outcome: "succeeded" | "failed" | "cancelled") => void;
     recordLoopStop: (
-      reason: "no_task" | "drained" | "max_runs" | "deadline" | "stop_requested" | "task_incomplete",
+      reason: "no_task" | "drained" | "max_runs" | "deadline" | "stop_requested" | "no_progress" | "task_incomplete",
     ) => void;
     recordTaskBlocked: () => void;
   };

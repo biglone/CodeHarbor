@@ -2948,6 +2948,59 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("stops /autodev run loop when a round produces no task-list state change", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-no-progress-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    const initialTaskList = [
+      "| 任务ID | 任务描述 | 状态 |",
+      "|--------|----------|------|",
+      "| T12.9 | no progress task | ⬜ |",
+    ].join("\n");
+    await fs.writeFile(taskListPath, initialTaskList, "utf8");
+
+    const originalReadFile = fs.readFile.bind(fs) as (...args: unknown[]) => Promise<string>;
+    const readFileSpy = vi.spyOn(fs, "readFile").mockImplementation(async (...args: unknown[]) => {
+      const targetPath = path.resolve(String(args[0] ?? ""));
+      if (targetPath === path.resolve(taskListPath)) {
+        return initialTaskList;
+      }
+      return originalReadFile(...args);
+    });
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevLoopMaxRuns: 20,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-no-progress",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("未产生任务状态变化"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
+      expect(runtime.autodev.loopStops.no_progress).toBe(1);
+    } finally {
+      readFileSpy.mockRestore();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails fast before /autodev run task execution when git worktree is dirty", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-preflight-single-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");

@@ -121,6 +121,7 @@ export class AutoDevRuntimeMetrics {
   private loopMaxRuns = 0;
   private loopDeadline = 0;
   private loopStopRequested = 0;
+  private loopNoProgress = 0;
   private loopTaskIncomplete = 0;
   private tasksBlocked = 0;
 
@@ -157,6 +158,10 @@ export class AutoDevRuntimeMetrics {
       this.loopStopRequested += 1;
       return;
     }
+    if (reason === "no_progress") {
+      this.loopNoProgress += 1;
+      return;
+    }
     this.loopTaskIncomplete += 1;
   }
 
@@ -177,6 +182,7 @@ export class AutoDevRuntimeMetrics {
         max_runs: this.loopMaxRuns,
         deadline: this.loopDeadline,
         stop_requested: this.loopStopRequested,
+        no_progress: this.loopNoProgress,
         task_incomplete: this.loopTaskIncomplete,
       },
       tasksBlocked: this.tasksBlocked,

@@ -23,6 +23,7 @@ export const AUTODEV_LOOP_STOP_REASON_VALUES = [
   "max_runs",
   "deadline",
   "stop_requested",
+  "no_progress",
   "task_incomplete",
 ] as const;
 export type AutoDevLoopStopReasonMetric = (typeof AUTODEV_LOOP_STOP_REASON_VALUES)[number];
@@ -417,6 +418,7 @@ function createEmptyAutoDevMetrics(): RuntimeAutoDevMetricsSnapshot {
       max_runs: 0,
       deadline: 0,
       stop_requested: 0,
+      no_progress: 0,
       task_incomplete: 0,
     },
     tasksBlocked: 0,
@@ -464,6 +466,7 @@ function parseRuntimeAutoDevMetrics(value: unknown): RuntimeAutoDevMetricsSnapsh
       max_runs: parseNonNegativeInt(candidate.loopStops?.max_runs),
       deadline: parseNonNegativeInt(candidate.loopStops?.deadline),
       stop_requested: parseNonNegativeInt(candidate.loopStops?.stop_requested),
+      no_progress: parseNonNegativeInt(candidate.loopStops?.no_progress),
       task_incomplete: parseNonNegativeInt(candidate.loopStops?.task_incomplete),
     },
     tasksBlocked: parseNonNegativeInt(candidate.tasksBlocked),
