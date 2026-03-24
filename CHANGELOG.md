@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.64] - 2026-03-24
+
+- autodev init: support implicit design-doc discovery by default with optional `--from <file>` override.
+- autodev init: add staged generation pipeline (Stage-A scaffold, Stage-B AI enhancement, Stage-C hard validation with rollback fallback).
+- autodev init/workdir: improve sibling workspace project resolution for short commands like `/autodev init StrawBerry`.
+- command UX: add mobile-friendly aliases and update help/manual coverage for the init/workdir flow.
+
 ## [0.1.63] - 2026-03-23
 
 - i18n: remove mixed Chinese text in English command replies for `/status`, `/upgrade`, `/autodev status`, and historical stage traces.
