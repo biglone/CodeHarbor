@@ -67,6 +67,19 @@ Install globally from npm (after publish):
 npm install -g codeharbor
 ```
 
+Recommended npm package lifecycle (install/upgrade/verify):
+
+```bash
+# install latest
+npm install -g codeharbor@latest
+
+# verify installed version
+codeharbor --version
+
+# upgrade helper (installs latest + restart strategy)
+codeharbor self-update
+```
+
 Linux one-command install (creates `/opt/codeharbor`, sets ownership, installs latest package):
 
 ```bash
@@ -170,7 +183,7 @@ codeharbor service --help
 Common in-chat control commands:
 
 - `/help` show command help
-- if Matrix client intercepts slash commands, use escaped `//...` form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev run T6.2`)
+- if Matrix client intercepts slash commands, use escaped `//...` form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
 - `/status` show session status, version/update hint, latest upgrade result + recent upgrade ids + upgrade metrics/lock, and runtime metrics
 - `/version` force-refresh latest version check
 - `/diag version` show runtime version diagnostics (pid/start time/bin path/backend)
@@ -186,6 +199,7 @@ Common in-chat control commands:
 - `/backend codex|claude [model] | /backend auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
 - `/reset` clear current conversation context and suppress one-shot history bridge on the next request
 - `/stop` cancel current running request (or queue the stop), clear session context, and drop pending queued tasks for this session
+  - aliases: `/cancel`, `/esc`, `/撤回`, `/撤销`
 
 ## GitHub CI/CD Publish
 
@@ -568,7 +582,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev run T6.2`)
+  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
@@ -583,11 +597,15 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/backend codex|claude [model] | /backend auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
   - `/reset` clear bound Codex session, keep conversation active, and suppress one-shot history bridge on the next request
   - `/stop` cancel in-flight execution (or queue a pending stop when busy), reset session context, and clear pending queue tasks for current session
+    - aliases: `/cancel`, `/esc`, `/撤回`, `/撤销`
   - `/agents status` show multi-agent workflow status for current session (when enabled)
   - `/agents run <objective>` run Planner -> Executor -> Reviewer workflow (when enabled)
   - `/autodev status` show AutoDev doc/task summary + currentTask/nextTask + run snapshot (when enabled)
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
   - `/autodev stop` graceful loop stop: finish current task, then stop before next task
+  - `/autodev workdir|wd [path]|status|clear` show/set/clear AutoDev workdir override for current session
+  - `/autodev init|i [path]` initialize `REQUIREMENTS.md` + `TASK_LIST.md` + `docs/AUTODEV_TASK_COMPASS.md` in target project
+    - short mobile-friendly flow: `//autodev init StrawBerry` -> `//autodev run`
   - `/autodev skills [on|off|summary|progressive|full|status]` control role-skill injection and disclosure mode per session
 
 Version update check controls:
@@ -688,6 +706,10 @@ Backend/model rule routing:
 AutoDev (`/autodev`) conventions:
 
 - Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
+- `/autodev init|i [path]` scaffolds missing AutoDev files and binds workdir override for current session.
+  - if `path` is a project name (no `/`), CodeHarbor resolves both `<room_workdir>/<name>` and sibling `<parent>/<name>`.
+  - when target path is missing/not-directory, init fails explicitly and keeps current workdir unchanged.
+- `/autodev workdir|wd [path]|status|clear` inspects or changes session-level workdir override.
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
 - `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
 - `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit stops safely with a summary notice.

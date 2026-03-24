@@ -40,6 +40,19 @@ npm install -g codeharbor
 codeharbor init
 ```
 
+推荐的 npm 包安装/升级/校验流程：
+
+```bash
+# 安装或升级到最新版本
+npm install -g codeharbor@latest
+
+# 校验本机已安装版本
+codeharbor --version
+
+# 一键升级并按平台执行重启策略
+codeharbor self-update
+```
+
 ### 方式 B：一条命令安装 + 写入基础配置（推荐）
 
 ```bash
@@ -189,6 +202,9 @@ codeharbor admin serve
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
+- `/autodev workdir|wd [path]|status|clear`：查看/设置/清除当前会话 AutoDev 工作目录覆盖
+- `/autodev init|i [path]`：在目标项目初始化 `REQUIREMENTS.md`、`TASK_LIST.md`、`docs/AUTODEV_TASK_COMPASS.md`
+  - 推荐移动端短流程：`//autodev init StrawBerry` -> `//autodev run`
 - `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <business-summary> (<taskId>)`（按任务目标与改动文件自动推断）
@@ -201,7 +217,7 @@ codeharbor admin serve
 ### 5.6 版本检查与更新提示
 
 - `/help`：查看机器人可用命令列表（包含当前多模态状态摘要）
-- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（适用于所有斜杠命令；例如 `//status`、`//version`、`//diag queue 5`、`//upgrade`、`//autodev run T6.2`）
+- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（适用于所有斜杠命令；例如 `//status`、`//version`、`//diag queue 5`、`//upgrade`、`//autodev init StrawBerry`、`//autodev run T6.2`）
 - `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）、升级指标/锁状态，以及最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
@@ -217,6 +233,7 @@ codeharbor admin serve
 - `/backend codex|claude [model] | /backend auto|status`：会话内切换后端工具（`auto` 恢复自动路由）；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`：清空会话上下文，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `/stop`：请求停止当前执行（繁忙时进入待停止），并清理会话上下文/当前会话待处理队列
+  - 别名：`/cancel`、`/esc`、`/撤回`、`/撤销`
 - `PACKAGE_UPDATE_CHECK_ENABLED=true|false`：是否启用版本更新检查
 - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`：检查超时时间（毫秒）
 - `PACKAGE_UPDATE_CHECK_TTL_MS`：更新检查结果缓存时长（毫秒，默认 6 小时）

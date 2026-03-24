@@ -8,6 +8,8 @@ export type AutoDevCommandLike =
   | { kind: "status" }
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
+  | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
+  | { kind: "init"; path: string | null; skill: string | null }
   | { kind: "progress"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" }
   | null;
@@ -31,6 +33,15 @@ export function parseControlCommand(text: string): ControlCommand | null {
   if (normalized === "help" || normalized === "帮助" || normalized === "菜单") {
     return "help";
   }
+  if (
+    normalized === "stop" ||
+    normalized === "cancel" ||
+    normalized === "esc" ||
+    normalized === "撤回" ||
+    normalized === "撤销"
+  ) {
+    return "stop";
+  }
   if (isPlainUpgradeCommand(normalized)) {
     return "upgrade";
   }
@@ -46,6 +57,9 @@ export function parseControlCommand(text: string): ControlCommand | null {
     return "backend";
   }
   if (command === "/stop") {
+    return "stop";
+  }
+  if (command === "/cancel" || command === "/esc" || command === "/撤回" || command === "/撤销") {
     return "stop";
   }
   if (command === "/reset") {
@@ -174,6 +188,9 @@ export function classifyBackendTaskType(
     return "autodev_status";
   }
   if (autoDevCommand?.kind === "skills" || autoDevCommand?.kind === "progress") {
+    return "autodev_status";
+  }
+  if (autoDevCommand?.kind === "workdir" || autoDevCommand?.kind === "init") {
     return "autodev_status";
   }
   if (autoDevCommand?.kind === "stop") {

@@ -166,9 +166,11 @@ import {
   transcribeAudioAttachments as runTranscribeAudioAttachments,
 } from "./orchestrator/attachment-processing";
 import {
+  handleAutoDevInitCommand as runAutoDevInitCommand,
   handleAutoDevLoopStopCommand as runAutoDevLoopStopCommand,
   handleAutoDevProgressCommand as runAutoDevProgressCommand,
   handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
+  handleAutoDevWorkdirCommand as runAutoDevWorkdirCommand,
   type AutoDevControlCommandDeps,
 } from "./orchestrator/autodev-control-command";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
@@ -358,6 +360,7 @@ export class Orchestrator {
   private readonly matrixAdminUsers: Set<string>;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
+  private readonly autoDevWorkdirOverrides = new Map<string, string>();
   private readonly autoDevFailureStreaks = new Map<string, number>();
   private readonly autoDevGitCommitRecords: AutoDevGitCommitRecord[] = [];
   private readonly backendRouteDiagRecords: BackendRouteDiagRecord[] = [];
@@ -628,6 +631,8 @@ export class Orchestrator {
         handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
         handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
         handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
+        handleAutoDevWorkdirCommand: this.handleAutoDevWorkdirCommand.bind(this),
+        handleAutoDevInitCommand: this.handleAutoDevInitCommand.bind(this),
       },
       getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
       rateLimiter: this.rateLimiter,
@@ -878,6 +883,7 @@ export class Orchestrator {
       skipBridgeForNextPrompt: this.skipBridgeForNextPrompt,
       workflowSnapshots: this.workflowSnapshots,
       autoDevSnapshots: this.autoDevSnapshots,
+      autoDevWorkdirOverrides: this.autoDevWorkdirOverrides,
       autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
       workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
       pendingStopRequests: this.pendingStopRequests,
@@ -921,12 +927,13 @@ export class Orchestrator {
     message: InboundMessage,
     workdir: string,
   ): Promise<void> {
+    const effectiveWorkdir = this.resolveAutoDevWorkdir(sessionKey, workdir);
     await runSendAutoDevStatusCommand(
       this.buildStatusCommandDispatchContext(),
       {
         sessionKey,
         message,
-        workdir,
+        workdir: effectiveWorkdir,
       },
     );
   }
@@ -1023,6 +1030,44 @@ export class Orchestrator {
     );
   }
 
+  private async handleAutoDevWorkdirCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "set" | "clear",
+    targetPath: string | null,
+    roomWorkdir: string,
+  ): Promise<void> {
+    await runAutoDevWorkdirCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        mode,
+        path: targetPath,
+        roomWorkdir,
+      },
+    );
+  }
+
+  private async handleAutoDevInitCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    targetPath: string | null,
+    skill: string | null,
+    roomWorkdir: string,
+  ): Promise<void> {
+    await runAutoDevInitCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        path: targetPath,
+        skill,
+        roomWorkdir,
+      },
+    );
+  }
+
   private buildAutoDevControlCommandDeps(): AutoDevControlCommandDeps {
     return {
       autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
@@ -1035,6 +1080,12 @@ export class Orchestrator {
       setWorkflowRoleSkillPolicyOverride: (targetSessionKey, next) =>
         this.setWorkflowRoleSkillPolicyOverride(targetSessionKey, next),
       buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
+      getAutoDevWorkdirOverride: (targetSessionKey) => this.autoDevWorkdirOverrides.get(targetSessionKey) ?? null,
+      setAutoDevWorkdirOverride: (targetSessionKey, targetWorkdir) =>
+        this.autoDevWorkdirOverrides.set(targetSessionKey, targetWorkdir),
+      clearAutoDevWorkdirOverride: (targetSessionKey) => {
+        this.autoDevWorkdirOverrides.delete(targetSessionKey);
+      },
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
     };
   }
@@ -1047,6 +1098,7 @@ export class Orchestrator {
     workdir: string,
     runContext?: AutoDevRunContext,
   ): Promise<void> {
+    const effectiveWorkdir = this.resolveAutoDevWorkdir(sessionKey, workdir);
     await runHandleAutoDevRunCommand(
       this.buildAutoDevRunCommandDispatchContext(),
       {
@@ -1054,10 +1106,14 @@ export class Orchestrator {
         sessionKey,
         message,
         requestId,
-        workdir,
+        workdir: effectiveWorkdir,
         runContext,
       },
     );
+  }
+
+  private resolveAutoDevWorkdir(sessionKey: string, roomWorkdir: string): string {
+    return this.autoDevWorkdirOverrides.get(sessionKey) ?? roomWorkdir;
   }
 
   private buildAutoDevRunCommandDispatchContext(): Parameters<typeof runHandleAutoDevRunCommand>[0] {

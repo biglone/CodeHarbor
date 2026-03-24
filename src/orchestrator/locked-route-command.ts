@@ -35,6 +35,20 @@ interface HandleLockedRouteCommandDeps {
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ) => Promise<void>;
   handleAutoDevLoopStopCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
+  handleAutoDevWorkdirCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "set" | "clear",
+    path: string | null,
+    roomWorkdir: string,
+  ) => Promise<void>;
+  handleAutoDevInitCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    path: string | null,
+    skill: string | null,
+    roomWorkdir: string,
+  ) => Promise<void>;
 }
 
 interface HandleLockedRouteCommandInput {
@@ -85,6 +99,28 @@ export async function handleLockedRouteCommand(
   }
   if (autoDevCommand?.kind === "stop") {
     await deps.handleAutoDevLoopStopCommand(input.sessionKey, input.message);
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { handled: true, workflowCommand, autoDevCommand };
+  }
+  if (autoDevCommand?.kind === "workdir") {
+    await deps.handleAutoDevWorkdirCommand(
+      input.sessionKey,
+      input.message,
+      autoDevCommand.mode,
+      autoDevCommand.path,
+      input.workdir,
+    );
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { handled: true, workflowCommand, autoDevCommand };
+  }
+  if (autoDevCommand?.kind === "init") {
+    await deps.handleAutoDevInitCommand(
+      input.sessionKey,
+      input.message,
+      autoDevCommand.path,
+      autoDevCommand.skill,
+      input.workdir,
+    );
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }

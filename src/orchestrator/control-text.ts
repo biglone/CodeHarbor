@@ -14,6 +14,9 @@ export function buildHelpNotice(input: {
 - /autodev status: Show AutoDev task, stage, and run state
 - /autodev run [taskId]: Run target task; when omitted, run task list in loop (example: /autodev run T6.2)
 - /autodev stop: Stop AutoDev loop after current task completes
+- /autodev workdir|wd [path]|status|clear: Show/set/clear AutoDev workdir override for this session
+- /autodev init|i [path]: Scaffold REQUIREMENTS.md + TASK_LIST.md + task compass in target project
+- tip: /autodev init StrawBerry (auto-resolves sibling workspace project)
 - /autodev progress [on|off|status]: Control detailed AutoDev/Multi-Agent progress echo (default on)
 - /autodev skills [on|off|summary|progressive|full|status]: Control role-skill injection and disclosure mode (default progressive)
 - multimodal: ${input.multimodalHelpStatus}
@@ -26,8 +29,8 @@ export function buildHelpNotice(input: {
 - /upgrade [version]: Upgrade and auto-restart services (DM only; MATRIX_UPGRADE_ALLOWED_USERS first, then MATRIX_ADMIN_USERS)
 - /backend codex|claude [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
 - /reset: Clear current session context
-- /stop: Stop current execution
-- If Matrix client intercepts / commands, use //autodev run T6.2 (also supports //agents, //diag, //upgrade)
+- /stop: Stop current execution (aliases: /cancel, /esc, /撤回, /撤销)
+- If Matrix client intercepts / commands, use //autodev init StrawBerry (also supports //autodev run T6.2, //agents, //diag, //upgrade)
 - help aliases: help | menu | localized aliases of /help`;
   }
   return `${input.botNoticePrefix} 可用命令
@@ -37,6 +40,9 @@ export function buildHelpNotice(input: {
 - /autodev status: 查看 AutoDev 当前任务、过程阶段与运行状态
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
+- /autodev workdir|wd [path]|status|clear: 查看/设置/清除当前会话的 AutoDev 工作目录覆盖
+- /autodev init|i [path]: 在目标项目初始化 REQUIREMENTS.md、TASK_LIST.md 与任务罗盘
+- 提示：/autodev init StrawBerry（会自动识别同级 workspace 项目）
 - /autodev progress [on|off|status]: 控制 AutoDev/多智能体过程回显详细模式（默认 on）
 - /autodev skills [on|off|summary|progressive|full|status]: 控制角色技能注入开关与披露模式（默认 progressive）
 - 多模态状态: ${input.multimodalHelpStatus}
@@ -49,8 +55,8 @@ export function buildHelpNotice(input: {
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
 - /backend codex|claude [model] | /backend auto|status: 查看/切换后端工具（auto=恢复自动路由）
 - /reset: 清空当前会话上下文
-- /stop: 停止当前执行任务
-- Matrix 客户端若拦截 / 命令，可发送 //autodev run T6.2（兼容 //agents、//diag、//upgrade）
+- /stop: 停止当前执行任务（别名：/cancel、/esc、/撤回、/撤销）
+- Matrix 客户端若拦截 / 命令，可发送 //autodev init StrawBerry（兼容 //autodev run T6.2、//agents、//diag、//upgrade）
 - help|帮助|菜单: /help 的文本别名（用于 Matrix 拦截 /help 的客户端）`;
 }
 

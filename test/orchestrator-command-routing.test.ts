@@ -16,6 +16,10 @@ describe("orchestrator command routing helpers", () => {
     expect(parseControlCommand("/status")).toBe("status");
     expect(parseControlCommand("//status")).toBe("status");
     expect(parseControlCommand("help")).toBe("help");
+    expect(parseControlCommand("/esc")).toBe("stop");
+    expect(parseControlCommand("/cancel")).toBe("stop");
+    expect(parseControlCommand("/撤回")).toBe("stop");
+    expect(parseControlCommand("撤销")).toBe("stop");
     expect(parseControlCommand("升级 latest")).toBe("upgrade");
     expect(parseControlCommand("/upgrade 0.1.50")).toBe("upgrade");
     expect(parseControlCommand("/unknown")).toBeNull();
@@ -68,6 +72,8 @@ describe("orchestrator command routing helpers", () => {
     expect(classifyBackendTaskType(null, { kind: "run", taskId: null })).toBe("autodev_run");
     expect(classifyBackendTaskType(null, { kind: "status" })).toBe("autodev_status");
     expect(classifyBackendTaskType(null, { kind: "progress", mode: "on" })).toBe("autodev_status");
+    expect(classifyBackendTaskType(null, { kind: "workdir", mode: "status", path: null })).toBe("autodev_status");
+    expect(classifyBackendTaskType(null, { kind: "init", path: null, skill: null })).toBe("autodev_status");
     expect(classifyBackendTaskType(null, { kind: "stop" })).toBe("autodev_stop");
     expect(classifyBackendTaskType(null, null)).toBe("chat");
   });

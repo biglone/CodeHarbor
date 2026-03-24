@@ -16,6 +16,8 @@ interface LockedMessageContextInput {
   handleAutoDevProgressCommand: LockedMessageDispatchContext["handleAutoDevProgressCommand"];
   handleAutoDevSkillsCommand: LockedMessageDispatchContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: LockedMessageDispatchContext["handleAutoDevLoopStopCommand"];
+  handleAutoDevWorkdirCommand: LockedMessageDispatchContext["handleAutoDevWorkdirCommand"];
+  handleAutoDevInitCommand: LockedMessageDispatchContext["handleAutoDevInitCommand"];
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   tryAcquireRateLimit: LockedMessageDispatchContext["tryAcquireRateLimit"];
   sendNotice: LockedMessageDispatchContext["sendNotice"];
@@ -46,6 +48,8 @@ export function buildLockedMessageDispatchContext(
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+    handleAutoDevWorkdirCommand: input.handleAutoDevWorkdirCommand,
+    handleAutoDevInitCommand: input.handleAutoDevInitCommand,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: input.tryAcquireRateLimit,
     sendNotice: input.sendNotice,
@@ -78,6 +82,8 @@ interface LockedMessageRuntimeContextInput {
     | "handleAutoDevProgressCommand"
     | "handleAutoDevSkillsCommand"
     | "handleAutoDevLoopStopCommand"
+    | "handleAutoDevWorkdirCommand"
+    | "handleAutoDevInitCommand"
   >;
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   rateLimiter: {
@@ -115,6 +121,8 @@ export function buildLockedMessageDispatchContextFromRuntime(
     handleAutoDevProgressCommand: input.controlHandlers.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.controlHandlers.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.controlHandlers.handleAutoDevLoopStopCommand,
+    handleAutoDevWorkdirCommand: input.controlHandlers.handleAutoDevWorkdirCommand,
+    handleAutoDevInitCommand: input.controlHandlers.handleAutoDevInitCommand,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: (request) => input.rateLimiter.tryAcquire(request),
     sendNotice: input.sendNotice,

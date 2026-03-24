@@ -32,6 +32,8 @@ export type AutoDevCommand =
   | { kind: "status" }
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
+  | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
+  | { kind: "init"; path: string | null; skill: string | null }
   | { kind: "progress"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" };
 
@@ -43,13 +45,42 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
 
   const normalizedCommand = normalized.replace(/^\/+/, "/");
   const parts = normalizedCommand.split(/\s+/);
-  if (parts.length === 1 || parts[1]?.toLowerCase() === "status") {
+  const action = parts[1]?.toLowerCase() ?? "";
+  if (parts.length === 1 || action === "status") {
     return { kind: "status" };
   }
-  if (parts[1]?.toLowerCase() === "stop") {
+  if (action === "stop") {
     return { kind: "stop" };
   }
-  if (parts[1]?.toLowerCase() === "progress") {
+  if (action === "workdir" || action === "wd") {
+    const remainder = normalizedCommand.replace(/^\/autodev\s+(?:workdir|wd)\s*/i, "").trim();
+    if (!remainder || remainder.toLowerCase() === "status") {
+      return { kind: "workdir", mode: "status", path: null };
+    }
+    if (["clear", "reset", "unset"].includes(remainder.toLowerCase())) {
+      return { kind: "workdir", mode: "clear", path: null };
+    }
+    return {
+      kind: "workdir",
+      mode: "set",
+      path: stripWrappingQuotes(remainder) || null,
+    };
+  }
+  if (action === "init" || action === "i") {
+    let remainder = normalizedCommand.replace(/^\/autodev\s+(?:init|i)\s*/i, "").trim();
+    let skill: string | null = null;
+    const skillInlineMatch = remainder.match(/(?:^|\s)--skill(?:=|\s+)([A-Za-z0-9._-]+)/i);
+    if (skillInlineMatch) {
+      skill = skillInlineMatch[1] ?? null;
+      remainder = remainder.replace(skillInlineMatch[0], " ").trim();
+    }
+    return {
+      kind: "init",
+      path: stripWrappingQuotes(remainder) || null,
+      skill,
+    };
+  }
+  if (action === "progress") {
     const option = (parts[2] ?? "").trim().toLowerCase();
     if (!option || option === "status") {
       return { kind: "progress", mode: "status" };
@@ -62,7 +93,7 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     }
     return null;
   }
-  if (parts[1]?.toLowerCase() === "skills") {
+  if (action === "skills") {
     const option = (parts[2] ?? "").trim().toLowerCase();
     if (!option || option === "status") {
       return { kind: "skills", mode: "status" };
@@ -78,7 +109,7 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     }
     return null;
   }
-  if (parts[1]?.toLowerCase() !== "run") {
+  if (action !== "run") {
     return null;
   }
 
@@ -87,6 +118,20 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     kind: "run",
     taskId: taskId || null,
   };
+}
+
+function stripWrappingQuotes(raw: string): string {
+  const value = raw.trim();
+  if (!value) {
+    return "";
+  }
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
 }
 
 const MARKDOWN_HEADING_PATTERN = /^#{1,6}\s+/;

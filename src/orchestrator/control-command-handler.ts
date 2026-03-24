@@ -23,6 +23,7 @@ interface HandleControlCommandDeps {
   skipBridgeForNextPrompt: Set<string>;
   workflowSnapshots: Map<string, unknown>;
   autoDevSnapshots: Map<string, unknown>;
+  autoDevWorkdirOverrides: Map<string, string>;
   autoDevDetailedProgressOverrides: Map<string, boolean>;
   workflowRoleSkillPolicyOverrides: Map<string, unknown>;
   pendingStopRequests: Set<string>;
@@ -65,6 +66,7 @@ export async function handleControlCommand(
     deps.skipBridgeForNextPrompt.add(input.sessionKey);
     deps.workflowSnapshots.delete(input.sessionKey);
     deps.autoDevSnapshots.delete(input.sessionKey);
+    deps.autoDevWorkdirOverrides.delete(input.sessionKey);
     deps.autoDevDetailedProgressOverrides.delete(input.sessionKey);
     deps.workflowRoleSkillPolicyOverrides.delete(input.sessionKey);
     deps.pendingStopRequests.delete(input.sessionKey);

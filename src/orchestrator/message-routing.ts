@@ -48,6 +48,8 @@ export function routeMessage(
   if (
     rawAutoDevCommand?.kind === "status" ||
     rawAutoDevCommand?.kind === "stop" ||
+    rawAutoDevCommand?.kind === "workdir" ||
+    rawAutoDevCommand?.kind === "init" ||
     rawAutoDevCommand?.kind === "progress" ||
     rawAutoDevCommand?.kind === "skills"
   ) {

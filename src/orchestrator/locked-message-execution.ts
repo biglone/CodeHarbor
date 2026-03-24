@@ -60,6 +60,20 @@ interface ExecuteLockedMessageDeps {
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ) => Promise<void>;
   handleAutoDevLoopStopCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
+  handleAutoDevWorkdirCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "set" | "clear",
+    path: string | null,
+    roomWorkdir: string,
+  ) => Promise<void>;
+  handleAutoDevInitCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    path: string | null,
+    skill: string | null,
+    roomWorkdir: string,
+  ) => Promise<void>;
   getTaskQueueStateStore: () => {
     enqueueTask: (input: {
       sessionKey: string;
@@ -190,6 +204,10 @@ export async function executeLockedMessage(
         deps.handleAutoDevProgressCommand(sessionKey, message, mode),
       handleAutoDevSkillsCommand: (sessionKey, message, mode) => deps.handleAutoDevSkillsCommand(sessionKey, message, mode),
       handleAutoDevLoopStopCommand: (sessionKey, message) => deps.handleAutoDevLoopStopCommand(sessionKey, message),
+      handleAutoDevWorkdirCommand: (sessionKey, message, mode, commandPath, roomWorkdir) =>
+        deps.handleAutoDevWorkdirCommand(sessionKey, message, mode, commandPath, roomWorkdir),
+      handleAutoDevInitCommand: (sessionKey, message, commandPath, skill, roomWorkdir) =>
+        deps.handleAutoDevInitCommand(sessionKey, message, commandPath, skill, roomWorkdir),
     },
     {
       route,
