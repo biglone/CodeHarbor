@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.65] - 2026-03-24
+
+- autodev loop: stop loop early when a round yields no `TASK_LIST.md` state progress (new `no_progress` loop-stop reason and metrics).
+- autodev init: support `--dry-run` (plan-only, no writes) and `--force` (overwrite scaffold files), with explicit planned/created/overwritten output.
+- autodev init Stage-B: add configurable enhancement controls (`AUTODEV_INIT_ENHANCEMENT_ENABLED`, `AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS`, `AUTODEV_INIT_ENHANCEMENT_MAX_CHARS`).
+- admin/config snapshot: expose and validate new AutoDev init enhancement settings in global config API/UI and import/export snapshot schema.
+- i18n hardening: improve English-mode diagnostics localization for AutoDev status/stage traces and keep English `/help` aliases free of mixed Chinese text.
+- tests: add runtime-config coverage for init enhancement budget, English i18n guard assertions, and `init -> status -> run` scenario coverage for sibling/subdir/empty targets.
+
 ## [0.1.64] - 2026-03-24
 
 - autodev init: support implicit design-doc discovery by default with optional `--from <file>` override.
