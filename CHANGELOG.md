@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.68] - 2026-03-25
+
+- autodev completion gate: avoid false validation failures when executor/reviewer output contains summaries like `0 failed`.
+- autodev validation inference: prioritize `__EXIT_CODES__` markers (`all 0 => pass`, `any non-zero => fail`) before keyword heuristics.
+- autodev task result messaging: align auto-commit skip reason with real gate cause (`validation not passed` vs `reviewer not approved`) to remove contradictory notices.
+- tests: add regression coverage for explicit validation failure gating and `0 failed` pass-through behavior.
+
 ## [0.1.67] - 2026-03-25
 
 - workflow contract hardening: strengthen reviewer contract parsing and rejected-result semantics to avoid contradictory or missing repair-contract states.
