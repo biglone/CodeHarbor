@@ -196,6 +196,7 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       cliCompatEnabled: deps.cliCompatEnabled,
       workflowEnabled: deps.workflowEnabled,
       workflowState: workflow.state,
+      workflowApproved: workflow.approved,
       workflowPlanBudget: deps.formatWorkflowContextBudget(deps.workflowPlanContextMaxChars),
       workflowOutputBudget: deps.formatWorkflowContextBudget(deps.workflowOutputContextMaxChars),
       workflowFeedbackBudget: deps.formatWorkflowContextBudget(deps.workflowFeedbackContextMaxChars),

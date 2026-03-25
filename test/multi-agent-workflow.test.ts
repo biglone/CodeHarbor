@@ -361,6 +361,87 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(contractRepairCount).toBe(2);
   });
 
+  it("ignores REPAIRCONTRACTSTATUS metadata line in blocker section parsing", async () => {
+    let reviewerCount = 0;
+    let contractRepairCount = 0;
+    let executorRepairCount = 0;
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: input.sessionId ?? "planner-thread", reply: "plan-v1" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_contract_repair_request]")) {
+        contractRepairCount += 1;
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: REJECTED\nSUMMARY: should not be called",
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        reviewerCount += 1;
+        if (reviewerCount === 1) {
+          return {
+            result: Promise.resolve({
+              sessionId: input.sessionId ?? "reviewer-thread",
+              reply: [
+                "VERDICT: REJECTED",
+                "SUMMARY: needs one repair",
+                "BLOCKERS:",
+                "- [B1][major] issue=missing timeout guard in workflow loop; evidence=src/orchestrator/autodev-runner.ts; fix=add timeout guard before next round; accept=workflow unit tests include timeout guard path",
+                "REPAIRCONTRACTSTATUS: COMPLETE",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "reviewer-thread",
+            reply: "VERDICT: APPROVED\nSUMMARY: repaired",
+          }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[reviewer_feedback]")) {
+        executorRepairCount += 1;
+        return {
+          result: Promise.resolve({
+            sessionId: input.sessionId ?? "executor-thread",
+            reply: "repaired-output",
+          }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({
+          sessionId: input.sessionId ?? "executor-thread",
+          reply: "initial-output",
+        }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 1,
+    });
+
+    const result = await runner.run({
+      objective: "ignore repair contract metadata line",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    expect(result.approved).toBe(true);
+    expect(result.repairRounds).toBe(1);
+    expect(executorRepairCount).toBe(1);
+    expect(contractRepairCount).toBe(0);
+  });
+
   it("stops workflow repair when reviewer contract remains non-actionable", async () => {
     let contractRepairCount = 0;
     const executor = new ScenarioExecutor((input) => {

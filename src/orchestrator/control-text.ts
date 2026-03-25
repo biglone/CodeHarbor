@@ -99,6 +99,7 @@ export function buildStatusNotice(input: {
   cliCompatEnabled: boolean;
   workflowEnabled: boolean;
   workflowState: string;
+  workflowApproved: boolean | null;
   workflowPlanBudget: string;
   workflowOutputBudget: string;
   workflowFeedbackBudget: string;
@@ -170,7 +171,9 @@ export function buildStatusNotice(input: {
 - ${avgCost}: queue=${input.metrics.avgQueueMs}ms, exec=${input.metrics.avgExecMs}ms, send=${input.metrics.avgSendMs}ms
 - ${limiter}: global=${input.limiter.activeGlobal}, users=${input.limiter.activeUsers}, rooms=${input.limiter.activeRooms}
 - CLI runtime: workers=${input.runtime.workerCount}, running=${input.runtime.runningCount}, compat_mode=${input.cliCompatEnabled ? "on" : "off"}
-- Multi-Agent workflow: enabled=${input.workflowEnabled ? "on" : "off"}, state=${input.workflowState}
+- Multi-Agent workflow: enabled=${input.workflowEnabled ? "on" : "off"}, state=${input.workflowState}, approved=${
+    input.workflowApproved === null ? "N/A" : input.workflowApproved ? "yes" : "no"
+  }
 - Multi-Agent context: plan=${input.workflowPlanBudget}, output=${input.workflowOutputBudget}, feedback=${input.workflowFeedbackBudget}
 - Multi-Agent role skills: enabled=${input.roleSkillStatus.enabled ? "on" : "off"}, mode=${input.roleSkillStatus.mode}, maxChars=${input.roleSkillStatus.maxChars}, override=${input.roleSkillStatus.override}
 - Multi-Agent role skills loaded: ${input.roleSkillStatus.loaded}

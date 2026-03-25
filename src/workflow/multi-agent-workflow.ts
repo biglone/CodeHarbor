@@ -771,10 +771,12 @@ function parseReviewerVerdict(review: string): ReviewerVerdict {
       ? blockersFromIssueSuggestion
       : [buildFallbackBlocker(summary || "Reviewer did not provide actionable blocker boundaries.")];
 
-  const contractComplete =
+  const declaredContractStatus = parseReviewerContractStatusToken(review);
+  const contractCompleteByFields =
     verdict === "REJECTED" &&
     blockersFromSection.length > 0 &&
     blockersFromSection.every((blocker) => blocker.issueProvided && blocker.fixProvided && blocker.acceptProvided);
+  const contractComplete = contractCompleteByFields && declaredContractStatus !== "INCOMPLETE";
   const contractActionable = contractComplete && blockersFromSection.every(isActionableReviewerBlocker);
   const resolvedSummary = resolveReviewerSummary(verdict, summary);
 
@@ -819,6 +821,37 @@ function parseReviewerVerdictToken(review: string): "APPROVED" | "REJECTED" | "U
   const onlyVerdict = verdictMatches[0];
   if (onlyVerdict === "APPROVED" || onlyVerdict === "REJECTED") {
     return onlyVerdict;
+  }
+  return "UNKNOWN";
+}
+
+function parseReviewerContractStatusToken(review: string): "COMPLETE" | "INCOMPLETE" | "UNKNOWN" {
+  const statusMatches = review
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^repair[\s_]*contract[\s_]*status\s*:/i.test(line))
+    .map((line) => {
+      const value = line.replace(/^repair[\s_]*contract[\s_]*status\s*:/i, "").trim().toUpperCase();
+      if (/\bINCOMPLETE\b/.test(value)) {
+        return "INCOMPLETE";
+      }
+      if (/\bCOMPLETE\b/.test(value)) {
+        return "COMPLETE";
+      }
+      return "UNKNOWN";
+    });
+
+  if (statusMatches.length === 0) {
+    return "UNKNOWN";
+  }
+
+  const uniqueStatuses = new Set(statusMatches);
+  if (uniqueStatuses.size !== 1) {
+    return "UNKNOWN";
+  }
+  const onlyStatus = statusMatches[0];
+  if (onlyStatus === "COMPLETE" || onlyStatus === "INCOMPLETE") {
+    return onlyStatus;
   }
   return "UNKNOWN";
 }
@@ -870,6 +903,10 @@ function parseReviewerSections(review: string): { issues: string[]; suggestions:
       active = "blockers";
       continue;
     }
+    if (isReviewerMetadataLine(line)) {
+      active = null;
+      continue;
+    }
     const bullet = normalizeReviewerBullet(line);
     if (!bullet || !active) {
       continue;
@@ -893,7 +930,11 @@ function parseReviewerSections(review: string): { issues: string[]; suggestions:
 }
 
 function normalizeReviewerBullet(line: string): string | null {
+  const hasListMarker = /^[-*+•]\s+/.test(line) || /^\d+[.)]\s+/.test(line);
   const withoutMarker = line.replace(/^[-*+•]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  if (!hasListMarker && !/^\[\s*B\d+\s*]/i.test(withoutMarker)) {
+    return null;
+  }
   if (!withoutMarker) {
     return null;
   }
@@ -901,6 +942,10 @@ function normalizeReviewerBullet(line: string): string | null {
     return null;
   }
   return withoutMarker;
+}
+
+function isReviewerMetadataLine(line: string): boolean {
+  return /^(verdict|summary|repair[\s_]*contract[\s_]*status)\s*:/i.test(line);
 }
 
 function parseBlockerItem(item: string, index: number): ReviewerBlocker {

@@ -34,11 +34,13 @@ export async function handleWorkflowStatusCommand(
   const snapshot = deps.getWorkflowSnapshot(input.sessionKey) ?? createIdleWorkflowSnapshot();
   const roleSkillStatus = deps.buildWorkflowRoleSkillStatus(input.sessionKey);
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
+  const workflowOutcome = snapshot.approved === null ? "N/A" : snapshot.approved ? "approved" : "rejected";
   await deps.sendNotice(
     input.message.conversationId,
     localize(
       `[CodeHarbor] 多智能体流程状态
 - state: ${snapshot.state}
+- outcome: ${workflowOutcome}
 - startedAt: ${snapshot.startedAt ?? "N/A"}
 - endedAt: ${snapshot.endedAt ?? "N/A"}
 - objective: ${snapshot.objective ?? "N/A"}
@@ -52,6 +54,7 @@ export async function handleWorkflowStatusCommand(
 - error: ${snapshot.error ?? "N/A"}`,
       `[CodeHarbor] Multi-Agent workflow status
 - state: ${snapshot.state}
+- outcome: ${workflowOutcome}
 - startedAt: ${snapshot.startedAt ?? "N/A"}
 - endedAt: ${snapshot.endedAt ?? "N/A"}
 - objective: ${snapshot.objective ?? "N/A"}

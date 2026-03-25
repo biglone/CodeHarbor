@@ -66,9 +66,14 @@ export function buildWorkflowResultReply(result: {
   repairRounds: number;
   durationMs: number;
 }, outputLanguage: OutputLanguage = "zh"): string {
+  const verdict = result.approved ? "APPROVED" : "REJECTED";
   if (outputLanguage === "en") {
-    return `[CodeHarbor] Multi-Agent workflow completed
+    const title = result.approved
+      ? "[CodeHarbor] Multi-Agent workflow completed (approved)"
+      : "[CodeHarbor] Multi-Agent workflow completed (reviewer rejected)";
+    return `${title}
 - objective: ${result.objective}
+- finalVerdict: ${verdict}
 - approved: ${result.approved ? "yes" : "no"}
 - repairRounds: ${result.repairRounds}
 - duration: ${formatDurationMs(result.durationMs)}
@@ -85,8 +90,10 @@ ${result.output}
 ${result.review}
 [/reviewer]`;
   }
-  return `[CodeHarbor] 多智能体流程完成
+  const title = result.approved ? "[CodeHarbor] 多智能体流程完成（审查通过）" : "[CodeHarbor] 多智能体流程完成（审查未通过）";
+  return `${title}
 - 目标: ${result.objective}
+- 最终结论: ${verdict}
 - 审查通过: ${result.approved ? "是" : "否"}
 - 修复轮次: ${result.repairRounds}
 - 耗时: ${formatDurationMs(result.durationMs)}

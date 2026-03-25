@@ -199,12 +199,18 @@ export async function executeWorkflowRunRequest(
     });
 
     await deps.sendMessage(input.message.conversationId, buildWorkflowResultReply(result, deps.outputLanguage));
+    const workflowSummary = result.approved
+      ? localize(
+          `多智能体流程完成（审查通过，耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+          `Multi-agent workflow completed (approved, ${formatDurationMs(Date.now() - requestStartedAt)})`,
+        )
+      : localize(
+          `多智能体流程完成（审查未通过，耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
+          `Multi-agent workflow completed (reviewer rejected, ${formatDurationMs(Date.now() - requestStartedAt)})`,
+        );
     await deps.finishProgress(
       progressCtx,
-      localize(
-        `多智能体流程完成（耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
-        `Multi-agent workflow completed (${formatDurationMs(Date.now() - requestStartedAt)})`,
-      ),
+      workflowSummary,
     );
     deps.finishWorkflowDiagRun(workflowDiagRunId, {
       status: "succeeded",
