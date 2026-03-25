@@ -3448,6 +3448,311 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("does not fail validation when non-validation sections mention '失败' but validation section passed", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-scope-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.7 | validation scope task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const executorWithNonValidationFailureWording = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: [
+                "最终可执行结果",
+                "已完成 T2.5。",
+                "",
+                "验证结果",
+                "node --test services/gateway/tests/inbound-events.test.js：31/31 通过。",
+                "node --test services/gateway/tests/entrypoint.test.js：23/23 通过。",
+                "bash services/run-smoke-tests.sh：全部 [PASS]。",
+                "",
+                "风险说明",
+                "复杂模型超时且回退失败场景已覆盖。",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: validated",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(
+        channel,
+        executorWithNonValidationFailureWording as never,
+        store as never,
+        logger as never,
+        {
+          commandPrefix: "!code",
+          matrixUserId: "@bot:example.com",
+          progressUpdatesEnabled: false,
+          outputLanguage: "en",
+          defaultCodexWorkdir: tempRoot,
+          multiAgentWorkflow: {
+            enabled: true,
+            autoRepairMaxRounds: 0,
+          },
+        },
+      );
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.7",
+          eventId: "$autodev-run-validation-scope",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.7 | validation scope task | ✅ |");
+      const resultNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("completionGate: passed");
+      expect(resultNotice).not.toContain("validation-not-passed");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats explicit VALIDATION_STATUS FAIL as validation failure", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-status-fail-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.8 | validation status fail task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const executorWithValidationStatusFail = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: [
+                "最终可执行结果",
+                "已完成任务。",
+                "",
+                "VALIDATION_STATUS: FAIL",
+                "验证结果",
+                "node --test services/gateway/tests/inbound-events.test.js：31/31 通过。",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: validated",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executorWithValidationStatusFail as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.8",
+          eventId: "$autodev-run-validation-status-fail",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.8 | validation status fail task | 🔄 |");
+      const resultNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("completionGate: failed");
+      expect(resultNotice).toContain("validation-not-passed");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prioritizes __EXIT_CODES__ non-zero as validation failure even when status says PASS", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-exitcode-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.9 | validation exitcode task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const executorWithExitCodeFailure = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: [
+                "最终可执行结果",
+                "已完成任务。",
+                "",
+                "VALIDATION_STATUS: PASS",
+                "__EXIT_CODES__ inbound=0 entrypoint=1",
+                "验证结果",
+                "node --test services/gateway/tests/inbound-events.test.js：31/31 通过。",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: validated",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executorWithExitCodeFailure as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.9",
+          eventId: "$autodev-run-validation-exitcode",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.9 | validation exitcode task | 🔄 |");
+      const resultNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("completionGate: failed");
+      expect(resultNotice).toContain("validation-not-passed");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("self-heals stale completed status from previous rejected run before executing task again", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-self-heal-run-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");

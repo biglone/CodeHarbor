@@ -588,6 +588,43 @@ describe("MultiAgentWorkflowRunner", () => {
     expect(executor.calls[0]?.timeoutMs).toBe(42_000);
   });
 
+  it("enforces structured validation contract in executor and reviewer prompts", async () => {
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: "planner-thread", reply: "plan" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({ sessionId: "reviewer-thread", reply: "VERDICT: APPROVED\nSUMMARY: done" }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({ sessionId: "executor-thread", reply: "output" }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+    });
+    await runner.run({
+      objective: "structured validation contract",
+      workdir: "/tmp/workflow-unit",
+    });
+
+    const executorPrompt = executor.calls.find((call) => call.prompt.includes("[role:executor]"))?.prompt ?? "";
+    const reviewerPrompt = executor.calls.find((call) => call.prompt.includes("[role:reviewer]"))?.prompt ?? "";
+
+    expect(executorPrompt).toContain("VALIDATION_STATUS: PASS 或 FAIL");
+    expect(executorPrompt).toContain("__EXIT_CODES__");
+    expect(reviewerPrompt).toContain("缺失 VALIDATION_STATUS 或 __EXIT_CODES__，必须 REJECTED");
+  });
+
   it("truncates oversized role context before passing it to the next stage", async () => {
     const oversizedOutput = "x".repeat(30_000);
     const executor = new ScenarioExecutor((input) => {

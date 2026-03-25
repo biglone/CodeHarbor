@@ -955,19 +955,126 @@ function inferAutoDevValidationPassed(result: MultiAgentWorkflowRunResult): bool
     }
   }
 
-  const failedCountMatches = [...combined.matchAll(/\b(\d+)\s+failed\b/gi)];
-  if (failedCountMatches.some((match) => Number.parseInt(match[1], 10) > 0)) {
+  const structuredValidationStatus = parseStructuredValidationStatus(combined);
+  if (structuredValidationStatus !== null) {
+    return structuredValidationStatus;
+  }
+
+  const scopedValidationText = resolveValidationScopeText(result.output, result.review);
+  const scopedVerdict = inferValidationVerdictByText(scopedValidationText);
+  if (scopedVerdict !== null) {
+    return scopedVerdict;
+  }
+
+  const fallbackVerdict = inferValidationVerdictByText(combined);
+  return fallbackVerdict ?? true;
+}
+
+function resolveValidationScopeText(output: string, review: string): string {
+  const sections = [extractValidationSection(output), extractValidationSection(review)].filter(
+    (section) => section.length > 0,
+  );
+  if (sections.length === 0) {
+    return `${output}\n${review}`;
+  }
+  return sections.join("\n");
+}
+
+function extractValidationSection(text: string): string {
+  if (!text.trim()) {
+    return "";
+  }
+
+  const lines = text.split(/\r?\n/);
+  const startPattern = /^\s*(?:#+\s*)?(?:VALIDATION|Validation(?:\s+Results?)?|验证结果|验证命令|验证)\s*[:：]?\s*(.*)$/i;
+  const stopPattern =
+    /^\s*(?:#+\s*)?(?:RISKS?|风险(?:与后续|说明)?|NEXT_STEPS|STATUS|ISSUES|SUGGESTIONS|BLOCKERS?|SUMMARY|改动文件|落盘文件|任务|最终可执行结果)\s*[:：]?\s*$/i;
+
+  const collected: string[] = [];
+  let capturing = false;
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const startMatch = line.match(startPattern);
+    if (startMatch) {
+      capturing = true;
+      const inline = startMatch[1].trim();
+      if (inline) {
+        collected.push(inline);
+      }
+      continue;
+    }
+
+    if (!capturing) {
+      continue;
+    }
+    if (stopPattern.test(line)) {
+      capturing = false;
+      continue;
+    }
+    collected.push(line);
+  }
+
+  return collected.join("\n").trim();
+}
+
+function inferValidationVerdictByText(text: string): boolean | null {
+  if (!text.trim()) {
+    return null;
+  }
+
+  const failedCountMatches = [...text.matchAll(/\b([1-9]\d*)\s+failed\b/gi)];
+  if (failedCountMatches.length > 0) {
     return false;
   }
-  const normalizedCombined = combined.replace(/\b0+\s+failed\b/gi, "");
+
+  const chineseFailedCountMatches = [...text.matchAll(/([1-9]\d*)\s*(?:项|个|例|次)?\s*失败/gi)];
+  if (chineseFailedCountMatches.length > 0) {
+    return false;
+  }
+
+  const normalized = text
+    .replace(/\b0+\s+failed\b/gi, "")
+    .replace(/0+\s*(?:项|个|例|次)?\s*失败/gi, "");
   const hasExplicitFailure =
-    /\b(tests?\s+failed|test\s+run\s+failed|command\s+failed|validation\s+failed|build\s+failed|lint\s+failed|typecheck\s+failed|failed\s+with|timeout|timed out|hang|hung|未通过|失败|卡住|挂起|❌)\b/i.test(
-      normalizedCombined,
+    /(?:\b(?:tests?\s+failed|test\s+run\s+failed|command\s+failed|validation\s+failed|build\s+failed|lint\s+failed|typecheck\s+failed|failed\s+with|not\s+passed)\b|(?:测试|验证|命令|构建|编译|lint|typecheck)(?:未通过|失败)|未通过|❌|\[FAIL\])/i.test(
+      normalized,
     );
   if (hasExplicitFailure) {
     return false;
   }
-  return true;
+
+  const hasExplicitSuccess =
+    /(?:\b0+\s+failed\b|\b\d+\s+passed\b|\ball\s+pass(?:ed)?\b|✅|\[PASS\]|验证通过|测试通过|全部通过|全部\s*\[PASS\]|通过)/i.test(
+      text,
+    );
+  if (hasExplicitSuccess) {
+    return true;
+  }
+
+  return null;
+}
+
+function parseStructuredValidationStatus(text: string): boolean | null {
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (!/^(?:validation[\s_-]*status|验证状态)\s*[:：]/i.test(line)) {
+      continue;
+    }
+    const value = line.replace(/^(?:validation[\s_-]*status|验证状态)\s*[:：]/i, "").trim().toLowerCase();
+    if (!value) {
+      continue;
+    }
+    if (/\b(?:fail|failed|error|not[\s_-]*pass(?:ed)?)\b/.test(value) || /(失败|未通过)/.test(value)) {
+      return false;
+    }
+    if (/\b(?:pass|passed|ok|success)\b/.test(value) || /(通过|成功)/.test(value)) {
+      return true;
+    }
+  }
+  return null;
 }
 
 function formatAutoDevCompletionGateReasons(
