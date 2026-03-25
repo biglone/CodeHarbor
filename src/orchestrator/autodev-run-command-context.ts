@@ -21,6 +21,7 @@ interface AutoDevRunCommandContextInput {
   beginWorkflowDiagRun: AutoDevRunCommandDispatchContext["beginWorkflowDiagRun"];
   appendWorkflowDiagEvent: AutoDevRunCommandDispatchContext["appendWorkflowDiagEvent"];
   runWorkflowCommand: AutoDevRunCommandDispatchContext["runWorkflowCommand"];
+  listWorkflowDiagRunsBySession: AutoDevRunCommandDispatchContext["listWorkflowDiagRunsBySession"];
   recordAutoDevGitCommit: AutoDevRunCommandDispatchContext["recordAutoDevGitCommit"];
   autoDevMetrics: AutoDevRunCommandDispatchContext["autoDevMetrics"];
 }
@@ -49,6 +50,7 @@ interface AutoDevRunCommandRuntimeContextInput {
     beginWorkflowDiagRun: AutoDevRunCommandDispatchContext["beginWorkflowDiagRun"];
     appendWorkflowDiagEvent: AutoDevRunCommandDispatchContext["appendWorkflowDiagEvent"];
     runWorkflowCommand: AutoDevRunCommandDispatchContext["runWorkflowCommand"];
+    listWorkflowDiagRunsBySession: AutoDevRunCommandDispatchContext["listWorkflowDiagRunsBySession"];
     recordAutoDevGitCommit: AutoDevRunCommandDispatchContext["recordAutoDevGitCommit"];
   };
   autoDevMetrics: AutoDevRunCommandDispatchContext["autoDevMetrics"];
@@ -76,6 +78,7 @@ export function buildAutoDevRunCommandDispatchContext(
     beginWorkflowDiagRun: input.beginWorkflowDiagRun,
     appendWorkflowDiagEvent: input.appendWorkflowDiagEvent,
     runWorkflowCommand: input.runWorkflowCommand,
+    listWorkflowDiagRunsBySession: input.listWorkflowDiagRunsBySession,
     recordAutoDevGitCommit: input.recordAutoDevGitCommit,
     autoDevMetrics: input.autoDevMetrics,
   };
@@ -103,6 +106,7 @@ export function buildAutoDevRunCommandDispatchContextFromRuntime(
     beginWorkflowDiagRun: input.hooks.beginWorkflowDiagRun,
     appendWorkflowDiagEvent: input.hooks.appendWorkflowDiagEvent,
     runWorkflowCommand: input.hooks.runWorkflowCommand,
+    listWorkflowDiagRunsBySession: input.hooks.listWorkflowDiagRunsBySession,
     recordAutoDevGitCommit: input.hooks.recordAutoDevGitCommit,
     autoDevMetrics: input.autoDevMetrics,
   });

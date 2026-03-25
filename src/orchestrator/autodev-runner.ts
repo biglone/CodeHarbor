@@ -27,9 +27,11 @@ import {
   formatAutoDevGitCommitResult,
   formatAutoDevReleaseResult,
 } from "./diagnostic-formatters";
+import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
 import { byOutputLanguage } from "./output-language";
+import type { WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
   state: "idle" | "running" | "succeeded" | "failed";
@@ -140,6 +142,7 @@ interface AutoDevRunnerDeps {
     message: string,
   ) => void;
   runWorkflowCommand: (input: RunWorkflowCommandInput) => Promise<MultiAgentWorkflowRunResult | null>;
+  listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   recordAutoDevGitCommit: (sessionKey: string, taskId: string, result: AutoDevGitCommitResult) => void;
   resetAutoDevFailureStreak: (workdir: string, taskId: string) => void;
   applyAutoDevFailurePolicy: (input: {
@@ -173,7 +176,7 @@ export async function runAutoDevCommand(
   const requestedTaskId = input.taskId?.trim() || null;
   const requestedTaskLineIndex =
     typeof input.taskLineIndex === "number" && Number.isFinite(input.taskLineIndex) ? Math.floor(input.taskLineIndex) : null;
-  const context = await loadAutoDevContext(input.workdir);
+  let context = await loadAutoDevContext(input.workdir);
   const activeContext: AutoDevRunContext = input.runContext ?? {
     mode: requestedTaskId ? "single" : "loop",
     loopRound: requestedTaskId ? 1 : 0,
@@ -185,6 +188,30 @@ export async function runAutoDevCommand(
         : new Date(Date.now() + deps.autoDevLoopMaxMinutes * 60_000).toISOString(),
   };
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
+
+  const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 50);
+  const healedStatuses = await healAutoDevTaskStatuses({
+    taskListPath: context.taskListPath,
+    tasks: context.tasks,
+    runs: recentRuns,
+    targetTaskIds: requestedTaskId ? [requestedTaskId] : null,
+  });
+  if (healedStatuses.length > 0) {
+    context = await loadAutoDevContext(input.workdir);
+    const healSummary = healedStatuses
+      .map((entry) => `${entry.taskId}:${statusToSymbol(entry.from)}->${statusToSymbol(entry.to)}`)
+      .join(", ");
+    await deps.channelSendNotice(
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 状态自愈：已根据最近运行记录修正任务状态。
+- changes: ${healSummary}`,
+        `[CodeHarbor] AutoDev status self-heal applied from recent run records.
+- changes: ${healSummary}`,
+      ),
+    );
+  }
+
   if (!context.requirementsContent) {
     await deps.channelSendNotice(
       input.message.conversationId,

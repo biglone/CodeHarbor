@@ -10,6 +10,7 @@ import {
   type AutoDevRunSnapshot,
 } from "./autodev-runner";
 import { formatError } from "./helpers";
+import type { WorkflowDiagRunRecord } from "./workflow-diag";
 
 interface AutoDevFailurePolicyResult {
   blocked: boolean;
@@ -53,6 +54,7 @@ interface HandleAutoDevRunCommandDeps {
     workdir: string;
     diagRunId: string;
   }) => Promise<MultiAgentWorkflowRunResult | null>;
+  listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   recordAutoDevGitCommit: (sessionKey: string, taskId: string, result: AutoDevGitCommitResult) => void;
   autoDevMetrics: {
     recordRunOutcome: (outcome: "succeeded" | "failed" | "cancelled") => void;
@@ -106,6 +108,8 @@ export async function handleAutoDevRunCommand(
       appendWorkflowDiagEvent: (runId, kind, stage, round, message) =>
         deps.appendWorkflowDiagEvent(runId, kind, stage, round, message),
       runWorkflowCommand: (workflowInput) => deps.runWorkflowCommand(workflowInput),
+      listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
+        deps.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
       recordAutoDevGitCommit: (sessionKey, taskId, result) => deps.recordAutoDevGitCommit(sessionKey, taskId, result),
       resetAutoDevFailureStreak: (workdir, taskId) => resetAutoDevFailureStreak(deps.autoDevFailureStreaks, workdir, taskId),
       applyAutoDevFailurePolicy: (policyInput) =>

@@ -3351,6 +3351,215 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("self-heals stale completed status from previous rejected run before executing task again", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-self-heal-run-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.3 | self heal run task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    let callCount = 0;
+    const rejectExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        callCount += 1;
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "output",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: REJECTED\nSUMMARY: still not approved\nISSUES:\n- missing detail",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, rejectExecutor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.3",
+          eventId: "$autodev-run-self-heal-first",
+        }),
+      );
+      const callsAfterFirstRun = callCount;
+      expect(callsAfterFirstRun).toBeGreaterThan(0);
+
+      const drifted = (await fs.readFile(taskListPath, "utf8")).replace(
+        "| T16.3 | self heal run task | 🔄 |",
+        "| T16.3 | self heal run task | ✅ |",
+      );
+      await fs.writeFile(taskListPath, drifted, "utf8");
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.3",
+          eventId: "$autodev-run-self-heal-second",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.3 | self heal run task | 🔄 |");
+      expect(callCount).toBeGreaterThan(callsAfterFirstRun);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态自愈"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("already completed"))).toBe(false);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("self-heals stale completed status during /autodev status", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-self-heal-status-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.4 | self heal status task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const rejectExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "output",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: REJECTED\nSUMMARY: still not approved\nISSUES:\n- missing detail",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, rejectExecutor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.4",
+          eventId: "$autodev-status-heal-run-first",
+        }),
+      );
+
+      const drifted = (await fs.readFile(taskListPath, "utf8")).replace(
+        "| T16.4 | self heal status task | 🔄 |",
+        "| T16.4 | self heal status task | ✅ |",
+      );
+      await fs.writeFile(taskListPath, drifted, "utf8");
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status-heal-check",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.4 | self heal status task | 🔄 |");
+      const statusNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("[CodeHarbor] AutoDev 状态"))?.text ?? "";
+      expect(statusNotice).toContain("taskAutoHeal: T16.4:completed->in_progress");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");

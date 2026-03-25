@@ -1272,6 +1272,8 @@ export class Orchestrator {
             input.diagRunId,
             "autodev",
           ),
+        listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
+          this.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
         recordAutoDevGitCommit: this.recordAutoDevGitCommit.bind(this),
       },
       autoDevMetrics: this.autoDevMetrics,

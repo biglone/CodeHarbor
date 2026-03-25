@@ -4,6 +4,7 @@ import { formatTaskForDisplay, loadAutoDevContext, summarizeAutoDevTasks } from 
 import { inspectAutoDevGitPreflight } from "./autodev-git";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { createIdleAutoDevSnapshot } from "./autodev-snapshot";
+import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError, formatRunWindowDuration, formatWorkflowDiagRunDuration } from "./helpers";
 import {
   formatAutoDevStatusRunSummaries,
@@ -58,7 +59,17 @@ export async function handleAutoDevStatusCommand(
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   const snapshot = deps.getAutoDevSnapshot(input.sessionKey) ?? createIdleAutoDevSnapshot();
   try {
-    const context = await loadAutoDevContext(input.workdir);
+    let context = await loadAutoDevContext(input.workdir);
+    const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 20);
+    const healedStatuses = await healAutoDevTaskStatuses({
+      taskListPath: context.taskListPath,
+      tasks: context.tasks,
+      runs: recentRuns,
+      targetTaskIds: null,
+    });
+    if (healedStatuses.length > 0) {
+      context = await loadAutoDevContext(input.workdir);
+    }
     const summary = summarizeAutoDevTasks(context.tasks);
     const gitPreflight = await inspectAutoDevGitPreflight(input.workdir);
     const inProgressTask = context.tasks.find((task) => task.status === "in_progress") ?? null;
@@ -69,7 +80,6 @@ export async function handleAutoDevStatusCommand(
     const detailedProgress = deps.isAutoDevDetailedProgressEnabled(input.sessionKey) ? "on" : "off";
     const detailedProgressDefault = deps.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
     const roleSkillStatus = deps.buildWorkflowRoleSkillStatus(input.sessionKey);
-    const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 3);
     const latestRun = recentRuns[0] ?? null;
     const stageEvents = latestRun ? deps.listWorkflowDiagEvents(latestRun.runId, 12) : [];
     const gitPreflightReason = gitPreflight.reason
@@ -102,6 +112,12 @@ export async function handleAutoDevStatusCommand(
             `\n- warning: autoRelease=on while autoReleasePush=off; release commit will not be pushed automatically. Run \`git push\` to trigger CI release`,
           )
         : "";
+    const taskAutoHealSummary =
+      healedStatuses.length === 0
+        ? "none"
+        : healedStatuses
+            .map((item) => `${item.taskId}:${item.from}->${item.to}`)
+            .join(", ");
     const currentTask =
       snapshot.taskId && snapshot.taskDescription
         ? deps.outputLanguage === "en"
@@ -123,6 +139,7 @@ export async function handleAutoDevStatusCommand(
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
+- taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
 - config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
@@ -158,6 +175,7 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - REQUIREMENTS.md: ${context.requirementsContent ? "found" : "missing"}
 - TASK_LIST.md: ${context.taskListContent ? "found" : "missing"}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
+- taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
 - config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
