@@ -3104,6 +3104,7 @@ describe("Orchestrator", () => {
       expect(updated).toContain("| T15.1 | preflight single | ⬜ |");
       expect(executor.callCount).toBe(0);
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 已停止（Git preflight 未通过）"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("dirtyFiles: DIRTY_NOTE.md"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("git status"))).toBe(true);
       const runtime = orchestrator.getRuntimeMetricsSnapshot();
       expect(runtime.autodev.runs.failed).toBe(1);
@@ -3164,6 +3165,7 @@ describe("Orchestrator", () => {
       expect(updated).toContain("| T15.3 | preflight loop two | ⬜ |");
       expect(executor.callCount).toBe(0);
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 已停止（Git preflight 未通过）"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("dirtyFiles: DIRTY_LOOP.md"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("mode: loop"))).toBe(true);
       const runtime = orchestrator.getRuntimeMetricsSnapshot();
       expect(runtime.autodev.runs.failed).toBe(1);
@@ -3172,7 +3174,72 @@ describe("Orchestrator", () => {
     }
   });
 
-  it("reconciles task status to in_progress when reviewer rejects and task file drifts to completed", async () => {
+  it("auto-stashes dirty worktree in preflight when AUTODEV_PREFLIGHT_AUTO_STASH=true", async () => {
+    const previous = process.env.AUTODEV_PREFLIGHT_AUTO_STASH;
+    process.env.AUTODEV_PREFLIGHT_AUTO_STASH = "true";
+
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-preflight-auto-stash-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T15.4 | preflight auto stash | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+    await fs.writeFile(path.join(tempRoot, "DIRTY_AUTO_STASH.md"), "dirty\n", "utf8");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T15.4",
+          eventId: "$autodev-run-preflight-auto-stash",
+        }),
+      );
+
+      expect(executor.callCount).toBeGreaterThan(0);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev stopped (Git preflight failed)"))).toBe(false);
+      expect(channel.notices.some((entry) => entry.text.includes("dirty worktree auto-stashed; continuing run"))).toBe(true);
+      const stashList = (await execFileAsync("git", ["stash", "list"], { cwd: tempRoot })).stdout;
+      expect(stashList).toContain("codeharbor autodev preflight auto-stash");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTODEV_PREFLIGHT_AUTO_STASH;
+      } else {
+        process.env.AUTODEV_PREFLIGHT_AUTO_STASH = previous;
+      }
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back forbidden TASK_LIST drift introduced during workflow", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-reconcile-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
     const taskListPath = path.join(tempRoot, "TASK_LIST.md");
@@ -3258,7 +3325,104 @@ describe("Orchestrator", () => {
       const updated = await fs.readFile(taskListPath, "utf8");
       expect(updated).toContain("| T16.1 | drift reconcile task | 🔄 |");
       expect(channel.notices.some((entry) => entry.text.includes("task status: 🔄"))).toBe(true);
-      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态保护"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 策略保护"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails completion gate when workflow mutates TASK_LIST even if reviewer approves", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-tasklist-policy-gate-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.11 | task list policy gate | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const policyExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "VALIDATION_STATUS: PASS\n__EXIT_CODES__ unit=0",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: (async () => {
+              const raw = await fs.readFile(taskListPath, "utf8");
+              const drifted = raw.replace("| T16.11 | task list policy gate | 🔄 |", "| T16.11 | task list policy gate | ✅ |");
+              await fs.writeFile(taskListPath, drifted, "utf8");
+              return {
+                sessionId: sessionId ?? "wf-thread-reviewer",
+                reply: "VERDICT: APPROVED\nSUMMARY: reviewer approved",
+              };
+            })(),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, policyExecutor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.11",
+          eventId: "$autodev-run-tasklist-policy-gate",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.11 | task list policy gate | 🔄 |");
+      const resultNotice = channel.notices.find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("reviewer approved: yes");
+      expect(resultNotice).toContain("completionGate: failed");
+      expect(resultNotice).toContain("completionGateReasons: task-list-policy-violated");
+      expect(resultNotice).toContain("task status: 🔄");
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev policy guard"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

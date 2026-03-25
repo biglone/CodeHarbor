@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.70] - 2026-03-25
+
+- autodev task-state ownership: enforce `TASK_LIST.md` as orchestrator-managed only; workflow-side edits are now auto-rolled back and blocked from completion gate (`task-list-policy-violated`).
+- autodev preflight resilience: add optional `AUTODEV_PREFLIGHT_AUTO_STASH=true` to auto-stash dirty worktrees and continue run with reported stash reference.
+- git preflight diagnostics: fix dirty file parsing so file names are reported accurately (prevents truncated names like `TASK_LIST.md -> ASK_LIST.md`).
+- workflow contract hardening: extend executor/reviewer prompts to explicitly forbid `TASK_LIST.md` mutations and require reviewer rejection when detected.
+- docs/admin config: document the new policy + auto-stash behavior, and add `AUTODEV_PREFLIGHT_AUTO_STASH` to config snapshot/admin env-override pipeline.
+
 ## [0.1.69] - 2026-03-25
 
 - autodev validation contract: require structured executor evidence (`VALIDATION_STATUS` + `__EXIT_CODES__`) and align reviewer rejection rules when validation evidence is missing or inconsistent.

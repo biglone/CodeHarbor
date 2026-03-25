@@ -232,6 +232,7 @@ export function buildAutoDevObjective(task: AutoDevTask): string {
     "2. 在当前仓库直接完成代码与测试改动。",
     "3. 运行受影响验证命令并汇总结果。",
     "4. 输出改动文件和风险说明。",
+    "5. 禁止修改 TASK_LIST.md（含任务状态与正文），任务状态仅由系统在编排阶段维护。",
   ].join("\n");
 }
 

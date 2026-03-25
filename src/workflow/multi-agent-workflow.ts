@@ -638,6 +638,7 @@ function buildReviewerPrompt(
     "1) 若 executor 输出缺失 VALIDATION_STATUS 或 __EXIT_CODES__，必须 REJECTED 并给出可执行 BLOCKERS。",
     "2) 若 VALIDATION_STATUS 与 VALIDATION/命令结果不一致，必须 REJECTED 并要求修正。",
     "3) REJECTED 时 BLOCKERS 至少 1 条，且 issue/fix/accept 不得为空。",
+    "4) 若 executor 输出显示改动了 TASK_LIST.md，必须 REJECTED（该文件仅允许系统维护任务状态）。",
     "",
     `目标：${objective}`,
     "",
@@ -727,6 +728,7 @@ function buildRepairPrompt(
   sections.push(
     `你是软件执行代理。请根据审查反馈进行第 ${round} 轮修复并输出最终版本。`,
     "要求：保持正确内容，修复问题，不要丢失已完成部分。",
+    "硬性约束：禁止修改 TASK_LIST.md（含任务状态与正文），任务状态由系统维护。",
     "必须优先按 [normalized_blockers] 逐条完成修复，每条都要有明确处理结果。",
     "输出必须包含：",
     "BLOCKER_STATUS:",

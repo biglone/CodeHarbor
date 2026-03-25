@@ -27,6 +27,11 @@ export interface AutoDevGitPreflight {
   reason: string | null;
 }
 
+export type AutoDevGitPreflightAutoStashResult =
+  | { kind: "stashed"; stashRef: string; stashMessage: string }
+  | { kind: "skipped"; reason: string }
+  | { kind: "failed"; error: string };
+
 export type AutoDevGitCommitResult =
   | { kind: "committed"; commitHash: string; commitSubject: string; changedFiles: string[] }
   | { kind: "skipped"; reason: string }
@@ -81,6 +86,50 @@ export async function captureAutoDevGitBaseline(input: {
     available: preflight.available,
     cleanBeforeRun: preflight.cleanBeforeRun,
   };
+}
+
+export async function tryAutoDevPreflightAutoStash(workdir: string): Promise<AutoDevGitPreflightAutoStashResult> {
+  const insideRepo = await isGitRepository(workdir);
+  if (!insideRepo) {
+    return {
+      kind: "skipped",
+      reason: "未检测到 git 仓库",
+    };
+  }
+
+  const before = await inspectAutoDevGitPreflight(workdir);
+  if (before.state !== "dirty") {
+    return {
+      kind: "skipped",
+      reason: "工作区已干净，无需暂存",
+    };
+  }
+
+  const stamp = new Date().toISOString().replace(/[:]/g, "-");
+  const stashMessage = `codeharbor autodev preflight auto-stash ${stamp}`;
+  try {
+    await runGitCommand(workdir, ["stash", "push", "--include-untracked", "-m", stashMessage]);
+    const after = await inspectAutoDevGitPreflight(workdir);
+    if (after.state === "dirty") {
+      return {
+        kind: "failed",
+        error: after.reason ?? "auto stash 后工作区仍非干净状态",
+      };
+    }
+
+    const top = (await runGitCommand(workdir, ["stash", "list", "-n", "1"])).split(/\r?\n/)[0]?.trim() ?? "";
+    const stashRef = top.split(":")[0]?.trim() || "stash@{0}";
+    return {
+      kind: "stashed",
+      stashRef,
+      stashMessage,
+    };
+  } catch (error) {
+    return {
+      kind: "failed",
+      error: formatError(error),
+    };
+  }
 }
 
 export async function tryAutoDevGitCommit(input: {
@@ -293,10 +342,9 @@ async function listUntrackedGitFiles(workdir: string): Promise<string[]> {
 function parseGitDirtyFiles(statusOutput: string): string[] {
   return statusOutput
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+    .filter((line) => line.trim().length > 0)
     .map((line) => {
-      const payload = line.slice(3).trim();
+      const payload = line.length >= 3 ? line.slice(3).trim() : line.trim();
       const renamedParts = payload.split("->");
       const pathLike = renamedParts[renamedParts.length - 1] ?? payload;
       return pathLike.trim().replace(/^"|"$/g, "");

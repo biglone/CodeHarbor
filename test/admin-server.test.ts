@@ -416,6 +416,7 @@ describe("AdminServer", () => {
           envOverrides: {
             MATRIX_ADMIN_USERS: "@ops:example.com",
             AUTODEV_LOOP_MAX_RUNS: "12",
+            AUTODEV_PREFLIGHT_AUTO_STASH: "true",
             AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "9000",
             CODEHARBOR_LAUNCHD_MAIN_LABEL: "com.custom.main",
           },
@@ -425,6 +426,7 @@ describe("AdminServer", () => {
     expect(validEnvOverrides.status).toBe(200);
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.MATRIX_ADMIN_USERS");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_LOOP_MAX_RUNS");
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_PREFLIGHT_AUTO_STASH");
 
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
@@ -1447,6 +1449,7 @@ describe("AdminServer", () => {
           AUTODEV_AUTO_COMMIT: "false",
           AUTODEV_AUTO_RELEASE_ENABLED: "false",
           AUTODEV_AUTO_RELEASE_PUSH: "true",
+          AUTODEV_PREFLIGHT_AUTO_STASH: "true",
           AUTODEV_MAX_CONSECUTIVE_FAILURES: "5",
           AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "7000",
           AGENT_WORKFLOW_OUTPUT_CONTEXT_MAX_CHARS: "10000",
@@ -1489,6 +1492,7 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_AUTO_COMMIT=false");
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
+    expect(envRaw).toContain("AUTODEV_PREFLIGHT_AUTO_STASH=true");
     expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_ENABLED=true");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS=240000");

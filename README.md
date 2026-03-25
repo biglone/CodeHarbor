@@ -702,6 +702,8 @@ Backend/model rule routing:
   - enable/disable AutoDev "big feature done -> release commit" flow (default `true`)
 - `AUTODEV_AUTO_RELEASE_PUSH=true|false`
   - push release commit automatically after local release commit (default `false`)
+- `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`
+  - when git preflight detects a dirty worktree, auto-stash (`git stash --include-untracked`) and continue run (default `false`)
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`
   - when the same task fails repeatedly and reaches this threshold, mark it `🚫` blocked (default `3`)
 
@@ -716,6 +718,7 @@ AutoDev (`/autodev`) conventions:
   - when target path is missing/not-directory, init fails explicitly and keeps current workdir unchanged.
 - `/autodev workdir|wd [path]|status|clear` inspects or changes session-level workdir override.
 - `TASK_LIST.md` should include task IDs and status markers (`⬜`, `🔄`, `✅`, `❌`, `🚫`) in table rows or checklist rows.
+- `TASK_LIST.md` task status is system-managed by orchestrator; avoid manual edits and use `/autodev reconcile` when drift needs healing.
 - `/autodev run` (without task id) loops through task list: selects `🔄` first, then `⬜`, and keeps running until no executable task remains.
 - `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit pauses safely with a summary notice, and you can resume with `/autodev run`.
 - `/autodev run <taskId>` runs only the specified task.
@@ -741,6 +744,8 @@ AutoDev (`/autodev`) conventions:
 - When CI detects that the target version already exists on npm, the release workflow skips publishing and prints `Suggested next version` to keep release flow idempotent.
 - If the same task fails consecutively and reaches `AUTODEV_MAX_CONSECUTIVE_FAILURES`, CodeHarbor marks it as `🚫` and skips it in later loops.
 - If the repo is missing or already dirty before run, AutoDev skips commit and reports the reason in the result notice.
+- When `AUTODEV_PREFLIGHT_AUTO_STASH=true`, dirty git preflight is auto-stashed and the run continues (stash ref is reported in notices).
+- If workflow attempts to edit `TASK_LIST.md`, AutoDev rolls it back and fails completion gate with `task-list-policy-violated`.
 - When using `scripts/autodev-loop-runner.sh`, a new trigger is skipped while any task is already `🔄` in progress.
 
 Default is disabled to keep legacy behavior unchanged.

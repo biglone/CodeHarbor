@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+
 import type { Logger } from "../logger";
 import type { InboundMessage } from "../types";
 import type { MultiAgentWorkflowRunResult } from "../workflow/multi-agent-workflow";
@@ -15,6 +17,7 @@ import {
 import {
   captureAutoDevGitBaseline,
   inspectAutoDevGitPreflight,
+  tryAutoDevPreflightAutoStash,
   tryAutoDevGitCommit,
   type AutoDevGitCommitResult,
 } from "./autodev-git";
@@ -28,7 +31,7 @@ import {
   formatAutoDevReleaseResult,
 } from "./diagnostic-formatters";
 import { healAutoDevTaskStatuses } from "./autodev-status-heal";
-import { formatError } from "./helpers";
+import { formatError, parseEnvBoolean } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
 import { byOutputLanguage } from "./output-language";
 import type { WorkflowDiagRunRecord } from "./workflow-diag";
@@ -70,11 +73,18 @@ interface AutoDevFailurePolicyResult {
 type AutoDevCompletionGateReason =
   | "reviewer_not_approved"
   | "validation_not_passed"
+  | "task_list_policy_violated"
   | "auto_commit_not_committed";
 
 interface AutoDevCompletionGateResult {
   passed: boolean;
   reasons: AutoDevCompletionGateReason[];
+}
+
+interface TaskListMutationGuardResult {
+  changed: boolean;
+  restored: boolean;
+  error: string | null;
 }
 
 interface AutoDevLoopStopCheckInput {
@@ -634,6 +644,7 @@ export async function runAutoDevCommand(
   );
 
   try {
+    const taskListBeforeWorkflow = await fs.readFile(context.taskListPath, "utf8");
     const result = await deps.runWorkflowCommand({
       objective: buildAutoDevObjective(activeTask),
       sessionKey: input.sessionKey,
@@ -646,6 +657,22 @@ export async function runAutoDevCommand(
       return;
     }
 
+    const taskListGuard = await guardAutoDevTaskListOwnership({
+      taskListPath: context.taskListPath,
+      baselineContent: taskListBeforeWorkflow,
+    });
+    if (taskListGuard.changed) {
+      const taskListGuardMessage = localize(
+        `[CodeHarbor] AutoDev 策略保护：检测到 workflow 修改了 TASK_LIST.md，已自动回滚（仅系统可维护任务状态）。`,
+        `[CodeHarbor] AutoDev policy guard: workflow modified TASK_LIST.md and was auto-rolled back (task status is system-managed only).`,
+      );
+      deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "task_list_guard", 0, taskListGuardMessage);
+      await deps.channelSendNotice(input.message.conversationId, taskListGuardMessage);
+      if (!taskListGuard.restored) {
+        throw new Error(taskListGuard.error ?? "failed to restore TASK_LIST.md after forbidden workflow mutation");
+      }
+    }
+
     let finalTask = activeTask;
     let gitCommit: AutoDevGitCommitResult = {
       kind: "skipped",
@@ -656,6 +683,8 @@ export async function runAutoDevCommand(
       reason: localize("未触发自动发布", "auto release not attempted"),
     };
     const validationPassed = inferAutoDevValidationPassed(result);
+    const taskListPolicyPassed = !taskListGuard.changed;
+    const reviewerApprovedForGate = result.approved && taskListPolicyPassed;
     if (!result.approved) {
       gitCommit = {
         kind: "skipped",
@@ -665,13 +694,22 @@ export async function runAutoDevCommand(
         kind: "skipped",
         reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
       };
+    } else if (!taskListPolicyPassed) {
+      gitCommit = {
+        kind: "skipped",
+        reason: localize("违反 TASK_LIST.md 写入策略，未自动提交", "TASK_LIST.md write policy violated; auto commit skipped"),
+      };
+      releaseResult = {
+        kind: "skipped",
+        reason: localize("违反 TASK_LIST.md 写入策略，未自动发布", "TASK_LIST.md write policy violated; auto release skipped"),
+      };
     } else if (!validationPassed) {
       gitCommit = {
         kind: "skipped",
         reason: localize("验证未通过，未自动提交", "validation not passed; auto commit skipped"),
       };
     }
-    const markCompletedCandidate = result.approved && validationPassed;
+    const markCompletedCandidate = reviewerApprovedForGate && validationPassed;
     const firstStatusResult = await reconcileAutoDevTaskFinalStatus({
       workdir: input.workdir,
       taskListPath: context.taskListPath,
@@ -705,6 +743,7 @@ export async function runAutoDevCommand(
     const completionGate = evaluateAutoDevCompletionGate({
       reviewerApproved: result.approved,
       validationPassed,
+      taskListPolicyPassed,
       commitRequired: deps.autoDevAutoCommit && gitBaseline.available && gitBaseline.cleanBeforeRun,
       gitCommit,
     });
@@ -920,9 +959,39 @@ async function reconcileAutoDevTaskFinalStatus(input: {
   };
 }
 
+async function guardAutoDevTaskListOwnership(input: {
+  taskListPath: string;
+  baselineContent: string;
+}): Promise<TaskListMutationGuardResult> {
+  try {
+    const currentContent = await fs.readFile(input.taskListPath, "utf8");
+    if (currentContent === input.baselineContent) {
+      return {
+        changed: false,
+        restored: true,
+        error: null,
+      };
+    }
+
+    await fs.writeFile(input.taskListPath, input.baselineContent, "utf8");
+    return {
+      changed: true,
+      restored: true,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      changed: true,
+      restored: false,
+      error: formatError(error),
+    };
+  }
+}
+
 function evaluateAutoDevCompletionGate(input: {
   reviewerApproved: boolean;
   validationPassed: boolean;
+  taskListPolicyPassed: boolean;
   commitRequired: boolean;
   gitCommit: AutoDevGitCommitResult;
 }): AutoDevCompletionGateResult {
@@ -932,6 +1001,9 @@ function evaluateAutoDevCompletionGate(input: {
   }
   if (!input.validationPassed) {
     reasons.push("validation_not_passed");
+  }
+  if (!input.taskListPolicyPassed) {
+    reasons.push("task_list_policy_violated");
   }
   if (input.commitRequired && input.gitCommit.kind !== "committed") {
     reasons.push("auto_commit_not_committed");
@@ -1091,6 +1163,9 @@ function formatAutoDevCompletionGateReasons(
     if (reason === "validation_not_passed") {
       return outputLanguage === "en" ? "validation-not-passed" : "验证未通过";
     }
+    if (reason === "task_list_policy_violated") {
+      return outputLanguage === "en" ? "task-list-policy-violated" : "TASK_LIST写入策略违反";
+    }
     return outputLanguage === "en" ? "auto-commit-not-committed" : "自动提交未成功";
   });
   return labels.join(", ");
@@ -1123,6 +1198,32 @@ async function failAutoDevOnGitPreflightError(
   const preflight = await inspectAutoDevGitPreflight(input.workdir);
   if (preflight.state !== "dirty") {
     return false;
+  }
+  const autoStashEnabled = parseEnvBoolean(process.env.AUTODEV_PREFLIGHT_AUTO_STASH, false);
+  if (autoStashEnabled) {
+    const stashResult = await tryAutoDevPreflightAutoStash(input.workdir);
+    if (stashResult.kind === "stashed") {
+      await deps.channelSendNotice(
+        input.conversationId,
+        localize(
+          `[CodeHarbor] AutoDev Git preflight：检测到脏工作区，已自动暂存后继续执行。
+- stashRef: ${stashResult.stashRef}
+- stashMessage: ${stashResult.stashMessage}
+- tip: \`git stash list\` / \`git stash pop ${stashResult.stashRef}\``,
+          `[CodeHarbor] AutoDev Git preflight: dirty worktree auto-stashed; continuing run.
+- stashRef: ${stashResult.stashRef}
+- stashMessage: ${stashResult.stashMessage}
+- tip: \`git stash list\` / \`git stash pop ${stashResult.stashRef}\``,
+        ),
+      );
+      return false;
+    }
+    if (stashResult.kind === "failed") {
+      deps.logger.warn("AutoDev preflight auto-stash failed", {
+        workdir: input.workdir,
+        error: stashResult.error,
+      });
+    }
   }
 
   const endedAtIso = new Date().toISOString();

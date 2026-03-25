@@ -15,6 +15,7 @@ export function buildHelpNotice(input: {
 - /autodev run [taskId]: Run target task; when omitted, run task list in loop (example: /autodev run T6.2)
 - /autodev stop: Stop AutoDev loop after current task completes
 - /autodev reconcile: Reconcile TASK_LIST task states using latest AutoDev run records
+- tip: TASK_LIST task status is system-managed; use /autodev reconcile instead of manual edits
 - /autodev workdir|wd [path]|status|clear: Show/set/clear AutoDev workdir override for this session
 - /autodev init|i [path] [--from file] [--dry-run] [--force]: Scaffold REQUIREMENTS.md + TASK_LIST.md + task compass in target project
 - tip: /autodev init StrawBerry --dry-run (preview), then /autodev init StrawBerry --force to overwrite
@@ -42,6 +43,7 @@ export function buildHelpNotice(input: {
 - /autodev run [taskId]: 执行指定任务；不指定时连续执行任务清单（示例: /autodev run T6.2）
 - /autodev stop: 不中断当前任务，在当前任务完成后停止 AutoDev 循环
 - /autodev reconcile: 根据最近 AutoDev 运行记录对账并修正 TASK_LIST 任务状态
+- 提示：TASK_LIST 任务状态由系统维护，避免手工修改，必要时使用 /autodev reconcile
 - /autodev workdir|wd [path]|status|clear: 查看/设置/清除当前会话的 AutoDev 工作目录覆盖
 - /autodev init|i [path] [--from file] [--dry-run] [--force]: 在目标项目初始化 REQUIREMENTS.md、TASK_LIST.md 与任务罗盘
 - 提示：/autodev init StrawBerry --dry-run（预览），确认后用 --force 覆盖写入

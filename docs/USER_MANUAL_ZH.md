@@ -198,11 +198,13 @@ codeharbor admin serve
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20，`0` 表示不限制）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120，`0` 表示不限制）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
+- `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`：Git 预检检测到脏工作区时自动 `stash` 后继续执行（默认 false）
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
   - 当达到轮次/时间上限时会“暂停”并输出剩余任务摘要，可再次执行 `/autodev run` 续跑
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
 - `/autodev stop`：不中断当前任务，等待当前任务完成后停止循环
+- `TASK_LIST.md` 的任务状态由系统维护，尽量不要手工改；发生漂移优先用 `/autodev reconcile` 对账修复
 - 循环护栏规则（建议）：
   - `AUTODEV_LOOP_MAX_RUNS=0`：轮次不限制
   - `AUTODEV_LOOP_MAX_MINUTES=0`：总时长不限制
@@ -223,6 +225,8 @@ codeharbor admin serve
   - 提交正文固定包含：`Task-ID`、`Changed-files`、`Generated-by`
 - AutoDev 结果消息会固定输出 `git commit` 与 `git changed files`
 - 若运行前仓库已存在未提交改动，或当前目录不是 Git 仓库，会跳过自动提交并在结果消息提示原因
+- 若开启 `AUTODEV_PREFLIGHT_AUTO_STASH=true`，脏工作区会自动暂存后继续运行（消息里会给出 stash 引用）
+- 若 workflow 试图修改 `TASK_LIST.md`，系统会自动回滚，并以 `task-list-policy-violated` 拒绝完成 gate
 
 ### 5.6 版本检查与更新提示
 

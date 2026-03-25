@@ -33,6 +33,7 @@ export const CONFIG_SNAPSHOT_ENV_KEYS = [
   "AUTODEV_AUTO_COMMIT",
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
+  "AUTODEV_PREFLIGHT_AUTO_STASH",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
   "AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS",
@@ -198,6 +199,7 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     AUTODEV_AUTO_COMMIT: booleanStringSchema("AUTODEV_AUTO_COMMIT").default("true"),
     AUTODEV_AUTO_RELEASE_ENABLED: booleanStringSchema("AUTODEV_AUTO_RELEASE_ENABLED").default("true"),
     AUTODEV_AUTO_RELEASE_PUSH: booleanStringSchema("AUTODEV_AUTO_RELEASE_PUSH").default("false"),
+    AUTODEV_PREFLIGHT_AUTO_STASH: booleanStringSchema("AUTODEV_PREFLIGHT_AUTO_STASH").default("false"),
     AUTODEV_MAX_CONSECUTIVE_FAILURES: integerStringSchema("AUTODEV_MAX_CONSECUTIVE_FAILURES", 1).default("3"),
     AUTODEV_INIT_ENHANCEMENT_ENABLED: booleanStringSchema("AUTODEV_INIT_ENHANCEMENT_ENABLED").default("true"),
     AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS: integerStringSchema("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS", 1).default("480000"),
@@ -501,6 +503,7 @@ function buildSnapshotEnv(config: AppConfig): ConfigSnapshotEnv {
     AUTODEV_AUTO_COMMIT: normalizeBooleanEnv(process.env.AUTODEV_AUTO_COMMIT, "true"),
     AUTODEV_AUTO_RELEASE_ENABLED: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_ENABLED, "true"),
     AUTODEV_AUTO_RELEASE_PUSH: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_PUSH, "false"),
+    AUTODEV_PREFLIGHT_AUTO_STASH: normalizeBooleanEnv(process.env.AUTODEV_PREFLIGHT_AUTO_STASH, "false"),
     AUTODEV_MAX_CONSECUTIVE_FAILURES: normalizePositiveIntegerEnv(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, "3"),
     AUTODEV_INIT_ENHANCEMENT_ENABLED: normalizeBooleanEnv(process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED, "true"),
     AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS: normalizePositiveIntegerEnv(
