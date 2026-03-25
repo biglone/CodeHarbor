@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.67] - 2026-03-25
+
+- workflow contract hardening: strengthen reviewer contract parsing and rejected-result semantics to avoid contradictory or missing repair-contract states.
+- task-state consistency: reconcile final `TASK_LIST.md` status from workflow result and guard against workflow/task drift before closing a task.
+- completion gate: close AutoDev task to `✅` only when reviewer approval, validation status, and required auto-commit conditions all pass.
+- self-heal on run/status: auto-repair stale task states from recent AutoDev run records when running `/autodev run` and `/autodev status`.
+- new command: add `/autodev reconcile` (alias `/autodev sync`) for one-shot task-state reconciliation, with help/docs and routing support.
+
 ## [0.1.66] - 2026-03-24
 
 - autodev loop guardrails: support `0` as unlimited for both `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`.
