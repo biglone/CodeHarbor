@@ -618,8 +618,28 @@ export async function runAutoDevCommand(
       kind: "skipped",
       reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
     };
+    const finalStatusResult = await reconcileAutoDevTaskFinalStatus({
+      workdir: input.workdir,
+      taskListPath: context.taskListPath,
+      task: activeTask,
+      expectedCurrentStatus: activeTask.status,
+      nextStatus: result.approved ? "completed" : "in_progress",
+    });
+    finalTask = finalStatusResult.task;
+    if (finalStatusResult.statusDriftDetected && finalStatusResult.observedStatus) {
+      const driftMessage = localize(
+        `[CodeHarbor] AutoDev 状态保护：检测到任务 ${activeTask.id} 状态漂移（observed=${statusToSymbol(
+          finalStatusResult.observedStatus,
+        )}, expected=${statusToSymbol(activeTask.status)}），已修正为 ${statusToSymbol(finalTask.status)}。`,
+        `[CodeHarbor] AutoDev status guard: detected status drift on task ${activeTask.id} (observed=${statusToSymbol(
+          finalStatusResult.observedStatus,
+        )}, expected=${statusToSymbol(activeTask.status)}); corrected to ${statusToSymbol(finalTask.status)}.`,
+      );
+      deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "status_guard", 0, driftMessage);
+      await deps.channelSendNotice(input.message.conversationId, driftMessage);
+    }
+
     if (result.approved) {
-      finalTask = await updateAutoDevTaskStatus(context.taskListPath, activeTask, "completed");
       gitCommit = await tryAutoDevGitCommit({
         workdir: input.workdir,
         task: finalTask,
@@ -638,13 +658,6 @@ export async function runAutoDevCommand(
           autoPush: deps.autoDevAutoReleasePush,
         },
         logger: deps.logger,
-      });
-    } else {
-      finalTask = await reconcileAutoDevTaskFinalStatus({
-        workdir: input.workdir,
-        taskListPath: context.taskListPath,
-        task: activeTask,
-        nextStatus: "in_progress",
       });
     }
     deps.recordAutoDevGitCommit(input.sessionKey, finalTask.id, gitCommit);
@@ -791,14 +804,27 @@ async function reconcileAutoDevTaskFinalStatus(input: {
   workdir: string;
   taskListPath: string;
   task: AutoDevTask;
+  expectedCurrentStatus: AutoDevTask["status"] | null;
   nextStatus: AutoDevTask["status"];
-}): Promise<AutoDevTask> {
+}): Promise<{ task: AutoDevTask; statusDriftDetected: boolean; observedStatus: AutoDevTask["status"] | null }> {
   const refreshed = await loadAutoDevContext(input.workdir);
   const latestTask = resolveAutoDevTask(refreshed.tasks, input.task.id, input.task.lineIndex) ?? input.task;
+  const statusDriftDetected =
+    input.expectedCurrentStatus !== null &&
+    latestTask.status !== input.expectedCurrentStatus;
   if (latestTask.status === input.nextStatus) {
-    return latestTask;
+    return {
+      task: latestTask,
+      statusDriftDetected,
+      observedStatus: latestTask.status,
+    };
   }
-  return updateAutoDevTaskStatus(input.taskListPath, latestTask, input.nextStatus);
+  const reconciledTask = await updateAutoDevTaskStatus(input.taskListPath, latestTask, input.nextStatus);
+  return {
+    task: reconciledTask,
+    statusDriftDetected,
+    observedStatus: latestTask.status,
+  };
 }
 
 function resolveAutoDevTask(

@@ -3258,6 +3258,7 @@ describe("Orchestrator", () => {
       const updated = await fs.readFile(taskListPath, "utf8");
       expect(updated).toContain("| T16.1 | drift reconcile task | 🔄 |");
       expect(channel.notices.some((entry) => entry.text.includes("task status: 🔄"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 状态保护"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
