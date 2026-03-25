@@ -639,6 +639,13 @@ export async function runAutoDevCommand(
         },
         logger: deps.logger,
       });
+    } else {
+      finalTask = await reconcileAutoDevTaskFinalStatus({
+        workdir: input.workdir,
+        taskListPath: context.taskListPath,
+        task: activeTask,
+        nextStatus: "in_progress",
+      });
     }
     deps.recordAutoDevGitCommit(input.sessionKey, finalTask.id, gitCommit);
     deps.appendWorkflowDiagEvent(
@@ -778,6 +785,20 @@ export async function runAutoDevCommand(
     }
     throw error;
   }
+}
+
+async function reconcileAutoDevTaskFinalStatus(input: {
+  workdir: string;
+  taskListPath: string;
+  task: AutoDevTask;
+  nextStatus: AutoDevTask["status"];
+}): Promise<AutoDevTask> {
+  const refreshed = await loadAutoDevContext(input.workdir);
+  const latestTask = resolveAutoDevTask(refreshed.tasks, input.task.id, input.task.lineIndex) ?? input.task;
+  if (latestTask.status === input.nextStatus) {
+    return latestTask;
+  }
+  return updateAutoDevTaskStatus(input.taskListPath, latestTask, input.nextStatus);
 }
 
 function resolveAutoDevTask(

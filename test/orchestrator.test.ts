@@ -3172,6 +3172,97 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("reconciles task status to in_progress when reviewer rejects and task file drifts to completed", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-reconcile-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.1 | drift reconcile task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const driftExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "delivered output",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: (async () => {
+              const raw = await fs.readFile(taskListPath, "utf8");
+              const drifted = raw.replace("| T16.1 | drift reconcile task | 🔄 |", "| T16.1 | drift reconcile task | ✅ |");
+              await fs.writeFile(taskListPath, drifted, "utf8");
+              return {
+                sessionId: sessionId ?? "wf-thread-reviewer",
+                reply: "VERDICT: REJECTED\nSUMMARY: reject this task\nISSUES:\n- missing validation",
+              };
+            })(),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, driftExecutor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.1",
+          eventId: "$autodev-run-status-reconcile",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.1 | drift reconcile task | 🔄 |");
+      expect(channel.notices.some((entry) => entry.text.includes("task status: 🔄"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("auto-commits autodev changes when reviewer approves and workdir is clean", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-commit-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
