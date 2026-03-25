@@ -649,13 +649,28 @@ export async function runAutoDevCommand(
     let finalTask = activeTask;
     let gitCommit: AutoDevGitCommitResult = {
       kind: "skipped",
-      reason: localize("reviewer 未批准，未自动提交", "reviewer not approved; auto commit skipped"),
+      reason: localize("未触发自动提交", "auto commit not attempted"),
     };
     let releaseResult: AutoDevReleaseResult = {
       kind: "skipped",
-      reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
+      reason: localize("未触发自动发布", "auto release not attempted"),
     };
     const validationPassed = inferAutoDevValidationPassed(result);
+    if (!result.approved) {
+      gitCommit = {
+        kind: "skipped",
+        reason: localize("reviewer 未批准，未自动提交", "reviewer not approved; auto commit skipped"),
+      };
+      releaseResult = {
+        kind: "skipped",
+        reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
+      };
+    } else if (!validationPassed) {
+      gitCommit = {
+        kind: "skipped",
+        reason: localize("验证未通过，未自动提交", "validation not passed; auto commit skipped"),
+      };
+    }
     const markCompletedCandidate = result.approved && validationPassed;
     const firstStatusResult = await reconcileAutoDevTaskFinalStatus({
       workdir: input.workdir,
@@ -929,7 +944,26 @@ function evaluateAutoDevCompletionGate(input: {
 
 function inferAutoDevValidationPassed(result: MultiAgentWorkflowRunResult): boolean {
   const combined = `${result.output}\n${result.review}`;
-  const hasExplicitFailure = /\b(tests?\s+failed|failed\b|timeout|timed out|hang|hung|未通过|失败|卡住|挂起|❌)\b/i.test(combined);
+  const exitCodeLine = combined.match(/__EXIT_CODES__([^\n]*)/i);
+  if (exitCodeLine) {
+    const codes = [...exitCodeLine[1].matchAll(/=\s*(-?\d+)/g)].map((match) => Number.parseInt(match[1], 10));
+    if (codes.some((code) => Number.isFinite(code) && code !== 0)) {
+      return false;
+    }
+    if (codes.length > 0 && codes.every((code) => Number.isFinite(code) && code === 0)) {
+      return true;
+    }
+  }
+
+  const failedCountMatches = [...combined.matchAll(/\b(\d+)\s+failed\b/gi)];
+  if (failedCountMatches.some((match) => Number.parseInt(match[1], 10) > 0)) {
+    return false;
+  }
+  const normalizedCombined = combined.replace(/\b0+\s+failed\b/gi, "");
+  const hasExplicitFailure =
+    /\b(tests?\s+failed|test\s+run\s+failed|command\s+failed|validation\s+failed|build\s+failed|lint\s+failed|typecheck\s+failed|failed\s+with|timeout|timed out|hang|hung|未通过|失败|卡住|挂起|❌)\b/i.test(
+      normalizedCombined,
+    );
   if (hasExplicitFailure) {
     return false;
   }
