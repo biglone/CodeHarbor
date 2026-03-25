@@ -14,6 +14,7 @@ interface NonBlockingStatusContextInput {
   handleAutoDevProgressCommand: NonBlockingStatusRouteContext["handleAutoDevProgressCommand"];
   handleAutoDevSkillsCommand: NonBlockingStatusRouteContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: NonBlockingStatusRouteContext["handleAutoDevLoopStopCommand"];
+  handleAutoDevReconcileCommand: NonBlockingStatusRouteContext["handleAutoDevReconcileCommand"];
 }
 
 export function buildNonBlockingStatusRouteContext(
@@ -31,6 +32,7 @@ export function buildNonBlockingStatusRouteContext(
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+    handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
   };
 }
 
@@ -46,6 +48,7 @@ interface NonBlockingStatusRuntimeContextInput {
   handleAutoDevProgressCommand: NonBlockingStatusRouteContext["handleAutoDevProgressCommand"];
   handleAutoDevSkillsCommand: NonBlockingStatusRouteContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: NonBlockingStatusRouteContext["handleAutoDevLoopStopCommand"];
+  handleAutoDevReconcileCommand: NonBlockingStatusRouteContext["handleAutoDevReconcileCommand"];
 }
 
 export function buildNonBlockingStatusRouteContextFromRuntime(
@@ -63,6 +66,7 @@ export function buildNonBlockingStatusRouteContextFromRuntime(
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+    handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
   });
 }
 

@@ -35,6 +35,7 @@ interface HandleLockedRouteCommandDeps {
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ) => Promise<void>;
   handleAutoDevLoopStopCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
+  handleAutoDevReconcileCommand: (sessionKey: string, message: InboundMessage, workdir: string) => Promise<void>;
   handleAutoDevWorkdirCommand: (
     sessionKey: string,
     message: InboundMessage,
@@ -101,6 +102,11 @@ export async function handleLockedRouteCommand(
   }
   if (autoDevCommand?.kind === "stop") {
     await deps.handleAutoDevLoopStopCommand(input.sessionKey, input.message);
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { handled: true, workflowCommand, autoDevCommand };
+  }
+  if (autoDevCommand?.kind === "reconcile") {
+    await deps.handleAutoDevReconcileCommand(input.sessionKey, input.message, input.workdir);
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }

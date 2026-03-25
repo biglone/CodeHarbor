@@ -16,6 +16,7 @@ interface LockedMessageContextInput {
   handleAutoDevProgressCommand: LockedMessageDispatchContext["handleAutoDevProgressCommand"];
   handleAutoDevSkillsCommand: LockedMessageDispatchContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: LockedMessageDispatchContext["handleAutoDevLoopStopCommand"];
+  handleAutoDevReconcileCommand: LockedMessageDispatchContext["handleAutoDevReconcileCommand"];
   handleAutoDevWorkdirCommand: LockedMessageDispatchContext["handleAutoDevWorkdirCommand"];
   handleAutoDevInitCommand: LockedMessageDispatchContext["handleAutoDevInitCommand"];
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
@@ -48,6 +49,7 @@ export function buildLockedMessageDispatchContext(
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
+    handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
     handleAutoDevWorkdirCommand: input.handleAutoDevWorkdirCommand,
     handleAutoDevInitCommand: input.handleAutoDevInitCommand,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
@@ -82,6 +84,7 @@ interface LockedMessageRuntimeContextInput {
     | "handleAutoDevProgressCommand"
     | "handleAutoDevSkillsCommand"
     | "handleAutoDevLoopStopCommand"
+    | "handleAutoDevReconcileCommand"
     | "handleAutoDevWorkdirCommand"
     | "handleAutoDevInitCommand"
   >;
@@ -121,6 +124,7 @@ export function buildLockedMessageDispatchContextFromRuntime(
     handleAutoDevProgressCommand: input.controlHandlers.handleAutoDevProgressCommand,
     handleAutoDevSkillsCommand: input.controlHandlers.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.controlHandlers.handleAutoDevLoopStopCommand,
+    handleAutoDevReconcileCommand: input.controlHandlers.handleAutoDevReconcileCommand,
     handleAutoDevWorkdirCommand: input.controlHandlers.handleAutoDevWorkdirCommand,
     handleAutoDevInitCommand: input.controlHandlers.handleAutoDevInitCommand,
     getTaskQueueStateStore: input.getTaskQueueStateStore,

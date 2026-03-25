@@ -169,6 +169,7 @@ import {
   handleAutoDevInitCommand as runAutoDevInitCommand,
   handleAutoDevLoopStopCommand as runAutoDevLoopStopCommand,
   handleAutoDevProgressCommand as runAutoDevProgressCommand,
+  handleAutoDevReconcileCommand as runAutoDevReconcileCommand,
   handleAutoDevSkillsCommand as runAutoDevSkillsCommand,
   handleAutoDevWorkdirCommand as runAutoDevWorkdirCommand,
   type AutoDevControlCommandDeps,
@@ -639,6 +640,7 @@ export class Orchestrator {
         handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
         handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
         handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
+        handleAutoDevReconcileCommand: this.handleAutoDevReconcileCommand.bind(this),
         handleAutoDevWorkdirCommand: this.handleAutoDevWorkdirCommand.bind(this),
         handleAutoDevInitCommand: this.handleAutoDevInitCommand.bind(this),
       },
@@ -712,6 +714,7 @@ export class Orchestrator {
         handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
         handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
         handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
+        handleAutoDevReconcileCommand: this.handleAutoDevReconcileCommand.bind(this),
       },
       {
         route: input.route,
@@ -1041,6 +1044,22 @@ export class Orchestrator {
     );
   }
 
+  private async handleAutoDevReconcileCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    workdir: string,
+  ): Promise<void> {
+    const effectiveWorkdir = this.resolveAutoDevWorkdir(sessionKey, workdir);
+    await runAutoDevReconcileCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        workdir: effectiveWorkdir,
+      },
+    );
+  }
+
   private async handleAutoDevWorkdirCommand(
     sessionKey: string,
     message: InboundMessage,
@@ -1102,6 +1121,8 @@ export class Orchestrator {
         this.autoDevWorkdirOverrides.delete(targetSessionKey);
       },
       runAutoDevInitEnhancement: (input) => this.runAutoDevInitEnhancement(input),
+      listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
+        this.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
     };
   }

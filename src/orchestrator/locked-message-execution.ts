@@ -60,6 +60,7 @@ interface ExecuteLockedMessageDeps {
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ) => Promise<void>;
   handleAutoDevLoopStopCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
+  handleAutoDevReconcileCommand: (sessionKey: string, message: InboundMessage, workdir: string) => Promise<void>;
   handleAutoDevWorkdirCommand: (
     sessionKey: string,
     message: InboundMessage,
@@ -206,6 +207,8 @@ export async function executeLockedMessage(
         deps.handleAutoDevProgressCommand(sessionKey, message, mode),
       handleAutoDevSkillsCommand: (sessionKey, message, mode) => deps.handleAutoDevSkillsCommand(sessionKey, message, mode),
       handleAutoDevLoopStopCommand: (sessionKey, message) => deps.handleAutoDevLoopStopCommand(sessionKey, message),
+      handleAutoDevReconcileCommand: (sessionKey, message, workdir) =>
+        deps.handleAutoDevReconcileCommand(sessionKey, message, workdir),
       handleAutoDevWorkdirCommand: (sessionKey, message, mode, commandPath, roomWorkdir) =>
         deps.handleAutoDevWorkdirCommand(sessionKey, message, mode, commandPath, roomWorkdir),
       handleAutoDevInitCommand: (sessionKey, message, commandPath, from, dryRun, force, roomWorkdir) =>

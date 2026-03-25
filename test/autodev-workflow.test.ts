@@ -21,6 +21,8 @@ describe("AutoDev workflow helpers", () => {
     expect(parseAutoDevCommand("/autodev stop")).toEqual({ kind: "stop" });
     expect(parseAutoDevCommand("//autodev stop")).toEqual({ kind: "stop" });
     expect(parseAutoDevCommand("///autodev stop")).toEqual({ kind: "stop" });
+    expect(parseAutoDevCommand("/autodev reconcile")).toEqual({ kind: "reconcile" });
+    expect(parseAutoDevCommand("//autodev sync")).toEqual({ kind: "reconcile" });
     expect(parseAutoDevCommand("/autodev workdir")).toEqual({ kind: "workdir", mode: "status", path: null });
     expect(parseAutoDevCommand("/autodev wd")).toEqual({ kind: "workdir", mode: "status", path: null });
     expect(parseAutoDevCommand("/autodev workdir status")).toEqual({ kind: "workdir", mode: "status", path: null });

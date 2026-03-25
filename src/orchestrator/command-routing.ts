@@ -8,6 +8,7 @@ export type AutoDevCommandLike =
   | { kind: "status" }
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
+  | { kind: "reconcile" }
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
   | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
@@ -190,7 +191,7 @@ export function classifyBackendTaskType(
   if (autoDevCommand?.kind === "skills" || autoDevCommand?.kind === "progress") {
     return "autodev_status";
   }
-  if (autoDevCommand?.kind === "workdir" || autoDevCommand?.kind === "init") {
+  if (autoDevCommand?.kind === "workdir" || autoDevCommand?.kind === "init" || autoDevCommand?.kind === "reconcile") {
     return "autodev_status";
   }
   if (autoDevCommand?.kind === "stop") {

@@ -32,6 +32,7 @@ export type AutoDevCommand =
   | { kind: "status" }
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
+  | { kind: "reconcile" }
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
   | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
@@ -51,6 +52,9 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
   }
   if (action === "stop") {
     return { kind: "stop" };
+  }
+  if (action === "reconcile" || action === "sync") {
+    return { kind: "reconcile" };
   }
   if (action === "workdir" || action === "wd") {
     const remainder = normalizedCommand.replace(/^\/autodev\s+(?:workdir|wd)\s*/i, "").trim();

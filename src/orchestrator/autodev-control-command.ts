@@ -5,9 +5,11 @@ import { existsSync } from "node:fs";
 
 import type { InboundMessage } from "../types";
 import type { OutputLanguage } from "../config";
-import { loadAutoDevContext, summarizeAutoDevTasks } from "../workflow/autodev";
+import { loadAutoDevContext, statusToSymbol, summarizeAutoDevTasks } from "../workflow/autodev";
+import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError } from "./helpers";
 import { byOutputLanguage } from "./output-language";
+import type { WorkflowDiagRunRecord } from "./workflow-diag";
 
 interface RoleSkillStatusLike {
   enabled: boolean;
@@ -34,6 +36,7 @@ export interface AutoDevControlCommandDeps {
   setAutoDevWorkdirOverride: (sessionKey: string, workdir: string) => void;
   clearAutoDevWorkdirOverride: (sessionKey: string) => void;
   runAutoDevInitEnhancement?: (input: AutoDevInitEnhancementInput) => Promise<AutoDevInitEnhancementResult>;
+  listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   sendNotice: (conversationId: string, text: string) => Promise<void>;
 }
 
@@ -188,6 +191,65 @@ export async function handleAutoDevLoopStopCommand(
       "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.",
     ),
   );
+}
+
+export async function handleAutoDevReconcileCommand(
+  deps: AutoDevControlCommandDeps,
+  input: AutoDevControlCommandInput & { workdir: string },
+): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
+  try {
+    const context = await loadAutoDevContext(input.workdir);
+    const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 100);
+    const healedStatuses = await healAutoDevTaskStatuses({
+      taskListPath: context.taskListPath,
+      tasks: context.tasks,
+      runs: recentRuns,
+      targetTaskIds: null,
+    });
+    const summary = summarizeAutoDevTasks((await loadAutoDevContext(input.workdir)).tasks);
+    if (healedStatuses.length === 0) {
+      await deps.sendNotice(
+        input.message.conversationId,
+        localize(
+          `[CodeHarbor] AutoDev 状态对账完成
+- changed: 0
+- result: no drift detected
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+          `[CodeHarbor] AutoDev reconcile completed
+- changed: 0
+- result: no drift detected
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+        ),
+      );
+      return;
+    }
+
+    const changedSummary = healedStatuses
+      .map((item) => `${item.taskId}:${statusToSymbol(item.from)}->${statusToSymbol(item.to)}`)
+      .join(", ");
+    await deps.sendNotice(
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 状态对账完成
+- changed: ${healedStatuses.length}
+- changes: ${changedSummary}
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+        `[CodeHarbor] AutoDev reconcile completed
+- changed: ${healedStatuses.length}
+- changes: ${changedSummary}
+- tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
+      ),
+    );
+  } catch (error) {
+    await deps.sendNotice(
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 状态对账失败: ${formatError(error)}`,
+        `[CodeHarbor] AutoDev reconcile failed: ${formatError(error)}`,
+      ),
+    );
+  }
 }
 
 export async function handleAutoDevWorkdirCommand(

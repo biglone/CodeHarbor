@@ -603,6 +603,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/autodev status` show AutoDev doc/task summary + currentTask/nextTask + run snapshot (when enabled)
   - `/autodev run [taskId]` auto-pick pending task (or run specified task) from `TASK_LIST.md` (when enabled)
   - `/autodev stop` graceful loop stop: finish current task, then stop before next task
+  - `/autodev reconcile` reconcile `TASK_LIST.md` task states from recent AutoDev run records
   - `/autodev workdir|wd [path]|status|clear` show/set/clear AutoDev workdir override for current session
   - `/autodev init|i [path] [--from file]` initialize `REQUIREMENTS.md` + `TASK_LIST.md` + `docs/AUTODEV_TASK_COMPASS.md` in target project
     - short mobile-friendly flow: `//autodev init StrawBerry` -> `//autodev run`
@@ -719,6 +720,7 @@ AutoDev (`/autodev`) conventions:
 - `/autodev run` loop is guarded by `AUTODEV_LOOP_MAX_RUNS` and `AUTODEV_LOOP_MAX_MINUTES`; reaching either limit pauses safely with a summary notice, and you can resume with `/autodev run`.
 - `/autodev run <taskId>` runs only the specified task.
 - `/autodev stop` does not interrupt the current task; it stops loop scheduling after the current task completes.
+- `/autodev reconcile` performs one-shot task-state reconciliation using recent AutoDev run records (useful after manual edits or interrupted sessions).
 - Loop guardrail rules:
   - `AUTODEV_LOOP_MAX_RUNS=0` means unlimited loop rounds.
   - `AUTODEV_LOOP_MAX_MINUTES=0` means unlimited loop wall-clock time.
@@ -727,7 +729,7 @@ AutoDev (`/autodev`) conventions:
   - `/autodev run <taskId>` is single-task mode and does not consume loop run/time budgets.
   - Recommended for long roadmap execution: set both loop limits to `0`, and keep `AUTODEV_MAX_CONSECUTIVE_FAILURES` + no-progress detection enabled as safety rails.
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
-- When reviewer verdict is `APPROVED`, CodeHarbor updates the task status to `✅` automatically.
+- Task closes to `✅` only when completion gate passes (reviewer approved + no explicit validation failure + auto-commit success when commit is required).
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.
 - AutoDev commit intent uses a hybrid strategy: prefer reviewer `SUMMARY` (role-skill output) when it matches the selected commit language; otherwise fall back to deterministic template inference.
 - Commit language policy: for a brand-new project (no history) the first AutoDev commit defaults to English; for existing projects, AutoDev follows the recent repository commit language trend.

@@ -57,6 +57,7 @@ function createDeps(options?: {
       overrides.delete(sessionKey);
     },
     runAutoDevInitEnhancement: options?.runAutoDevInitEnhancement,
+    listWorkflowDiagRunsBySession: () => [],
     sendNotice: async (_conversationId, text) => {
       notices.push(text);
     },

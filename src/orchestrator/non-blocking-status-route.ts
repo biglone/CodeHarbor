@@ -37,6 +37,7 @@ interface NonBlockingStatusRouteDeps {
     mode: "status" | "on" | "off" | "summary" | "progressive" | "full",
   ) => Promise<void>;
   handleAutoDevLoopStopCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
+  handleAutoDevReconcileCommand: (sessionKey: string, message: InboundMessage, workdir: string) => Promise<void>;
 }
 
 interface NonBlockingStatusRouteInput {
@@ -63,6 +64,7 @@ export async function tryHandleNonBlockingStatusRoute(
   const isAutoDevProgress = autoDevCommand?.kind === "progress";
   const isAutoDevSkills = autoDevCommand?.kind === "skills";
   const isAutoDevStop = autoDevCommand?.kind === "stop";
+  const isAutoDevReconcile = autoDevCommand?.kind === "reconcile";
 
   if (
     !isReadOnlyControlCommand &&
@@ -70,7 +72,8 @@ export async function tryHandleNonBlockingStatusRoute(
     !isAutoDevStatus &&
     !isAutoDevProgress &&
     !isAutoDevSkills &&
-    !isAutoDevStop
+    !isAutoDevStop &&
+    !isAutoDevReconcile
   ) {
     return false;
   }
@@ -96,6 +99,8 @@ export async function tryHandleNonBlockingStatusRoute(
     await deps.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
   } else if (isAutoDevStop) {
     await deps.handleAutoDevLoopStopCommand(sessionKey, message);
+  } else if (isAutoDevReconcile) {
+    await deps.handleAutoDevReconcileCommand(sessionKey, message, workdir);
   } else {
     await deps.handleAutoDevStatusCommand(sessionKey, message, workdir);
   }
@@ -115,6 +120,8 @@ export async function tryHandleNonBlockingStatusRoute(
               ? "autodev.skills"
               : isAutoDevStop
                 ? "autodev.stop"
+                : isAutoDevReconcile
+                  ? "autodev.reconcile"
                 : "autodev.status",
     queueWaitMs,
   });
