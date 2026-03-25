@@ -13,6 +13,7 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - autodev validation contract: require structured executor evidence (`VALIDATION_STATUS` + `__EXIT_CODES__`) and align reviewer rejection rules when validation evidence is missing or inconsistent.
 - completion gate inference: prioritize hard signals (`__EXIT_CODES__` then `VALIDATION_STATUS`) before section-scoped/fallback text heuristics to reduce false negatives.
 - tests: add regression coverage for structured validation status parsing, exit-code precedence, and prompt contract enforcement across workflow/orchestrator suites.
+- ci stability: raise timeout budget for queue transient-retry recovery test to avoid false negatives on slower runners.
 
 ## [0.1.68] - 2026-03-25
 

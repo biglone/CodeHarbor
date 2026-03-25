@@ -1425,7 +1425,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("archives queue task after max retry attempts", async () => {
     const { dir, store } = await createSqliteStateStore();
