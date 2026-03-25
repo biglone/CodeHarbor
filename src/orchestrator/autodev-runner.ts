@@ -65,6 +65,16 @@ interface AutoDevFailurePolicyResult {
   task: AutoDevTask;
 }
 
+type AutoDevCompletionGateReason =
+  | "reviewer_not_approved"
+  | "validation_not_passed"
+  | "auto_commit_not_committed";
+
+interface AutoDevCompletionGateResult {
+  passed: boolean;
+  reasons: AutoDevCompletionGateReason[];
+}
+
 interface AutoDevLoopStopCheckInput {
   sessionKey: string;
   conversationId: string;
@@ -618,28 +628,29 @@ export async function runAutoDevCommand(
       kind: "skipped",
       reason: localize("reviewer 未批准，未自动发布", "reviewer not approved; auto release skipped"),
     };
-    const finalStatusResult = await reconcileAutoDevTaskFinalStatus({
+    const validationPassed = inferAutoDevValidationPassed(result);
+    const markCompletedCandidate = result.approved && validationPassed;
+    const firstStatusResult = await reconcileAutoDevTaskFinalStatus({
       workdir: input.workdir,
       taskListPath: context.taskListPath,
       task: activeTask,
       expectedCurrentStatus: activeTask.status,
-      nextStatus: result.approved ? "completed" : "in_progress",
+      nextStatus: markCompletedCandidate ? "completed" : "in_progress",
     });
-    finalTask = finalStatusResult.task;
-    if (finalStatusResult.statusDriftDetected && finalStatusResult.observedStatus) {
+    finalTask = firstStatusResult.task;
+    if (firstStatusResult.statusDriftDetected && firstStatusResult.observedStatus) {
       const driftMessage = localize(
         `[CodeHarbor] AutoDev 状态保护：检测到任务 ${activeTask.id} 状态漂移（observed=${statusToSymbol(
-          finalStatusResult.observedStatus,
+          firstStatusResult.observedStatus,
         )}, expected=${statusToSymbol(activeTask.status)}），已修正为 ${statusToSymbol(finalTask.status)}。`,
         `[CodeHarbor] AutoDev status guard: detected status drift on task ${activeTask.id} (observed=${statusToSymbol(
-          finalStatusResult.observedStatus,
+          firstStatusResult.observedStatus,
         )}, expected=${statusToSymbol(activeTask.status)}); corrected to ${statusToSymbol(finalTask.status)}.`,
       );
       deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "status_guard", 0, driftMessage);
       await deps.channelSendNotice(input.message.conversationId, driftMessage);
     }
-
-    if (result.approved) {
+    if (markCompletedCandidate) {
       gitCommit = await tryAutoDevGitCommit({
         workdir: input.workdir,
         task: finalTask,
@@ -648,6 +659,25 @@ export async function runAutoDevCommand(
         autoCommit: deps.autoDevAutoCommit,
         logger: deps.logger,
       });
+    }
+    const completionGate = evaluateAutoDevCompletionGate({
+      reviewerApproved: result.approved,
+      validationPassed,
+      commitRequired: deps.autoDevAutoCommit && gitBaseline.available && gitBaseline.cleanBeforeRun,
+      gitCommit,
+    });
+    if (!completionGate.passed && finalTask.status !== "in_progress") {
+      const fallbackStatusResult = await reconcileAutoDevTaskFinalStatus({
+        workdir: input.workdir,
+        taskListPath: context.taskListPath,
+        task: finalTask,
+        expectedCurrentStatus: finalTask.status,
+        nextStatus: "in_progress",
+      });
+      finalTask = fallbackStatusResult.task;
+    }
+
+    if (completionGate.passed) {
       releaseResult = await tryAutoDevTaskRelease({
         workdir: input.workdir,
         task: finalTask,
@@ -659,6 +689,15 @@ export async function runAutoDevCommand(
         },
         logger: deps.logger,
       });
+    } else {
+      const gateReason = formatAutoDevCompletionGateReasons(completionGate.reasons, deps.outputLanguage);
+      releaseResult = {
+        kind: "skipped",
+        reason: localize(
+          `completion gate 未通过，已跳过自动发布（${gateReason}）`,
+          `completion gate not satisfied; auto release skipped (${gateReason})`,
+        ),
+      };
     }
     deps.recordAutoDevGitCommit(input.sessionKey, finalTask.id, gitCommit);
     deps.appendWorkflowDiagEvent(
@@ -706,6 +745,10 @@ export async function runAutoDevCommand(
         `[CodeHarbor] AutoDev 任务结果
 - task: ${finalTask.id}
 - reviewer approved: ${result.approved ? "yes" : "no"}
+- completionGate: ${completionGate.passed ? "passed" : "failed"}
+- completionGateReasons: ${
+          completionGate.passed ? "N/A" : formatAutoDevCompletionGateReasons(completionGate.reasons, deps.outputLanguage)
+        }
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
@@ -714,6 +757,10 @@ export async function runAutoDevCommand(
         `[CodeHarbor] AutoDev task result
 - task: ${finalTask.id}
 - reviewer approved: ${result.approved ? "yes" : "no"}
+- completionGate: ${completionGate.passed ? "passed" : "failed"}
+- completionGateReasons: ${
+          completionGate.passed ? "N/A" : formatAutoDevCompletionGateReasons(completionGate.reasons, deps.outputLanguage)
+        }
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
@@ -727,8 +774,12 @@ export async function runAutoDevCommand(
       "autodev",
       0,
       localize(
-        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
-        `AutoDev task result: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+        `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, completionGate=${
+          completionGate.passed ? "passed" : "failed"
+        }, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+        `AutoDev task result: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, completionGate=${
+          completionGate.passed ? "passed" : "failed"
+        }, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
       ),
     );
   } catch (error) {
@@ -825,6 +876,56 @@ async function reconcileAutoDevTaskFinalStatus(input: {
     statusDriftDetected,
     observedStatus: latestTask.status,
   };
+}
+
+function evaluateAutoDevCompletionGate(input: {
+  reviewerApproved: boolean;
+  validationPassed: boolean;
+  commitRequired: boolean;
+  gitCommit: AutoDevGitCommitResult;
+}): AutoDevCompletionGateResult {
+  const reasons: AutoDevCompletionGateReason[] = [];
+  if (!input.reviewerApproved) {
+    reasons.push("reviewer_not_approved");
+  }
+  if (!input.validationPassed) {
+    reasons.push("validation_not_passed");
+  }
+  if (input.commitRequired && input.gitCommit.kind !== "committed") {
+    reasons.push("auto_commit_not_committed");
+  }
+  return {
+    passed: reasons.length === 0,
+    reasons,
+  };
+}
+
+function inferAutoDevValidationPassed(result: MultiAgentWorkflowRunResult): boolean {
+  const combined = `${result.output}\n${result.review}`;
+  const hasExplicitFailure = /\b(tests?\s+failed|failed\b|timeout|timed out|hang|hung|未通过|失败|卡住|挂起|❌)\b/i.test(combined);
+  if (hasExplicitFailure) {
+    return false;
+  }
+  return true;
+}
+
+function formatAutoDevCompletionGateReasons(
+  reasons: AutoDevCompletionGateReason[],
+  outputLanguage: OutputLanguage,
+): string {
+  if (reasons.length === 0) {
+    return "N/A";
+  }
+  const labels = reasons.map((reason) => {
+    if (reason === "reviewer_not_approved") {
+      return outputLanguage === "en" ? "reviewer-not-approved" : "reviewer未批准";
+    }
+    if (reason === "validation_not_passed") {
+      return outputLanguage === "en" ? "validation-not-passed" : "验证未通过";
+    }
+    return outputLanguage === "en" ? "auto-commit-not-committed" : "自动提交未成功";
+  });
+  return labels.join(", ");
 }
 
 function resolveAutoDevTask(
