@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.75] - 2026-03-27
+
+- reviewer policy hardening: TASK_LIST rejection is now based on verifiable final state (`finalClean=no`) instead of command-text traces alone.
+- executor contract tightening: added explicit prohibition against `checkout/restore/reset` operations on `TASK_LIST.md` in both initial execution and repair prompts.
+- system-context injection: AutoDev now injects reviewer-visible `system_task_list_policy` facts (`changedSinceBaseline`, `restoredBySystem`, `finalClean`, `error`) before each review round.
+- autodev state persistence refinement: stop writing `in_progress` to `TASK_LIST.md` at run start to reduce cross-agent policy conflicts and dirty-state churn.
+
 ## [0.1.74] - 2026-03-27
 
 - autodev stage output echo: add `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED` (default `true`) so `/autodev run` can stream planner/executor/reviewer full outputs to Matrix in real time.
