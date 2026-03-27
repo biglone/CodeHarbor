@@ -539,6 +539,28 @@ describe("MatrixChannel", () => {
     await channel.stop();
   });
 
+  it("treats HTTP 530 as retryable for Matrix sends", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    fetchMock
+      .mockResolvedValueOnce(createErrorResponse(530, "Origin DNS Error", "cloudflare temporary"))
+      .mockResolvedValueOnce(createSendResponse("$retry-530-ok"));
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendMessage("!room:example.com", "retry 530");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/send/m.room.message/");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/send/m.room.message/");
+
+    await channel.stop();
+  });
+
   it("sends rich html for AI chat replies", async () => {
     const client = new FakeMatrixClient();
     client.startClient.mockImplementation(() => {

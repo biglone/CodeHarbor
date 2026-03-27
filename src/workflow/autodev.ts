@@ -33,6 +33,7 @@ export type AutoDevCommand =
   | { kind: "run"; taskId: string | null }
   | { kind: "stop" }
   | { kind: "reconcile" }
+  | { kind: "invalid"; action: string | null; option: string | null }
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
   | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
@@ -108,7 +109,11 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     if (["off", "disable", "disabled", "false", "0"].includes(option)) {
       return { kind: "progress", mode: "off" };
     }
-    return null;
+    return {
+      kind: "invalid",
+      action: "progress",
+      option: option || null,
+    };
   }
   if (action === "skills") {
     const option = (parts[2] ?? "").trim().toLowerCase();
@@ -124,10 +129,18 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     if (option === "summary" || option === "progressive" || option === "full") {
       return { kind: "skills", mode: option };
     }
-    return null;
+    return {
+      kind: "invalid",
+      action: "skills",
+      option: option || null,
+    };
   }
   if (action !== "run") {
-    return null;
+    return {
+      kind: "invalid",
+      action: action || null,
+      option: null,
+    };
   }
 
   const taskId = normalizedCommand.replace(/^\/autodev\s+run\s*/i, "").trim();

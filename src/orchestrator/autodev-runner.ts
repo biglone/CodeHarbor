@@ -110,6 +110,21 @@ interface AutoDevGitPreflightCheckInput {
   loopDeadlineAtIso: string | null;
 }
 
+async function sendAutoDevNoticeBestEffort(
+  deps: Pick<AutoDevRunnerDeps, "channelSendNotice" | "logger">,
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  try {
+    await deps.channelSendNotice(conversationId, text);
+  } catch (error) {
+    deps.logger.warn("Failed to send AutoDev notice", {
+      conversationId,
+      error: formatError(error),
+    });
+  }
+}
+
 interface RunWorkflowCommandInput {
   objective: string;
   sessionKey: string;
@@ -211,7 +226,7 @@ export async function runAutoDevCommand(
     const healSummary = healedStatuses
       .map((entry) => `${entry.taskId}:${statusToSymbol(entry.from)}->${statusToSymbol(entry.to)}`)
       .join(", ");
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         `[CodeHarbor] AutoDev 状态自愈：已根据最近运行记录修正任务状态。
@@ -223,7 +238,7 @@ export async function runAutoDevCommand(
   }
 
   if (!context.requirementsContent) {
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         `[CodeHarbor] AutoDev 需要 ${context.requirementsPath}，请先准备需求文档。`,
@@ -233,7 +248,7 @@ export async function runAutoDevCommand(
     return;
   }
   if (!context.taskListContent) {
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         `[CodeHarbor] AutoDev 需要 ${context.taskListPath}，请先准备任务清单。`,
@@ -243,7 +258,7 @@ export async function runAutoDevCommand(
     return;
   }
   if (context.tasks.length === 0) {
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         "[CodeHarbor] 未在 TASK_LIST.md 识别到任务（需包含任务 ID 与状态列）。",
@@ -314,7 +329,7 @@ export async function runAutoDevCommand(
             lastGitCommitSummary: null,
             lastGitCommitAt: null,
           });
-          await deps.channelSendNotice(
+          await sendAutoDevNoticeBestEffort(deps, 
             input.message.conversationId,
             localize(
               `[CodeHarbor] AutoDev 循环执行已达到轮次上限，已暂停。
@@ -355,7 +370,7 @@ export async function runAutoDevCommand(
             lastGitCommitSummary: null,
             lastGitCommitAt: null,
           });
-          await deps.channelSendNotice(
+          await sendAutoDevNoticeBestEffort(deps, 
             input.message.conversationId,
             localize(
               `[CodeHarbor] AutoDev 循环执行已达到时间上限，已暂停。
@@ -413,7 +428,7 @@ export async function runAutoDevCommand(
             lastGitCommitAt: null,
           });
           if (completedRuns === 0) {
-            await deps.channelSendNotice(
+            await sendAutoDevNoticeBestEffort(deps, 
               input.message.conversationId,
               localize(
                 "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。",
@@ -423,7 +438,7 @@ export async function runAutoDevCommand(
             return;
           }
           const summary = summarizeAutoDevTasks(loopContext.tasks);
-          await deps.channelSendNotice(
+          await sendAutoDevNoticeBestEffort(deps, 
             input.message.conversationId,
             localize(
               `[CodeHarbor] AutoDev 循环执行完成
@@ -489,7 +504,7 @@ export async function runAutoDevCommand(
             lastReleaseSummary: null,
             lastReleaseAt: null,
           });
-          await deps.channelSendNotice(
+          await sendAutoDevNoticeBestEffort(deps, 
             input.message.conversationId,
             localize(
               `[CodeHarbor] AutoDev 循环执行已停止：检测到本轮未产生任务状态变化。
@@ -512,7 +527,7 @@ export async function runAutoDevCommand(
         }
         if (refreshedTask && refreshedTask.status !== "completed") {
           deps.autoDevMetrics.recordLoopStop("task_incomplete");
-          await deps.channelSendNotice(
+          await sendAutoDevNoticeBestEffort(deps, 
             input.message.conversationId,
             localize(
               `[CodeHarbor] AutoDev 循环执行暂停：任务 ${refreshedTask.id} 当前状态为 ${statusToSymbol(refreshedTask.status)}。请处理后继续。`,
@@ -531,13 +546,13 @@ export async function runAutoDevCommand(
   const selectedTask = resolveAutoDevTask(context.tasks, requestedTaskId, requestedTaskLineIndex);
   if (!selectedTask) {
     if (requestedTaskId) {
-      await deps.channelSendNotice(
+      await sendAutoDevNoticeBestEffort(deps, 
         input.message.conversationId,
         localize(`[CodeHarbor] 未找到任务 ${requestedTaskId}。`, `[CodeHarbor] Task ${requestedTaskId} was not found.`),
       );
       return;
     }
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         "[CodeHarbor] 当前没有可执行任务（pending/in_progress）。",
@@ -547,14 +562,14 @@ export async function runAutoDevCommand(
     return;
   }
   if (selectedTask.status === "completed") {
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(`[CodeHarbor] 任务 ${selectedTask.id} 已完成（✅）。`, `[CodeHarbor] Task ${selectedTask.id} is already completed (✅).`),
     );
     return;
   }
   if (selectedTask.status === "cancelled") {
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(`[CodeHarbor] 任务 ${selectedTask.id} 已取消（❌）。`, `[CodeHarbor] Task ${selectedTask.id} is cancelled (❌).`),
     );
@@ -635,7 +650,7 @@ export async function runAutoDevCommand(
     ),
   );
 
-  await deps.channelSendNotice(
+  await sendAutoDevNoticeBestEffort(deps, 
     input.message.conversationId,
     localize(
       `[CodeHarbor] AutoDev 启动任务 ${activeTask.id}: ${activeTask.description}`,
@@ -667,7 +682,7 @@ export async function runAutoDevCommand(
         `[CodeHarbor] AutoDev policy guard: workflow modified TASK_LIST.md and was auto-rolled back (task status is system-managed only).`,
       );
       deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "task_list_guard", 0, taskListGuardMessage);
-      await deps.channelSendNotice(input.message.conversationId, taskListGuardMessage);
+      await sendAutoDevNoticeBestEffort(deps, input.message.conversationId, taskListGuardMessage);
       if (!taskListGuard.restored) {
         throw new Error(taskListGuard.error ?? "failed to restore TASK_LIST.md after forbidden workflow mutation");
       }
@@ -683,7 +698,7 @@ export async function runAutoDevCommand(
       reason: localize("未触发自动发布", "auto release not attempted"),
     };
     const validationPassed = inferAutoDevValidationPassed(result);
-    const taskListPolicyPassed = !taskListGuard.changed;
+    const taskListPolicyPassed = taskListGuard.restored;
     const reviewerApprovedForGate = result.approved && taskListPolicyPassed;
     if (!result.approved) {
       gitCommit = {
@@ -728,7 +743,7 @@ export async function runAutoDevCommand(
         )}, expected=${statusToSymbol(activeTask.status)}); corrected to ${statusToSymbol(finalTask.status)}.`,
       );
       deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "status_guard", 0, driftMessage);
-      await deps.channelSendNotice(input.message.conversationId, driftMessage);
+      await sendAutoDevNoticeBestEffort(deps, input.message.conversationId, driftMessage);
     }
     if (markCompletedCandidate) {
       gitCommit = await tryAutoDevGitCommit({
@@ -820,7 +835,7 @@ export async function runAutoDevCommand(
 
     const refreshed = await loadAutoDevContext(input.workdir);
     const nextTask = selectAutoDevTask(refreshed.tasks);
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.message.conversationId,
       localize(
         `[CodeHarbor] AutoDev 任务结果
@@ -916,7 +931,7 @@ export async function runAutoDevCommand(
     );
     if (failurePolicy.blocked) {
       deps.autoDevMetrics.recordTaskBlocked();
-      await deps.channelSendNotice(
+      await sendAutoDevNoticeBestEffort(deps, 
         input.message.conversationId,
         localize(
           `[CodeHarbor] AutoDev 任务 ${activeTask.id} 连续失败 ${failurePolicy.streak} 次，已标记为阻塞（🚫）。`,
@@ -1203,7 +1218,7 @@ async function failAutoDevOnGitPreflightError(
   if (autoStashEnabled) {
     const stashResult = await tryAutoDevPreflightAutoStash(input.workdir);
     if (stashResult.kind === "stashed") {
-      await deps.channelSendNotice(
+      await sendAutoDevNoticeBestEffort(deps, 
         input.conversationId,
         localize(
           `[CodeHarbor] AutoDev Git preflight：检测到脏工作区，已自动暂存后继续执行。
@@ -1260,7 +1275,7 @@ async function failAutoDevOnGitPreflightError(
   });
   deps.autoDevMetrics.recordRunOutcome("failed");
 
-  await deps.channelSendNotice(
+  await sendAutoDevNoticeBestEffort(deps, 
     input.conversationId,
     localize(
       `[CodeHarbor] AutoDev 已停止（Git preflight 未通过）。
@@ -1309,7 +1324,7 @@ async function handleAutoDevLoopStopIfRequested(
       lastGitCommitSummary: null,
       lastGitCommitAt: null,
     });
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.conversationId,
       localize(
         `[CodeHarbor] AutoDev 循环执行已停止。
@@ -1341,7 +1356,7 @@ async function handleAutoDevLoopStopIfRequested(
       lastGitCommitSummary: null,
       lastGitCommitAt: null,
     });
-    await deps.channelSendNotice(
+    await sendAutoDevNoticeBestEffort(deps, 
       input.conversationId,
       localize(
         `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。

@@ -45,6 +45,7 @@ const MATRIX_HTTP_RETRY_POLICY = createRetryPolicy({
   multiplier: 2,
   jitterRatio: 0.2,
 });
+const MATRIX_RETRYABLE_HTTP_STATUSES = new Set([...DEFAULT_RETRYABLE_HTTP_STATUSES, 530]);
 const ACCEPTED_MSG_TYPES = new Set(["m.text", "m.image", "m.file", "m.audio", "m.video"]);
 
 export class MatrixChannel implements Channel {
@@ -351,7 +352,7 @@ export class MatrixChannel implements Channel {
       {
         timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
         policy: MATRIX_HTTP_RETRY_POLICY,
-        retryableStatuses: DEFAULT_RETRYABLE_HTTP_STATUSES,
+        retryableStatuses: MATRIX_RETRYABLE_HTTP_STATUSES,
       },
     );
 
@@ -437,7 +438,7 @@ export class MatrixChannel implements Channel {
         {
           timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
           policy: MATRIX_HTTP_RETRY_POLICY,
-          retryableStatuses: DEFAULT_RETRYABLE_HTTP_STATUSES,
+          retryableStatuses: MATRIX_RETRYABLE_HTTP_STATUSES,
         },
       );
       if (candidate.ok) {

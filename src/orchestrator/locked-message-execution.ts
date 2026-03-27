@@ -198,6 +198,7 @@ export async function executeLockedMessage(
     {
       workflowEnabled: deps.workflowEnabled,
       markEventProcessed: (sessionKey, eventId) => deps.markEventProcessed(sessionKey, eventId),
+      sendNotice: (conversationId, text) => deps.sendNotice(conversationId, text),
       handleControlCommand: (command, sessionKey, message, requestId) =>
         deps.handleControlCommand(command, sessionKey, message, requestId),
       handleWorkflowStatusCommand: (sessionKey, message) => deps.handleWorkflowStatusCommand(sessionKey, message),

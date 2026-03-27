@@ -108,7 +108,11 @@ describe("AutoDev workflow helpers", () => {
     expect(parseAutoDevCommand("/autodev progress status")).toEqual({ kind: "progress", mode: "status" });
     expect(parseAutoDevCommand("/autodev progress on")).toEqual({ kind: "progress", mode: "on" });
     expect(parseAutoDevCommand("//autodev progress off")).toEqual({ kind: "progress", mode: "off" });
-    expect(parseAutoDevCommand("/autodev progress maybe")).toBeNull();
+    expect(parseAutoDevCommand("/autodev progress maybe")).toEqual({
+      kind: "invalid",
+      action: "progress",
+      option: "maybe",
+    });
     expect(parseAutoDevCommand("/autodev skills")).toEqual({ kind: "skills", mode: "status" });
     expect(parseAutoDevCommand("//autodev skills status")).toEqual({ kind: "skills", mode: "status" });
     expect(parseAutoDevCommand("/autodev skills on")).toEqual({ kind: "skills", mode: "on" });
@@ -116,12 +120,25 @@ describe("AutoDev workflow helpers", () => {
     expect(parseAutoDevCommand("/autodev skills progressive")).toEqual({ kind: "skills", mode: "progressive" });
     expect(parseAutoDevCommand("/autodev skills full")).toEqual({ kind: "skills", mode: "full" });
     expect(parseAutoDevCommand("/autodev skills summary")).toEqual({ kind: "skills", mode: "summary" });
-    expect(parseAutoDevCommand("/autodev skills maybe")).toBeNull();
+    expect(parseAutoDevCommand("/autodev skills maybe")).toEqual({
+      kind: "invalid",
+      action: "skills",
+      option: "maybe",
+    });
     expect(parseAutoDevCommand("/autodev run")).toEqual({ kind: "run", taskId: null });
     expect(parseAutoDevCommand("/autodev run T3.2")).toEqual({ kind: "run", taskId: "T3.2" });
     expect(parseAutoDevCommand("//autodev run T3.3")).toEqual({ kind: "run", taskId: "T3.3" });
     expect(parseAutoDevCommand("///autodev run T3.4")).toEqual({ kind: "run", taskId: "T3.4" });
-    expect(parseAutoDevCommand("/autodev unknown")).toBeNull();
+    expect(parseAutoDevCommand("/autodev unknown")).toEqual({
+      kind: "invalid",
+      action: "unknown",
+      option: null,
+    });
+    expect(parseAutoDevCommand("/autodev 润")).toEqual({
+      kind: "invalid",
+      action: "润",
+      option: null,
+    });
     expect(parseAutoDevCommand("/autodevrun")).toBeNull();
   });
 

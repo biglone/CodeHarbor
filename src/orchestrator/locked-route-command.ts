@@ -16,6 +16,7 @@ export type AutoDevCommandLike = ReturnType<typeof parseAutoDevCommand>;
 interface HandleLockedRouteCommandDeps {
   workflowEnabled: boolean;
   markEventProcessed: (sessionKey: string, eventId: string) => void;
+  sendNotice: (conversationId: string, text: string) => Promise<void>;
   handleControlCommand: (
     command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade",
     sessionKey: string,
@@ -134,5 +135,23 @@ export async function handleLockedRouteCommand(
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }
+  if (autoDevCommand?.kind === "invalid") {
+    await deps.sendNotice(
+      input.message.conversationId,
+      buildAutoDevInvalidCommandNotice(autoDevCommand.action, autoDevCommand.option),
+    );
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { handled: true, workflowCommand, autoDevCommand };
+  }
   return { handled: false, workflowCommand, autoDevCommand };
+}
+
+function buildAutoDevInvalidCommandNotice(action: string | null, option: string | null): string {
+  const actionLabel = action?.trim() || "(empty)";
+  const optionLabel = option?.trim();
+  const detail = optionLabel ? `${actionLabel} ${optionLabel}` : actionLabel;
+  return `[CodeHarbor] 无效的 /autodev 子命令（invalid /autodev subcommand）: ${detail}
+- usage: /autodev status | /autodev run [taskId] | /autodev stop | /autodev reconcile
+- usage: /autodev workdir [path]|status|clear | /autodev init [path] [--from file] [--dry-run] [--force]
+- usage: /autodev progress [on|off|status] | /autodev skills [on|off|summary|progressive|full|status]`;
 }

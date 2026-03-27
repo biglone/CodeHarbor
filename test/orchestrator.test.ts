@@ -48,6 +48,13 @@ class FakeChannel implements Channel {
   async stop(): Promise<void> {}
 }
 
+class NoticeFailingChannel extends FakeChannel {
+  override async sendNotice(conversationId: string, text: string): Promise<void> {
+    this.notices.push({ conversationId, text });
+    throw new Error("simulated notice send failure");
+  }
+}
+
 interface FakeSessionState {
   codexSessionId: string | null;
   processedEventIds: Set<string>;
@@ -2591,6 +2598,33 @@ describe("Orchestrator", () => {
     expect(channel.sent[0]?.text).toBe("ok:/autodev run T1.1");
   });
 
+  it("rejects invalid /autodev subcommands instead of routing to chat", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/autodev 润",
+        eventId: "$autodev-invalid-subcommand",
+      }),
+    );
+
+    expect(executor.calls).toHaveLength(0);
+    expect(channel.sent).toHaveLength(0);
+    expect(channel.notices.some((entry) => entry.text.includes("invalid /autodev subcommand"))).toBe(true);
+  });
+
   it("runs /autodev and marks selected task completed when approved", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
@@ -2633,6 +2667,54 @@ describe("Orchestrator", () => {
       expect(updated).toContain("| T9.1 | 实现自动化能力 | 1h | P0 | - | ✅ |");
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 启动任务 T9.1"))).toBe(true);
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev 任务结果"))).toBe(true);
+      expect(executor.calls.some((call) => call.text.includes("[role:planner]"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps autodev run successful when Matrix notice sending fails", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-notice-failure-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Requirements\n- implement T9.2\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |",
+        "|--------|----------|----------|--------|------|------|",
+        "| T9.2 | notice failure should not fail run | 1h | P0 | - | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new NoticeFailingChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await expect(
+        orchestrator.handleMessage(
+          makeInbound({
+            isDirectMessage: true,
+            text: "/autodev run T9.2",
+            eventId: "$autodev-run-notice-failure",
+          }),
+        ),
+      ).resolves.toBeUndefined();
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T9.2 | notice failure should not fail run | 1h | P0 | - | ✅ |");
       expect(executor.calls.some((call) => call.text.includes("[role:planner]"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
@@ -3331,7 +3413,7 @@ describe("Orchestrator", () => {
     }
   });
 
-  it("fails completion gate when workflow mutates TASK_LIST even if reviewer approves", async () => {
+  it("allows completion gate when TASK_LIST drift is auto-restored", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-tasklist-policy-gate-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
     const taskListPath = path.join(tempRoot, "TASK_LIST.md");
@@ -3416,12 +3498,12 @@ describe("Orchestrator", () => {
       );
 
       const updated = await fs.readFile(taskListPath, "utf8");
-      expect(updated).toContain("| T16.11 | task list policy gate | 🔄 |");
+      expect(updated).toContain("| T16.11 | task list policy gate | ✅ |");
       const resultNotice = channel.notices.find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
       expect(resultNotice).toContain("reviewer approved: yes");
-      expect(resultNotice).toContain("completionGate: failed");
-      expect(resultNotice).toContain("completionGateReasons: task-list-policy-violated");
-      expect(resultNotice).toContain("task status: 🔄");
+      expect(resultNotice).toContain("completionGate: passed");
+      expect(resultNotice).toContain("completionGateReasons: N/A");
+      expect(resultNotice).toContain("task status: ✅");
       expect(channel.notices.some((entry) => entry.text.includes("AutoDev policy guard"))).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

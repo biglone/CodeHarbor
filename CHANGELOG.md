@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.71] - 2026-03-27
+
+- command routing hardening: invalid `/autodev` subcommands (for example `/autodev 润`) are now rejected with explicit usage guidance instead of falling through to chat execution.
+- task-state flow resiliency: AutoDev notice sends now use best-effort delivery so transient Matrix notification failures no longer fail an otherwise successful task run.
+- completion gate refinement: `TASK_LIST.md` ownership guard now treats auto-restored drift as policy-passed, avoiding false rejections after successful rollback.
+- Matrix transport robustness: treat HTTP `530` as retryable for Matrix send/fetch retry paths to reduce failures on transient edge/network conditions.
+- tests: add/adjust regression coverage for invalid autodev command handling, Matrix 530 retry behavior, notice-send failure tolerance, and auto-restored task-list drift.
+
 ## [0.1.70] - 2026-03-25
 
 - autodev task-state ownership: enforce `TASK_LIST.md` as orchestrator-managed only; workflow-side edits are now auto-rolled back and blocked from completion gate (`task-list-policy-violated`).
