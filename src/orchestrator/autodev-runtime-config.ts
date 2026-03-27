@@ -10,6 +10,7 @@ import {
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
   DEFAULT_AUTODEV_RUN_ARCHIVE_DIR,
   DEFAULT_AUTODEV_RUN_ARCHIVE_ENABLED,
+  DEFAULT_AUTODEV_STAGE_OUTPUT_ECHO_ENABLED,
 } from "./orchestrator-constants";
 import type { OrchestratorOptions } from "./orchestrator-config-types";
 import { parseEnvBoolean, parseEnvNonNegativeInt, parseEnvPositiveInt } from "./helpers";
@@ -24,6 +25,7 @@ export interface AutoDevRuntimeConfig {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -61,6 +63,9 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
       parseArchiveDirEnv(process.env.AUTODEV_RUN_ARCHIVE_DIR, DEFAULT_AUTODEV_RUN_ARCHIVE_DIR),
     autoDevDetailedProgressDefaultEnabled:
       options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
+    autoDevStageOutputEchoDefaultEnabled:
+      options?.autoDevStageOutputEchoEnabled ??
+      parseEnvBoolean(process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED, DEFAULT_AUTODEV_STAGE_OUTPUT_ECHO_ENABLED),
     autoDevInitEnhancementEnabled:
       options?.autoDevInitEnhancementEnabled ??
       parseEnvBoolean(process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED, DEFAULT_AUTODEV_INIT_ENHANCEMENT_ENABLED),

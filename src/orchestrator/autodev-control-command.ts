@@ -22,11 +22,14 @@ interface RoleSkillStatusLike {
 
 export interface AutoDevControlCommandDeps {
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   outputLanguage: OutputLanguage;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
   setAutoDevDetailedProgressEnabled: (sessionKey: string, enabled: boolean) => void;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
+  setAutoDevStageOutputEchoEnabled: (sessionKey: string, enabled: boolean) => void;
   setWorkflowRoleSkillPolicyOverride: (
     sessionKey: string,
     next: { enabled?: boolean; mode?: "summary" | "progressive" | "full" },
@@ -108,6 +111,47 @@ export async function handleAutoDevProgressCommand(
 - session: ${input.sessionKey}`,
       `[CodeHarbor] AutoDev progress echo updated
 - detailedProgress: ${enabled ? "on" : "off"}
+- default: ${defaultMode}
+- session: ${input.sessionKey}`,
+    ),
+  );
+}
+
+export async function handleAutoDevContentCommand(
+  deps: AutoDevControlCommandDeps,
+  input: AutoDevControlCommandInput & { mode: "status" | "on" | "off" },
+): Promise<void> {
+  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
+  const current = deps.isAutoDevStageOutputEchoEnabled(input.sessionKey) ? "on" : "off";
+  const defaultMode = deps.autoDevStageOutputEchoDefaultEnabled ? "on" : "off";
+  if (input.mode === "status") {
+    await deps.sendNotice(
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 阶段内容回显设置
+- stageOutputEcho: ${current}
+- default: ${defaultMode}
+- usage: /autodev content on|off|status`,
+        `[CodeHarbor] AutoDev stage output echo settings
+- stageOutputEcho: ${current}
+- default: ${defaultMode}
+- usage: /autodev content on|off|status`,
+      ),
+    );
+    return;
+  }
+
+  const enabled = input.mode === "on";
+  deps.setAutoDevStageOutputEchoEnabled(input.sessionKey, enabled);
+  await deps.sendNotice(
+    input.message.conversationId,
+    localize(
+      `[CodeHarbor] AutoDev 阶段内容回显已更新
+- stageOutputEcho: ${enabled ? "on" : "off"}
+- default: ${defaultMode}
+- session: ${input.sessionKey}`,
+      `[CodeHarbor] AutoDev stage output echo updated
+- stageOutputEcho: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${input.sessionKey}`,
     ),

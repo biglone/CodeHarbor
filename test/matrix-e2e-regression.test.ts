@@ -741,6 +741,7 @@ describe("Matrix e2e regression", () => {
     expect(channel.notices.some((entry) => entry.text.includes("/autodev run [taskId]"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/autodev stop"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("/autodev progress [on|off|status]"))).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("/autodev content [on|off|status]"))).toBe(true);
     expect(
       channel.notices.some((entry) =>
         entry.text.includes("/autodev skills [on|off|summary|progressive|full|status]"),

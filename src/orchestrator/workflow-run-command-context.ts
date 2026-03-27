@@ -13,6 +13,7 @@ interface WorkflowRunCommandContextInput {
   sendProgressUpdate: WorkflowRunDispatchContext["sendProgressUpdate"];
   appendWorkflowDiagEvent: WorkflowRunDispatchContext["appendWorkflowDiagEvent"];
   isAutoDevDetailedProgressEnabled: WorkflowRunDispatchContext["isAutoDevDetailedProgressEnabled"];
+  isAutoDevStageOutputEchoEnabled: WorkflowRunDispatchContext["isAutoDevStageOutputEchoEnabled"];
   resolveWorkflowRoleSkillPolicy: WorkflowRunDispatchContext["resolveWorkflowRoleSkillPolicy"];
   runWorkflow: WorkflowRunDispatchContext["runWorkflow"];
   sendMessage: WorkflowRunDispatchContext["sendMessage"];
@@ -35,6 +36,7 @@ export function buildWorkflowRunCommandDispatchContext(
     sendProgressUpdate: input.sendProgressUpdate,
     appendWorkflowDiagEvent: input.appendWorkflowDiagEvent,
     isAutoDevDetailedProgressEnabled: input.isAutoDevDetailedProgressEnabled,
+    isAutoDevStageOutputEchoEnabled: input.isAutoDevStageOutputEchoEnabled,
     resolveWorkflowRoleSkillPolicy: input.resolveWorkflowRoleSkillPolicy,
     runWorkflow: input.runWorkflow,
     sendMessage: input.sendMessage,

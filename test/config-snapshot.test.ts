@@ -97,6 +97,7 @@ describe("config snapshot commands", () => {
     expect(parsed.env).toHaveProperty("AUTODEV_PREFLIGHT_AUTO_STASH");
     expect(parsed.env).toHaveProperty("AUTODEV_RUN_ARCHIVE_ENABLED");
     expect(parsed.env).toHaveProperty("AUTODEV_RUN_ARCHIVE_DIR");
+    expect(parsed.env).toHaveProperty("AUTODEV_STAGE_OUTPUT_ECHO_ENABLED");
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_ENABLED");
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS");
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_MAX_CHARS");

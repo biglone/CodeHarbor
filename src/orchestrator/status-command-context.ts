@@ -22,6 +22,7 @@ interface StatusCommandContextInput {
   cliCompatEnabled: boolean;
   workflowEnabled: boolean;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   workflowPlanContextMaxChars: number | null;
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
@@ -64,6 +65,7 @@ interface StatusCommandContextInput {
   pendingAutoDevLoopStopRequests: Set<string>;
   pendingStopRequests: Set<string>;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   buildWorkflowRoleSkillStatus: (sessionKey: string) => {
@@ -93,6 +95,7 @@ interface StatusCommandRuntimeConfigInput {
   cliCompat: { enabled: boolean };
   workflowRunner: { isEnabled: () => boolean };
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   workflowPlanContextMaxChars: number | null;
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
@@ -127,6 +130,7 @@ interface StatusCommandRuntimeActionInput {
   rateLimiter: { snapshot: () => RateLimiterSnapshot };
   getBackendRuntimeStats: StatusCommandContextInput["getBackendRuntimeStats"];
   isAutoDevDetailedProgressEnabled: StatusCommandContextInput["isAutoDevDetailedProgressEnabled"];
+  isAutoDevStageOutputEchoEnabled: StatusCommandContextInput["isAutoDevStageOutputEchoEnabled"];
   listWorkflowDiagRunsBySession: StatusCommandContextInput["listWorkflowDiagRunsBySession"];
   listWorkflowDiagEvents: StatusCommandContextInput["listWorkflowDiagEvents"];
   buildWorkflowRoleSkillStatus: StatusCommandContextInput["buildWorkflowRoleSkillStatus"];
@@ -155,6 +159,7 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     cliCompatEnabled: input.cliCompatEnabled,
     workflowEnabled: input.workflowEnabled,
     autoDevDetailedProgressDefaultEnabled: input.autoDevDetailedProgressDefaultEnabled,
+    autoDevStageOutputEchoDefaultEnabled: input.autoDevStageOutputEchoDefaultEnabled,
     workflowPlanContextMaxChars: input.workflowPlanContextMaxChars,
     workflowOutputContextMaxChars: input.workflowOutputContextMaxChars,
     workflowFeedbackContextMaxChars: input.workflowFeedbackContextMaxChars,
@@ -180,6 +185,7 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     hasPendingAutoDevLoopStopRequest: (sessionKey: string) => input.pendingAutoDevLoopStopRequests.has(sessionKey),
     hasPendingStopRequest: (sessionKey: string) => input.pendingStopRequests.has(sessionKey),
     isAutoDevDetailedProgressEnabled: (sessionKey: string) => input.isAutoDevDetailedProgressEnabled(sessionKey),
+    isAutoDevStageOutputEchoEnabled: (sessionKey: string) => input.isAutoDevStageOutputEchoEnabled(sessionKey),
     listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) =>
       input.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
     listWorkflowDiagEvents: (runId: string, limit?: number) => input.listWorkflowDiagEvents(runId, limit),
@@ -208,6 +214,7 @@ export function buildStatusCommandDispatchContextFromRuntime(
     cliCompatEnabled: input.config.cliCompat.enabled,
     workflowEnabled: input.config.workflowRunner.isEnabled(),
     autoDevDetailedProgressDefaultEnabled: input.config.autoDevDetailedProgressDefaultEnabled,
+    autoDevStageOutputEchoDefaultEnabled: input.config.autoDevStageOutputEchoDefaultEnabled,
     workflowPlanContextMaxChars: input.config.workflowPlanContextMaxChars,
     workflowOutputContextMaxChars: input.config.workflowOutputContextMaxChars,
     workflowFeedbackContextMaxChars: input.config.workflowFeedbackContextMaxChars,
@@ -235,6 +242,7 @@ export function buildStatusCommandDispatchContextFromRuntime(
     getRateLimiterSnapshot: () => input.actions.rateLimiter.snapshot(),
     getBackendRuntimeStats: input.actions.getBackendRuntimeStats,
     isAutoDevDetailedProgressEnabled: input.actions.isAutoDevDetailedProgressEnabled,
+    isAutoDevStageOutputEchoEnabled: input.actions.isAutoDevStageOutputEchoEnabled,
     listWorkflowDiagRunsBySession: input.actions.listWorkflowDiagRunsBySession,
     listWorkflowDiagEvents: input.actions.listWorkflowDiagEvents,
     buildWorkflowRoleSkillStatus: input.actions.buildWorkflowRoleSkillStatus,

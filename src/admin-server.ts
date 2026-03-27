@@ -62,6 +62,7 @@ const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
   "AUTODEV_RUN_ARCHIVE_ENABLED",
+  "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
   "AUTODEV_PREFLIGHT_AUTO_STASH",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
 ]);
@@ -1310,6 +1311,11 @@ export class AdminServer {
         envUpdates.AUTODEV_RUN_ARCHIVE_DIR = value;
         markUpdatedKey("autoDev.runArchiveDir");
       }
+      if ("stageOutputEchoEnabled" in autoDev) {
+        const value = normalizeBoolean(autoDev.stageOutputEchoEnabled, true);
+        envUpdates.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED = String(value);
+        markUpdatedKey("autoDev.stageOutputEchoEnabled");
+      }
       if ("maxConsecutiveFailures" in autoDev) {
         const value = normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
         envUpdates.AUTODEV_MAX_CONSECUTIVE_FAILURES = String(value);
@@ -1801,6 +1807,10 @@ export class AdminServer {
           throw new HttpError(400, "autoDev.runArchiveDir cannot be empty.");
         }
         markCheckedKey("autoDev.runArchiveDir");
+      }
+      if ("stageOutputEchoEnabled" in autoDev) {
+        normalizeBoolean(autoDev.stageOutputEchoEnabled, true);
+        markCheckedKey("autoDev.stageOutputEchoEnabled");
       }
       if ("maxConsecutiveFailures" in autoDev) {
         normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
@@ -2370,6 +2380,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     maxConsecutiveFailures: number;
     runArchiveEnabled: boolean;
     runArchiveDir: string;
+    stageOutputEchoEnabled: boolean;
     initEnhancementEnabled: boolean;
     initEnhancementTimeoutMs: number;
     initEnhancementMaxChars: number;
@@ -2399,6 +2410,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
       autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
       runArchiveEnabled: normalizeBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, true),
       runArchiveDir: process.env.AUTODEV_RUN_ARCHIVE_DIR?.trim() || ".codeharbor/autodev-runs",
+      stageOutputEchoEnabled: normalizeBoolean(process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED, true),
       maxConsecutiveFailures: normalizePositiveInt(
         process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES,
         3,

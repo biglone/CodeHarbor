@@ -37,6 +37,7 @@ export type AutoDevCommand =
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
   | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
+  | { kind: "content"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" };
 
 export function parseAutoDevCommand(text: string): AutoDevCommand | null {
@@ -112,6 +113,23 @@ export function parseAutoDevCommand(text: string): AutoDevCommand | null {
     return {
       kind: "invalid",
       action: "progress",
+      option: option || null,
+    };
+  }
+  if (action === "content") {
+    const option = (parts[2] ?? "").trim().toLowerCase();
+    if (!option || option === "status") {
+      return { kind: "content", mode: "status" };
+    }
+    if (["on", "enable", "enabled", "true", "1"].includes(option)) {
+      return { kind: "content", mode: "on" };
+    }
+    if (["off", "disable", "disabled", "false", "0"].includes(option)) {
+      return { kind: "content", mode: "off" };
+    }
+    return {
+      kind: "invalid",
+      action: "content",
       option: option || null,
     };
   }

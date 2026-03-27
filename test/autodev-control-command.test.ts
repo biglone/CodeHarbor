@@ -35,11 +35,14 @@ function createDeps(options?: {
   const overrides = new Map<string, string>();
   const deps: AutoDevControlCommandDeps = {
     autoDevDetailedProgressDefaultEnabled: true,
+    autoDevStageOutputEchoDefaultEnabled: true,
     outputLanguage: options?.outputLanguage ?? "en",
     pendingAutoDevLoopStopRequests: new Set<string>(),
     activeAutoDevLoopSessions: new Set<string>(),
     isAutoDevDetailedProgressEnabled: () => true,
     setAutoDevDetailedProgressEnabled: () => {},
+    isAutoDevStageOutputEchoEnabled: () => true,
+    setAutoDevStageOutputEchoEnabled: () => {},
     setWorkflowRoleSkillPolicyOverride: () => {},
     buildWorkflowRoleSkillStatus: () => ({
       enabled: true,

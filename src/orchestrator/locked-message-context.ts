@@ -14,6 +14,7 @@ interface LockedMessageContextInput {
   handleWorkflowStatusCommand: LockedMessageDispatchContext["handleWorkflowStatusCommand"];
   handleAutoDevStatusCommand: LockedMessageDispatchContext["handleAutoDevStatusCommand"];
   handleAutoDevProgressCommand: LockedMessageDispatchContext["handleAutoDevProgressCommand"];
+  handleAutoDevContentCommand: LockedMessageDispatchContext["handleAutoDevContentCommand"];
   handleAutoDevSkillsCommand: LockedMessageDispatchContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: LockedMessageDispatchContext["handleAutoDevLoopStopCommand"];
   handleAutoDevReconcileCommand: LockedMessageDispatchContext["handleAutoDevReconcileCommand"];
@@ -47,6 +48,7 @@ export function buildLockedMessageDispatchContext(
     handleWorkflowStatusCommand: input.handleWorkflowStatusCommand,
     handleAutoDevStatusCommand: input.handleAutoDevStatusCommand,
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
+    handleAutoDevContentCommand: input.handleAutoDevContentCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
     handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
@@ -82,6 +84,7 @@ interface LockedMessageRuntimeContextInput {
     | "handleWorkflowStatusCommand"
     | "handleAutoDevStatusCommand"
     | "handleAutoDevProgressCommand"
+    | "handleAutoDevContentCommand"
     | "handleAutoDevSkillsCommand"
     | "handleAutoDevLoopStopCommand"
     | "handleAutoDevReconcileCommand"
@@ -122,6 +125,7 @@ export function buildLockedMessageDispatchContextFromRuntime(
     handleWorkflowStatusCommand: input.controlHandlers.handleWorkflowStatusCommand,
     handleAutoDevStatusCommand: input.controlHandlers.handleAutoDevStatusCommand,
     handleAutoDevProgressCommand: input.controlHandlers.handleAutoDevProgressCommand,
+    handleAutoDevContentCommand: input.controlHandlers.handleAutoDevContentCommand,
     handleAutoDevSkillsCommand: input.controlHandlers.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.controlHandlers.handleAutoDevLoopStopCommand,
     handleAutoDevReconcileCommand: input.controlHandlers.handleAutoDevReconcileCommand,

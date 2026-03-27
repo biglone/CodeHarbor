@@ -284,6 +284,7 @@ describe("AdminServer", () => {
             autoReleasePush: true,
             runArchiveEnabled: true,
             runArchiveDir: ".codeharbor/autodev-runs",
+            stageOutputEchoEnabled: true,
             maxConsecutiveFailures: 4,
             initEnhancementEnabled: true,
             initEnhancementTimeoutMs: 120000,
@@ -1434,6 +1435,7 @@ describe("AdminServer", () => {
           autoReleasePush: false,
           runArchiveEnabled: true,
           runArchiveDir: ".codeharbor/autodev-runs",
+          stageOutputEchoEnabled: true,
           maxConsecutiveFailures: 4,
           initEnhancementEnabled: true,
           initEnhancementTimeoutMs: 240000,
@@ -1455,6 +1457,7 @@ describe("AdminServer", () => {
           AUTODEV_AUTO_RELEASE_PUSH: "true",
           AUTODEV_RUN_ARCHIVE_ENABLED: "false",
           AUTODEV_RUN_ARCHIVE_DIR: ".codeharbor/autodev-runs-custom",
+          AUTODEV_STAGE_OUTPUT_ECHO_ENABLED: "false",
           AUTODEV_PREFLIGHT_AUTO_STASH: "true",
           AUTODEV_MAX_CONSECUTIVE_FAILURES: "5",
           AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "7000",
@@ -1500,6 +1503,7 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
     expect(envRaw).toContain("AUTODEV_RUN_ARCHIVE_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_RUN_ARCHIVE_DIR=.codeharbor/autodev-runs-custom");
+    expect(envRaw).toContain("AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_PREFLIGHT_AUTO_STASH=true");
     expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_ENABLED=true");

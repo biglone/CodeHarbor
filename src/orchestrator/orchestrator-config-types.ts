@@ -73,6 +73,7 @@ export interface OrchestratorOptions {
   autoDevRunArchiveEnabled?: boolean;
   autoDevRunArchiveDir?: string;
   autoDevDetailedProgressEnabled?: boolean;
+  autoDevStageOutputEchoEnabled?: boolean;
   autoDevInitEnhancementEnabled?: boolean;
   autoDevInitEnhancementTimeoutMs?: number;
   autoDevInitEnhancementMaxChars?: number;

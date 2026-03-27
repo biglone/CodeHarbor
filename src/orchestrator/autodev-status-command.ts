@@ -34,6 +34,7 @@ interface AutoDevStatusCommandDeps {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -42,6 +43,7 @@ interface AutoDevStatusCommandDeps {
   hasPendingAutoDevLoopStopRequest: (sessionKey: string) => boolean;
   hasPendingStopRequest: (sessionKey: string) => boolean;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
   buildWorkflowRoleSkillStatus: (sessionKey: string) => RoleSkillStatusLike;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
@@ -81,6 +83,8 @@ export async function handleAutoDevStatusCommand(
     const stopRequested = deps.hasPendingStopRequest(input.sessionKey) ? "yes" : "no";
     const detailedProgress = deps.isAutoDevDetailedProgressEnabled(input.sessionKey) ? "on" : "off";
     const detailedProgressDefault = deps.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+    const stageOutputEcho = deps.isAutoDevStageOutputEchoEnabled(input.sessionKey) ? "on" : "off";
+    const stageOutputEchoDefault = deps.autoDevStageOutputEchoDefaultEnabled ? "on" : "off";
     const roleSkillStatus = deps.buildWorkflowRoleSkillStatus(input.sessionKey);
     const latestRun = recentRuns[0] ?? null;
     const stageEvents = latestRun ? deps.listWorkflowDiagEvents(latestRun.runId, 12) : [];
@@ -143,7 +147,7 @@ export async function handleAutoDevStatusCommand(
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
@@ -179,7 +183,7 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}

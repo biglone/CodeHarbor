@@ -31,6 +31,11 @@ interface NonBlockingStatusRouteDeps {
     message: InboundMessage,
     mode: "status" | "on" | "off",
   ) => Promise<void>;
+  handleAutoDevContentCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "on" | "off",
+  ) => Promise<void>;
   handleAutoDevSkillsCommand: (
     sessionKey: string,
     message: InboundMessage,
@@ -62,6 +67,7 @@ export async function tryHandleNonBlockingStatusRoute(
   const isWorkflowStatus = workflowCommand?.kind === "status";
   const isAutoDevStatus = autoDevCommand?.kind === "status";
   const isAutoDevProgress = autoDevCommand?.kind === "progress";
+  const isAutoDevContent = autoDevCommand?.kind === "content";
   const isAutoDevSkills = autoDevCommand?.kind === "skills";
   const isAutoDevStop = autoDevCommand?.kind === "stop";
   const isAutoDevReconcile = autoDevCommand?.kind === "reconcile";
@@ -71,6 +77,7 @@ export async function tryHandleNonBlockingStatusRoute(
     !isWorkflowStatus &&
     !isAutoDevStatus &&
     !isAutoDevProgress &&
+    !isAutoDevContent &&
     !isAutoDevSkills &&
     !isAutoDevStop &&
     !isAutoDevReconcile
@@ -95,6 +102,8 @@ export async function tryHandleNonBlockingStatusRoute(
     await deps.handleWorkflowStatusCommand(sessionKey, message);
   } else if (isAutoDevProgress) {
     await deps.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
+  } else if (isAutoDevContent) {
+    await deps.handleAutoDevContentCommand(sessionKey, message, autoDevCommand.mode);
   } else if (isAutoDevSkills) {
     await deps.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
   } else if (isAutoDevStop) {
@@ -116,6 +125,8 @@ export async function tryHandleNonBlockingStatusRoute(
           ? "workflow.status"
           : isAutoDevProgress
             ? "autodev.progress"
+            : isAutoDevContent
+              ? "autodev.content"
             : isAutoDevSkills
               ? "autodev.skills"
               : isAutoDevStop

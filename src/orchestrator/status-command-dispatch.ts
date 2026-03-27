@@ -52,6 +52,7 @@ interface StatusCommandDispatchContext {
   cliCompatEnabled: boolean;
   workflowEnabled: boolean;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   workflowPlanContextMaxChars: number | null;
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
@@ -66,6 +67,7 @@ interface StatusCommandDispatchContext {
   hasPendingAutoDevLoopStopRequest: (sessionKey: string) => boolean;
   hasPendingStopRequest: (sessionKey: string) => boolean;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   buildWorkflowRoleSkillStatus: (sessionKey: string) => RoleSkillStatusLike;
@@ -117,6 +119,7 @@ export async function sendStatusCommand(
       cliCompatEnabled: context.cliCompatEnabled,
       workflowEnabled: context.workflowEnabled,
       autoDevDetailedProgressDefaultEnabled: context.autoDevDetailedProgressDefaultEnabled,
+      autoDevStageOutputEchoDefaultEnabled: context.autoDevStageOutputEchoDefaultEnabled,
       workflowPlanContextMaxChars: context.workflowPlanContextMaxChars,
       workflowOutputContextMaxChars: context.workflowOutputContextMaxChars,
       workflowFeedbackContextMaxChars: context.workflowFeedbackContextMaxChars,
@@ -131,6 +134,7 @@ export async function sendStatusCommand(
       hasPendingAutoDevLoopStopRequest: (sessionKey) => context.hasPendingAutoDevLoopStopRequest(sessionKey),
       hasPendingStopRequest: (sessionKey) => context.hasPendingStopRequest(sessionKey),
       isAutoDevDetailedProgressEnabled: (sessionKey) => context.isAutoDevDetailedProgressEnabled(sessionKey),
+      isAutoDevStageOutputEchoEnabled: (sessionKey) => context.isAutoDevStageOutputEchoEnabled(sessionKey),
       listWorkflowDiagRunsBySession: (kind, sessionKey, limit) => context.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
       listWorkflowDiagEvents: (runId, limit) => context.listWorkflowDiagEvents(runId, limit),
       buildWorkflowRoleSkillStatus: (sessionKey) => context.buildWorkflowRoleSkillStatus(sessionKey),
@@ -194,11 +198,13 @@ export async function sendAutoDevStatusCommand(
     | "autoDevInitEnhancementTimeoutMs"
     | "autoDevInitEnhancementMaxChars"
     | "autoDevDetailedProgressDefaultEnabled"
+    | "autoDevStageOutputEchoDefaultEnabled"
     | "getAutoDevSnapshot"
     | "hasActiveAutoDevLoopSession"
     | "hasPendingAutoDevLoopStopRequest"
     | "hasPendingStopRequest"
     | "isAutoDevDetailedProgressEnabled"
+    | "isAutoDevStageOutputEchoEnabled"
     | "buildWorkflowRoleSkillStatus"
     | "listWorkflowDiagRunsBySession"
     | "listWorkflowDiagEvents"
@@ -221,11 +227,13 @@ export async function sendAutoDevStatusCommand(
       autoDevInitEnhancementTimeoutMs: context.autoDevInitEnhancementTimeoutMs,
       autoDevInitEnhancementMaxChars: context.autoDevInitEnhancementMaxChars,
       autoDevDetailedProgressDefaultEnabled: context.autoDevDetailedProgressDefaultEnabled,
+      autoDevStageOutputEchoDefaultEnabled: context.autoDevStageOutputEchoDefaultEnabled,
       getAutoDevSnapshot: (sessionKey) => context.getAutoDevSnapshot(sessionKey),
       hasActiveAutoDevLoopSession: (sessionKey) => context.hasActiveAutoDevLoopSession(sessionKey),
       hasPendingAutoDevLoopStopRequest: (sessionKey) => context.hasPendingAutoDevLoopStopRequest(sessionKey),
       hasPendingStopRequest: (sessionKey) => context.hasPendingStopRequest(sessionKey),
       isAutoDevDetailedProgressEnabled: (sessionKey) => context.isAutoDevDetailedProgressEnabled(sessionKey),
+      isAutoDevStageOutputEchoEnabled: (sessionKey) => context.isAutoDevStageOutputEchoEnabled(sessionKey),
       buildWorkflowRoleSkillStatus: (sessionKey) => context.buildWorkflowRoleSkillStatus(sessionKey),
       listWorkflowDiagRunsBySession: (kind, sessionKey, limit) => context.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
       listWorkflowDiagEvents: (runId, limit) => context.listWorkflowDiagEvents(runId, limit),

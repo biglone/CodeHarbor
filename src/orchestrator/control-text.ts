@@ -20,6 +20,7 @@ export function buildHelpNotice(input: {
 - /autodev init|i [path] [--from file] [--dry-run] [--force]: Scaffold REQUIREMENTS.md + TASK_LIST.md + task compass in target project
 - tip: /autodev init StrawBerry --dry-run (preview), then /autodev init StrawBerry --force to overwrite
 - /autodev progress [on|off|status]: Control detailed AutoDev/Multi-Agent progress echo (default on)
+- /autodev content [on|off|status]: Control AutoDev stage output echo for planner/executor/reviewer content (default on)
 - /autodev skills [on|off|summary|progressive|full|status]: Control role-skill injection and disclosure mode (default progressive)
 - multimodal: ${input.multimodalHelpStatus}
 - /diag version: Show runtime diagnosis
@@ -48,6 +49,7 @@ export function buildHelpNotice(input: {
 - /autodev init|i [path] [--from file] [--dry-run] [--force]: 在目标项目初始化 REQUIREMENTS.md、TASK_LIST.md 与任务罗盘
 - 提示：/autodev init StrawBerry --dry-run（预览），确认后用 --force 覆盖写入
 - /autodev progress [on|off|status]: 控制 AutoDev/多智能体过程回显详细模式（默认 on）
+- /autodev content [on|off|status]: 控制 AutoDev 阶段产出（planner/executor/reviewer 内容）回显（默认 on）
 - /autodev skills [on|off|summary|progressive|full|status]: 控制角色技能注入开关与披露模式（默认 progressive）
 - 多模态状态: ${input.multimodalHelpStatus}
 - /diag version: 查看运行实例诊断信息
@@ -121,6 +123,8 @@ export function buildStatusNotice(input: {
   autoDevStopRequested: string;
   autoDevDetailedProgress: string;
   autoDevDetailedProgressDefault: string;
+  autoDevStageOutputEcho: string;
+  autoDevStageOutputEchoDefault: string;
   autoDevDiagRunId: string;
   autoDevDiagRunStatus: string;
   autoDevStageSummary: string;
@@ -183,7 +187,7 @@ export function buildStatusNotice(input: {
 - Multi-Agent role skills loaded: ${input.roleSkillStatus.loaded}
 - AutoDev: enabled=${input.workflowEnabled ? "on" : "off"}, state=${input.autoDevState}, mode=${input.autoDevMode}, task=${input.autoDevTask}, duration=${input.autoDevRunDuration}
 - AutoDev loop: round=${input.autoDevLoopRound}/${input.autoDevLoopMaxRuns}, completed=${input.autoDevLoopCompletedRuns}, deadline=${input.autoDevLoopDeadlineAt ?? "N/A"}, active=${input.autoDevLoopActive}
-- AutoDev control: loopStopRequested=${input.autoDevLoopStopRequested}, stopRequested=${input.autoDevStopRequested}, detailedProgress=${input.autoDevDetailedProgress} (default=${input.autoDevDetailedProgressDefault})
+- AutoDev control: loopStopRequested=${input.autoDevLoopStopRequested}, stopRequested=${input.autoDevStopRequested}, detailedProgress=${input.autoDevDetailedProgress} (default=${input.autoDevDetailedProgressDefault}), stageOutputEcho=${input.autoDevStageOutputEcho} (default=${input.autoDevStageOutputEchoDefault})
 - ${autoDevStage}: run=${input.autoDevDiagRunId}, status=${input.autoDevDiagRunStatus}, latest=${input.autoDevStageSummary}
 - ${autoDevStageDetail}: ${input.autoDevStageMessage}`;
 }

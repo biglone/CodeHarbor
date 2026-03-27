@@ -166,6 +166,7 @@ import {
   transcribeAudioAttachments as runTranscribeAudioAttachments,
 } from "./orchestrator/attachment-processing";
 import {
+  handleAutoDevContentCommand as runAutoDevContentCommand,
   handleAutoDevInitCommand as runAutoDevInitCommand,
   handleAutoDevLoopStopCommand as runAutoDevLoopStopCommand,
   handleAutoDevProgressCommand as runAutoDevProgressCommand,
@@ -376,10 +377,12 @@ export class Orchestrator {
   private readonly autoDevRunArchiveEnabled: boolean;
   private readonly autoDevRunArchiveDir: string;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
+  private readonly autoDevStageOutputEchoDefaultEnabled: boolean;
   private readonly autoDevInitEnhancementEnabled: boolean;
   private readonly autoDevInitEnhancementTimeoutMs: number;
   private readonly autoDevInitEnhancementMaxChars: number;
   private readonly autoDevDetailedProgressOverrides = new Map<string, boolean>();
+  private readonly autoDevStageOutputEchoOverrides = new Map<string, boolean>();
   private readonly workflowRoleSkillCatalog: WorkflowRoleSkillCatalog;
   private readonly workflowRoleSkillDefaultPolicy: WorkflowRoleSkillPolicyOverride;
   private readonly workflowRoleSkillPolicyOverrides = new Map<string, WorkflowRoleSkillPolicyOverride>();
@@ -459,6 +462,7 @@ export class Orchestrator {
     this.autoDevRunArchiveEnabled = autoDevRuntimeConfig.autoDevRunArchiveEnabled;
     this.autoDevRunArchiveDir = autoDevRuntimeConfig.autoDevRunArchiveDir;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
+    this.autoDevStageOutputEchoDefaultEnabled = autoDevRuntimeConfig.autoDevStageOutputEchoDefaultEnabled;
     this.autoDevInitEnhancementEnabled = autoDevRuntimeConfig.autoDevInitEnhancementEnabled;
     this.autoDevInitEnhancementTimeoutMs = autoDevRuntimeConfig.autoDevInitEnhancementTimeoutMs;
     this.autoDevInitEnhancementMaxChars = autoDevRuntimeConfig.autoDevInitEnhancementMaxChars;
@@ -642,6 +646,7 @@ export class Orchestrator {
         handleWorkflowStatusCommand: this.handleWorkflowStatusCommand.bind(this),
         handleAutoDevStatusCommand: this.handleAutoDevStatusCommand.bind(this),
         handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
+        handleAutoDevContentCommand: this.handleAutoDevContentCommand.bind(this),
         handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
         handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
         handleAutoDevReconcileCommand: this.handleAutoDevReconcileCommand.bind(this),
@@ -716,6 +721,7 @@ export class Orchestrator {
         handleWorkflowStatusCommand: this.handleWorkflowStatusCommand.bind(this),
         handleAutoDevStatusCommand: this.handleAutoDevStatusCommand.bind(this),
         handleAutoDevProgressCommand: this.handleAutoDevProgressCommand.bind(this),
+        handleAutoDevContentCommand: this.handleAutoDevContentCommand.bind(this),
         handleAutoDevSkillsCommand: this.handleAutoDevSkillsCommand.bind(this),
         handleAutoDevLoopStopCommand: this.handleAutoDevLoopStopCommand.bind(this),
         handleAutoDevReconcileCommand: this.handleAutoDevReconcileCommand.bind(this),
@@ -967,6 +973,7 @@ export class Orchestrator {
         cliCompat: this.cliCompat,
         workflowRunner: this.workflowRunner,
         autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+        autoDevStageOutputEchoDefaultEnabled: this.autoDevStageOutputEchoDefaultEnabled,
         workflowPlanContextMaxChars: this.workflowPlanContextMaxChars,
         workflowOutputContextMaxChars: this.workflowOutputContextMaxChars,
         workflowFeedbackContextMaxChars: this.workflowFeedbackContextMaxChars,
@@ -999,6 +1006,7 @@ export class Orchestrator {
         rateLimiter: this.rateLimiter,
         getBackendRuntimeStats: this.getBackendRuntimeStats.bind(this),
         isAutoDevDetailedProgressEnabled: this.isAutoDevDetailedProgressEnabled.bind(this),
+        isAutoDevStageOutputEchoEnabled: this.isAutoDevStageOutputEchoEnabled.bind(this),
         listWorkflowDiagRunsBySession: this.listWorkflowDiagRunsBySession.bind(this),
         listWorkflowDiagEvents: this.listWorkflowDiagEvents.bind(this),
         buildWorkflowRoleSkillStatus: this.buildWorkflowRoleSkillStatus.bind(this),
@@ -1020,6 +1028,21 @@ export class Orchestrator {
     mode: "status" | "on" | "off",
   ): Promise<void> {
     await runAutoDevProgressCommand(
+      this.buildAutoDevControlCommandDeps(),
+      {
+        sessionKey,
+        message,
+        mode,
+      },
+    );
+  }
+
+  private async handleAutoDevContentCommand(
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "on" | "off",
+  ): Promise<void> {
+    await runAutoDevContentCommand(
       this.buildAutoDevControlCommandDeps(),
       {
         sessionKey,
@@ -1115,12 +1138,16 @@ export class Orchestrator {
   private buildAutoDevControlCommandDeps(): AutoDevControlCommandDeps {
     return {
       autoDevDetailedProgressDefaultEnabled: this.autoDevDetailedProgressDefaultEnabled,
+      autoDevStageOutputEchoDefaultEnabled: this.autoDevStageOutputEchoDefaultEnabled,
       outputLanguage: this.outputLanguage,
       pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
       isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
       setAutoDevDetailedProgressEnabled: (targetSessionKey, enabled) =>
         this.setAutoDevDetailedProgressEnabled(targetSessionKey, enabled),
+      isAutoDevStageOutputEchoEnabled: (targetSessionKey) => this.isAutoDevStageOutputEchoEnabled(targetSessionKey),
+      setAutoDevStageOutputEchoEnabled: (targetSessionKey, enabled) =>
+        this.setAutoDevStageOutputEchoEnabled(targetSessionKey, enabled),
       setWorkflowRoleSkillPolicyOverride: (targetSessionKey, next) =>
         this.setWorkflowRoleSkillPolicyOverride(targetSessionKey, next),
       buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
@@ -1454,6 +1481,7 @@ export class Orchestrator {
       appendWorkflowDiagEvent: (runId, kind, stage, round, stageMessage) =>
         this.appendWorkflowDiagEvent(runId, kind, stage, round, stageMessage),
       isAutoDevDetailedProgressEnabled: (targetSessionKey) => this.isAutoDevDetailedProgressEnabled(targetSessionKey),
+      isAutoDevStageOutputEchoEnabled: (targetSessionKey) => this.isAutoDevStageOutputEchoEnabled(targetSessionKey),
       resolveWorkflowRoleSkillPolicy: (targetSessionKey) => this.resolveWorkflowRoleSkillPolicy(targetSessionKey),
       runWorkflow: (input) => this.workflowRunner.run(input),
       sendMessage: (conversationId, text) => this.channel.sendMessage(conversationId, text),
@@ -1820,6 +1848,18 @@ export class Orchestrator {
       return;
     }
     this.autoDevDetailedProgressOverrides.set(sessionKey, enabled);
+  }
+
+  private isAutoDevStageOutputEchoEnabled(sessionKey: string): boolean {
+    return this.autoDevStageOutputEchoOverrides.get(sessionKey) ?? this.autoDevStageOutputEchoDefaultEnabled;
+  }
+
+  private setAutoDevStageOutputEchoEnabled(sessionKey: string, enabled: boolean): void {
+    if (enabled === this.autoDevStageOutputEchoDefaultEnabled) {
+      this.autoDevStageOutputEchoOverrides.delete(sessionKey);
+      return;
+    }
+    this.autoDevStageOutputEchoOverrides.set(sessionKey, enabled);
   }
 
   private resolveWorkflowRoleSkillPolicy(sessionKey: string): { enabled: boolean; mode: WorkflowRoleSkillDisclosureMode } {

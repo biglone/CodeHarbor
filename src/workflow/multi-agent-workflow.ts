@@ -28,6 +28,12 @@ export interface MultiAgentWorkflowProgressEvent {
   stage: "planner" | "executor" | "reviewer" | "repair";
   round: number;
   message: string;
+  stageOutput?: {
+    role: "planner" | "executor" | "reviewer";
+    source: "primary" | "repair" | "contract_repair";
+    label: string;
+    content: string;
+  };
 }
 
 export interface MultiAgentWorkflowRunInput {
@@ -188,6 +194,12 @@ export class MultiAgentWorkflowRunner {
         `规划代理执行完成（agent=planner, ${formatRoleExecutionStats(planResult)}）`,
         `Planner completed (agent=planner, ${formatRoleExecutionStats(planResult)})`,
       ),
+      stageOutput: {
+        role: "planner",
+        source: "primary",
+        label: "planner_output",
+        content: plan,
+      },
     });
 
     const executorSkillPrompt = this.buildRoleSkillPrompt({
@@ -226,6 +238,12 @@ export class MultiAgentWorkflowRunner {
         `执行代理初版交付完成（agent=executor, ${formatRoleExecutionStats(outputResult)}）`,
         `Executor initial delivery completed (agent=executor, ${formatRoleExecutionStats(outputResult)})`,
       ),
+      stageOutput: {
+        role: "executor",
+        source: "primary",
+        label: "executor_output",
+        content: outputResult.reply,
+      },
     });
 
     let finalReviewReply = "";
@@ -280,6 +298,12 @@ export class MultiAgentWorkflowRunner {
             verdict.approved ? "" : `, summary=${verdict.summary}, contract=${formatReviewerContractStatus(verdict)}`
           }`,
         ),
+        stageOutput: {
+          role: "reviewer",
+          source: "primary",
+          label: "reviewer_output",
+          content: finalReviewReply,
+        },
       });
 
       const contractRepairResult = await this.ensureReviewerRepairContract({
@@ -381,6 +405,12 @@ export class MultiAgentWorkflowRunner {
             outputResult,
           )})`,
         ),
+        stageOutput: {
+          role: "executor",
+          source: "repair",
+          label: "executor_repair_output",
+          content: outputResult.reply,
+        },
       });
     }
 
@@ -535,6 +565,12 @@ export class MultiAgentWorkflowRunner {
               repairResult,
             )})`,
           ),
+          stageOutput: {
+            role: "reviewer",
+            source: "contract_repair",
+            label: "reviewer_contract_repair_output",
+            content: reviewReply,
+          },
         },
       );
     }

@@ -69,6 +69,7 @@ interface StatusCommandDeps {
   cliCompatEnabled: boolean;
   workflowEnabled: boolean;
   autoDevDetailedProgressDefaultEnabled: boolean;
+  autoDevStageOutputEchoDefaultEnabled: boolean;
   workflowPlanContextMaxChars: number | null;
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
@@ -83,6 +84,7 @@ interface StatusCommandDeps {
   hasPendingAutoDevLoopStopRequest: (sessionKey: string) => boolean;
   hasPendingStopRequest: (sessionKey: string) => boolean;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   buildWorkflowRoleSkillStatus: (sessionKey: string) => RoleSkillStatusLike;
@@ -132,6 +134,8 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
   const autoDevStopRequested = deps.hasPendingStopRequest(input.sessionKey) ? "yes" : "no";
   const autoDevDetailedProgress = deps.isAutoDevDetailedProgressEnabled(input.sessionKey) ? "on" : "off";
   const autoDevDetailedProgressDefault = deps.autoDevDetailedProgressDefaultEnabled ? "on" : "off";
+  const autoDevStageOutputEcho = deps.isAutoDevStageOutputEchoEnabled(input.sessionKey) ? "on" : "off";
+  const autoDevStageOutputEchoDefault = deps.autoDevStageOutputEchoDefaultEnabled ? "on" : "off";
   const autoDevRunDuration = formatRunWindowDuration(autoDev.startedAt, autoDev.endedAt);
   const autoDevDiagRun = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 1)[0] ?? null;
   const autoDevLatestStageEvent = autoDevDiagRun ? deps.listWorkflowDiagEvents(autoDevDiagRun.runId, 1)[0] ?? null : null;
@@ -214,6 +218,8 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       autoDevStopRequested,
       autoDevDetailedProgress,
       autoDevDetailedProgressDefault,
+      autoDevStageOutputEcho,
+      autoDevStageOutputEchoDefault,
       autoDevDiagRunId: autoDevDiagRun?.runId ?? "N/A",
       autoDevDiagRunStatus: autoDevDiagRun?.status ?? "N/A",
       autoDevStageSummary,

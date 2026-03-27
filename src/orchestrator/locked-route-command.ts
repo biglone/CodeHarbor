@@ -30,6 +30,11 @@ interface HandleLockedRouteCommandDeps {
     message: InboundMessage,
     mode: "status" | "on" | "off",
   ) => Promise<void>;
+  handleAutoDevContentCommand: (
+    sessionKey: string,
+    message: InboundMessage,
+    mode: "status" | "on" | "off",
+  ) => Promise<void>;
   handleAutoDevSkillsCommand: (
     sessionKey: string,
     message: InboundMessage,
@@ -96,6 +101,11 @@ export async function handleLockedRouteCommand(
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }
+  if (autoDevCommand?.kind === "content") {
+    await deps.handleAutoDevContentCommand(input.sessionKey, input.message, autoDevCommand.mode);
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { handled: true, workflowCommand, autoDevCommand };
+  }
   if (autoDevCommand?.kind === "skills") {
     await deps.handleAutoDevSkillsCommand(input.sessionKey, input.message, autoDevCommand.mode);
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
@@ -153,5 +163,5 @@ function buildAutoDevInvalidCommandNotice(action: string | null, option: string 
   return `[CodeHarbor] 无效的 /autodev 子命令（invalid /autodev subcommand）: ${detail}
 - usage: /autodev status | /autodev run [taskId] | /autodev stop | /autodev reconcile
 - usage: /autodev workdir [path]|status|clear | /autodev init [path] [--from file] [--dry-run] [--force]
-- usage: /autodev progress [on|off|status] | /autodev skills [on|off|summary|progressive|full|status]`;
+- usage: /autodev progress [on|off|status] | /autodev content [on|off|status] | /autodev skills [on|off|summary|progressive|full|status]`;
 }

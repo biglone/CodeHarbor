@@ -113,6 +113,15 @@ describe("AutoDev workflow helpers", () => {
       action: "progress",
       option: "maybe",
     });
+    expect(parseAutoDevCommand("/autodev content")).toEqual({ kind: "content", mode: "status" });
+    expect(parseAutoDevCommand("//autodev content status")).toEqual({ kind: "content", mode: "status" });
+    expect(parseAutoDevCommand("/autodev content on")).toEqual({ kind: "content", mode: "on" });
+    expect(parseAutoDevCommand("/autodev content off")).toEqual({ kind: "content", mode: "off" });
+    expect(parseAutoDevCommand("/autodev content maybe")).toEqual({
+      kind: "invalid",
+      action: "content",
+      option: "maybe",
+    });
     expect(parseAutoDevCommand("/autodev skills")).toEqual({ kind: "skills", mode: "status" });
     expect(parseAutoDevCommand("//autodev skills status")).toEqual({ kind: "skills", mode: "status" });
     expect(parseAutoDevCommand("/autodev skills on")).toEqual({ kind: "skills", mode: "on" });

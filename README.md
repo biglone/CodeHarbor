@@ -706,6 +706,8 @@ Backend/model rule routing:
   - persist each `/autodev run` execution archive as local JSON (default `true`)
 - `AUTODEV_RUN_ARCHIVE_DIR`
   - archive directory (relative to workdir or absolute path, default `.codeharbor/autodev-runs`)
+- `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=true|false`
+  - echo planner/executor/reviewer full stage output to Matrix during `/autodev run` (default `true`)
 - `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`
   - when git preflight detects a dirty worktree, auto-stash (`git stash --include-untracked`) and continue run (default `false`)
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`
@@ -736,6 +738,7 @@ AutoDev (`/autodev`) conventions:
   - `/autodev run <taskId>` is single-task mode and does not consume loop run/time budgets.
   - Recommended for long roadmap execution: set both loop limits to `0`, and keep `AUTODEV_MAX_CONSECUTIVE_FAILURES` + no-progress detection enabled as safety rails.
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
+- `/autodev content on|off|status` controls AutoDev stage output echo (planner/executor/reviewer content) for current session.
 - Task closes to `✅` only when completion gate passes (reviewer approved + no explicit validation failure + auto-commit success when commit is required).
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.
 - AutoDev commit intent uses a hybrid strategy: prefer reviewer `SUMMARY` (role-skill output) when it matches the selected commit language; otherwise fall back to deterministic template inference.

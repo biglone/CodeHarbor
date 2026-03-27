@@ -5540,6 +5540,74 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("timeout="))).toBe(false);
   });
 
+  it("echoes autodev stage outputs by default and supports /autodev content off", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-content-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- deliver T4.x\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T4.1 | stage content echo on | ⬜ |",
+        "| T4.2 | stage content echo off | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: true,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T4.1",
+          eventId: "$autodev-content-on",
+        }),
+      );
+
+      const stageOutputNoticesAfterOn = channel.notices.filter(
+        (entry) => entry.text.includes("阶段产出") && entry.text.includes("planner_output"),
+      );
+      expect(stageOutputNoticesAfterOn.length).toBeGreaterThanOrEqual(1);
+      expect(channel.notices.some((entry) => entry.text.includes("executor_output"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("reviewer_output"))).toBe(true);
+      const beforeOffCount = channel.notices.filter((entry) => entry.text.includes("阶段产出")).length;
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev content off",
+          eventId: "$autodev-content-off",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T4.2",
+          eventId: "$autodev-content-off-run",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("AutoDev 阶段内容回显已更新"))).toBe(true);
+      const afterOffCount = channel.notices.filter((entry) => entry.text.includes("阶段产出")).length;
+      expect(afterOffCount).toBe(beforeOffCount);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("switches command and workflow progress text to english when outputLanguage=en", async () => {
     const channel = new FakeChannel();
     const executor = new WorkflowExecutor();

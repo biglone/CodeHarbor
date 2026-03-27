@@ -200,6 +200,7 @@ codeharbor admin serve
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
 - `AUTODEV_RUN_ARCHIVE_ENABLED=true|false`：是否将每次 `/autodev run` 过程归档落盘（默认 true）
 - `AUTODEV_RUN_ARCHIVE_DIR`：归档目录（相对工作目录或绝对路径，默认 `.codeharbor/autodev-runs`）
+- `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=true|false`：是否在 `/autodev run` 期间将 planner/executor/reviewer 阶段完整内容回显到 Matrix（默认 true）
 - `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`：Git 预检检测到脏工作区时自动 `stash` 后继续执行（默认 false）
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
@@ -220,6 +221,7 @@ codeharbor admin serve
   - 初始化采用三阶段：Stage-A 固定模板生成、Stage-B AI 增强、Stage-C 硬校验（不合规自动回退到 Stage-A 基线）
   - Stage-B 仅在本次 `init` 新建了 `REQUIREMENTS.md` 与 `TASK_LIST.md` 时执行；若已有同名文件则默认保留并跳过增强
 - `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
+- `/autodev content [on|off|status]`：会话级控制 AutoDev 阶段内容回显（planner/executor/reviewer）
 - 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <business-summary> (<taskId>)`（按任务目标与改动文件自动推断）
   - 标题摘要采用混合策略：优先使用 Reviewer `SUMMARY`（来自角色 SKILL 输出）；若与当前目标语言不匹配则自动回退到模板推断

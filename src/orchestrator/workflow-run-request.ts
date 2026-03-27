@@ -61,6 +61,7 @@ interface ExecuteWorkflowRunRequestDeps {
     message: string,
   ) => void;
   isAutoDevDetailedProgressEnabled: (sessionKey: string) => boolean;
+  isAutoDevStageOutputEchoEnabled: (sessionKey: string) => boolean;
   resolveWorkflowRoleSkillPolicy: (sessionKey: string) => WorkflowRoleSkillPolicyLike;
   runWorkflow: (input: {
     objective: string;
@@ -165,6 +166,8 @@ export async function executeWorkflowRunRequest(
     workflowStartText,
   );
   const detailedProgressEnabled = deps.isAutoDevDetailedProgressEnabled(input.sessionKey);
+  const stageOutputEchoEnabled =
+    input.diagRunKind === "autodev" && deps.isAutoDevStageOutputEchoEnabled(input.sessionKey);
   const roleSkillPolicy = deps.resolveWorkflowRoleSkillPolicy(input.sessionKey);
 
   try {
@@ -184,6 +187,13 @@ export async function executeWorkflowRunRequest(
           progressCtx,
           `[CodeHarbor] ${formatWorkflowProgressNotice(event, detailedProgressEnabled, deps.outputLanguage)}`,
         );
+        if (stageOutputEchoEnabled && event.stageOutput?.content?.trim()) {
+          await sendNoticeBestEffort(
+            deps,
+            input.message.conversationId,
+            buildWorkflowStageOutputNotice(event, deps.outputLanguage),
+          );
+        }
       },
     });
 
@@ -247,4 +257,48 @@ export async function executeWorkflowRunRequest(
     deps.persistRuntimeMetricsSnapshot();
     await stopTyping();
   }
+}
+
+async function sendNoticeBestEffort(
+  deps: Pick<ExecuteWorkflowRunRequestDeps, "sendNotice">,
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  try {
+    await deps.sendNotice(conversationId, text);
+  } catch {
+    // Best-effort stage output echo should not fail the workflow.
+  }
+}
+
+function buildWorkflowStageOutputNotice(
+  event: MultiAgentWorkflowProgressEvent,
+  outputLanguage: OutputLanguage,
+): string {
+  const stageOutput = event.stageOutput;
+  if (!stageOutput) {
+    return outputLanguage === "en"
+      ? "[CodeHarbor] Workflow stage output unavailable."
+      : "[CodeHarbor] Workflow 阶段产出不可用。";
+  }
+  const round = event.stage === "repair" ? Math.max(1, event.round) : event.round + 1;
+  const stageLabel = event.stage.toUpperCase();
+  if (outputLanguage === "en") {
+    return `[CodeHarbor] ${stageLabel} stage output
+- role: ${stageOutput.role}
+- source: ${stageOutput.source}
+- round: ${round}
+
+[${stageOutput.label}]
+${stageOutput.content}
+[/${stageOutput.label}]`;
+  }
+  return `[CodeHarbor] ${stageLabel} 阶段产出
+- 角色: ${stageOutput.role}
+- 来源: ${stageOutput.source}
+- 轮次: ${round}
+
+[${stageOutput.label}]
+${stageOutput.content}
+[/${stageOutput.label}]`;
 }

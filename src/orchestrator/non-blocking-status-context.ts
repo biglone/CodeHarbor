@@ -12,6 +12,7 @@ interface NonBlockingStatusContextInput {
   handleWorkflowStatusCommand: NonBlockingStatusRouteContext["handleWorkflowStatusCommand"];
   handleAutoDevStatusCommand: NonBlockingStatusRouteContext["handleAutoDevStatusCommand"];
   handleAutoDevProgressCommand: NonBlockingStatusRouteContext["handleAutoDevProgressCommand"];
+  handleAutoDevContentCommand: NonBlockingStatusRouteContext["handleAutoDevContentCommand"];
   handleAutoDevSkillsCommand: NonBlockingStatusRouteContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: NonBlockingStatusRouteContext["handleAutoDevLoopStopCommand"];
   handleAutoDevReconcileCommand: NonBlockingStatusRouteContext["handleAutoDevReconcileCommand"];
@@ -30,6 +31,7 @@ export function buildNonBlockingStatusRouteContext(
     handleWorkflowStatusCommand: input.handleWorkflowStatusCommand,
     handleAutoDevStatusCommand: input.handleAutoDevStatusCommand,
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
+    handleAutoDevContentCommand: input.handleAutoDevContentCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
     handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
@@ -46,6 +48,7 @@ interface NonBlockingStatusRuntimeContextInput {
   handleWorkflowStatusCommand: NonBlockingStatusRouteContext["handleWorkflowStatusCommand"];
   handleAutoDevStatusCommand: NonBlockingStatusRouteContext["handleAutoDevStatusCommand"];
   handleAutoDevProgressCommand: NonBlockingStatusRouteContext["handleAutoDevProgressCommand"];
+  handleAutoDevContentCommand: NonBlockingStatusRouteContext["handleAutoDevContentCommand"];
   handleAutoDevSkillsCommand: NonBlockingStatusRouteContext["handleAutoDevSkillsCommand"];
   handleAutoDevLoopStopCommand: NonBlockingStatusRouteContext["handleAutoDevLoopStopCommand"];
   handleAutoDevReconcileCommand: NonBlockingStatusRouteContext["handleAutoDevReconcileCommand"];
@@ -64,6 +67,7 @@ export function buildNonBlockingStatusRouteContextFromRuntime(
     handleWorkflowStatusCommand: input.handleWorkflowStatusCommand,
     handleAutoDevStatusCommand: input.handleAutoDevStatusCommand,
     handleAutoDevProgressCommand: input.handleAutoDevProgressCommand,
+    handleAutoDevContentCommand: input.handleAutoDevContentCommand,
     handleAutoDevSkillsCommand: input.handleAutoDevSkillsCommand,
     handleAutoDevLoopStopCommand: input.handleAutoDevLoopStopCommand,
     handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,

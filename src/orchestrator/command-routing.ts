@@ -13,6 +13,7 @@ export type AutoDevCommandLike =
   | { kind: "workdir"; mode: "status" | "set" | "clear"; path: string | null }
   | { kind: "init"; path: string | null; from: string | null; dryRun: boolean; force: boolean }
   | { kind: "progress"; mode: "status" | "on" | "off" }
+  | { kind: "content"; mode: "status" | "on" | "off" }
   | { kind: "skills"; mode: "status" | "on" | "off" | "summary" | "progressive" | "full" }
   | null;
 
@@ -189,7 +190,7 @@ export function classifyBackendTaskType(
   if (autoDevCommand?.kind === "status") {
     return "autodev_status";
   }
-  if (autoDevCommand?.kind === "skills" || autoDevCommand?.kind === "progress") {
+  if (autoDevCommand?.kind === "skills" || autoDevCommand?.kind === "progress" || autoDevCommand?.kind === "content") {
     return "autodev_status";
   }
   if (autoDevCommand?.kind === "workdir" || autoDevCommand?.kind === "init" || autoDevCommand?.kind === "reconcile") {
