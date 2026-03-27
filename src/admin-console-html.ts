@@ -515,7 +515,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           </label>
           <label class="field full">
             <span class="field-label" data-i18n="global.envOverrides">高级环境变量覆盖（JSON，可选）</span>
-            <textarea id="global-env-overrides" rows="8" placeholder='{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}' data-i18n-placeholder="global.envOverridesPlaceholder"></textarea>
+            <textarea id="global-env-overrides" rows="8" placeholder='{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}' data-i18n-placeholder="global.envOverridesPlaceholder"></textarea>
+            <p class="muted" data-i18n="global.envOverridesHint">
+              常用 AutoDev 覆盖键：AUTODEV_STAGE_OUTPUT_ECHO_ENABLED、AUTODEV_PREFLIGHT_AUTO_STASH、AUTODEV_RUN_ARCHIVE_ENABLED、AUTODEV_RUN_ARCHIVE_DIR
+            </p>
           </label>
         </div>
         <div class="actions">
@@ -768,7 +771,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
             "global.envOverrides": "高级环境变量覆盖（JSON，可选）",
             "global.envOverridesPlaceholder":
-              '{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}',
+              '{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}',
+            "global.envOverridesHint":
+              "常用 AutoDev 覆盖键：AUTODEV_STAGE_OUTPUT_ECHO_ENABLED、AUTODEV_PREFLIGHT_AUTO_STASH、AUTODEV_RUN_ARCHIVE_ENABLED、AUTODEV_RUN_ARCHIVE_DIR（布尔值请使用字符串 true/false）",
             "global.save": "保存全局配置",
             "global.validate": "校验全局配置",
             "global.reload": "重新加载",
@@ -966,7 +971,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
             "global.envOverrides": "Advanced env overrides (JSON, optional)",
             "global.envOverridesPlaceholder":
-              '{"MATRIX_ADMIN_USERS":"@alice:example.com,@bob:example.com","CONTEXT_BRIDGE_HISTORY_LIMIT":"24"}',
+              '{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}',
+            "global.envOverridesHint":
+              "Common AutoDev keys: AUTODEV_STAGE_OUTPUT_ECHO_ENABLED, AUTODEV_PREFLIGHT_AUTO_STASH, AUTODEV_RUN_ARCHIVE_ENABLED, AUTODEV_RUN_ARCHIVE_DIR (use string booleans: true/false)",
             "global.save": "Save Global Config",
             "global.validate": "Validate Global Config",
             "global.reload": "Reload",
