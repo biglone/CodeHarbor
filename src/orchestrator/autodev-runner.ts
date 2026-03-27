@@ -85,6 +85,7 @@ interface AutoDevCompletionGateResult {
 interface TaskListMutationGuardResult {
   changed: boolean;
   restored: boolean;
+  finalClean: boolean;
   error: string | null;
 }
 
@@ -133,6 +134,13 @@ interface RunWorkflowCommandInput {
   requestId: string;
   workdir: string;
   diagRunId: string;
+  resolveReviewerTaskListPolicyContext?: (input: {
+    round: number;
+    objective: string;
+    plan: string;
+    output: string;
+    workdir: string;
+  }) => string | null | Promise<string | null>;
 }
 
 interface BeginWorkflowDiagRunInput {
@@ -672,6 +680,7 @@ export async function runAutoDevCommand(
 
   try {
     const taskListBeforeWorkflow = await fs.readFile(context.taskListPath, "utf8");
+    let taskListMutationObservedDuringWorkflow = false;
     const result = await deps.runWorkflowCommand({
       objective,
       sessionKey: input.sessionKey,
@@ -679,6 +688,20 @@ export async function runAutoDevCommand(
       requestId: input.requestId,
       workdir: input.workdir,
       diagRunId: workflowDiagRunId,
+      resolveReviewerTaskListPolicyContext: async (policyInput) => {
+        const reviewerGuard = await guardAutoDevTaskListOwnership({
+          taskListPath: context.taskListPath,
+          baselineContent: taskListBeforeWorkflow,
+        });
+        if (reviewerGuard.changed) {
+          taskListMutationObservedDuringWorkflow = true;
+        }
+        return buildReviewerTaskListPolicyContextSummary({
+          outputLanguage: deps.outputLanguage,
+          round: policyInput.round,
+          guard: reviewerGuard,
+        });
+      },
     });
     if (!result) {
       return;
@@ -688,7 +711,7 @@ export async function runAutoDevCommand(
       taskListPath: context.taskListPath,
       baselineContent: taskListBeforeWorkflow,
     });
-    if (taskListGuard.changed) {
+    if (taskListGuard.changed || taskListMutationObservedDuringWorkflow) {
       const taskListGuardMessage = localize(
         `[CodeHarbor] AutoDev 策略保护：检测到 workflow 修改了 TASK_LIST.md，已自动回滚（仅系统可维护任务状态）。`,
         `[CodeHarbor] AutoDev policy guard: workflow modified TASK_LIST.md and was auto-rolled back (task status is system-managed only).`,
@@ -710,7 +733,7 @@ export async function runAutoDevCommand(
       reason: localize("未触发自动发布", "auto release not attempted"),
     };
     const validationPassed = inferAutoDevValidationPassed(result);
-    const taskListPolicyPassed = taskListGuard.restored;
+    const taskListPolicyPassed = taskListGuard.restored && taskListGuard.finalClean;
     const reviewerApprovedForGate = result.approved && taskListPolicyPassed;
     if (!result.approved) {
       gitCommit = {
@@ -1187,23 +1210,57 @@ async function guardAutoDevTaskListOwnership(input: {
       return {
         changed: false,
         restored: true,
+        finalClean: true,
         error: null,
       };
     }
 
     await fs.writeFile(input.taskListPath, input.baselineContent, "utf8");
+    const restoredContent = await fs.readFile(input.taskListPath, "utf8");
+    const finalClean = restoredContent === input.baselineContent;
     return {
       changed: true,
-      restored: true,
+      restored: finalClean,
+      finalClean,
       error: null,
     };
   } catch (error) {
     return {
       changed: true,
       restored: false,
+      finalClean: false,
       error: formatError(error),
     };
   }
+}
+
+function buildReviewerTaskListPolicyContextSummary(input: {
+  outputLanguage: OutputLanguage;
+  round: number;
+  guard: TaskListMutationGuardResult;
+}): string {
+  const changed = input.guard.changed ? "yes" : "no";
+  const restored = input.guard.restored ? "yes" : "no";
+  const finalClean = input.guard.finalClean ? "yes" : "no";
+  const error = input.guard.error ?? "none";
+  if (input.outputLanguage === "en") {
+    return [
+      `round=${input.round}`,
+      `changedSinceBaseline=${changed}`,
+      `restoredBySystem=${restored}`,
+      `finalClean=${finalClean}`,
+      `error=${error}`,
+      "policy: use this system block as the source of truth for TASK_LIST.md; do not reject by command-text hints alone.",
+    ].join("\n");
+  }
+  return [
+    `round=${input.round}`,
+    `changedSinceBaseline=${changed}`,
+    `restoredBySystem=${restored}`,
+    `finalClean=${finalClean}`,
+    `error=${error}`,
+    "策略：TASK_LIST.md 判定以该系统块为准；不得仅凭命令文本痕迹拒绝。",
+  ].join("\n");
 }
 
 function evaluateAutoDevCompletionGate(input: {

@@ -1376,6 +1376,7 @@ export class Orchestrator {
             input.workdir,
             input.diagRunId,
             "autodev",
+            input.resolveReviewerTaskListPolicyContext,
           ),
         listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
           this.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
@@ -1453,6 +1454,13 @@ export class Orchestrator {
     workdir: string,
     diagRunId: string | null = null,
     diagRunKind: WorkflowDiagRunKind = "workflow",
+    resolveReviewerTaskListPolicyContext?: (input: {
+      round: number;
+      objective: string;
+      plan: string;
+      output: string;
+      workdir: string;
+    }) => string | null | Promise<string | null>,
   ): Promise<MultiAgentWorkflowRunResult | null> {
     return runSendWorkflowRunRequest(
       this.buildWorkflowRunDispatchContext(),
@@ -1464,6 +1472,7 @@ export class Orchestrator {
         workdir,
         diagRunId,
         diagRunKind,
+        resolveReviewerTaskListPolicyContext,
       },
     );
   }

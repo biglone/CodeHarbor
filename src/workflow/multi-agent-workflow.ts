@@ -40,6 +40,13 @@ export interface MultiAgentWorkflowRunInput {
   objective: string;
   workdir: string;
   roleSkillPolicy?: WorkflowRoleSkillPolicyOverride;
+  resolveReviewerTaskListPolicyContext?: (input: {
+    round: number;
+    objective: string;
+    plan: string;
+    output: string;
+    workdir: string;
+  }) => string | null | Promise<string | null>;
   onProgress?: (event: MultiAgentWorkflowProgressEvent) => void | Promise<void>;
   onRegisterCancel?: (cancel: () => void) => void;
 }
@@ -251,6 +258,13 @@ export class MultiAgentWorkflowRunner {
     let repairRounds = 0;
 
     for (let attempt = 0; attempt <= maxRepairRounds; attempt += 1) {
+      const reviewerTaskListPolicyContext = await this.resolveReviewerTaskListPolicyContext(input, {
+        round: attempt + 1,
+        objective,
+        plan,
+        output: outputResult.reply,
+        workdir: input.workdir,
+      });
       const reviewerSkillPrompt = this.buildRoleSkillPrompt({
         role: "reviewer",
         stage: "reviewer",
@@ -271,7 +285,14 @@ export class MultiAgentWorkflowRunner {
       });
       const reviewResult = await this.executeRole(
         "reviewer",
-        buildReviewerPrompt(objective, plan, outputResult.reply, this.promptContextLimits, reviewerSkillPrompt.text),
+        buildReviewerPrompt(
+          objective,
+          plan,
+          outputResult.reply,
+          this.promptContextLimits,
+          reviewerSkillPrompt.text,
+          reviewerTaskListPolicyContext,
+        ),
         null,
         input.workdir,
         roleTimeoutMs,
@@ -478,6 +499,34 @@ export class MultiAgentWorkflowRunner {
     return this.roleSkillCatalog.buildPrompt(input);
   }
 
+  private async resolveReviewerTaskListPolicyContext(
+    input: MultiAgentWorkflowRunInput,
+    context: {
+      round: number;
+      objective: string;
+      plan: string;
+      output: string;
+      workdir: string;
+    },
+  ): Promise<string | null> {
+    const resolver = input.resolveReviewerTaskListPolicyContext;
+    if (!resolver) {
+      return null;
+    }
+    try {
+      const resolved = await resolver(context);
+      const normalized = typeof resolved === "string" ? resolved.trim() : "";
+      return normalized.length > 0 ? normalized : null;
+    } catch (error) {
+      this.logger.warn("Failed to resolve reviewer task-list policy context", {
+        round: context.round,
+        workdir: context.workdir,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   private async ensureReviewerRepairContract(input: ReviewerContractRepairInput): Promise<ReviewerContractRepairResult> {
     const localize = (zh: string, en: string): string => byOutputLanguage(this.outputLanguage, zh, en);
     let reviewReply = input.reviewReply;
@@ -651,6 +700,7 @@ function buildReviewerPrompt(
   output: string,
   limits: WorkflowPromptContextLimits,
   roleSkillBlock: string | null,
+  reviewerTaskListPolicyContext: string | null,
 ): string {
   const planContext = clampPromptContext("planner_plan", plan, limits.plan);
   const outputContext = clampPromptContext("executor_output", output, limits.output);
@@ -675,7 +725,8 @@ function buildReviewerPrompt(
     "1) 若 executor 输出缺失 VALIDATION_STATUS 或 __EXIT_CODES__，必须 REJECTED 并给出可执行 BLOCKERS。",
     "2) 若 VALIDATION_STATUS 与 VALIDATION/命令结果不一致，必须 REJECTED 并要求修正。",
     "3) REJECTED 时 BLOCKERS 至少 1 条，且 issue/fix/accept 不得为空。",
-    "4) 仅当 executor 输出提供可验证证据显示 TASK_LIST.md 在最终工作区仍被改动（例如 git diff -- TASK_LIST.md 非空）时，才可因该项 REJECTED。",
+    "4) TASK_LIST.md 策略判定必须优先参考 [system_task_list_policy]；仅当 finalClean=no 时，才可因该项 REJECTED。",
+    "5) 不得仅因 executor 文本出现 checkout/restore/reset 等字样而拒绝，除非有可验证证据显示最终状态仍违规。",
     "",
     `目标：${objective}`,
     "",
@@ -687,6 +738,9 @@ function buildReviewerPrompt(
     outputContext,
     "[/executor_output]",
   );
+  if (reviewerTaskListPolicyContext) {
+    sections.push("", "[system_task_list_policy]", reviewerTaskListPolicyContext, "[/system_task_list_policy]");
+  }
   return sections.join("\n");
 }
 

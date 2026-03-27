@@ -67,6 +67,13 @@ interface ExecuteWorkflowRunRequestDeps {
     objective: string;
     workdir: string;
     roleSkillPolicy: WorkflowRoleSkillPolicyLike;
+    resolveReviewerTaskListPolicyContext?: (input: {
+      round: number;
+      objective: string;
+      plan: string;
+      output: string;
+      workdir: string;
+    }) => string | null | Promise<string | null>;
     onRegisterCancel: (cancel: () => void) => void;
     onProgress: (event: MultiAgentWorkflowProgressEvent) => Promise<void>;
   }) => Promise<MultiAgentWorkflowRunResult>;
@@ -89,6 +96,13 @@ interface ExecuteWorkflowRunRequestInput {
   workdir: string;
   diagRunId?: string | null;
   diagRunKind?: WorkflowDiagRunKind;
+  resolveReviewerTaskListPolicyContext?: (input: {
+    round: number;
+    objective: string;
+    plan: string;
+    output: string;
+    workdir: string;
+  }) => string | null | Promise<string | null>;
 }
 
 export async function executeWorkflowRunRequest(
@@ -175,6 +189,7 @@ export async function executeWorkflowRunRequest(
       objective: normalizedObjective,
       workdir: input.workdir,
       roleSkillPolicy,
+      resolveReviewerTaskListPolicyContext: input.resolveReviewerTaskListPolicyContext,
       onRegisterCancel: (cancel) => {
         cancelWorkflow = cancel;
         if (cancelRequested) {

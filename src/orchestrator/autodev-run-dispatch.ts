@@ -56,6 +56,13 @@ interface HandleAutoDevRunCommandDeps {
     requestId: string;
     workdir: string;
     diagRunId: string;
+    resolveReviewerTaskListPolicyContext?: (input: {
+      round: number;
+      objective: string;
+      plan: string;
+      output: string;
+      workdir: string;
+    }) => string | null | Promise<string | null>;
   }) => Promise<MultiAgentWorkflowRunResult | null>;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];

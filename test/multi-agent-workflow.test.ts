@@ -755,4 +755,47 @@ describe("MultiAgentWorkflowRunner", () => {
     const plannerPrompt = executor.calls.find((call) => call.prompt.includes("[role:planner]"))?.prompt ?? "";
     expect(plannerPrompt).not.toContain("[role_skills]");
   });
+
+  it("injects system task-list policy context into reviewer prompt when resolver is provided", async () => {
+    const resolverCalls: number[] = [];
+    const executor = new ScenarioExecutor((input) => {
+      if (input.prompt.includes("[role:planner]")) {
+        return {
+          result: Promise.resolve({ sessionId: "planner-thread", reply: "plan" }),
+          cancel: () => {},
+        };
+      }
+      if (input.prompt.includes("[role:reviewer]")) {
+        return {
+          result: Promise.resolve({ sessionId: "reviewer-thread", reply: "VERDICT: APPROVED\nSUMMARY: done" }),
+          cancel: () => {},
+        };
+      }
+      return {
+        result: Promise.resolve({ sessionId: "executor-thread", reply: "output" }),
+        cancel: () => {},
+      };
+    });
+
+    const runner = new MultiAgentWorkflowRunner(executor as never, logger as never, {
+      enabled: true,
+      autoRepairMaxRounds: 0,
+    });
+
+    await runner.run({
+      objective: "inject policy context",
+      workdir: "/tmp/workflow-unit",
+      resolveReviewerTaskListPolicyContext: ({ round }) => {
+        resolverCalls.push(round);
+        return ["changedSinceBaseline=no", "restoredBySystem=yes", "finalClean=yes"].join("\n");
+      },
+    });
+
+    expect(resolverCalls).toEqual([1]);
+    const reviewerPrompt = executor.calls.find((call) => call.prompt.includes("[role:reviewer]"))?.prompt ?? "";
+    expect(reviewerPrompt).toContain("[system_task_list_policy]");
+    expect(reviewerPrompt).toContain("changedSinceBaseline=no");
+    expect(reviewerPrompt).toContain("finalClean=yes");
+    expect(reviewerPrompt).toContain("[/system_task_list_policy]");
+  });
 });
