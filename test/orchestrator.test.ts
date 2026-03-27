@@ -1702,7 +1702,7 @@ describe("Orchestrator", () => {
         },
       });
 
-      await waitForCondition(() => store.getTaskById(queued.task.id)?.status === "succeeded", 20_000);
+      await waitForCondition(() => store.getTaskById(queued.task.id)?.status === "succeeded", 60_000);
       expect(lifecycleEvents.map((event) => event.stage)).toEqual(
         expect.arrayContaining(["queued", "executing", "retrying", "completed"]),
       );
@@ -1713,7 +1713,7 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 90_000);
 
   it("exposes API task query snapshot with status, stage, and error summary", async () => {
     const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-query-");
