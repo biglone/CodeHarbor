@@ -70,6 +70,8 @@ export interface OrchestratorOptions {
   autoDevAutoReleaseEnabled?: boolean;
   autoDevAutoReleasePush?: boolean;
   autoDevMaxConsecutiveFailures?: number;
+  autoDevRunArchiveEnabled?: boolean;
+  autoDevRunArchiveDir?: string;
   autoDevDetailedProgressEnabled?: boolean;
   autoDevInitEnhancementEnabled?: boolean;
   autoDevInitEnhancementTimeoutMs?: number;

@@ -88,6 +88,8 @@ interface AutoDevStatusContext extends StatusCommandDispatchContext {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -186,6 +188,8 @@ export async function sendAutoDevStatusCommand(
     | "autoDevAutoReleaseEnabled"
     | "autoDevAutoReleasePush"
     | "autoDevMaxConsecutiveFailures"
+    | "autoDevRunArchiveEnabled"
+    | "autoDevRunArchiveDir"
     | "autoDevInitEnhancementEnabled"
     | "autoDevInitEnhancementTimeoutMs"
     | "autoDevInitEnhancementMaxChars"
@@ -211,6 +215,8 @@ export async function sendAutoDevStatusCommand(
       autoDevAutoReleaseEnabled: context.autoDevAutoReleaseEnabled,
       autoDevAutoReleasePush: context.autoDevAutoReleasePush,
       autoDevMaxConsecutiveFailures: context.autoDevMaxConsecutiveFailures,
+      autoDevRunArchiveEnabled: context.autoDevRunArchiveEnabled,
+      autoDevRunArchiveDir: context.autoDevRunArchiveDir,
       autoDevInitEnhancementEnabled: context.autoDevInitEnhancementEnabled,
       autoDevInitEnhancementTimeoutMs: context.autoDevInitEnhancementTimeoutMs,
       autoDevInitEnhancementMaxChars: context.autoDevInitEnhancementMaxChars,

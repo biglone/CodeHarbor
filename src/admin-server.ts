@@ -61,6 +61,7 @@ const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_AUTO_COMMIT",
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
+  "AUTODEV_RUN_ARCHIVE_ENABLED",
   "AUTODEV_PREFLIGHT_AUTO_STASH",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
 ]);
@@ -1296,6 +1297,19 @@ export class AdminServer {
         envUpdates.AUTODEV_AUTO_RELEASE_PUSH = String(value);
         markUpdatedKey("autoDev.autoReleasePush");
       }
+      if ("runArchiveEnabled" in autoDev) {
+        const value = normalizeBoolean(autoDev.runArchiveEnabled, true);
+        envUpdates.AUTODEV_RUN_ARCHIVE_ENABLED = String(value);
+        markUpdatedKey("autoDev.runArchiveEnabled");
+      }
+      if ("runArchiveDir" in autoDev) {
+        const value = String(autoDev.runArchiveDir ?? "").trim();
+        if (!value) {
+          throw new HttpError(400, "autoDev.runArchiveDir cannot be empty.");
+        }
+        envUpdates.AUTODEV_RUN_ARCHIVE_DIR = value;
+        markUpdatedKey("autoDev.runArchiveDir");
+      }
       if ("maxConsecutiveFailures" in autoDev) {
         const value = normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
         envUpdates.AUTODEV_MAX_CONSECUTIVE_FAILURES = String(value);
@@ -1776,6 +1790,17 @@ export class AdminServer {
       if ("autoReleasePush" in autoDev) {
         normalizeBoolean(autoDev.autoReleasePush, false);
         markCheckedKey("autoDev.autoReleasePush");
+      }
+      if ("runArchiveEnabled" in autoDev) {
+        normalizeBoolean(autoDev.runArchiveEnabled, true);
+        markCheckedKey("autoDev.runArchiveEnabled");
+      }
+      if ("runArchiveDir" in autoDev) {
+        const value = String(autoDev.runArchiveDir ?? "").trim();
+        if (!value) {
+          throw new HttpError(400, "autoDev.runArchiveDir cannot be empty.");
+        }
+        markCheckedKey("autoDev.runArchiveDir");
       }
       if ("maxConsecutiveFailures" in autoDev) {
         normalizePositiveInt(autoDev.maxConsecutiveFailures, 3, 1, Number.MAX_SAFE_INTEGER);
@@ -2343,6 +2368,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     autoReleaseEnabled: boolean;
     autoReleasePush: boolean;
     maxConsecutiveFailures: number;
+    runArchiveEnabled: boolean;
+    runArchiveDir: string;
     initEnhancementEnabled: boolean;
     initEnhancementTimeoutMs: number;
     initEnhancementMaxChars: number;
@@ -2370,6 +2397,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
       autoCommit: normalizeBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
       autoReleaseEnabled: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, true),
       autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
+      runArchiveEnabled: normalizeBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, true),
+      runArchiveDir: process.env.AUTODEV_RUN_ARCHIVE_DIR?.trim() || ".codeharbor/autodev-runs",
       maxConsecutiveFailures: normalizePositiveInt(
         process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES,
         3,

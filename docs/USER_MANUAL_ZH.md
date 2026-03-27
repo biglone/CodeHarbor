@@ -198,6 +198,8 @@ codeharbor admin serve
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20，`0` 表示不限制）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120，`0` 表示不限制）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
+- `AUTODEV_RUN_ARCHIVE_ENABLED=true|false`：是否将每次 `/autodev run` 过程归档落盘（默认 true）
+- `AUTODEV_RUN_ARCHIVE_DIR`：归档目录（相对工作目录或绝对路径，默认 `.codeharbor/autodev-runs`）
 - `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`：Git 预检检测到脏工作区时自动 `stash` 后继续执行（默认 false）
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务

@@ -373,6 +373,8 @@ export class Orchestrator {
   private readonly autoDevAutoReleaseEnabled: boolean;
   private readonly autoDevAutoReleasePush: boolean;
   private readonly autoDevMaxConsecutiveFailures: number;
+  private readonly autoDevRunArchiveEnabled: boolean;
+  private readonly autoDevRunArchiveDir: string;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
   private readonly autoDevInitEnhancementEnabled: boolean;
   private readonly autoDevInitEnhancementTimeoutMs: number;
@@ -454,6 +456,8 @@ export class Orchestrator {
     this.autoDevAutoReleaseEnabled = autoDevRuntimeConfig.autoDevAutoReleaseEnabled;
     this.autoDevAutoReleasePush = autoDevRuntimeConfig.autoDevAutoReleasePush;
     this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
+    this.autoDevRunArchiveEnabled = autoDevRuntimeConfig.autoDevRunArchiveEnabled;
+    this.autoDevRunArchiveDir = autoDevRuntimeConfig.autoDevRunArchiveDir;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
     this.autoDevInitEnhancementEnabled = autoDevRuntimeConfig.autoDevInitEnhancementEnabled;
     this.autoDevInitEnhancementTimeoutMs = autoDevRuntimeConfig.autoDevInitEnhancementTimeoutMs;
@@ -972,6 +976,8 @@ export class Orchestrator {
         autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
         autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
+        autoDevRunArchiveDir: this.autoDevRunArchiveDir,
         autoDevInitEnhancementEnabled: this.autoDevInitEnhancementEnabled,
         autoDevInitEnhancementTimeoutMs: this.autoDevInitEnhancementTimeoutMs,
         autoDevInitEnhancementMaxChars: this.autoDevInitEnhancementMaxChars,
@@ -1318,6 +1324,8 @@ export class Orchestrator {
         autoDevAutoReleaseEnabled: this.autoDevAutoReleaseEnabled,
         autoDevAutoReleasePush: this.autoDevAutoReleasePush,
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
+        autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
+        autoDevRunArchiveDir: this.autoDevRunArchiveDir,
         outputLanguage: this.outputLanguage,
       },
       state: {
@@ -1344,6 +1352,7 @@ export class Orchestrator {
           ),
         listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
           this.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
+        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
         recordAutoDevGitCommit: this.recordAutoDevGitCommit.bind(this),
       },
       autoDevMetrics: this.autoDevMetrics,

@@ -31,6 +31,8 @@ interface AutoDevStatusCommandDeps {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   autoDevDetailedProgressDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
@@ -141,7 +143,7 @@ export async function handleAutoDevStatusCommand(
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
@@ -177,7 +179,7 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}

@@ -702,6 +702,10 @@ Backend/model rule routing:
   - enable/disable AutoDev "big feature done -> release commit" flow (default `true`)
 - `AUTODEV_AUTO_RELEASE_PUSH=true|false`
   - push release commit automatically after local release commit (default `false`)
+- `AUTODEV_RUN_ARCHIVE_ENABLED=true|false`
+  - persist each `/autodev run` execution archive as local JSON (default `true`)
+- `AUTODEV_RUN_ARCHIVE_DIR`
+  - archive directory (relative to workdir or absolute path, default `.codeharbor/autodev-runs`)
 - `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`
   - when git preflight detects a dirty worktree, auto-stash (`git stash --include-untracked`) and continue run (default `false`)
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`

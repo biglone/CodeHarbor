@@ -8,6 +8,8 @@ const ENV_KEYS = [
   "AUTODEV_AUTO_COMMIT",
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
+  "AUTODEV_RUN_ARCHIVE_ENABLED",
+  "AUTODEV_RUN_ARCHIVE_DIR",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
   "AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS",
@@ -58,6 +60,24 @@ describe("resolveAutoDevRuntimeConfig", () => {
     expect(config.autoDevInitEnhancementEnabled).toBe(false);
     expect(config.autoDevInitEnhancementTimeoutMs).toBe(180000);
     expect(config.autoDevInitEnhancementMaxChars).toBe(1200);
+  });
+
+  it("enables run archive by default with default archive dir", () => {
+    delete process.env.AUTODEV_RUN_ARCHIVE_ENABLED;
+    delete process.env.AUTODEV_RUN_ARCHIVE_DIR;
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevRunArchiveEnabled).toBe(true);
+    expect(config.autoDevRunArchiveDir).toBe(".codeharbor/autodev-runs");
+  });
+
+  it("reads run archive settings from env", () => {
+    process.env.AUTODEV_RUN_ARCHIVE_ENABLED = "false";
+    process.env.AUTODEV_RUN_ARCHIVE_DIR = "logs/autodev-archive";
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevRunArchiveEnabled).toBe(false);
+    expect(config.autoDevRunArchiveDir).toBe("logs/autodev-archive");
   });
 
   it("lets orchestrator options override env for init enhancement budget", () => {

@@ -8,6 +8,8 @@ import {
   DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
   DEFAULT_AUTODEV_LOOP_MAX_RUNS,
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
+  DEFAULT_AUTODEV_RUN_ARCHIVE_DIR,
+  DEFAULT_AUTODEV_RUN_ARCHIVE_ENABLED,
 } from "./orchestrator-constants";
 import type { OrchestratorOptions } from "./orchestrator-config-types";
 import { parseEnvBoolean, parseEnvNonNegativeInt, parseEnvPositiveInt } from "./helpers";
@@ -19,6 +21,8 @@ export interface AutoDevRuntimeConfig {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   autoDevDetailedProgressDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
@@ -49,6 +53,12 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
       options?.autoDevMaxConsecutiveFailures ??
         parseEnvPositiveInt(process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES, DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES),
     ),
+    autoDevRunArchiveEnabled:
+      options?.autoDevRunArchiveEnabled ??
+      parseEnvBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, DEFAULT_AUTODEV_RUN_ARCHIVE_ENABLED),
+    autoDevRunArchiveDir:
+      options?.autoDevRunArchiveDir ??
+      parseArchiveDirEnv(process.env.AUTODEV_RUN_ARCHIVE_DIR, DEFAULT_AUTODEV_RUN_ARCHIVE_DIR),
     autoDevDetailedProgressDefaultEnabled:
       options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
     autoDevInitEnhancementEnabled:
@@ -68,4 +78,9 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
         parseEnvPositiveInt(process.env.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS, DEFAULT_AUTODEV_INIT_ENHANCEMENT_MAX_CHARS),
     ),
   };
+}
+
+function parseArchiveDirEnv(raw: string | undefined, fallback: string): string {
+  const normalized = raw?.trim();
+  return normalized ? normalized : fallback;
 }

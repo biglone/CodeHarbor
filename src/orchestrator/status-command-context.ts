@@ -31,6 +31,8 @@ interface StatusCommandContextInput {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -100,6 +102,8 @@ interface StatusCommandRuntimeConfigInput {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -160,6 +164,8 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevAutoReleaseEnabled: input.autoDevAutoReleaseEnabled,
     autoDevAutoReleasePush: input.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
+    autoDevRunArchiveEnabled: input.autoDevRunArchiveEnabled,
+    autoDevRunArchiveDir: input.autoDevRunArchiveDir,
     autoDevInitEnhancementEnabled: input.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.autoDevInitEnhancementMaxChars,
@@ -211,6 +217,8 @@ export function buildStatusCommandDispatchContextFromRuntime(
     autoDevAutoReleaseEnabled: input.config.autoDevAutoReleaseEnabled,
     autoDevAutoReleasePush: input.config.autoDevAutoReleasePush,
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
+    autoDevRunArchiveEnabled: input.config.autoDevRunArchiveEnabled,
+    autoDevRunArchiveDir: input.config.autoDevRunArchiveDir,
     autoDevInitEnhancementEnabled: input.config.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.config.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.config.autoDevInitEnhancementMaxChars,

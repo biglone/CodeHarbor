@@ -11,6 +11,7 @@ import {
 } from "./autodev-runner";
 import { formatError } from "./helpers";
 import type { WorkflowDiagRunRecord } from "./workflow-diag";
+import type { WorkflowDiagEventRecord } from "./workflow-diag";
 
 interface AutoDevFailurePolicyResult {
   blocked: boolean;
@@ -37,6 +38,8 @@ interface HandleAutoDevRunCommandDeps {
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
   autoDevMaxConsecutiveFailures: number;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   autoDevFailureStreaks: Map<string, number>;
@@ -55,6 +58,7 @@ interface HandleAutoDevRunCommandDeps {
     diagRunId: string;
   }) => Promise<MultiAgentWorkflowRunResult | null>;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
+  listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   recordAutoDevGitCommit: (sessionKey: string, taskId: string, result: AutoDevGitCommitResult) => void;
   autoDevMetrics: {
     recordRunOutcome: (outcome: "succeeded" | "failed" | "cancelled") => void;
@@ -96,6 +100,8 @@ export async function handleAutoDevRunCommand(
       autoDevAutoCommit: deps.autoDevAutoCommit,
       autoDevAutoReleaseEnabled: deps.autoDevAutoReleaseEnabled,
       autoDevAutoReleasePush: deps.autoDevAutoReleasePush,
+      autoDevRunArchiveEnabled: deps.autoDevRunArchiveEnabled,
+      autoDevRunArchiveDir: deps.autoDevRunArchiveDir,
       pendingAutoDevLoopStopRequests: deps.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: deps.activeAutoDevLoopSessions,
       consumePendingStopRequest: (sessionKey) => deps.consumePendingStopRequest(sessionKey),
@@ -110,6 +116,7 @@ export async function handleAutoDevRunCommand(
       runWorkflowCommand: (workflowInput) => deps.runWorkflowCommand(workflowInput),
       listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
         deps.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
+      listWorkflowDiagEvents: (runId, limit) => deps.listWorkflowDiagEvents(runId, limit),
       recordAutoDevGitCommit: (sessionKey, taskId, result) => deps.recordAutoDevGitCommit(sessionKey, taskId, result),
       resetAutoDevFailureStreak: (workdir, taskId) => resetAutoDevFailureStreak(deps.autoDevFailureStreaks, workdir, taskId),
       applyAutoDevFailurePolicy: (policyInput) =>

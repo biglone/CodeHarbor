@@ -25,6 +25,7 @@ import {
   tryAutoDevTaskRelease,
   type AutoDevReleaseResult,
 } from "./autodev-release";
+import { type AutoDevRunArchiveRecord, persistAutoDevRunArchive } from "./autodev-run-archive";
 import {
   formatAutoDevGitChangedFiles,
   formatAutoDevGitCommitResult,
@@ -34,7 +35,7 @@ import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError, parseEnvBoolean } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
 import { byOutputLanguage } from "./output-language";
-import type { WorkflowDiagRunRecord } from "./workflow-diag";
+import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
   state: "idle" | "running" | "succeeded" | "failed";
@@ -152,6 +153,8 @@ interface AutoDevRunnerDeps {
   autoDevAutoCommit: boolean;
   autoDevAutoReleaseEnabled: boolean;
   autoDevAutoReleasePush: boolean;
+  autoDevRunArchiveEnabled: boolean;
+  autoDevRunArchiveDir: string;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   consumePendingStopRequest: (sessionKey: string) => boolean;
@@ -168,6 +171,7 @@ interface AutoDevRunnerDeps {
   ) => void;
   runWorkflowCommand: (input: RunWorkflowCommandInput) => Promise<MultiAgentWorkflowRunResult | null>;
   listWorkflowDiagRunsBySession: (kind: "autodev", sessionKey: string, limit: number) => WorkflowDiagRunRecord[];
+  listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   recordAutoDevGitCommit: (sessionKey: string, taskId: string, result: AutoDevGitCommitResult) => void;
   resetAutoDevFailureStreak: (workdir: string, taskId: string) => void;
   applyAutoDevFailurePolicy: (input: {
@@ -635,14 +639,15 @@ export async function runAutoDevCommand(
     loopMaxRuns: effectiveContext.loopMaxRuns,
     loopDeadlineAt: effectiveContext.loopDeadlineAt,
     lastGitCommitSummary: null,
-    lastGitCommitAt: null,
-  });
+      lastGitCommitAt: null,
+    });
+  const objective = buildAutoDevObjective(activeTask);
   const workflowDiagRunId = deps.beginWorkflowDiagRun({
     kind: "autodev",
     sessionKey: input.sessionKey,
     conversationId: input.message.conversationId,
     requestId: input.requestId,
-    objective: buildAutoDevObjective(activeTask),
+    objective,
     taskId: activeTask.id,
     taskDescription: activeTask.description,
   });
@@ -668,7 +673,7 @@ export async function runAutoDevCommand(
   try {
     const taskListBeforeWorkflow = await fs.readFile(context.taskListPath, "utf8");
     const result = await deps.runWorkflowCommand({
-      objective: buildAutoDevObjective(activeTask),
+      objective,
       sessionKey: input.sessionKey,
       message: input.message,
       requestId: input.requestId,
@@ -885,6 +890,37 @@ export async function runAutoDevCommand(
         }, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
       ),
     );
+    await persistAutoDevRunArchiveBestEffort(deps, {
+      workdir: input.workdir,
+      sessionKey: input.sessionKey,
+      conversationId: input.message.conversationId,
+      requestId: input.requestId,
+      workflowDiagRunId,
+      startedAt: startedAtIso,
+      endedAt: endedAtIso,
+      status: "succeeded",
+      mode: effectiveContext.mode,
+      loopRound: effectiveContext.loopRound,
+      loopCompletedRuns: effectiveContext.loopCompletedRuns + (finalTask.status === "completed" ? 1 : 0),
+      loopMaxRuns: effectiveContext.loopMaxRuns,
+      loopDeadlineAt: effectiveContext.loopDeadlineAt,
+      taskId: finalTask.id,
+      taskDescription: finalTask.description,
+      taskLineIndex: finalTask.lineIndex,
+      taskFinalStatus: finalTask.status,
+      reviewerApproved: result.approved,
+      validationPassed,
+      taskListPolicyPassed,
+      completionPassed: completionGate.passed,
+      completionReasons: completionGate.reasons,
+      gitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
+      gitChangedFiles: formatAutoDevGitChangedFiles(gitCommit),
+      releaseSummary: formatAutoDevReleaseResult(releaseResult),
+      failureStreak: null,
+      blocked: false,
+      error: null,
+      workflowResult: result,
+    });
   } catch (error) {
     const failurePolicy = await deps.applyAutoDevFailurePolicy({
       workdir: input.workdir,
@@ -948,9 +984,169 @@ export async function runAutoDevCommand(
     }
     deps.autoDevMetrics.recordRunOutcome(status === "cancelled" ? "cancelled" : "failed");
     if (failurePolicy.blocked && effectiveContext.mode === "loop") {
+      await persistAutoDevRunArchiveBestEffort(deps, {
+        workdir: input.workdir,
+        sessionKey: input.sessionKey,
+        conversationId: input.message.conversationId,
+        requestId: input.requestId,
+        workflowDiagRunId,
+        startedAt: startedAtIso,
+        endedAt: endedAtIso,
+        status: status === "cancelled" ? "cancelled" : "failed",
+        mode: effectiveContext.mode,
+        loopRound: effectiveContext.loopRound,
+        loopCompletedRuns: effectiveContext.loopCompletedRuns,
+        loopMaxRuns: effectiveContext.loopMaxRuns,
+        loopDeadlineAt: effectiveContext.loopDeadlineAt,
+        taskId: activeTask.id,
+        taskDescription: activeTask.description,
+        taskLineIndex: activeTask.lineIndex,
+        taskFinalStatus: activeTask.status,
+        reviewerApproved: null,
+        validationPassed: null,
+        taskListPolicyPassed: null,
+        completionPassed: null,
+        completionReasons: [],
+        gitCommitSummary: null,
+        gitChangedFiles: null,
+        releaseSummary: null,
+        failureStreak: failurePolicy.streak,
+        blocked: failurePolicy.blocked,
+        error: formatError(error),
+        workflowResult: null,
+      });
       return;
     }
+    await persistAutoDevRunArchiveBestEffort(deps, {
+      workdir: input.workdir,
+      sessionKey: input.sessionKey,
+      conversationId: input.message.conversationId,
+      requestId: input.requestId,
+      workflowDiagRunId,
+      startedAt: startedAtIso,
+      endedAt: endedAtIso,
+      status: status === "cancelled" ? "cancelled" : "failed",
+      mode: effectiveContext.mode,
+      loopRound: effectiveContext.loopRound,
+      loopCompletedRuns: effectiveContext.loopCompletedRuns,
+      loopMaxRuns: effectiveContext.loopMaxRuns,
+      loopDeadlineAt: effectiveContext.loopDeadlineAt,
+      taskId: activeTask.id,
+      taskDescription: activeTask.description,
+      taskLineIndex: activeTask.lineIndex,
+      taskFinalStatus: activeTask.status,
+      reviewerApproved: null,
+      validationPassed: null,
+      taskListPolicyPassed: null,
+      completionPassed: null,
+      completionReasons: [],
+      gitCommitSummary: null,
+      gitChangedFiles: null,
+      releaseSummary: null,
+      failureStreak: failurePolicy.streak,
+      blocked: failurePolicy.blocked,
+      error: formatError(error),
+      workflowResult: null,
+    });
     throw error;
+  }
+}
+
+interface PersistAutoDevRunArchiveBestEffortInput {
+  workdir: string;
+  sessionKey: string;
+  conversationId: string;
+  requestId: string;
+  workflowDiagRunId: string;
+  startedAt: string;
+  endedAt: string;
+  status: "succeeded" | "failed" | "cancelled";
+  mode: "single" | "loop";
+  loopRound: number;
+  loopCompletedRuns: number;
+  loopMaxRuns: number;
+  loopDeadlineAt: string | null;
+  taskId: string;
+  taskDescription: string;
+  taskLineIndex: number;
+  taskFinalStatus: string | null;
+  reviewerApproved: boolean | null;
+  validationPassed: boolean | null;
+  taskListPolicyPassed: boolean | null;
+  completionPassed: boolean | null;
+  completionReasons: string[];
+  gitCommitSummary: string | null;
+  gitChangedFiles: string | null;
+  releaseSummary: string | null;
+  failureStreak: number | null;
+  blocked: boolean | null;
+  error: string | null;
+  workflowResult: MultiAgentWorkflowRunResult | null;
+}
+
+async function persistAutoDevRunArchiveBestEffort(
+  deps: AutoDevRunnerDeps,
+  input: PersistAutoDevRunArchiveBestEffortInput,
+): Promise<void> {
+  const events = deps.listWorkflowDiagEvents(input.workflowDiagRunId, 2_000);
+  const record: AutoDevRunArchiveRecord = {
+    version: 1,
+    archivedAt: new Date().toISOString(),
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+    status: input.status,
+    workdir: input.workdir,
+    sessionKey: input.sessionKey,
+    conversationId: input.conversationId,
+    requestId: input.requestId,
+    workflowDiagRunId: input.workflowDiagRunId,
+    mode: input.mode,
+    loop: {
+      round: input.loopRound,
+      completedRuns: input.loopCompletedRuns,
+      maxRuns: input.loopMaxRuns,
+      deadlineAt: input.loopDeadlineAt,
+    },
+    task: {
+      id: input.taskId,
+      description: input.taskDescription,
+      lineIndex: input.taskLineIndex,
+      finalStatus: input.taskFinalStatus,
+    },
+    gate: {
+      reviewerApproved: input.reviewerApproved,
+      validationPassed: input.validationPassed,
+      taskListPolicyPassed: input.taskListPolicyPassed,
+      completionPassed: input.completionPassed,
+      completionReasons: [...input.completionReasons],
+    },
+    git: {
+      commitSummary: input.gitCommitSummary,
+      changedFiles: input.gitChangedFiles,
+      releaseSummary: input.releaseSummary,
+    },
+    failure: {
+      streak: input.failureStreak,
+      blocked: input.blocked,
+      error: input.error,
+    },
+    workflowResult: input.workflowResult,
+    events,
+  };
+  const archiveResult = await persistAutoDevRunArchive({
+    enabled: deps.autoDevRunArchiveEnabled,
+    archiveDir: deps.autoDevRunArchiveDir,
+    workdir: input.workdir,
+    logger: deps.logger,
+    record,
+  });
+  if (archiveResult.written && archiveResult.filePath) {
+    deps.logger.info("Persisted AutoDev run archive", {
+      workflowDiagRunId: input.workflowDiagRunId,
+      filePath: archiveResult.filePath,
+      taskId: input.taskId,
+      status: input.status,
+    });
   }
 }
 

@@ -5133,6 +5133,75 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("persists autodev run archive file after /autodev run", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-archive-run-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T1.4 | archive run task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        autoDevRunArchiveEnabled: true,
+        autoDevRunArchiveDir: ".codeharbor/autodev-runs-test",
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T1.4",
+          eventId: "$autodev-run-archive",
+        }),
+      );
+
+      const archiveRoot = path.join(tempRoot, ".codeharbor", "autodev-runs-test");
+      const dateDirs = await fs.readdir(archiveRoot);
+      expect(dateDirs.length).toBeGreaterThan(0);
+      const files = await fs.readdir(path.join(archiveRoot, dateDirs[0]));
+      const jsonFiles = files.filter((name) => name.endsWith(".json"));
+      expect(jsonFiles.length).toBeGreaterThan(0);
+
+      const payload = JSON.parse(
+        await fs.readFile(path.join(archiveRoot, dateDirs[0], jsonFiles[0]), "utf8"),
+      ) as {
+        task: { id: string };
+        workflowResult: { output: string };
+        status: string;
+      };
+      expect(payload.task.id).toBe("T1.4");
+      expect(payload.status).toBe("succeeded");
+      expect(typeof payload.workflowResult.output).toBe("string");
+      expect(payload.workflowResult.output.length).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("shows auto-release push warning in /autodev status when auto push is disabled", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-release-warning-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
