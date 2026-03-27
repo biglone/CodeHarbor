@@ -733,8 +733,8 @@ export class Orchestrator {
         sessionQueueDrains: this.sessionQueueDrains,
         getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
         clearSessionQueueRetryTimer: (targetSessionKey) => this.clearSessionQueueRetryTimer(targetSessionKey),
-        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore) =>
-          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore),
+        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore, now) =>
+          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore, now),
         drainSessionQueue: (targetSessionKey) => this.drainSessionQueue(targetSessionKey),
         reconcileSessionQueueDrain: (targetSessionKey) => this.reconcileSessionQueueDrain(targetSessionKey),
         logger: this.logger,
@@ -769,8 +769,8 @@ export class Orchestrator {
       {
         getTaskQueueStateStore: () => this.getTaskQueueStateStore(),
         startSessionQueueDrain: (targetSessionKey) => this.startSessionQueueDrain(targetSessionKey),
-        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore) =>
-          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore),
+        scheduleSessionQueueDrainAtNextRetry: (targetSessionKey, queueStore, now) =>
+          this.scheduleSessionQueueDrainAtNextRetry(targetSessionKey, queueStore, now),
         logger: this.logger,
       },
       sessionKey,
@@ -780,11 +780,13 @@ export class Orchestrator {
   private scheduleSessionQueueDrainAtNextRetry(
     sessionKey: string,
     queueStore: Pick<TaskQueueStateStore, "getNextPendingRetryAt">,
+    now?: number,
   ): void {
     runScheduleSessionQueueDrainAtNextRetry(
       (targetSessionKey, nextRetryAt) => this.scheduleSessionQueueDrain(targetSessionKey, nextRetryAt),
       sessionKey,
       queueStore,
+      now,
     );
   }
 

@@ -14,6 +14,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - preflight/self-heal interaction fix: avoid `AUTODEV_PREFLIGHT_AUTO_STASH` repeatedly stashing self-healed `TASK_LIST.md` changes in no-task scenarios.
 - loop robustness: after preflight, re-resolve selected loop task from refreshed `TASK_LIST.md` state before executing the round.
 - tests: add regression coverage to ensure no auto-stash occurs when loop run has no executable tasks.
+- queue scheduler race fix: use a shared timestamp snapshot when checking `hasReadyTask` and `getNextPendingRetryAt`, preventing missed retry drains under millisecond timing races.
+- tests: add queue drain scheduler regression coverage for start/reconcile retry scheduling timestamp consistency.
 - ci stability: increase timeout budget for API lifecycle retry test to reduce false negatives on slower runners.
 
 ## [0.1.72] - 2026-03-27

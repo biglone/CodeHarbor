@@ -2,8 +2,8 @@ import type { Logger } from "../logger";
 import { formatError } from "./helpers";
 
 interface TaskQueueStateStoreLike {
-  hasReadyTask: (sessionKey: string) => boolean;
-  getNextPendingRetryAt: (sessionKey: string) => number | null;
+  hasReadyTask: (sessionKey: string, now?: number) => boolean;
+  getNextPendingRetryAt: (sessionKey: string, now?: number) => number | null;
 }
 
 type QueueDrainTimer = ReturnType<typeof setTimeout>;
@@ -12,7 +12,7 @@ interface StartSessionQueueDrainDeps {
   sessionQueueDrains: Map<string, Promise<void>>;
   getTaskQueueStateStore: () => TaskQueueStateStoreLike | null;
   clearSessionQueueRetryTimer: (sessionKey: string) => void;
-  scheduleSessionQueueDrainAtNextRetry: (sessionKey: string, queueStore: TaskQueueStateStoreLike) => void;
+  scheduleSessionQueueDrainAtNextRetry: (sessionKey: string, queueStore: TaskQueueStateStoreLike, now?: number) => void;
   drainSessionQueue: (sessionKey: string) => Promise<void>;
   reconcileSessionQueueDrain: (sessionKey: string) => void;
   logger: Logger;
@@ -21,7 +21,7 @@ interface StartSessionQueueDrainDeps {
 interface ReconcileSessionQueueDrainDeps {
   getTaskQueueStateStore: () => TaskQueueStateStoreLike | null;
   startSessionQueueDrain: (sessionKey: string) => void;
-  scheduleSessionQueueDrainAtNextRetry: (sessionKey: string, queueStore: TaskQueueStateStoreLike) => void;
+  scheduleSessionQueueDrainAtNextRetry: (sessionKey: string, queueStore: TaskQueueStateStoreLike, now?: number) => void;
   logger: Logger;
 }
 
@@ -48,8 +48,9 @@ export function startSessionQueueDrain(deps: StartSessionQueueDrainDeps, session
     return;
   }
   try {
-    if (!queueStore.hasReadyTask(sessionKey)) {
-      deps.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
+    const now = Date.now();
+    if (!queueStore.hasReadyTask(sessionKey, now)) {
+      deps.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore, now);
       return;
     }
   } catch (error) {
@@ -85,11 +86,12 @@ export function reconcileSessionQueueDrain(deps: ReconcileSessionQueueDrainDeps,
     return;
   }
   try {
-    if (queueStore.hasReadyTask(sessionKey)) {
+    const now = Date.now();
+    if (queueStore.hasReadyTask(sessionKey, now)) {
       deps.startSessionQueueDrain(sessionKey);
       return;
     }
-    deps.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore);
+    deps.scheduleSessionQueueDrainAtNextRetry(sessionKey, queueStore, now);
   } catch (error) {
     deps.logger.warn("Failed to reconcile session queue drain state", {
       sessionKey,
@@ -102,8 +104,10 @@ export function scheduleSessionQueueDrainAtNextRetry(
   scheduleSessionQueueDrainFn: (sessionKey: string, nextRetryAt: number) => void,
   sessionKey: string,
   queueStore: Pick<TaskQueueStateStoreLike, "getNextPendingRetryAt">,
+  now = Date.now(),
 ): void {
-  const nextRetryAt = queueStore.getNextPendingRetryAt(sessionKey);
+  const safeNow = Math.max(0, Math.floor(now));
+  const nextRetryAt = queueStore.getNextPendingRetryAt(sessionKey, safeNow);
   if (nextRetryAt === null) {
     return;
   }
