@@ -225,28 +225,30 @@ export async function runAutoDevCommand(
         : new Date(Date.now() + deps.autoDevLoopMaxMinutes * 60_000).toISOString(),
   };
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
-
-  const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 50);
-  const healedStatuses = await healAutoDevTaskStatuses({
-    taskListPath: context.taskListPath,
-    tasks: context.tasks,
-    runs: recentRuns,
-    targetTaskIds: requestedTaskId ? [requestedTaskId] : null,
-  });
-  if (healedStatuses.length > 0) {
-    context = await loadAutoDevContext(input.workdir);
-    const healSummary = healedStatuses
-      .map((entry) => `${entry.taskId}:${statusToSymbol(entry.from)}->${statusToSymbol(entry.to)}`)
-      .join(", ");
-    await sendAutoDevNoticeBestEffort(deps, 
-      input.message.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 状态自愈：已根据最近运行记录修正任务状态。
+  const isNestedLoopTaskRun = Boolean(requestedTaskId && activeContext.mode === "loop");
+  if (!isNestedLoopTaskRun) {
+    const recentRuns = deps.listWorkflowDiagRunsBySession("autodev", input.sessionKey, 50);
+    const healedStatuses = await healAutoDevTaskStatuses({
+      taskListPath: context.taskListPath,
+      tasks: context.tasks,
+      runs: recentRuns,
+      targetTaskIds: requestedTaskId ? [requestedTaskId] : null,
+    });
+    if (healedStatuses.length > 0) {
+      context = await loadAutoDevContext(input.workdir);
+      const healSummary = healedStatuses
+        .map((entry) => `${entry.taskId}:${statusToSymbol(entry.from)}->${statusToSymbol(entry.to)}`)
+        .join(", ");
+      await sendAutoDevNoticeBestEffort(deps, 
+        input.message.conversationId,
+        localize(
+          `[CodeHarbor] AutoDev 状态自愈：已根据最近运行记录修正任务状态。
 - changes: ${healSummary}`,
-        `[CodeHarbor] AutoDev status self-heal applied from recent run records.
+          `[CodeHarbor] AutoDev status self-heal applied from recent run records.
 - changes: ${healSummary}`,
-      ),
-    );
+        ),
+      );
+    }
   }
 
   if (!context.requirementsContent) {
