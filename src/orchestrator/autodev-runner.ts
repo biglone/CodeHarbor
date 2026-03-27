@@ -389,24 +389,8 @@ export async function runAutoDevCommand(
           );
           return;
         }
-        const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
-          sessionKey: input.sessionKey,
-          conversationId: input.message.conversationId,
-          workdir: input.workdir,
-          task: null,
-          mode: "loop",
-          startedAtIso: new Date(loopStartedAt).toISOString(),
-          loopRound: attemptedRuns,
-          loopCompletedRuns: completedRuns,
-          loopMaxRuns: activeContext.loopMaxRuns,
-          loopDeadlineAtIso,
-        });
-        if (preflightFailed) {
-          return;
-        }
-
-        const loopContext = await loadAutoDevContext(input.workdir);
-        const loopTask = selectAutoDevTask(loopContext.tasks);
+        let loopContext = await loadAutoDevContext(input.workdir);
+        let loopTask = selectAutoDevTask(loopContext.tasks);
         if (!loopTask) {
           deps.autoDevMetrics.recordLoopStop(completedRuns === 0 ? "no_task" : "drained");
           const endedAtIso = new Date().toISOString();
@@ -464,6 +448,29 @@ export async function runAutoDevCommand(
         if (shouldStopBeforeNextTask) {
           return;
         }
+
+        const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
+          sessionKey: input.sessionKey,
+          conversationId: input.message.conversationId,
+          workdir: input.workdir,
+          task: null,
+          mode: "loop",
+          startedAtIso: new Date(loopStartedAt).toISOString(),
+          loopRound: attemptedRuns,
+          loopCompletedRuns: completedRuns,
+          loopMaxRuns: activeContext.loopMaxRuns,
+          loopDeadlineAtIso,
+        });
+        if (preflightFailed) {
+          return;
+        }
+
+        loopContext = await loadAutoDevContext(input.workdir);
+        const refreshedLoopTask = resolveAutoDevTask(loopContext.tasks, loopTask.id, loopTask.lineIndex);
+        if (!refreshedLoopTask) {
+          continue;
+        }
+        loopTask = refreshedLoopTask;
 
         const taskListBeforeRun = loopContext.taskListContent ?? "";
         attemptedRuns += 1;

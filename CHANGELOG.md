@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.73] - 2026-03-27
+
+- autodev loop stability: reorder loop flow to check executable tasks before git preflight in `/autodev run` loop mode, preventing unnecessary preflight operations when task list is already drained.
+- preflight/self-heal interaction fix: avoid `AUTODEV_PREFLIGHT_AUTO_STASH` repeatedly stashing self-healed `TASK_LIST.md` changes in no-task scenarios.
+- loop robustness: after preflight, re-resolve selected loop task from refreshed `TASK_LIST.md` state before executing the round.
+- tests: add regression coverage to ensure no auto-stash occurs when loop run has no executable tasks.
+
 ## [0.1.72] - 2026-03-27
 
 - autodev workdir persistence: `/autodev workdir` override is now stored in `StateStore` and restored after service restart, so Matrix room sessions keep their selected workspace.

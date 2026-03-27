@@ -5020,6 +5020,69 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("skips git preflight auto-stash when /autodev run has no executable tasks", async () => {
+    const previous = process.env.AUTODEV_PREFLIGHT_AUTO_STASH;
+    process.env.AUTODEV_PREFLIGHT_AUTO_STASH = "true";
+
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-loop-no-task-preflight-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    const completedTaskList = [
+      "| 任务ID | 任务描述 | 状态 |",
+      "|--------|----------|------|",
+      "| T16.12 | no executable loop task | ✅ |",
+    ].join("\n");
+    await fs.writeFile(taskListPath, completedTaskList, "utf8");
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init"],
+      { cwd: tempRoot },
+    );
+    await fs.writeFile(path.join(tempRoot, "DIRTY_NO_TASK.md"), "dirty\n", "utf8");
+
+    try {
+      const secondChannel = new FakeChannel();
+      const store = new FakeStateStore();
+      const second = new Orchestrator(secondChannel, new WorkflowExecutor() as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        autoDevAutoCommit: true,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await second.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-loop-no-task-preflight",
+        }),
+      );
+
+      expect(secondChannel.notices.some((entry) => entry.text.includes("No executable tasks (pending/in_progress)."))).toBe(true);
+      expect(secondChannel.notices.some((entry) => entry.text.includes("dirty worktree auto-stashed; continuing run"))).toBe(
+        false,
+      );
+      const stashList = (await execFileAsync("git", ["stash", "list"], { cwd: tempRoot })).stdout;
+      expect(stashList).not.toContain("codeharbor autodev preflight auto-stash");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTODEV_PREFLIGHT_AUTO_STASH;
+      } else {
+        process.env.AUTODEV_PREFLIGHT_AUTO_STASH = previous;
+      }
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reports /autodev status with task summary and current task", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-status-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
