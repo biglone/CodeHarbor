@@ -674,7 +674,7 @@ function buildReviewerPrompt(
     "1) 若 executor 输出缺失 VALIDATION_STATUS 或 __EXIT_CODES__，必须 REJECTED 并给出可执行 BLOCKERS。",
     "2) 若 VALIDATION_STATUS 与 VALIDATION/命令结果不一致，必须 REJECTED 并要求修正。",
     "3) REJECTED 时 BLOCKERS 至少 1 条，且 issue/fix/accept 不得为空。",
-    "4) 若 executor 输出显示改动了 TASK_LIST.md，必须 REJECTED（该文件仅允许系统维护任务状态）。",
+    "4) 仅当 executor 输出提供可验证证据显示 TASK_LIST.md 在最终工作区仍被改动（例如 git diff -- TASK_LIST.md 非空）时，才可因该项 REJECTED。",
     "",
     `目标：${objective}`,
     "",
