@@ -2625,6 +2625,74 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("invalid /autodev subcommand"))).toBe(true);
   });
 
+  it("keeps /autodev workdir override after orchestrator restart", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-autodev-workdir-");
+    const targetWorkdir = path.join(dir, "workspace-autodev");
+    await fs.mkdir(targetWorkdir, { recursive: true });
+
+    const options = {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      outputLanguage: "en" as const,
+      progressUpdatesEnabled: false,
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    };
+
+    try {
+      const firstChannel = new FakeChannel();
+      const firstExecutor = new ImmediateExecutor();
+      const first = new Orchestrator(firstChannel, firstExecutor as never, store as never, logger as never, options);
+
+      await first.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: `/autodev workdir ${targetWorkdir}`,
+          eventId: "$autodev-workdir-set",
+        }),
+      );
+      expect(firstChannel.notices.some((entry) => entry.text.includes("AutoDev workdir updated"))).toBe(true);
+
+      const secondChannel = new FakeChannel();
+      const secondExecutor = new ImmediateExecutor();
+      const second = new Orchestrator(secondChannel, secondExecutor as never, store as never, logger as never, options);
+
+      await second.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev workdir",
+          eventId: "$autodev-workdir-status-1",
+        }),
+      );
+
+      const statusBeforeReset = secondChannel.notices.at(-1)?.text ?? "";
+      expect(statusBeforeReset).toContain(`effectiveWorkdir: ${path.resolve(targetWorkdir)}`);
+      expect(statusBeforeReset).toContain(`override: ${path.resolve(targetWorkdir)}`);
+
+      await second.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/reset",
+          eventId: "$autodev-workdir-reset",
+        }),
+      );
+      await second.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev workdir",
+          eventId: "$autodev-workdir-status-2",
+        }),
+      );
+
+      const statusAfterReset = secondChannel.notices.at(-1)?.text ?? "";
+      expect(statusAfterReset).toContain("override: none");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs /autodev and marks selected task completed when approved", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");

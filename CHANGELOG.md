@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.72] - 2026-03-27
+
+- autodev workdir persistence: `/autodev workdir` override is now stored in `StateStore` and restored after service restart, so Matrix room sessions keep their selected workspace.
+- reset consistency: `/reset` now clears both in-memory and persisted AutoDev workdir override to avoid stale override reuse.
+- schema migration: add backward-compatible `sessions.autodev_workdir_override` column with automatic migration on startup.
+- tests: add regression coverage for persisted workdir override in `state-store` and orchestrator restart scenarios.
+
 ## [0.1.71] - 2026-03-27
 
 - command routing hardening: invalid `/autodev` subcommands (for example `/autodev 润`) are now rejected with explicit usage guidance instead of falling through to chat execution.

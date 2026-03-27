@@ -15,6 +15,7 @@ interface ControlCommandContextInput {
   workflowSnapshots: ControlCommandDispatchContext["workflowSnapshots"];
   autoDevSnapshots: ControlCommandDispatchContext["autoDevSnapshots"];
   autoDevWorkdirOverrides: ControlCommandDispatchContext["autoDevWorkdirOverrides"];
+  clearPersistedAutoDevWorkdirOverride?: ControlCommandDispatchContext["clearPersistedAutoDevWorkdirOverride"];
   autoDevDetailedProgressOverrides: ControlCommandDispatchContext["autoDevDetailedProgressOverrides"];
   workflowRoleSkillPolicyOverrides: ControlCommandDispatchContext["workflowRoleSkillPolicyOverrides"];
   pendingStopRequests: ControlCommandDispatchContext["pendingStopRequests"];
@@ -43,6 +44,7 @@ interface ControlCommandRuntimeContextInput {
   workflowSnapshots: ControlCommandDispatchContext["workflowSnapshots"];
   autoDevSnapshots: ControlCommandDispatchContext["autoDevSnapshots"];
   autoDevWorkdirOverrides: ControlCommandDispatchContext["autoDevWorkdirOverrides"];
+  clearPersistedAutoDevWorkdirOverride?: ControlCommandDispatchContext["clearPersistedAutoDevWorkdirOverride"];
   autoDevDetailedProgressOverrides: ControlCommandDispatchContext["autoDevDetailedProgressOverrides"];
   workflowRoleSkillPolicyOverrides: ControlCommandDispatchContext["workflowRoleSkillPolicyOverrides"];
   pendingStopRequests: ControlCommandDispatchContext["pendingStopRequests"];
@@ -77,6 +79,7 @@ export function buildControlCommandDispatchContext(
     workflowSnapshots: input.workflowSnapshots,
     autoDevSnapshots: input.autoDevSnapshots,
     autoDevWorkdirOverrides: input.autoDevWorkdirOverrides,
+    clearPersistedAutoDevWorkdirOverride: input.clearPersistedAutoDevWorkdirOverride,
     autoDevDetailedProgressOverrides: input.autoDevDetailedProgressOverrides,
     workflowRoleSkillPolicyOverrides: input.workflowRoleSkillPolicyOverrides,
     pendingStopRequests: input.pendingStopRequests,
@@ -109,6 +112,7 @@ export function buildControlCommandDispatchContextFromRuntime(
     workflowSnapshots: input.workflowSnapshots,
     autoDevSnapshots: input.autoDevSnapshots,
     autoDevWorkdirOverrides: input.autoDevWorkdirOverrides,
+    clearPersistedAutoDevWorkdirOverride: input.clearPersistedAutoDevWorkdirOverride,
     autoDevDetailedProgressOverrides: input.autoDevDetailedProgressOverrides,
     workflowRoleSkillPolicyOverrides: input.workflowRoleSkillPolicyOverrides,
     pendingStopRequests: input.pendingStopRequests,

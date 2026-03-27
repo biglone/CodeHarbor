@@ -24,6 +24,7 @@ interface HandleControlCommandDeps {
   workflowSnapshots: Map<string, unknown>;
   autoDevSnapshots: Map<string, unknown>;
   autoDevWorkdirOverrides: Map<string, string>;
+  clearPersistedAutoDevWorkdirOverride?: (sessionKey: string) => void;
   autoDevDetailedProgressOverrides: Map<string, boolean>;
   workflowRoleSkillPolicyOverrides: Map<string, unknown>;
   pendingStopRequests: Set<string>;
@@ -67,6 +68,7 @@ export async function handleControlCommand(
     deps.workflowSnapshots.delete(input.sessionKey);
     deps.autoDevSnapshots.delete(input.sessionKey);
     deps.autoDevWorkdirOverrides.delete(input.sessionKey);
+    deps.clearPersistedAutoDevWorkdirOverride?.(input.sessionKey);
     deps.autoDevDetailedProgressOverrides.delete(input.sessionKey);
     deps.workflowRoleSkillPolicyOverrides.delete(input.sessionKey);
     deps.pendingStopRequests.delete(input.sessionKey);

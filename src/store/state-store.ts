@@ -395,6 +395,38 @@ export class StateStore {
     return row?.codex_session_id ?? null;
   }
 
+  getAutoDevWorkdirOverride(sessionKey: string): string | null {
+    this.maybePruneExpiredSessions();
+    const row = this.db
+      .prepare("SELECT autodev_workdir_override FROM sessions WHERE session_key = ?1")
+      .get(sessionKey) as { autodev_workdir_override: string | null } | undefined;
+    const value = row?.autodev_workdir_override?.trim() ?? "";
+    return value.length > 0 ? value : null;
+  }
+
+  setAutoDevWorkdirOverride(sessionKey: string, workdir: string): void {
+    this.maybePruneExpiredSessions();
+    const normalized = workdir.trim();
+    if (!normalized) {
+      this.clearAutoDevWorkdirOverride(sessionKey);
+      return;
+    }
+    this.ensureSession(sessionKey);
+    this.db
+      .prepare(
+        "UPDATE sessions SET autodev_workdir_override = ?2, updated_at = ?3 WHERE session_key = ?1",
+      )
+      .run(sessionKey, normalized, Date.now());
+  }
+
+  clearAutoDevWorkdirOverride(sessionKey: string): void {
+    this.maybePruneExpiredSessions();
+    this.ensureSession(sessionKey);
+    this.db
+      .prepare("UPDATE sessions SET autodev_workdir_override = NULL, updated_at = ?2 WHERE session_key = ?1")
+      .run(sessionKey, Date.now());
+  }
+
   setCodexSessionId(sessionKey: string, codexSessionId: string): void {
     this.maybePruneExpiredSessions();
     this.ensureSession(sessionKey);
@@ -2113,6 +2145,7 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS sessions (
         session_key TEXT PRIMARY KEY,
         codex_session_id TEXT,
+        autodev_workdir_override TEXT,
         active_until INTEGER,
         updated_at INTEGER NOT NULL
       );
@@ -2316,6 +2349,12 @@ export class StateStore {
         updated_at INTEGER NOT NULL
       );
     `);
+
+    const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    const sessionColumnNames = new Set(sessionColumns.map((column) => column.name));
+    if (!sessionColumnNames.has("autodev_workdir_override")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN autodev_workdir_override TEXT");
+    }
   }
 
   private migrateTaskQueueSchema(): void {

@@ -145,6 +145,22 @@ describe("StateStore", () => {
     expect(store.isSessionActive("s1")).toBe(false);
   });
 
+  it("persists AutoDev workdir override across restarts", () => {
+    const { db, legacy, dir } = createPaths();
+    const workdir = path.join(dir, "autodev-project");
+    fs.mkdirSync(workdir, { recursive: true });
+
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    expect(store.getAutoDevWorkdirOverride("s1")).toBeNull();
+    store.setAutoDevWorkdirOverride("s1", workdir);
+    expect(store.getAutoDevWorkdirOverride("s1")).toBe(workdir);
+
+    const reopened = new StateStore(db, legacy, 10, 30, 100);
+    expect(reopened.getAutoDevWorkdirOverride("s1")).toBe(workdir);
+    reopened.clearAutoDevWorkdirOverride("s1");
+    expect(reopened.getAutoDevWorkdirOverride("s1")).toBeNull();
+  });
+
   it("stores room settings and config revisions", () => {
     const { db, legacy, dir } = createPaths();
     const projectDir = path.join(dir, "project-a");

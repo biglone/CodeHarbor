@@ -895,6 +895,8 @@ export class Orchestrator {
       workflowSnapshots: this.workflowSnapshots,
       autoDevSnapshots: this.autoDevSnapshots,
       autoDevWorkdirOverrides: this.autoDevWorkdirOverrides,
+      clearPersistedAutoDevWorkdirOverride: (targetSessionKey) =>
+        this.clearPersistedAutoDevWorkdirOverride(targetSessionKey),
       autoDevDetailedProgressOverrides: this.autoDevDetailedProgressOverrides,
       workflowRoleSkillPolicyOverrides: this.workflowRoleSkillPolicyOverrides,
       pendingStopRequests: this.pendingStopRequests,
@@ -1114,12 +1116,10 @@ export class Orchestrator {
       setWorkflowRoleSkillPolicyOverride: (targetSessionKey, next) =>
         this.setWorkflowRoleSkillPolicyOverride(targetSessionKey, next),
       buildWorkflowRoleSkillStatus: (targetSessionKey) => this.buildWorkflowRoleSkillStatus(targetSessionKey),
-      getAutoDevWorkdirOverride: (targetSessionKey) => this.autoDevWorkdirOverrides.get(targetSessionKey) ?? null,
+      getAutoDevWorkdirOverride: (targetSessionKey) => this.getAutoDevWorkdirOverride(targetSessionKey),
       setAutoDevWorkdirOverride: (targetSessionKey, targetWorkdir) =>
-        this.autoDevWorkdirOverrides.set(targetSessionKey, targetWorkdir),
-      clearAutoDevWorkdirOverride: (targetSessionKey) => {
-        this.autoDevWorkdirOverrides.delete(targetSessionKey);
-      },
+        this.setAutoDevWorkdirOverride(targetSessionKey, targetWorkdir),
+      clearAutoDevWorkdirOverride: (targetSessionKey) => this.clearAutoDevWorkdirOverride(targetSessionKey),
       runAutoDevInitEnhancement: (input) => this.runAutoDevInitEnhancement(input),
       listWorkflowDiagRunsBySession: (kind, sessionKey, limit) =>
         this.listWorkflowDiagRunsBySession(kind, sessionKey, limit),
@@ -1256,7 +1256,54 @@ export class Orchestrator {
   }
 
   private resolveAutoDevWorkdir(sessionKey: string, roomWorkdir: string): string {
-    return this.autoDevWorkdirOverrides.get(sessionKey) ?? roomWorkdir;
+    return this.getAutoDevWorkdirOverride(sessionKey) ?? roomWorkdir;
+  }
+
+  private getAutoDevWorkdirOverride(sessionKey: string): string | null {
+    const inMemory = this.autoDevWorkdirOverrides.get(sessionKey);
+    if (inMemory) {
+      return inMemory;
+    }
+    const persisted = this.readPersistedAutoDevWorkdirOverride(sessionKey);
+    if (persisted) {
+      this.autoDevWorkdirOverrides.set(sessionKey, persisted);
+      return persisted;
+    }
+    return null;
+  }
+
+  private setAutoDevWorkdirOverride(sessionKey: string, workdir: string): void {
+    this.autoDevWorkdirOverrides.set(sessionKey, workdir);
+    const stateStoreWithAutoDevWorkdir = this.stateStore as unknown as {
+      setAutoDevWorkdirOverride?: (targetSessionKey: string, targetWorkdir: string) => void;
+    };
+    if (typeof stateStoreWithAutoDevWorkdir.setAutoDevWorkdirOverride === "function") {
+      stateStoreWithAutoDevWorkdir.setAutoDevWorkdirOverride(sessionKey, workdir);
+    }
+  }
+
+  private clearAutoDevWorkdirOverride(sessionKey: string): void {
+    this.autoDevWorkdirOverrides.delete(sessionKey);
+    this.clearPersistedAutoDevWorkdirOverride(sessionKey);
+  }
+
+  private readPersistedAutoDevWorkdirOverride(sessionKey: string): string | null {
+    const stateStoreWithAutoDevWorkdir = this.stateStore as unknown as {
+      getAutoDevWorkdirOverride?: (targetSessionKey: string) => string | null;
+    };
+    if (typeof stateStoreWithAutoDevWorkdir.getAutoDevWorkdirOverride !== "function") {
+      return null;
+    }
+    return stateStoreWithAutoDevWorkdir.getAutoDevWorkdirOverride(sessionKey);
+  }
+
+  private clearPersistedAutoDevWorkdirOverride(sessionKey: string): void {
+    const stateStoreWithAutoDevWorkdir = this.stateStore as unknown as {
+      clearAutoDevWorkdirOverride?: (targetSessionKey: string) => void;
+    };
+    if (typeof stateStoreWithAutoDevWorkdir.clearAutoDevWorkdirOverride === "function") {
+      stateStoreWithAutoDevWorkdir.clearAutoDevWorkdirOverride(sessionKey);
+    }
   }
 
   private buildAutoDevRunCommandDispatchContext(): Parameters<typeof runHandleAutoDevRunCommand>[0] {
