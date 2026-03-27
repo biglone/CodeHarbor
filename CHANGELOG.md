@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.74] - 2026-03-27
+
+- autodev stage output echo: add `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED` (default `true`) so `/autodev run` can stream planner/executor/reviewer full outputs to Matrix in real time.
+- new session control: add `/autodev content on|off|status` to toggle stage-output echo per room/session without changing global env.
+- workflow robustness: stage-output notices are delivered best-effort and no longer fail the main workflow when Matrix notification sending is transiently unavailable.
+- admin usability: global settings page now includes direct `envOverrides` examples/hints for common AutoDev keys (`AUTODEV_STAGE_OUTPUT_ECHO_ENABLED`, `AUTODEV_PREFLIGHT_AUTO_STASH`, `AUTODEV_RUN_ARCHIVE_ENABLED`, `AUTODEV_RUN_ARCHIVE_DIR`).
+
 ## [0.1.73] - 2026-03-27
 
 - autodev loop stability: reorder loop flow to check executable tasks before git preflight in `/autodev run` loop mode, preventing unnecessary preflight operations when task list is already drained.
