@@ -627,6 +627,7 @@ function buildExecutorPrompt(
   }
   sections.push(
     "你是软件执行代理。请根据计划完成交付内容。",
+    "硬性约束：禁止对 TASK_LIST.md 执行 checkout/restore/reset 等恢复写操作；该文件仅允许系统维护。",
     "输出要求：",
     "1. 直接给出最终可执行结果",
     "2. 说明你实际完成了哪些步骤",
@@ -765,6 +766,7 @@ function buildRepairPrompt(
     `你是软件执行代理。请根据审查反馈进行第 ${round} 轮修复并输出最终版本。`,
     "要求：保持正确内容，修复问题，不要丢失已完成部分。",
     "硬性约束：禁止修改 TASK_LIST.md（含任务状态与正文），任务状态由系统维护。",
+    "硬性约束：禁止对 TASK_LIST.md 执行 checkout/restore/reset 等恢复写操作；若发现异常请在回执中报告，不要自行回滚该文件。",
     "必须优先按 [normalized_blockers] 逐条完成修复，每条都要有明确处理结果。",
     "输出必须包含：",
     "BLOCKER_STATUS:",
