@@ -625,11 +625,6 @@ export async function runAutoDevCommand(
     logger: deps.logger,
   });
   let activeTask = selectedTask;
-  let promotedToInProgress = false;
-  if (selectedTask.status === "pending") {
-    activeTask = await updateAutoDevTaskStatus(context.taskListPath, selectedTask, "in_progress");
-    promotedToInProgress = true;
-  }
 
   const startedAtIso = new Date().toISOString();
   deps.setAutoDevSnapshot(input.sessionKey, {
@@ -951,17 +946,6 @@ export async function runAutoDevCommand(
       taskListPath: context.taskListPath,
     });
     activeTask = failurePolicy.task;
-    if (promotedToInProgress && !failurePolicy.blocked) {
-      try {
-        await updateAutoDevTaskStatus(context.taskListPath, activeTask, "pending");
-      } catch (restoreError) {
-        deps.logger.warn("Failed to restore AutoDev task status after failure", {
-          taskId: activeTask.id,
-          error: formatError(restoreError),
-        });
-      }
-    }
-
     const status = classifyExecutionOutcome(error);
     const endedAtIso = new Date().toISOString();
     deps.setAutoDevSnapshot(input.sessionKey, {

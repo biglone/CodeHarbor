@@ -3430,7 +3430,7 @@ describe("Orchestrator", () => {
           return {
             result: (async () => {
               const raw = await fs.readFile(taskListPath, "utf8");
-              const drifted = raw.replace("| T16.1 | drift reconcile task | 🔄 |", "| T16.1 | drift reconcile task | ✅ |");
+              const drifted = raw.replace("| T16.1 | drift reconcile task | ⬜ |", "| T16.1 | drift reconcile task | ✅ |");
               await fs.writeFile(taskListPath, drifted, "utf8");
               return {
                 sessionId: sessionId ?? "wf-thread-reviewer",
@@ -3522,7 +3522,7 @@ describe("Orchestrator", () => {
           return {
             result: (async () => {
               const raw = await fs.readFile(taskListPath, "utf8");
-              const drifted = raw.replace("| T16.11 | task list policy gate | 🔄 |", "| T16.11 | task list policy gate | ✅ |");
+              const drifted = raw.replace("| T16.11 | task list policy gate | ⬜ |", "| T16.11 | task list policy gate | ✅ |");
               await fs.writeFile(taskListPath, drifted, "utf8");
               return {
                 sessionId: sessionId ?? "wf-thread-reviewer",
