@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.76] - 2026-03-27
+
+- autodev loop stability: skip task-status self-heal on nested loop task invocations (`taskId + mode=loop`) to prevent repeated `TASK_LIST.md` churn.
+- preflight noise reduction: avoids self-heal/preflight auto-stash oscillation that could spam repeated `already completed` and `auto-stashed` notices.
+- tests: add runner-level regression coverage for nested-loop self-heal guard behavior.
+
 ## [0.1.75] - 2026-03-27
 
 - reviewer policy hardening: TASK_LIST rejection is now based on verifiable final state (`finalClean=no`) instead of command-text traces alone.
