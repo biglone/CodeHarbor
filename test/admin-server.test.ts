@@ -284,6 +284,7 @@ describe("AdminServer", () => {
             autoReleasePush: true,
             runArchiveEnabled: true,
             runArchiveDir: ".codeharbor/autodev-runs",
+            validationStrict: true,
             stageOutputEchoEnabled: true,
             maxConsecutiveFailures: 4,
             initEnhancementEnabled: true,
@@ -295,6 +296,7 @@ describe("AdminServer", () => {
     });
     expect(validAutoDevConfig.status).toBe(200);
     expect(JSON.stringify(validAutoDevConfig.body)).toContain("autoDev.initEnhancementTimeoutMs");
+    expect(JSON.stringify(validAutoDevConfig.body)).toContain("autoDev.validationStrict");
 
     const invalidRoleSkills = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
@@ -419,6 +421,7 @@ describe("AdminServer", () => {
           envOverrides: {
             MATRIX_ADMIN_USERS: "@ops:example.com",
             AUTODEV_LOOP_MAX_RUNS: "12",
+            AUTODEV_VALIDATION_STRICT: "true",
             AUTODEV_PREFLIGHT_AUTO_STASH: "true",
             AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "9000",
             CODEHARBOR_LAUNCHD_MAIN_LABEL: "com.custom.main",
@@ -429,6 +432,7 @@ describe("AdminServer", () => {
     expect(validEnvOverrides.status).toBe(200);
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.MATRIX_ADMIN_USERS");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_LOOP_MAX_RUNS");
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_VALIDATION_STRICT");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_PREFLIGHT_AUTO_STASH");
 
     const invalidRoom = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
@@ -1435,6 +1439,7 @@ describe("AdminServer", () => {
           autoReleasePush: false,
           runArchiveEnabled: true,
           runArchiveDir: ".codeharbor/autodev-runs",
+          validationStrict: true,
           stageOutputEchoEnabled: true,
           maxConsecutiveFailures: 4,
           initEnhancementEnabled: true,
@@ -1457,6 +1462,7 @@ describe("AdminServer", () => {
           AUTODEV_AUTO_RELEASE_PUSH: "true",
           AUTODEV_RUN_ARCHIVE_ENABLED: "false",
           AUTODEV_RUN_ARCHIVE_DIR: ".codeharbor/autodev-runs-custom",
+          AUTODEV_VALIDATION_STRICT: "false",
           AUTODEV_STAGE_OUTPUT_ECHO_ENABLED: "false",
           AUTODEV_PREFLIGHT_AUTO_STASH: "true",
           AUTODEV_MAX_CONSECUTIVE_FAILURES: "5",
@@ -1503,6 +1509,7 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
     expect(envRaw).toContain("AUTODEV_RUN_ARCHIVE_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_RUN_ARCHIVE_DIR=.codeharbor/autodev-runs-custom");
+    expect(envRaw).toContain("AUTODEV_VALIDATION_STRICT=false");
     expect(envRaw).toContain("AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_PREFLIGHT_AUTO_STASH=true");
     expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");

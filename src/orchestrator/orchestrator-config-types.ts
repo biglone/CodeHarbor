@@ -72,6 +72,7 @@ export interface OrchestratorOptions {
   autoDevMaxConsecutiveFailures?: number;
   autoDevRunArchiveEnabled?: boolean;
   autoDevRunArchiveDir?: string;
+  autoDevValidationStrict?: boolean;
   autoDevDetailedProgressEnabled?: boolean;
   autoDevStageOutputEchoEnabled?: boolean;
   autoDevInitEnhancementEnabled?: boolean;

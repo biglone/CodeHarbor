@@ -62,6 +62,7 @@ const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_AUTO_RELEASE_ENABLED",
   "AUTODEV_AUTO_RELEASE_PUSH",
   "AUTODEV_RUN_ARCHIVE_ENABLED",
+  "AUTODEV_VALIDATION_STRICT",
   "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
   "AUTODEV_PREFLIGHT_AUTO_STASH",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
@@ -1311,6 +1312,11 @@ export class AdminServer {
         envUpdates.AUTODEV_RUN_ARCHIVE_DIR = value;
         markUpdatedKey("autoDev.runArchiveDir");
       }
+      if ("validationStrict" in autoDev) {
+        const value = normalizeBoolean(autoDev.validationStrict, false);
+        envUpdates.AUTODEV_VALIDATION_STRICT = String(value);
+        markUpdatedKey("autoDev.validationStrict");
+      }
       if ("stageOutputEchoEnabled" in autoDev) {
         const value = normalizeBoolean(autoDev.stageOutputEchoEnabled, true);
         envUpdates.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED = String(value);
@@ -1807,6 +1813,10 @@ export class AdminServer {
           throw new HttpError(400, "autoDev.runArchiveDir cannot be empty.");
         }
         markCheckedKey("autoDev.runArchiveDir");
+      }
+      if ("validationStrict" in autoDev) {
+        normalizeBoolean(autoDev.validationStrict, false);
+        markCheckedKey("autoDev.validationStrict");
       }
       if ("stageOutputEchoEnabled" in autoDev) {
         normalizeBoolean(autoDev.stageOutputEchoEnabled, true);
@@ -2380,6 +2390,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     maxConsecutiveFailures: number;
     runArchiveEnabled: boolean;
     runArchiveDir: string;
+    validationStrict: boolean;
     stageOutputEchoEnabled: boolean;
     initEnhancementEnabled: boolean;
     initEnhancementTimeoutMs: number;
@@ -2410,6 +2421,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
       autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
       runArchiveEnabled: normalizeBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, true),
       runArchiveDir: process.env.AUTODEV_RUN_ARCHIVE_DIR?.trim() || ".codeharbor/autodev-runs",
+      validationStrict: normalizeBoolean(process.env.AUTODEV_VALIDATION_STRICT, false),
       stageOutputEchoEnabled: normalizeBoolean(process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED, true),
       maxConsecutiveFailures: normalizePositiveInt(
         process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES,

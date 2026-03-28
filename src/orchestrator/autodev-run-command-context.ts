@@ -13,9 +13,11 @@ interface AutoDevRunCommandContextInput {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
   activeAutoDevLoopSessions: AutoDevRunCommandDispatchContext["activeAutoDevLoopSessions"];
   autoDevFailureStreaks: AutoDevRunCommandDispatchContext["autoDevFailureStreaks"];
+  autoDevValidationFailureStreaks: AutoDevRunCommandDispatchContext["autoDevValidationFailureStreaks"];
   consumePendingStopRequest: AutoDevRunCommandDispatchContext["consumePendingStopRequest"];
   consumePendingAutoDevLoopStopRequest: AutoDevRunCommandDispatchContext["consumePendingAutoDevLoopStopRequest"];
   setAutoDevSnapshot: AutoDevRunCommandDispatchContext["setAutoDevSnapshot"];
@@ -40,12 +42,14 @@ interface AutoDevRunCommandRuntimeContextInput {
     autoDevMaxConsecutiveFailures: number;
     autoDevRunArchiveEnabled: boolean;
     autoDevRunArchiveDir: string;
+    autoDevValidationStrict: boolean;
     outputLanguage: AutoDevRunCommandDispatchContext["outputLanguage"];
   };
   state: {
     pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
     activeAutoDevLoopSessions: AutoDevRunCommandDispatchContext["activeAutoDevLoopSessions"];
     autoDevFailureStreaks: AutoDevRunCommandDispatchContext["autoDevFailureStreaks"];
+    autoDevValidationFailureStreaks: AutoDevRunCommandDispatchContext["autoDevValidationFailureStreaks"];
   };
   hooks: {
     consumePendingStopRequest: AutoDevRunCommandDispatchContext["consumePendingStopRequest"];
@@ -76,9 +80,11 @@ export function buildAutoDevRunCommandDispatchContext(
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
     autoDevRunArchiveEnabled: input.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.autoDevRunArchiveDir,
+    autoDevValidationStrict: input.autoDevValidationStrict,
     pendingAutoDevLoopStopRequests: input.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.activeAutoDevLoopSessions,
     autoDevFailureStreaks: input.autoDevFailureStreaks,
+    autoDevValidationFailureStreaks: input.autoDevValidationFailureStreaks,
     consumePendingStopRequest: input.consumePendingStopRequest,
     consumePendingAutoDevLoopStopRequest: input.consumePendingAutoDevLoopStopRequest,
     setAutoDevSnapshot: input.setAutoDevSnapshot,
@@ -107,9 +113,11 @@ export function buildAutoDevRunCommandDispatchContextFromRuntime(
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
     autoDevRunArchiveEnabled: input.config.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.config.autoDevRunArchiveDir,
+    autoDevValidationStrict: input.config.autoDevValidationStrict,
     pendingAutoDevLoopStopRequests: input.state.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.state.activeAutoDevLoopSessions,
     autoDevFailureStreaks: input.state.autoDevFailureStreaks,
+    autoDevValidationFailureStreaks: input.state.autoDevValidationFailureStreaks,
     consumePendingStopRequest: input.hooks.consumePendingStopRequest,
     consumePendingAutoDevLoopStopRequest: input.hooks.consumePendingAutoDevLoopStopRequest,
     setAutoDevSnapshot: input.hooks.setAutoDevSnapshot,

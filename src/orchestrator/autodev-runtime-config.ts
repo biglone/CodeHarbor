@@ -10,6 +10,7 @@ import {
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
   DEFAULT_AUTODEV_RUN_ARCHIVE_DIR,
   DEFAULT_AUTODEV_RUN_ARCHIVE_ENABLED,
+  DEFAULT_AUTODEV_VALIDATION_STRICT,
   DEFAULT_AUTODEV_STAGE_OUTPUT_ECHO_ENABLED,
 } from "./orchestrator-constants";
 import type { OrchestratorOptions } from "./orchestrator-config-types";
@@ -24,6 +25,7 @@ export interface AutoDevRuntimeConfig {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   autoDevDetailedProgressDefaultEnabled: boolean;
   autoDevStageOutputEchoDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
@@ -61,6 +63,9 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
     autoDevRunArchiveDir:
       options?.autoDevRunArchiveDir ??
       parseArchiveDirEnv(process.env.AUTODEV_RUN_ARCHIVE_DIR, DEFAULT_AUTODEV_RUN_ARCHIVE_DIR),
+    autoDevValidationStrict:
+      options?.autoDevValidationStrict ??
+      parseEnvBoolean(process.env.AUTODEV_VALIDATION_STRICT, DEFAULT_AUTODEV_VALIDATION_STRICT),
     autoDevDetailedProgressDefaultEnabled:
       options?.autoDevDetailedProgressEnabled ?? DEFAULT_AUTODEV_DETAILED_PROGRESS_ENABLED,
     autoDevStageOutputEchoDefaultEnabled:

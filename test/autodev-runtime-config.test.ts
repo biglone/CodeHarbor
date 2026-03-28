@@ -10,6 +10,7 @@ const ENV_KEYS = [
   "AUTODEV_AUTO_RELEASE_PUSH",
   "AUTODEV_RUN_ARCHIVE_ENABLED",
   "AUTODEV_RUN_ARCHIVE_DIR",
+  "AUTODEV_VALIDATION_STRICT",
   "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
@@ -83,6 +84,12 @@ describe("resolveAutoDevRuntimeConfig", () => {
     expect(config.autoDevRunArchiveEnabled).toBe(false);
     expect(config.autoDevRunArchiveDir).toBe("logs/autodev-archive");
     expect(config.autoDevStageOutputEchoDefaultEnabled).toBe(false);
+  });
+
+  it("reads validation strict mode from env", () => {
+    process.env.AUTODEV_VALIDATION_STRICT = "true";
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevValidationStrict).toBe(true);
   });
 
   it("lets orchestrator options override env for init enhancement budget", () => {

@@ -34,6 +34,7 @@ interface StatusCommandContextInput {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -107,6 +108,7 @@ interface StatusCommandRuntimeConfigInput {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -171,6 +173,7 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevMaxConsecutiveFailures: input.autoDevMaxConsecutiveFailures,
     autoDevRunArchiveEnabled: input.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.autoDevRunArchiveDir,
+    autoDevValidationStrict: input.autoDevValidationStrict,
     autoDevInitEnhancementEnabled: input.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.autoDevInitEnhancementMaxChars,
@@ -226,6 +229,7 @@ export function buildStatusCommandDispatchContextFromRuntime(
     autoDevMaxConsecutiveFailures: input.config.autoDevMaxConsecutiveFailures,
     autoDevRunArchiveEnabled: input.config.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.config.autoDevRunArchiveDir,
+    autoDevValidationStrict: input.config.autoDevValidationStrict,
     autoDevInitEnhancementEnabled: input.config.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.config.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.config.autoDevInitEnhancementMaxChars,

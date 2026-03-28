@@ -33,6 +33,7 @@ interface AutoDevStatusCommandDeps {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   autoDevDetailedProgressDefaultEnabled: boolean;
   autoDevStageOutputEchoDefaultEnabled: boolean;
   autoDevInitEnhancementEnabled: boolean;
@@ -111,6 +112,14 @@ export async function handleAutoDevStatusCommand(
             : ""
         }`
       : "N/A";
+    const runValidationFailureClass =
+      snapshot.lastValidationFailureClass ?? parseValidationFailureClassFromRunMessage(latestRun?.lastMessage ?? null);
+    const runValidationEvidenceSource =
+      snapshot.lastValidationEvidenceSource ?? parseValidationEvidenceSourceFromRunMessage(latestRun?.lastMessage ?? null);
+    const runValidationAt =
+      snapshot.lastValidationAt ??
+      parseValidationAtFromRunMessage(latestRun?.lastMessage ?? null) ??
+      (runValidationFailureClass || runValidationEvidenceSource ? latestRun?.updatedAt ?? null : null);
     const autoReleasePushWarning =
       deps.autoDevAutoReleaseEnabled && !deps.autoDevAutoReleasePush
         ? localize(
@@ -147,7 +156,7 @@ export async function handleAutoDevStatusCommand(
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, validationStrict=${deps.autoDevValidationStrict ? "on" : "off"}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
@@ -159,6 +168,9 @@ export async function handleAutoDevStatusCommand(
 - runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - runError: ${snapshot.error ?? "N/A"}
+- runValidationFailureClass: ${runValidationFailureClass ?? "N/A"}
+- runValidationEvidenceSource: ${runValidationEvidenceSource ?? "N/A"}
+- runValidationAt: ${runValidationAt ?? "N/A"}
 - runGitCommit: ${runGitCommitSummary}
 - runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
 - runRelease: ${runReleaseSummary}
@@ -183,7 +195,7 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}
 - taskAutoHeal: ${taskAutoHealSummary}
 - gitPreflight: ${gitPreflight.state}
-- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
+- config: loopMaxRuns=${deps.autoDevLoopMaxRuns}, loopMaxMinutes=${deps.autoDevLoopMaxMinutes}, autoCommit=${deps.autoDevAutoCommit ? "on" : "off"}, autoRelease=${deps.autoDevAutoReleaseEnabled ? "on" : "off"}, autoReleasePush=${deps.autoDevAutoReleasePush ? "on" : "off"}, maxConsecutiveFailures=${deps.autoDevMaxConsecutiveFailures}, runArchive=${deps.autoDevRunArchiveEnabled ? "on" : "off"}, runArchiveDir=${deps.autoDevRunArchiveDir}, validationStrict=${deps.autoDevValidationStrict ? "on" : "off"}, initEnhancement=${deps.autoDevInitEnhancementEnabled ? "on" : "off"}, initEnhancementTimeoutMs=${deps.autoDevInitEnhancementTimeoutMs}, initEnhancementMaxChars=${deps.autoDevInitEnhancementMaxChars}, detailedProgress=${detailedProgress} (default=${detailedProgressDefault}), stageOutputEcho=${stageOutputEcho} (default=${stageOutputEchoDefault})
 - gitPreflightReason: ${gitPreflightReason}${autoReleasePushWarning}
 - roleSkills: enabled=${roleSkillStatus.enabled ? "on" : "off"}, mode=${roleSkillStatus.mode}, maxChars=${roleSkillStatus.maxChars}, override=${roleSkillStatus.override}
 - roleSkillsLoaded: ${roleSkillStatus.loaded}
@@ -195,6 +207,9 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
 - runControl: loopActive=${loopActive}, loopStopRequested=${loopStopRequested}, stopRequested=${stopRequested}
 - runApproved: ${snapshot.approved === null ? "N/A" : snapshot.approved ? "yes" : "no"}
 - runError: ${snapshot.error ?? "N/A"}
+- runValidationFailureClass: ${runValidationFailureClass ?? "N/A"}
+- runValidationEvidenceSource: ${runValidationEvidenceSource ?? "N/A"}
+- runValidationAt: ${runValidationAt ?? "N/A"}
 - runGitCommit: ${runGitCommitSummary}
 - runGitCommitAt: ${snapshot.lastGitCommitAt ?? "N/A"}
 - runRelease: ${runReleaseSummary}
@@ -216,4 +231,41 @@ ${formatAutoDevStatusStageTrace(stageEvents, deps.outputLanguage)}`,
       ),
     );
   }
+}
+
+function parseValidationFailureClassFromRunMessage(message: string | null): string | null {
+  if (!message) {
+    return null;
+  }
+  const match = message.match(/validationFailureClass\s*=\s*([a-z_]+|none)/i);
+  if (!match) {
+    return null;
+  }
+  return match[1].toLowerCase();
+}
+
+function parseValidationEvidenceSourceFromRunMessage(message: string | null): string | null {
+  if (!message) {
+    return null;
+  }
+  const match = message.match(/validationEvidenceSource\s*=\s*([a-z_]+|none)/i);
+  if (!match) {
+    return null;
+  }
+  return match[1].toLowerCase();
+}
+
+function parseValidationAtFromRunMessage(message: string | null): string | null {
+  if (!message) {
+    return null;
+  }
+  const match = message.match(/validationAt\s*=\s*([^,\s]+)/i);
+  if (!match) {
+    return null;
+  }
+  const value = match[1].trim();
+  if (!value) {
+    return null;
+  }
+  return value;
 }

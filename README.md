@@ -712,6 +712,8 @@ Backend/model rule routing:
   - when git preflight detects a dirty worktree, auto-stash (`git stash --include-untracked`) and continue run (default `false`)
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`
   - when the same task fails repeatedly and reaches this threshold, mark it `🚫` blocked (default `3`)
+- `AUTODEV_VALIDATION_STRICT=true|false`
+  - fail closed on validation gate when structured evidence is missing (`VALIDATION_STATUS`/`__EXIT_CODES__`); default `false`
 
 AutoDev (`/autodev`) conventions:
 
@@ -740,6 +742,10 @@ AutoDev (`/autodev`) conventions:
 - `/autodev skills ...` controls role-skill injection (`on|off`) and disclosure mode (`summary|progressive|full`) for current session.
 - `/autodev content on|off|status` controls AutoDev stage output echo (planner/executor/reviewer content) for current session.
 - Task closes to `✅` only when completion gate passes (reviewer approved + no explicit validation failure + auto-commit success when commit is required).
+- In strict mode (`AUTODEV_VALIDATION_STRICT=true`), completion gate requires structured validation evidence (`VALIDATION_STATUS` and/or `__EXIT_CODES__`).
+- When workflow/reviewer execution succeeds but completion gate fails, `/autodev status` reports `runState: completed_with_gate_failed` (instead of `succeeded`).
+- `/autodev status` exposes validation observability fields: `runValidationFailureClass`, `runValidationEvidenceSource`, and `runValidationAt`.
+- Validation fuse rule: if the same task hits the same `validationFailureClass` consecutively for `AUTODEV_MAX_CONSECUTIVE_FAILURES`, AutoDev stops and marks it `🚫` with next-action guidance.
 - When reviewer verdict is `APPROVED` and the workdir is a clean Git repo, CodeHarbor auto-commits changes with a semantic subject: `<type>(<scope>): <business-summary> (<taskId>)`.
 - AutoDev commit intent uses a hybrid strategy: prefer reviewer `SUMMARY` (role-skill output) when it matches the selected commit language; otherwise fall back to deterministic template inference.
 - Commit language policy: for a brand-new project (no history) the first AutoDev commit defaults to English; for existing projects, AutoDev follows the recent repository commit language trend.

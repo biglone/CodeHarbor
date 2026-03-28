@@ -67,12 +67,17 @@ export async function healAutoDevTaskStatuses(input: HealAutoDevTaskStatusesInpu
 }
 
 function deriveExpectedTaskStatusFromRun(run: WorkflowDiagRunRecord): AutoDevTaskStatus | null {
-  const statusFromMessage = parseTaskStatusFromRunMessage(run.lastMessage ?? null);
+  const lastMessage = run.lastMessage ?? null;
+  const statusFromMessage = parseTaskStatusFromRunMessage(lastMessage);
   if (statusFromMessage) {
     return statusFromMessage;
   }
-  if (run.approved === true) {
+  const completionGateFromMessage = parseCompletionGateFromRunMessage(lastMessage);
+  if (completionGateFromMessage === "passed") {
     return "completed";
+  }
+  if (completionGateFromMessage === "failed") {
+    return "in_progress";
   }
   if (run.approved === false) {
     return "in_progress";
@@ -100,6 +105,21 @@ function parseTaskStatusFromRunMessage(message: string | null): AutoDevTaskStatu
   }
   if (symbol === "🚫") {
     return "blocked";
+  }
+  return null;
+}
+
+function parseCompletionGateFromRunMessage(message: string | null): "passed" | "failed" | null {
+  if (!message) {
+    return null;
+  }
+  const match = message.match(/completionGate\s*[:=]\s*(passed|failed)/i);
+  if (!match) {
+    return null;
+  }
+  const gate = match[1].toLowerCase();
+  if (gate === "passed" || gate === "failed") {
+    return gate;
   }
   return null;
 }

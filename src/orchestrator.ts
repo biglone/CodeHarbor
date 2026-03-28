@@ -366,6 +366,7 @@ export class Orchestrator {
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
   private readonly autoDevWorkdirOverrides = new Map<string, string>();
   private readonly autoDevFailureStreaks = new Map<string, number>();
+  private readonly autoDevValidationFailureStreaks = new Map<string, { failureClass: string; streak: number }>();
   private readonly autoDevGitCommitRecords: AutoDevGitCommitRecord[] = [];
   private readonly backendRouteDiagRecords: BackendRouteDiagRecord[] = [];
   private readonly autoDevLoopMaxRuns: number;
@@ -376,6 +377,7 @@ export class Orchestrator {
   private readonly autoDevMaxConsecutiveFailures: number;
   private readonly autoDevRunArchiveEnabled: boolean;
   private readonly autoDevRunArchiveDir: string;
+  private readonly autoDevValidationStrict: boolean;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
   private readonly autoDevStageOutputEchoDefaultEnabled: boolean;
   private readonly autoDevInitEnhancementEnabled: boolean;
@@ -461,6 +463,7 @@ export class Orchestrator {
     this.autoDevMaxConsecutiveFailures = autoDevRuntimeConfig.autoDevMaxConsecutiveFailures;
     this.autoDevRunArchiveEnabled = autoDevRuntimeConfig.autoDevRunArchiveEnabled;
     this.autoDevRunArchiveDir = autoDevRuntimeConfig.autoDevRunArchiveDir;
+    this.autoDevValidationStrict = autoDevRuntimeConfig.autoDevValidationStrict;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
     this.autoDevStageOutputEchoDefaultEnabled = autoDevRuntimeConfig.autoDevStageOutputEchoDefaultEnabled;
     this.autoDevInitEnhancementEnabled = autoDevRuntimeConfig.autoDevInitEnhancementEnabled;
@@ -985,6 +988,7 @@ export class Orchestrator {
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
         autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
         autoDevRunArchiveDir: this.autoDevRunArchiveDir,
+        autoDevValidationStrict: this.autoDevValidationStrict,
         autoDevInitEnhancementEnabled: this.autoDevInitEnhancementEnabled,
         autoDevInitEnhancementTimeoutMs: this.autoDevInitEnhancementTimeoutMs,
         autoDevInitEnhancementMaxChars: this.autoDevInitEnhancementMaxChars,
@@ -1353,12 +1357,14 @@ export class Orchestrator {
         autoDevMaxConsecutiveFailures: this.autoDevMaxConsecutiveFailures,
         autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
         autoDevRunArchiveDir: this.autoDevRunArchiveDir,
+        autoDevValidationStrict: this.autoDevValidationStrict,
         outputLanguage: this.outputLanguage,
       },
       state: {
         pendingAutoDevLoopStopRequests: this.pendingAutoDevLoopStopRequests,
         activeAutoDevLoopSessions: this.activeAutoDevLoopSessions,
         autoDevFailureStreaks: this.autoDevFailureStreaks,
+        autoDevValidationFailureStreaks: this.autoDevValidationFailureStreaks,
       },
       hooks: {
         consumePendingStopRequest: this.consumePendingStopRequest.bind(this),

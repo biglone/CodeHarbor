@@ -203,6 +203,10 @@ codeharbor admin serve
 - `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=true|false`：是否在 `/autodev run` 期间将 planner/executor/reviewer 阶段完整内容回显到 Matrix（默认 true）
 - `AUTODEV_PREFLIGHT_AUTO_STASH=true|false`：Git 预检检测到脏工作区时自动 `stash` 后继续执行（默认 false）
 - `AUTODEV_MAX_CONSECUTIVE_FAILURES`：同一任务连续失败达到阈值后自动标记 `🚫`（默认 3）
+- `AUTODEV_VALIDATION_STRICT=true|false`：开启后校验 gate 采用 fail-closed；缺少结构化验证证据（`VALIDATION_STATUS`/`__EXIT_CODES__`）即判定未通过（默认 false）
+- 当 workflow/reviewer 执行成功但 completion gate 失败时，`/autodev status` 会显示 `runState: completed_with_gate_failed`（避免误判为 `succeeded`）
+- `/autodev status` 会额外输出验证可观测字段：`runValidationFailureClass`、`runValidationEvidenceSource`、`runValidationAt`
+- 验证熔断规则：同一任务连续命中同一 `validationFailureClass` 达到 `AUTODEV_MAX_CONSECUTIVE_FAILURES` 时会自动停机并标记 `🚫`，并给出 next action
 - `/autodev run`：循环执行任务清单（优先 `🔄`，再选 `⬜`），直到没有可执行任务
   - 当达到轮次/时间上限时会“暂停”并输出剩余任务摘要，可再次执行 `/autodev run` 续跑
 - `/autodev run [taskId]`：只执行指定任务，不进入循环
@@ -222,7 +226,7 @@ codeharbor admin serve
   - Stage-B 仅在本次 `init` 新建了 `REQUIREMENTS.md` 与 `TASK_LIST.md` 时执行；若已有同名文件则默认保留并跳过增强
 - `/autodev skills [on|off|summary|progressive|full|status]`：会话级控制角色 SKILL 开关与披露模式
 - `/autodev content [on|off|status]`：会话级控制 AutoDev 阶段内容回显（planner/executor/reviewer）
-- 审查通过（`APPROVED`）后会自动将任务状态写为 `✅`，并在 Git 工作区干净时自动提交：
+- 任务仅在 completion gate 通过时写为 `✅`（含审查通过、验证通过、需要自动提交时提交成功），并在 Git 工作区干净时自动提交：
   - 提交标题格式：`<type>(<scope>): <business-summary> (<taskId>)`（按任务目标与改动文件自动推断）
   - 标题摘要采用混合策略：优先使用 Reviewer `SUMMARY`（来自角色 SKILL 输出）；若与当前目标语言不匹配则自动回退到模板推断
   - 日志语言策略：新项目首条 AutoDev 提交默认英文；已有项目会跟随仓库近期提交日志的主语言

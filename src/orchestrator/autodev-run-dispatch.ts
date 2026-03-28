@@ -19,6 +19,11 @@ interface AutoDevFailurePolicyResult {
   task: AutoDevTask;
 }
 
+interface AutoDevValidationFailureStreakEntry {
+  failureClass: string;
+  streak: number;
+}
+
 interface BeginWorkflowDiagRunInput {
   kind: "autodev";
   sessionKey: string;
@@ -40,9 +45,11 @@ interface HandleAutoDevRunCommandDeps {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   autoDevFailureStreaks: Map<string, number>;
+  autoDevValidationFailureStreaks: Map<string, AutoDevValidationFailureStreakEntry>;
   consumePendingStopRequest: (sessionKey: string) => boolean;
   consumePendingAutoDevLoopStopRequest: (sessionKey: string) => boolean;
   setAutoDevSnapshot: (sessionKey: string, snapshot: AutoDevRunSnapshot) => void;
@@ -94,6 +101,16 @@ interface ApplyAutoDevFailurePolicyInput {
   taskListPath: string;
 }
 
+interface ApplyAutoDevValidationFailurePolicyInput {
+  autoDevValidationFailureStreaks: Map<string, AutoDevValidationFailureStreakEntry>;
+  autoDevMaxConsecutiveFailures: number;
+  logger: Logger;
+  workdir: string;
+  task: AutoDevTask;
+  taskListPath: string;
+  validationFailureClass: string;
+}
+
 export async function handleAutoDevRunCommand(
   deps: HandleAutoDevRunCommandDeps,
   input: HandleAutoDevRunCommandInput,
@@ -109,6 +126,7 @@ export async function handleAutoDevRunCommand(
       autoDevAutoReleasePush: deps.autoDevAutoReleasePush,
       autoDevRunArchiveEnabled: deps.autoDevRunArchiveEnabled,
       autoDevRunArchiveDir: deps.autoDevRunArchiveDir,
+      autoDevValidationStrict: deps.autoDevValidationStrict,
       pendingAutoDevLoopStopRequests: deps.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: deps.activeAutoDevLoopSessions,
       consumePendingStopRequest: (sessionKey) => deps.consumePendingStopRequest(sessionKey),
@@ -126,6 +144,8 @@ export async function handleAutoDevRunCommand(
       listWorkflowDiagEvents: (runId, limit) => deps.listWorkflowDiagEvents(runId, limit),
       recordAutoDevGitCommit: (sessionKey, taskId, result) => deps.recordAutoDevGitCommit(sessionKey, taskId, result),
       resetAutoDevFailureStreak: (workdir, taskId) => resetAutoDevFailureStreak(deps.autoDevFailureStreaks, workdir, taskId),
+      resetAutoDevValidationFailureStreak: (workdir, taskId) =>
+        resetAutoDevValidationFailureStreak(deps.autoDevValidationFailureStreaks, workdir, taskId),
       applyAutoDevFailurePolicy: (policyInput) =>
         applyAutoDevFailurePolicy({
           autoDevFailureStreaks: deps.autoDevFailureStreaks,
@@ -134,6 +154,16 @@ export async function handleAutoDevRunCommand(
           workdir: policyInput.workdir,
           task: policyInput.task,
           taskListPath: policyInput.taskListPath,
+        }),
+      applyAutoDevValidationFailurePolicy: (policyInput) =>
+        applyAutoDevValidationFailurePolicy({
+          autoDevValidationFailureStreaks: deps.autoDevValidationFailureStreaks,
+          autoDevMaxConsecutiveFailures: deps.autoDevMaxConsecutiveFailures,
+          logger: deps.logger,
+          workdir: policyInput.workdir,
+          task: policyInput.task,
+          taskListPath: policyInput.taskListPath,
+          validationFailureClass: policyInput.validationFailureClass,
         }),
       autoDevMetrics: deps.autoDevMetrics,
     },
@@ -173,9 +203,60 @@ export async function applyAutoDevFailurePolicy(input: ApplyAutoDevFailurePolicy
   }
 }
 
+export async function applyAutoDevValidationFailurePolicy(
+  input: ApplyAutoDevValidationFailurePolicyInput,
+): Promise<AutoDevFailurePolicyResult> {
+  const key = buildAutoDevFailureKey(input.workdir, input.task.id);
+  const previous = input.autoDevValidationFailureStreaks.get(key);
+  const streak =
+    previous && previous.failureClass === input.validationFailureClass
+      ? previous.streak + 1
+      : 1;
+  input.autoDevValidationFailureStreaks.set(key, {
+    failureClass: input.validationFailureClass,
+    streak,
+  });
+  if (streak < input.autoDevMaxConsecutiveFailures) {
+    return {
+      blocked: false,
+      streak,
+      task: input.task,
+    };
+  }
+  try {
+    const blockedTask = await updateAutoDevTaskStatus(input.taskListPath, input.task, "blocked");
+    return {
+      blocked: true,
+      streak,
+      task: blockedTask,
+    };
+  } catch (error) {
+    input.logger.warn("Failed to mark AutoDev task as blocked after repeated validation failure class", {
+      taskId: input.task.id,
+      validationFailureClass: input.validationFailureClass,
+      streak,
+      error: formatError(error),
+    });
+    return {
+      blocked: false,
+      streak,
+      task: input.task,
+    };
+  }
+}
+
 function resetAutoDevFailureStreak(autoDevFailureStreaks: Map<string, number>, workdir: string, taskId: string): void {
   const key = buildAutoDevFailureKey(workdir, taskId);
   autoDevFailureStreaks.delete(key);
+}
+
+function resetAutoDevValidationFailureStreak(
+  autoDevValidationFailureStreaks: Map<string, AutoDevValidationFailureStreakEntry>,
+  workdir: string,
+  taskId: string,
+): void {
+  const key = buildAutoDevFailureKey(workdir, taskId);
+  autoDevValidationFailureStreaks.delete(key);
 }
 
 function buildAutoDevFailureKey(workdir: string, taskId: string): string {

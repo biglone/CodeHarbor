@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.77] - 2026-03-28
+
+- autodev completion gate hardening: add `AUTODEV_VALIDATION_STRICT` fail-closed mode and wire it through runtime config, config snapshot export/import, admin global settings, and env overrides.
+- status observability: `/autodev status` now reports `runValidationFailureClass`, `runValidationEvidenceSource`, and `runValidationAt` for faster validation gate diagnostics.
+- state semantics tightening: when workflow execution succeeds but completion gate fails, run snapshot state is now `completed_with_gate_failed` (instead of `succeeded`).
+- validation-failure fuse: repeated identical validation failure classes now use the existing consecutive-failure threshold to auto-block (`🚫`) and stop ineffective reruns.
+- diagnostics enrichment: workflow result messages now emit `validationFailureClass`, `validationEvidenceSource`, and timestamp fields for robust status fallback parsing.
+- tests/docs: add regression coverage for strict validation config wiring, status visibility, and validation fuse behavior; update release/user docs for the new rules.
+
 ## [0.1.76] - 2026-03-27
 
 - autodev loop stability: skip task-status self-heal on nested loop task invocations (`taskId + mode=loop`) to prevent repeated `TASK_LIST.md` churn.

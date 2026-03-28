@@ -38,6 +38,7 @@ function createRunnerDeps(notices: string[]): RunnerDeps {
     autoDevAutoReleasePush: true,
     autoDevRunArchiveEnabled: false,
     autoDevRunArchiveDir: "",
+    autoDevValidationStrict: false,
     pendingAutoDevLoopStopRequests: new Set<string>(),
     activeAutoDevLoopSessions: new Set<string>(),
     consumePendingStopRequest: () => false,
@@ -55,7 +56,13 @@ function createRunnerDeps(notices: string[]): RunnerDeps {
     listWorkflowDiagEvents: () => [],
     recordAutoDevGitCommit: () => {},
     resetAutoDevFailureStreak: () => {},
+    resetAutoDevValidationFailureStreak: () => {},
     applyAutoDevFailurePolicy: async (input) => ({
+      blocked: false,
+      streak: 0,
+      task: input.task,
+    }),
+    applyAutoDevValidationFailurePolicy: async (input) => ({
       blocked: false,
       streak: 0,
       task: input.task,

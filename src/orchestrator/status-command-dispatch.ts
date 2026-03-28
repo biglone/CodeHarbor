@@ -92,6 +92,7 @@ interface AutoDevStatusContext extends StatusCommandDispatchContext {
   autoDevMaxConsecutiveFailures: number;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -194,6 +195,7 @@ export async function sendAutoDevStatusCommand(
     | "autoDevMaxConsecutiveFailures"
     | "autoDevRunArchiveEnabled"
     | "autoDevRunArchiveDir"
+    | "autoDevValidationStrict"
     | "autoDevInitEnhancementEnabled"
     | "autoDevInitEnhancementTimeoutMs"
     | "autoDevInitEnhancementMaxChars"
@@ -223,6 +225,7 @@ export async function sendAutoDevStatusCommand(
       autoDevMaxConsecutiveFailures: context.autoDevMaxConsecutiveFailures,
       autoDevRunArchiveEnabled: context.autoDevRunArchiveEnabled,
       autoDevRunArchiveDir: context.autoDevRunArchiveDir,
+      autoDevValidationStrict: context.autoDevValidationStrict,
       autoDevInitEnhancementEnabled: context.autoDevInitEnhancementEnabled,
       autoDevInitEnhancementTimeoutMs: context.autoDevInitEnhancementTimeoutMs,
       autoDevInitEnhancementMaxChars: context.autoDevInitEnhancementMaxChars,

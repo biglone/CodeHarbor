@@ -38,7 +38,7 @@ import { byOutputLanguage } from "./output-language";
 import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
-  state: "idle" | "running" | "succeeded" | "failed";
+  state: "idle" | "running" | "succeeded" | "completed_with_gate_failed" | "failed";
   startedAt: string | null;
   endedAt: string | null;
   taskId: string | null;
@@ -53,6 +53,10 @@ export interface AutoDevRunSnapshot {
   loopDeadlineAt: string | null;
   lastGitCommitSummary: string | null;
   lastGitCommitAt: string | null;
+  lastValidationPassed?: boolean | null;
+  lastValidationFailureClass?: AutoDevValidationFailureClass | null;
+  lastValidationEvidenceSource?: AutoDevValidationEvidenceSource | null;
+  lastValidationAt?: string | null;
   lastReleaseSummary?: string | null;
   lastReleaseAt?: string | null;
 }
@@ -76,6 +80,21 @@ type AutoDevCompletionGateReason =
   | "validation_not_passed"
   | "task_list_policy_violated"
   | "auto_commit_not_committed";
+
+type AutoDevValidationFailureClass =
+  | "strict_missing_structured_evidence"
+  | "exit_codes_non_zero_unexpected"
+  | "structured_status_fail"
+  | "scoped_text_failure"
+  | "fallback_text_failure";
+
+type AutoDevValidationEvidenceSource = "structured" | "scoped_text" | "fallback_text" | "none";
+
+interface AutoDevValidationInference {
+  passed: boolean;
+  failureClass: AutoDevValidationFailureClass | null;
+  evidenceSource: AutoDevValidationEvidenceSource;
+}
 
 interface AutoDevCompletionGateResult {
   passed: boolean;
@@ -163,6 +182,7 @@ interface AutoDevRunnerDeps {
   autoDevAutoReleasePush: boolean;
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
+  autoDevValidationStrict: boolean;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   consumePendingStopRequest: (sessionKey: string) => boolean;
@@ -182,10 +202,17 @@ interface AutoDevRunnerDeps {
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   recordAutoDevGitCommit: (sessionKey: string, taskId: string, result: AutoDevGitCommitResult) => void;
   resetAutoDevFailureStreak: (workdir: string, taskId: string) => void;
+  resetAutoDevValidationFailureStreak: (workdir: string, taskId: string) => void;
   applyAutoDevFailurePolicy: (input: {
     workdir: string;
     task: AutoDevTask;
     taskListPath: string;
+  }) => Promise<AutoDevFailurePolicyResult>;
+  applyAutoDevValidationFailurePolicy: (input: {
+    workdir: string;
+    task: AutoDevTask;
+    taskListPath: string;
+    validationFailureClass: AutoDevValidationFailureClass;
   }) => Promise<AutoDevFailurePolicyResult>;
   autoDevMetrics: {
     recordRunOutcome: (outcome: "succeeded" | "failed" | "cancelled") => void;
@@ -729,7 +756,8 @@ export async function runAutoDevCommand(
       kind: "skipped",
       reason: localize("未触发自动发布", "auto release not attempted"),
     };
-    const validationPassed = inferAutoDevValidationPassed(result);
+    const validation = inferAutoDevValidation(result, deps.autoDevValidationStrict);
+    const validationPassed = validation.passed;
     const taskListPolicyPassed = taskListGuard.restored && taskListGuard.finalClean;
     const reviewerApprovedForGate = result.approved && taskListPolicyPassed;
     if (!result.approved) {
@@ -804,6 +832,33 @@ export async function runAutoDevCommand(
       });
       finalTask = fallbackStatusResult.task;
     }
+    let validationFailurePolicy: AutoDevFailurePolicyResult | null = null;
+    if (completionGate.passed) {
+      deps.resetAutoDevValidationFailureStreak(input.workdir, finalTask.id);
+    } else if (validation.failureClass) {
+      validationFailurePolicy = await deps.applyAutoDevValidationFailurePolicy({
+        workdir: input.workdir,
+        task: finalTask,
+        taskListPath: context.taskListPath,
+        validationFailureClass: validation.failureClass,
+      });
+      if (validationFailurePolicy.blocked) {
+        finalTask = validationFailurePolicy.task;
+        deps.autoDevMetrics.recordTaskBlocked();
+        const fuseMessage = localize(
+          `[CodeHarbor] AutoDev 验证熔断：任务 ${finalTask.id} 连续 ${validationFailurePolicy.streak} 次命中同类验证失败（${validation.failureClass}），已自动停机并标记为阻塞（🚫）。
+- nextAction: 修复失败原因后，将任务状态改回 ⬜/🔄 再执行 \`/autodev run ${finalTask.id}\`
+- hint: 通过 \`/autodev status\` 查看 runValidationFailureClass 与 runValidationEvidenceSource`,
+          `[CodeHarbor] AutoDev validation fuse: task ${finalTask.id} hit the same validation failure class (${validation.failureClass}) ${validationFailurePolicy.streak} times in a row. AutoDev stopped and marked it blocked (🚫).
+- nextAction: fix the root cause, move task status back to ⬜/🔄, then run \`/autodev run ${finalTask.id}\`
+- hint: use \`/autodev status\` to inspect runValidationFailureClass and runValidationEvidenceSource`,
+        );
+        deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "validation_fuse", 0, fuseMessage);
+        await sendAutoDevNoticeBestEffort(deps, input.message.conversationId, fuseMessage);
+      }
+    } else {
+      deps.resetAutoDevValidationFailureStreak(input.workdir, finalTask.id);
+    }
 
     if (completionGate.passed) {
       releaseResult = await tryAutoDevTaskRelease({
@@ -845,7 +900,7 @@ export async function runAutoDevCommand(
     deps.resetAutoDevFailureStreak(input.workdir, finalTask.id);
     const endedAtIso = new Date().toISOString();
     deps.setAutoDevSnapshot(input.sessionKey, {
-      state: "succeeded",
+      state: completionGate.passed ? "succeeded" : "completed_with_gate_failed",
       startedAt: startedAtIso,
       endedAt: endedAtIso,
       taskId: finalTask.id,
@@ -860,6 +915,10 @@ export async function runAutoDevCommand(
       loopDeadlineAt: effectiveContext.loopDeadlineAt,
       lastGitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
       lastGitCommitAt: new Date().toISOString(),
+      lastValidationPassed: validation.passed,
+      lastValidationFailureClass: validation.failureClass,
+      lastValidationEvidenceSource: validation.evidenceSource,
+      lastValidationAt: endedAtIso,
       lastReleaseSummary: formatAutoDevReleaseResult(releaseResult),
       lastReleaseAt: releaseResult.kind === "released" ? new Date().toISOString() : null,
     });
@@ -877,6 +936,9 @@ export async function runAutoDevCommand(
 - completionGateReasons: ${
           completionGate.passed ? "N/A" : formatAutoDevCompletionGateReasons(completionGate.reasons, deps.outputLanguage)
         }
+- validationFailureClass: ${validation.failureClass ?? "none"}
+- validationEvidenceSource: ${validation.evidenceSource}
+- validationAt: ${endedAtIso}
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
@@ -889,6 +951,9 @@ export async function runAutoDevCommand(
 - completionGateReasons: ${
           completionGate.passed ? "N/A" : formatAutoDevCompletionGateReasons(completionGate.reasons, deps.outputLanguage)
         }
+- validationFailureClass: ${validation.failureClass ?? "none"}
+- validationEvidenceSource: ${validation.evidenceSource}
+- validationAt: ${endedAtIso}
 - task status: ${statusToSymbol(finalTask.status)}
 - git commit: ${formatAutoDevGitCommitResult(gitCommit)}
 - git changed files: ${formatAutoDevGitChangedFiles(gitCommit)}
@@ -904,10 +969,18 @@ export async function runAutoDevCommand(
       localize(
         `AutoDev 任务结果: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, completionGate=${
           completionGate.passed ? "passed" : "failed"
-        }, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+        }, completionGateReasonCodes=${
+          completionGate.reasons.length === 0 ? "none" : completionGate.reasons.join("|")
+        }, validationFailureClass=${validation.failureClass ?? "none"}, validationEvidenceSource=${
+          validation.evidenceSource
+        }, validationAt=${endedAtIso}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
         `AutoDev task result: task=${finalTask.id}, reviewerApproved=${result.approved ? "yes" : "no"}, completionGate=${
           completionGate.passed ? "passed" : "failed"
-        }, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
+        }, completionGateReasonCodes=${
+          completionGate.reasons.length === 0 ? "none" : completionGate.reasons.join("|")
+        }, validationFailureClass=${validation.failureClass ?? "none"}, validationEvidenceSource=${
+          validation.evidenceSource
+        }, validationAt=${endedAtIso}, taskStatus=${statusToSymbol(finalTask.status)}, gitCommit=${formatAutoDevGitCommitResult(gitCommit)}, release=${formatAutoDevReleaseResult(releaseResult)}`,
       ),
     );
     await persistAutoDevRunArchiveBestEffort(deps, {
@@ -942,6 +1015,7 @@ export async function runAutoDevCommand(
       workflowResult: result,
     });
   } catch (error) {
+    deps.resetAutoDevValidationFailureStreak(input.workdir, activeTask.id);
     const failurePolicy = await deps.applyAutoDevFailurePolicy({
       workdir: input.workdir,
       task: activeTask,
@@ -1275,32 +1349,72 @@ function evaluateAutoDevCompletionGate(input: {
   };
 }
 
-function inferAutoDevValidationPassed(result: MultiAgentWorkflowRunResult): boolean {
+function inferAutoDevValidation(result: MultiAgentWorkflowRunResult, strictMode: boolean): AutoDevValidationInference {
   const combined = `${result.output}\n${result.review}`;
-  const exitCodeLine = combined.match(/__EXIT_CODES__([^\n]*)/i);
-  if (exitCodeLine) {
-    const codes = [...exitCodeLine[1].matchAll(/=\s*(-?\d+)/g)].map((match) => Number.parseInt(match[1], 10));
-    if (codes.some((code) => Number.isFinite(code) && code !== 0)) {
-      return false;
+  const structuredValidationStatus = parseStructuredValidationStatus(combined);
+  const exitCodes = parseAutoDevExitCodes(combined);
+  if (exitCodes.length > 0) {
+    const nonZeroCodes = exitCodes.filter((code) => Number.isFinite(code) && code !== 0);
+    if (nonZeroCodes.length === 0) {
+      return {
+        passed: true,
+        failureClass: null,
+        evidenceSource: "structured",
+      };
     }
-    if (codes.length > 0 && codes.every((code) => Number.isFinite(code) && code === 0)) {
-      return true;
+    if (structuredValidationStatus === true && hasExpectedNonZeroExitEvidence(combined, nonZeroCodes)) {
+      return {
+        passed: true,
+        failureClass: null,
+        evidenceSource: "structured",
+      };
     }
+    return {
+      passed: false,
+      failureClass: "exit_codes_non_zero_unexpected",
+      evidenceSource: "structured",
+    };
   }
 
-  const structuredValidationStatus = parseStructuredValidationStatus(combined);
   if (structuredValidationStatus !== null) {
-    return structuredValidationStatus;
+    return {
+      passed: structuredValidationStatus,
+      failureClass: structuredValidationStatus ? null : "structured_status_fail",
+      evidenceSource: "structured",
+    };
+  }
+
+  if (strictMode) {
+    return {
+      passed: false,
+      failureClass: "strict_missing_structured_evidence",
+      evidenceSource: "none",
+    };
   }
 
   const scopedValidationText = resolveValidationScopeText(result.output, result.review);
   const scopedVerdict = inferValidationVerdictByText(scopedValidationText);
   if (scopedVerdict !== null) {
-    return scopedVerdict;
+    return {
+      passed: scopedVerdict,
+      failureClass: scopedVerdict ? null : "scoped_text_failure",
+      evidenceSource: "scoped_text",
+    };
   }
 
   const fallbackVerdict = inferValidationVerdictByText(combined);
-  return fallbackVerdict ?? true;
+  if (fallbackVerdict !== null) {
+    return {
+      passed: fallbackVerdict,
+      failureClass: fallbackVerdict ? null : "fallback_text_failure",
+      evidenceSource: "fallback_text",
+    };
+  }
+  return {
+    passed: true,
+    failureClass: null,
+    evidenceSource: "none",
+  };
 }
 
 function resolveValidationScopeText(output: string, review: string): string {
@@ -1408,6 +1522,63 @@ function parseStructuredValidationStatus(text: string): boolean | null {
     }
   }
   return null;
+}
+
+function parseAutoDevExitCodes(text: string): number[] {
+  const codes: number[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const markerMatch = line.match(/__EXIT_CODES__\s*[:：]?\s*(.*)$/i);
+    if (!markerMatch) {
+      continue;
+    }
+    const payload = markerMatch[1];
+    if (!payload) {
+      continue;
+    }
+    for (const match of payload.matchAll(/(?:^|\s)[A-Za-z0-9_.:/-]+\s*=\s*(-?\d+)/g)) {
+      const code = Number.parseInt(match[1], 10);
+      if (Number.isFinite(code)) {
+        codes.push(code);
+      }
+    }
+  }
+  return codes;
+}
+
+function hasExpectedNonZeroExitEvidence(text: string, nonZeroCodes: number[]): boolean {
+  const explicitExpectedCodes = new Set<number>();
+  let hasGenericExpectedNonZero = false;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (!/(?:按预期|预期|as expected|expected(?:ly)?)/i.test(line)) {
+      continue;
+    }
+    const lineMentionsNonZeroExpectation = /(?:non[-\s]?zero|非零|reject|拒绝|fail(?:ed)?|失败|exit|退出码|返回码)/i.test(line);
+    if (lineMentionsNonZeroExpectation) {
+      hasGenericExpectedNonZero = true;
+    }
+    for (const match of line.matchAll(/(?:exit|退出码|返回码)\s*[:=]?\s*(-?\d+)/gi)) {
+      const code = Number.parseInt(match[1], 10);
+      if (Number.isFinite(code) && code !== 0) {
+        explicitExpectedCodes.add(code);
+      }
+    }
+  }
+
+  if (nonZeroCodes.every((code) => explicitExpectedCodes.has(code))) {
+    return true;
+  }
+  if (!hasGenericExpectedNonZero) {
+    return false;
+  }
+  return new Set(nonZeroCodes).size === 1;
 }
 
 function formatAutoDevCompletionGateReasons(

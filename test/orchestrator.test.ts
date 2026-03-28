@@ -3666,6 +3666,25 @@ describe("Orchestrator", () => {
         .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
       expect(resultNotice).toContain("git commit: skipped (validation not passed; auto commit skipped)");
       expect(resultNotice).not.toContain("reviewer not approved; auto commit skipped");
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev status",
+          eventId: "$autodev-status-completion-gate",
+        }),
+      );
+      const statusNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("[CodeHarbor] AutoDev status"))?.text ?? "";
+      expect(statusNotice).toContain("runState: completed_with_gate_failed");
+      expect(statusNotice).toContain("runValidationFailureClass: scoped_text_failure");
+      expect(statusNotice).toContain("runValidationEvidenceSource: scoped_text");
+      const runValidationAtLine = statusNotice
+        .split("\n")
+        .find((line) => line.startsWith("- runValidationAt: "));
+      expect(runValidationAtLine).toBeDefined();
+      expect(runValidationAtLine ?? "").not.toContain("N/A");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -4057,6 +4076,205 @@ describe("Orchestrator", () => {
 
       const updated = await fs.readFile(taskListPath, "utf8");
       expect(updated).toContain("| T16.9 | validation exitcode task | 🔄 |");
+      const resultNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("completionGate: failed");
+      expect(resultNotice).toContain("validation-not-passed");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("allows expected non-zero exit codes when validation status is PASS and evidence is explicit", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-expected-nonzero-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.10 | validation expected non-zero task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const executorWithExpectedNonZero = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: [
+                "最终可执行结果",
+                "已完成任务。",
+                "",
+                "VALIDATION",
+                "bash deploy/scripts/respeaker-precheck.sh --jetson-host '$(id)'：PASS（按预期拒绝，exit 2）",
+                "bash deploy/scripts/respeaker-precheck.sh --jetson-host 'a;id'：PASS（按预期拒绝，exit 2）",
+                "",
+                "VALIDATION_STATUS: PASS",
+                "__EXIT_CODES__ dry_run=0 precheck_subshell=2 precheck_semicolon=2",
+              ].join("\n"),
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: validated",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executorWithExpectedNonZero as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        outputLanguage: "en",
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 0,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.10",
+          eventId: "$autodev-run-validation-expected-nonzero",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.10 | validation expected non-zero task | ✅ |");
+      const resultNotice = [...channel.notices]
+        .reverse()
+        .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
+      expect(resultNotice).toContain("completionGate: passed");
+      expect(resultNotice).not.toContain("validation-not-passed");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails completion gate in strict validation mode when structured validation evidence is missing", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-strict-missing-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T16.12 | validation strict missing evidence task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const executorWithoutStructuredValidation = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "VALIDATION: 23 passed, 0 failed",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: validated",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(
+        channel,
+        executorWithoutStructuredValidation as never,
+        store as never,
+        logger as never,
+        {
+          commandPrefix: "!code",
+          matrixUserId: "@bot:example.com",
+          progressUpdatesEnabled: false,
+          outputLanguage: "en",
+          defaultCodexWorkdir: tempRoot,
+          autoDevValidationStrict: true,
+          multiAgentWorkflow: {
+            enabled: true,
+            autoRepairMaxRounds: 0,
+          },
+        },
+      );
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T16.12",
+          eventId: "$autodev-run-validation-strict-missing",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T16.12 | validation strict missing evidence task | 🔄 |");
       const resultNotice = [...channel.notices]
         .reverse()
         .find((entry) => entry.text.includes("AutoDev task result"))?.text ?? "";
@@ -5014,6 +5232,109 @@ describe("Orchestrator", () => {
       expect(channel.notices.some((entry) => entry.text.includes("连续失败 2 次"))).toBe(true);
       const runtime = orchestrator.getRuntimeMetricsSnapshot();
       expect(runtime.autodev.runs.failed).toBe(2);
+      expect(runtime.autodev.tasksBlocked).toBe(1);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("marks autodev task blocked after repeated same validation failure class", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-validation-fuse-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T14.2 | validation fuse task | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const repeatedValidationFailureExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-planner",
+              reply: "1) plan",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-executor",
+              reply: "VALIDATION: tests failed in gateway suite",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-thread-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: reviewer approved",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "wf-thread-default",
+            reply: "ok",
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(
+        channel,
+        repeatedValidationFailureExecutor as never,
+        store as never,
+        logger as never,
+        {
+          commandPrefix: "!code",
+          matrixUserId: "@bot:example.com",
+          progressUpdatesEnabled: false,
+          outputLanguage: "en",
+          defaultCodexWorkdir: tempRoot,
+          autoDevMaxConsecutiveFailures: 2,
+          multiAgentWorkflow: {
+            enabled: true,
+            autoRepairMaxRounds: 0,
+          },
+        },
+      );
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T14.2",
+          eventId: "$autodev-run-validation-fuse-1",
+        }),
+      );
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T14.2",
+          eventId: "$autodev-run-validation-fuse-2",
+        }),
+      );
+
+      const updated = await fs.readFile(taskListPath, "utf8");
+      expect(updated).toContain("| T14.2 | validation fuse task | 🚫 |");
+      expect(channel.notices.some((entry) => entry.text.includes("validation fuse"))).toBe(true);
+      const runtime = orchestrator.getRuntimeMetricsSnapshot();
       expect(runtime.autodev.tasksBlocked).toBe(1);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
