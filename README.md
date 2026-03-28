@@ -698,6 +698,10 @@ Backend/model rule routing:
   - max wall-clock minutes for one `/autodev run` loop execution (default `120`, `0` = unlimited)
 - `AUTODEV_AUTO_COMMIT=true|false`
   - enable/disable AutoDev git auto-commit after reviewer `APPROVED` (default `true`)
+- `AUTODEV_GIT_AUTHOR_NAME`
+  - git author name for AutoDev auto-commit/release commit (default `CodeHarbor AutoDev`; empty falls back to default)
+- `AUTODEV_GIT_AUTHOR_EMAIL`
+  - git author email for AutoDev auto-commit/release commit (default `autodev@codeharbor.local`; empty falls back to default)
 - `AUTODEV_AUTO_RELEASE_ENABLED=true|false`
   - enable/disable AutoDev "big feature done -> release commit" flow (default `true`)
 - `AUTODEV_AUTO_RELEASE_PUSH=true|false`

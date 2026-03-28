@@ -4656,6 +4656,75 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("uses configured git author identity for autodev commits", async () => {
+    const previousAuthorName = process.env.AUTODEV_GIT_AUTHOR_NAME;
+    const previousAuthorEmail = process.env.AUTODEV_GIT_AUTHOR_EMAIL;
+    process.env.AUTODEV_GIT_AUTHOR_NAME = "CodeHarbor CI Bot";
+    process.env.AUTODEV_GIT_AUTHOR_EMAIL = "ci-bot@example.com";
+
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-author-"));
+    const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(requirementsPath, "# Requirements\n- implement T10.2\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |",
+        "|--------|----------|----------|--------|------|------|",
+        "| T10.2 | 自定义作者验证 | 1h | P0 | - | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init autodev test"],
+      { cwd: tempRoot },
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run",
+          eventId: "$autodev-run-commit-custom-author",
+        }),
+      );
+
+      const authorInfo = await execFileAsync("git", ["log", "--pretty=%an%n%ae", "-n", "1"], { cwd: tempRoot });
+      expect(authorInfo.stdout).toContain("CodeHarbor CI Bot");
+      expect(authorInfo.stdout).toContain("ci-bot@example.com");
+    } finally {
+      if (previousAuthorName === undefined) {
+        delete process.env.AUTODEV_GIT_AUTHOR_NAME;
+      } else {
+        process.env.AUTODEV_GIT_AUTHOR_NAME = previousAuthorName;
+      }
+      if (previousAuthorEmail === undefined) {
+        delete process.env.AUTODEV_GIT_AUTHOR_EMAIL;
+      } else {
+        process.env.AUTODEV_GIT_AUTHOR_EMAIL = previousAuthorEmail;
+      }
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("creates release commit for mapped big-feature task after autodev completion", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-release-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- implement T8.1\n", "utf8");

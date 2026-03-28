@@ -11,10 +11,17 @@ import { formatError } from "./helpers";
 
 const AUTODEV_GIT_ARTIFACT_BASENAME_REGEX = /^(autodev|workflow|planner|executor|reviewer)#\d+$/i;
 const execFileAsync = promisify(execFile);
+const DEFAULT_AUTODEV_GIT_AUTHOR_NAME = "CodeHarbor AutoDev";
+const DEFAULT_AUTODEV_GIT_AUTHOR_EMAIL = "autodev@codeharbor.local";
 
 export interface AutoDevGitBaseline {
   available: boolean;
   cleanBeforeRun: boolean;
+}
+
+export interface AutoDevGitAuthor {
+  name: string;
+  email: string;
 }
 
 export type AutoDevGitPreflightState = "clean" | "dirty" | "no_repo";
@@ -36,6 +43,17 @@ export type AutoDevGitCommitResult =
   | { kind: "committed"; commitHash: string; commitSubject: string; changedFiles: string[] }
   | { kind: "skipped"; reason: string }
   | { kind: "failed"; error: string };
+
+export function resolveAutoDevGitAuthor(input?: { name?: string | null; email?: string | null }): AutoDevGitAuthor {
+  const rawName = input?.name ?? process.env.AUTODEV_GIT_AUTHOR_NAME;
+  const rawEmail = input?.email ?? process.env.AUTODEV_GIT_AUTHOR_EMAIL;
+  const normalizedName = typeof rawName === "string" ? rawName.trim() : "";
+  const normalizedEmail = typeof rawEmail === "string" ? rawEmail.trim() : "";
+  return {
+    name: normalizedName || DEFAULT_AUTODEV_GIT_AUTHOR_NAME,
+    email: normalizedEmail || DEFAULT_AUTODEV_GIT_AUTHOR_EMAIL,
+  };
+}
 
 export async function inspectAutoDevGitPreflight(workdir: string): Promise<AutoDevGitPreflight> {
   const insideRepo = await isGitRepository(workdir);
@@ -160,6 +178,7 @@ export async function tryAutoDevGitCommit(input: {
   }
 
   try {
+    const author = resolveAutoDevGitAuthor();
     const removedArtifacts = await cleanupAutoDevGitArtifacts(input.workdir, input.logger);
     if (removedArtifacts.length > 0) {
       input.logger.warn("Removed AutoDev shell artifact files before git commit", {
@@ -192,9 +211,9 @@ export async function tryAutoDevGitCommit(input: {
     });
     await runGitCommand(input.workdir, [
       "-c",
-      "user.name=CodeHarbor AutoDev",
+      `user.name=${author.name}`,
       "-c",
-      "user.email=autodev@codeharbor.local",
+      `user.email=${author.email}`,
       "commit",
       "-m",
       commitMessage.subject,

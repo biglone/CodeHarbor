@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 import type { Logger } from "../logger";
 import type { AutoDevTask } from "../workflow/autodev";
-import type { AutoDevGitCommitResult } from "./autodev-git";
+import { resolveAutoDevGitAuthor, type AutoDevGitCommitResult } from "./autodev-git";
 import { formatError, summarizeSingleLine } from "./helpers";
 
 const execFileAsync = promisify(execFile);
@@ -78,6 +78,7 @@ export async function tryAutoDevTaskRelease(input: {
   }
 
   try {
+    const author = resolveAutoDevGitAuthor();
     const insideRepo = await isGitRepository(input.workdir);
     if (!insideRepo) {
       return {
@@ -138,9 +139,9 @@ export async function tryAutoDevTaskRelease(input: {
     ].join("\n");
     await runGitCommand(input.workdir, [
       "-c",
-      "user.name=CodeHarbor AutoDev",
+      `user.name=${author.name}`,
       "-c",
-      "user.email=autodev@codeharbor.local",
+      `user.email=${author.email}`,
       "commit",
       "-m",
       commitSubject,

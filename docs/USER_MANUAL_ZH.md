@@ -198,6 +198,8 @@ codeharbor admin serve
 - `AUTODEV_LOOP_MAX_RUNS`：一次 `/autodev run` 最多尝试任务数（默认 20，`0` 表示不限制）
 - `AUTODEV_LOOP_MAX_MINUTES`：一次 `/autodev run` 最长执行分钟数（默认 120，`0` 表示不限制）
 - `AUTODEV_AUTO_COMMIT=true|false`：是否在审查通过后自动提交（默认 true）
+- `AUTODEV_GIT_AUTHOR_NAME`：AutoDev 自动提交/发布提交使用的 Git 作者名（默认 `CodeHarbor AutoDev`；留空时回退默认）
+- `AUTODEV_GIT_AUTHOR_EMAIL`：AutoDev 自动提交/发布提交使用的 Git 作者邮箱（默认 `autodev@codeharbor.local`；留空时回退默认）
 - `AUTODEV_RUN_ARCHIVE_ENABLED=true|false`：是否将每次 `/autodev run` 过程归档落盘（默认 true）
 - `AUTODEV_RUN_ARCHIVE_DIR`：归档目录（相对工作目录或绝对路径，默认 `.codeharbor/autodev-runs`）
 - `AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=true|false`：是否在 `/autodev run` 期间将 planner/executor/reviewer 阶段完整内容回显到 Matrix（默认 true）

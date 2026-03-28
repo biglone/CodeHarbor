@@ -1289,6 +1289,16 @@ export class AdminServer {
         envUpdates.AUTODEV_AUTO_COMMIT = String(value);
         markUpdatedKey("autoDev.autoCommit");
       }
+      if ("gitAuthorName" in autoDev) {
+        const value = normalizeString(autoDev.gitAuthorName, "CodeHarbor AutoDev", "autoDev.gitAuthorName");
+        envUpdates.AUTODEV_GIT_AUTHOR_NAME = value || "CodeHarbor AutoDev";
+        markUpdatedKey("autoDev.gitAuthorName");
+      }
+      if ("gitAuthorEmail" in autoDev) {
+        const value = normalizeString(autoDev.gitAuthorEmail, "autodev@codeharbor.local", "autoDev.gitAuthorEmail");
+        envUpdates.AUTODEV_GIT_AUTHOR_EMAIL = value || "autodev@codeharbor.local";
+        markUpdatedKey("autoDev.gitAuthorEmail");
+      }
       if ("autoReleaseEnabled" in autoDev) {
         const value = normalizeBoolean(autoDev.autoReleaseEnabled, true);
         envUpdates.AUTODEV_AUTO_RELEASE_ENABLED = String(value);
@@ -1794,6 +1804,14 @@ export class AdminServer {
       if ("autoCommit" in autoDev) {
         normalizeBoolean(autoDev.autoCommit, true);
         markCheckedKey("autoDev.autoCommit");
+      }
+      if ("gitAuthorName" in autoDev) {
+        normalizeString(autoDev.gitAuthorName, "CodeHarbor AutoDev", "autoDev.gitAuthorName");
+        markCheckedKey("autoDev.gitAuthorName");
+      }
+      if ("gitAuthorEmail" in autoDev) {
+        normalizeString(autoDev.gitAuthorEmail, "autodev@codeharbor.local", "autoDev.gitAuthorEmail");
+        markCheckedKey("autoDev.gitAuthorEmail");
       }
       if ("autoReleaseEnabled" in autoDev) {
         normalizeBoolean(autoDev.autoReleaseEnabled, true);
@@ -2385,6 +2403,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     loopMaxRuns: number;
     loopMaxMinutes: number;
     autoCommit: boolean;
+    gitAuthorName: string;
+    gitAuthorEmail: string;
     autoReleaseEnabled: boolean;
     autoReleasePush: boolean;
     maxConsecutiveFailures: number;
@@ -2417,6 +2437,8 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
       loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 0, Number.MAX_SAFE_INTEGER),
       loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 0, Number.MAX_SAFE_INTEGER),
       autoCommit: normalizeBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
+      gitAuthorName: process.env.AUTODEV_GIT_AUTHOR_NAME?.trim() || "CodeHarbor AutoDev",
+      gitAuthorEmail: process.env.AUTODEV_GIT_AUTHOR_EMAIL?.trim() || "autodev@codeharbor.local",
       autoReleaseEnabled: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, true),
       autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
       runArchiveEnabled: normalizeBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, true),

@@ -93,6 +93,8 @@ describe("config snapshot commands", () => {
     expect(parsed.env.CLI_COMPAT_IMAGE_MAX_COUNT).toBe("4");
     expect(parsed.env.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES).toBe("image/png,image/jpeg,image/webp,image/gif");
     expect(parsed.env).toHaveProperty("AUTODEV_LOOP_MAX_RUNS");
+    expect(parsed.env).toHaveProperty("AUTODEV_GIT_AUTHOR_NAME");
+    expect(parsed.env).toHaveProperty("AUTODEV_GIT_AUTHOR_EMAIL");
     expect(parsed.env).toHaveProperty("AUTODEV_AUTO_RELEASE_ENABLED");
     expect(parsed.env).toHaveProperty("AUTODEV_PREFLIGHT_AUTO_STASH");
     expect(parsed.env).toHaveProperty("AUTODEV_RUN_ARCHIVE_ENABLED");

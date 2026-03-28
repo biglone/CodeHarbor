@@ -421,6 +421,8 @@ describe("AdminServer", () => {
           envOverrides: {
             MATRIX_ADMIN_USERS: "@ops:example.com",
             AUTODEV_LOOP_MAX_RUNS: "12",
+            AUTODEV_GIT_AUTHOR_NAME: "CI Bot",
+            AUTODEV_GIT_AUTHOR_EMAIL: "ci@example.com",
             AUTODEV_VALIDATION_STRICT: "true",
             AUTODEV_PREFLIGHT_AUTO_STASH: "true",
             AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS: "9000",
@@ -432,6 +434,8 @@ describe("AdminServer", () => {
     expect(validEnvOverrides.status).toBe(200);
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.MATRIX_ADMIN_USERS");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_LOOP_MAX_RUNS");
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_GIT_AUTHOR_NAME");
+    expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_GIT_AUTHOR_EMAIL");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_VALIDATION_STRICT");
     expect(JSON.stringify(validEnvOverrides.body)).toContain("envOverrides.AUTODEV_PREFLIGHT_AUTO_STASH");
 
@@ -1435,6 +1439,8 @@ describe("AdminServer", () => {
           loopMaxRuns: 11,
           loopMaxMinutes: 75,
           autoCommit: true,
+          gitAuthorName: "Auto Bot",
+          gitAuthorEmail: "autobot@example.com",
           autoReleaseEnabled: true,
           autoReleasePush: false,
           runArchiveEnabled: true,
@@ -1458,6 +1464,8 @@ describe("AdminServer", () => {
           AUTODEV_LOOP_MAX_RUNS: "9",
           AUTODEV_LOOP_MAX_MINUTES: "60",
           AUTODEV_AUTO_COMMIT: "false",
+          AUTODEV_GIT_AUTHOR_NAME: "CI Bot",
+          AUTODEV_GIT_AUTHOR_EMAIL: "ci@example.com",
           AUTODEV_AUTO_RELEASE_ENABLED: "false",
           AUTODEV_AUTO_RELEASE_PUSH: "true",
           AUTODEV_RUN_ARCHIVE_ENABLED: "false",
@@ -1505,6 +1513,8 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_LOOP_MAX_RUNS=9");
     expect(envRaw).toContain("AUTODEV_LOOP_MAX_MINUTES=60");
     expect(envRaw).toContain("AUTODEV_AUTO_COMMIT=false");
+    expect(envRaw).toContain('AUTODEV_GIT_AUTHOR_NAME="CI Bot"');
+    expect(envRaw).toContain("AUTODEV_GIT_AUTHOR_EMAIL=ci@example.com");
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_AUTO_RELEASE_PUSH=true");
     expect(envRaw).toContain("AUTODEV_RUN_ARCHIVE_ENABLED=false");
