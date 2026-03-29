@@ -31,7 +31,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         min-height: 100vh;
       }
       .shell {
-        max-width: 1100px;
+        max-width: 1320px;
         margin: 0 auto;
         padding: 20px 16px 40px;
       }
@@ -41,6 +41,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         border-radius: 16px;
         padding: 16px;
         backdrop-filter: blur(8px);
+        margin-bottom: 14px;
       }
       .title {
         margin: 0 0 8px;
@@ -52,28 +53,75 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         color: var(--muted);
         font-size: 14px;
       }
-      .tabs {
+      .workspace {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+      }
+      .sidebar {
+        position: sticky;
+        top: 20px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 14px 12px;
+        backdrop-filter: blur(8px);
+      }
+      .menu {
+        display: flex;
+        flex-direction: column;
         gap: 8px;
-        margin-bottom: 12px;
+      }
+      .menu-group-title {
+        margin: 8px 4px 2px;
+        color: #7dd3fc;
+        font-size: 11px;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+      }
+      .submenu {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: -2px 0 6px;
       }
       .tab {
         display: flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
+        gap: 8px;
         color: var(--text);
         text-decoration: none;
         border: 1px solid var(--panel-border);
         border-radius: 10px;
-        padding: 8px 10px;
+        padding: 9px 12px;
         font-size: 12px;
-        text-align: center;
+        text-align: left;
+        min-height: 40px;
+        transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+      }
+      .tab:hover {
+        border-color: #4fd1e8;
+        background: #133347;
+      }
+      .tab-parent {
+        font-weight: 600;
+      }
+      .tab-sub {
+        margin-left: 14px;
+        font-size: 11px;
+        color: #cbd5e1;
+        background: #0f172acc;
+        border-color: #374151;
         min-height: 36px;
       }
       .tab.active {
         border-color: var(--accent);
-        background: #164e6388;
+        background: linear-gradient(90deg, #164e63cc, #0f2942cc);
+      }
+      .content {
+        min-width: 0;
       }
       .auth-row {
         display: grid;
@@ -192,11 +240,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         background: #78350f88;
       }
       .panel {
-        margin-top: 14px;
         background: var(--panel);
         border: 1px solid var(--panel-border);
         border-radius: 16px;
         padding: 16px;
+      }
+      .content > .panel {
+        margin-top: 0;
       }
       .panel[hidden] {
         display: none;
@@ -257,6 +307,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         color: var(--muted);
         font-size: 12px;
       }
+      @media (max-width: 1024px) {
+        .workspace {
+          grid-template-columns: 240px minmax(0, 1fr);
+        }
+      }
       @media (max-width: 900px) {
         .auth-row {
           grid-template-columns: 1fr;
@@ -264,8 +319,27 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         .grid {
           grid-template-columns: 1fr;
         }
-        .tabs {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          position: static;
+        }
+        .menu {
+          display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .menu-group-title {
+          grid-column: 1 / -1;
+          margin-top: 4px;
+        }
+        .submenu {
+          margin: 0;
+          gap: 6px;
+        }
+        .tab-sub {
+          margin-left: 0;
         }
       }
       @media (max-width: 640px) {
@@ -275,7 +349,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           bottom: 12px;
           max-width: none;
         }
-        .tabs {
+        .menu {
           grid-template-columns: 1fr;
         }
       }
@@ -285,20 +359,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
     <main class="shell">
       <section class="header">
         <h1 class="title" data-i18n="header.title">CodeHarbor 管理后台</h1>
-        <p class="subtitle" data-i18n="header.subtitle">管理全局配置、房间策略、健康检查与配置审计记录。</p>
-        <nav class="tabs">
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/basic" href="#/settings/global/basic" data-i18n="tab.globalBasic">全局·基础</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/autodev" href="#/settings/global/autodev" data-i18n="tab.globalAutoDev">全局·AutoDev</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/rate" href="#/settings/global/rate" data-i18n="tab.globalRate">全局·限流</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/triggers" href="#/settings/global/triggers" data-i18n="tab.globalTriggers">全局·触发</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/cli" href="#/settings/global/cli" data-i18n="tab.globalCli">全局·CLI/多模态</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/agent" href="#/settings/global/agent" data-i18n="tab.globalAgent">全局·技能与高级</a>
-          <a class="tab" data-page="settings-global" data-route="#/settings/global/snapshot" href="#/settings/global/snapshot" data-i18n="tab.globalSnapshot">全局·快照与重启</a>
-          <a class="tab" data-page="settings-rooms" data-route="#/settings/rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间</a>
-          <a class="tab" data-page="diagnostics" data-route="#/diagnostics" href="#/diagnostics" data-i18n="tab.diagnostics">诊断</a>
-          <a class="tab" data-page="health" data-route="#/health" href="#/health" data-i18n="tab.health">健康</a>
-          <a class="tab" data-page="audit" data-route="#/audit" href="#/audit" data-i18n="tab.audit">审计</a>
-        </nav>
+        <p class="subtitle" data-i18n="header.subtitle">通过左侧分层菜单管理全局配置、房间策略、健康检查与配置审计记录。</p>
         <div class="auth-row">
           <label class="field">
             <span class="field-label" data-i18n="auth.token.label">管理员令牌（可选）</span>
@@ -327,6 +388,39 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         <p id="auth-role" class="muted" data-i18n="auth.permission.unknown">权限：未知</p>
       </section>
 
+      <div class="workspace">
+        <aside class="sidebar">
+          <nav class="menu" aria-label="Admin navigation">
+            <p class="menu-group-title" data-i18n="menu.group.global">全局配置</p>
+            <a
+              class="tab tab-parent"
+              data-page="settings-global"
+              data-route="#/settings/global/basic"
+              data-route-prefix="#/settings/global/"
+              href="#/settings/global/basic"
+              data-i18n="menu.global"
+            >全局配置中心</a>
+            <div class="submenu">
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/basic" href="#/settings/global/basic" data-i18n="tab.globalBasic">基础设置</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/autodev" href="#/settings/global/autodev" data-i18n="tab.globalAutoDev">AutoDev 策略</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/rate" href="#/settings/global/rate" data-i18n="tab.globalRate">限流与并发</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/triggers" href="#/settings/global/triggers" data-i18n="tab.globalTriggers">触发策略</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/cli" href="#/settings/global/cli" data-i18n="tab.globalCli">CLI 与多模态</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/agent" href="#/settings/global/agent" data-i18n="tab.globalAgent">技能与高级</a>
+              <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/snapshot" href="#/settings/global/snapshot" data-i18n="tab.globalSnapshot">快照与重启</a>
+            </div>
+
+            <p class="menu-group-title" data-i18n="menu.group.workspace">房间治理</p>
+            <a class="tab tab-parent" data-page="settings-rooms" data-route="#/settings/rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间配置</a>
+
+            <p class="menu-group-title" data-i18n="menu.group.observe">运行观测</p>
+            <a class="tab tab-parent" data-page="diagnostics" data-route="#/diagnostics" href="#/diagnostics" data-i18n="tab.diagnostics">运行诊断</a>
+            <a class="tab tab-parent" data-page="health" data-route="#/health" href="#/health" data-i18n="tab.health">健康检查</a>
+            <a class="tab tab-parent" data-page="audit" data-route="#/audit" href="#/audit" data-i18n="tab.audit">配置审计</a>
+          </nav>
+        </aside>
+
+        <section class="content">
       <section class="panel" data-view="settings-global">
         <h2 class="panel-title" data-i18n="global.title">全局配置</h2>
         <div class="grid" id="global-grid">
@@ -690,6 +784,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           </table>
         </div>
       </section>
+        </section>
+      </div>
     </main>
 
     <script>
@@ -733,18 +829,22 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var i18n = {
           zh: {
             "header.title": "CodeHarbor 管理后台",
-            "header.subtitle": "按功能分页管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
-            "tab.globalBasic": "全局·基础",
-            "tab.globalAutoDev": "全局·AutoDev",
-            "tab.globalRate": "全局·限流",
-            "tab.globalTriggers": "全局·触发",
-            "tab.globalCli": "全局·CLI/多模态",
-            "tab.globalAgent": "全局·技能与高级",
-            "tab.globalSnapshot": "全局·快照与重启",
-            "tab.rooms": "房间",
-            "tab.diagnostics": "诊断",
-            "tab.health": "健康",
-            "tab.audit": "审计",
+            "header.subtitle": "通过左侧分层菜单管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
+            "menu.group.global": "全局配置",
+            "menu.group.workspace": "房间治理",
+            "menu.group.observe": "运行观测",
+            "menu.global": "全局配置中心",
+            "tab.globalBasic": "基础设置",
+            "tab.globalAutoDev": "AutoDev 策略",
+            "tab.globalRate": "限流与并发",
+            "tab.globalTriggers": "触发策略",
+            "tab.globalCli": "CLI 与多模态",
+            "tab.globalAgent": "技能与高级",
+            "tab.globalSnapshot": "快照与重启",
+            "tab.rooms": "房间配置",
+            "tab.diagnostics": "运行诊断",
+            "tab.health": "健康检查",
+            "tab.audit": "配置审计",
             "auth.token.label": "管理员令牌（可选）",
             "auth.token.placeholder": "ADMIN_TOKEN",
             "auth.actor.label": "操作者（用于审计日志）",
@@ -942,18 +1042,22 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           },
           en: {
             "header.title": "CodeHarbor Admin Console",
-            "header.subtitle": "Manage global settings with function-based paged navigation, plus rooms, diagnostics, health checks, and audit records.",
-            "tab.globalBasic": "Global · Basics",
-            "tab.globalAutoDev": "Global · AutoDev",
-            "tab.globalRate": "Global · Rate Limit",
-            "tab.globalTriggers": "Global · Triggers",
-            "tab.globalCli": "Global · CLI/Media",
-            "tab.globalAgent": "Global · Skills/Advanced",
-            "tab.globalSnapshot": "Global · Snapshot/Restart",
+            "header.subtitle": "Use left hierarchical navigation to manage global settings, rooms, diagnostics, health checks, and audit records.",
+            "menu.group.global": "Global Settings",
+            "menu.group.workspace": "Room Governance",
+            "menu.group.observe": "Observability",
+            "menu.global": "Global Control Center",
+            "tab.globalBasic": "Basics",
+            "tab.globalAutoDev": "AutoDev Policy",
+            "tab.globalRate": "Rate & Concurrency",
+            "tab.globalTriggers": "Trigger Policy",
+            "tab.globalCli": "CLI & Multimodal",
+            "tab.globalAgent": "Skills & Advanced",
+            "tab.globalSnapshot": "Snapshot & Restart",
             "tab.rooms": "Rooms",
-            "tab.diagnostics": "Diagnostics",
-            "tab.health": "Health",
-            "tab.audit": "Audit",
+            "tab.diagnostics": "Runtime Diagnostics",
+            "tab.health": "Health Check",
+            "tab.audit": "Config Audit",
             "auth.token.label": "Admin Token (optional)",
             "auth.token.placeholder": "ADMIN_TOKEN",
             "auth.actor.label": "Actor (for audit logs)",
@@ -1379,7 +1483,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           for (var j = 0; j < tabs.length; j += 1) {
             var tab = tabs[j];
             var targetRoute = tab.getAttribute("data-route");
-            if (targetRoute && targetRoute === route.hash) {
+            var targetPrefix = tab.getAttribute("data-route-prefix");
+            var matchedByPrefix = Boolean(targetPrefix && route.hash.indexOf(targetPrefix) === 0);
+            if ((targetRoute && targetRoute === route.hash) || matchedByPrefix) {
               tab.classList.add("active");
             } else {
               tab.classList.remove("active");
