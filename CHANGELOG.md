@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.82] - 2026-03-29
+
+- admin e2e stability: align global settings tests with left hierarchical submenus (`basic` / `agent`) before interacting with section-scoped fields.
+- flaky assertion fix: remove save-toast wording checks that were racy with immediate audit auto-refresh notices, keeping assertions focused on persisted state and audit records.
+
 ## [0.1.81] - 2026-03-29
 
 - admin console navigation redesign: move main menu to a left sidebar with hierarchical grouping (`Global Settings`, `Room Governance`, `Observability`) for faster wayfinding.
