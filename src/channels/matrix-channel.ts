@@ -136,13 +136,17 @@ export class MatrixChannel implements Channel {
       return response.event_id;
     }
 
+    const replacementRichContent = buildMatrixRichMessageContent(
+      normalized,
+      "m.notice",
+      null,
+      this.config.matrixNoticeBadgeEnabled,
+    );
+
     const content = {
       msgtype: "m.notice",
       body: `* ${normalized}`,
-      "m.new_content": {
-        msgtype: "m.notice",
-        body: normalized,
-      },
+      "m.new_content": replacementRichContent,
       "m.relates_to": {
         rel_type: "m.replace",
         event_id: replaceEventId,
@@ -1008,6 +1012,20 @@ function renderMarkdownSection(raw: string): string {
       continue;
     }
 
+    const namedOutputBlock = collectNamedOutputBlock(lines, index);
+    if (namedOutputBlock) {
+      blocks.push(renderNamedOutputBlock(namedOutputBlock.label, namedOutputBlock.content));
+      index += namedOutputBlock.consumedLines;
+      continue;
+    }
+
+    const codeHarborEnvelope = parseCodeHarborEnvelopeLine(trimmed);
+    if (codeHarborEnvelope) {
+      blocks.push(renderCodeHarborEnvelopeLine(codeHarborEnvelope));
+      index += 1;
+      continue;
+    }
+
     const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
     if (headingMatch) {
       const level = Math.min(6, headingMatch[1].length + 1);
@@ -1096,6 +1114,13 @@ interface StructuredInfoRow {
   value: string;
 }
 
+interface CodeHarborEnvelopeLine {
+  source: string;
+  tags: string[];
+  keyValues: StructuredInfoRow[];
+  message: string;
+}
+
 function collectStructuredInfoRows(lines: string[], startIndex: number): StructuredInfoRow[] {
   const rows: StructuredInfoRow[] = [];
   let index = startIndex;
@@ -1108,6 +1133,114 @@ function collectStructuredInfoRows(lines: string[], startIndex: number): Structu
     index += 1;
   }
   return rows;
+}
+
+function collectNamedOutputBlock(
+  lines: string[],
+  startIndex: number,
+): { label: string; content: string; consumedLines: number } | null {
+  const openLine = lines[startIndex]?.trim() ?? "";
+  const openMatch = /^\[([A-Za-z][A-Za-z0-9_.:-]{1,80})\]$/.exec(openLine);
+  if (!openMatch) {
+    return null;
+  }
+
+  const label = openMatch[1];
+  const closeMarker = `[/${label}]`;
+  let endIndex = startIndex + 1;
+  while (endIndex < lines.length) {
+    if ((lines[endIndex]?.trim() ?? "") === closeMarker) {
+      break;
+    }
+    endIndex += 1;
+  }
+  if (endIndex >= lines.length) {
+    return null;
+  }
+
+  return {
+    label,
+    content: lines.slice(startIndex + 1, endIndex).join("\n"),
+    consumedLines: endIndex - startIndex + 1,
+  };
+}
+
+function renderNamedOutputBlock(label: string, content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const rendered = normalized || "(empty)";
+  return `<p><font color="#3558d1"><b>${escapeHtml(label)}</b></font></p><pre><code>${escapeHtml(rendered)}</code></pre>`;
+}
+
+function parseCodeHarborEnvelopeLine(line: string): CodeHarborEnvelopeLine | null {
+  const trimmed = line.trim();
+  const sourceMatch = /^\[(CodeHarbor(?:[^\]]*)?)\]\s*(.*)$/.exec(trimmed);
+  if (!sourceMatch) {
+    return null;
+  }
+
+  const source = sourceMatch[1]?.trim() || "CodeHarbor";
+  let rest = sourceMatch[2]?.trim() ?? "";
+  const tags: string[] = [];
+
+  while (rest.startsWith("[")) {
+    const tagMatch = /^\[([A-Za-z0-9_-]{2,40})\]\s*(.*)$/.exec(rest);
+    if (!tagMatch) {
+      break;
+    }
+    tags.push(tagMatch[1].toUpperCase());
+    rest = tagMatch[2]?.trim() ?? "";
+  }
+
+  const keyValues: StructuredInfoRow[] = [];
+  while (true) {
+    const leadingWithComma = /^([A-Za-z][A-Za-z0-9_.-]{0,80})=([^\s,]+),\s*(.*)$/.exec(rest);
+    if (leadingWithComma) {
+      keyValues.push({
+        key: leadingWithComma[1],
+        value: leadingWithComma[2],
+      });
+      rest = leadingWithComma[3]?.trim() ?? "";
+      continue;
+    }
+
+    const trailingWithMessage = /^([A-Za-z][A-Za-z0-9_.-]{0,80})=([^\s,]+)(?:\s+(.*))?$/.exec(rest);
+    if (!trailingWithMessage) {
+      break;
+    }
+    keyValues.push({
+      key: trailingWithMessage[1],
+      value: trailingWithMessage[2],
+    });
+    rest = trailingWithMessage[3]?.trim() ?? "";
+    break;
+  }
+
+  return {
+    source,
+    tags,
+    keyValues,
+    message: rest,
+  };
+}
+
+function renderCodeHarborEnvelopeLine(line: CodeHarborEnvelopeLine): string {
+  const heading = [line.source, ...line.tags].join(" · ").trim();
+  const blocks: string[] = [`<p><font color="#8a5a00"><b>${escapeHtml(heading)}</b></font></p>`];
+  if (line.keyValues.length > 0) {
+    const rows = [...line.keyValues];
+    if (line.message) {
+      rows.push({
+        key: "message",
+        value: line.message,
+      });
+    }
+    blocks.push(renderStructuredInfoRows(rows));
+    return blocks.join("");
+  }
+  if (line.message) {
+    blocks.push(`<p>${renderInlineMarkup(line.message)}</p>`);
+  }
+  return blocks.join("");
 }
 
 function parseStructuredInfoLine(line: string): StructuredInfoRow | null {
@@ -1154,6 +1287,8 @@ function isBlockBoundaryLine(line: string): boolean {
     /^(#{1,6})\s+/.test(trimmed) ||
     /^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed) ||
     /^>\s?/.test(trimmed) ||
+    /^\[(CodeHarbor(?:[^\]]*)?)\]\s*/.test(trimmed) ||
+    /^\[[A-Za-z][A-Za-z0-9_.:-]{1,80}\]$/.test(trimmed) ||
     /^\s*[-*]\s+/.test(trimmed) ||
     /^\s*\d+\.\s+/.test(trimmed)
   );

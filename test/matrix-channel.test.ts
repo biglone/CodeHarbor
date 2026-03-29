@@ -515,6 +515,13 @@ describe("MatrixChannel", () => {
         event_id: "$notice-1",
       },
     });
+    const replacement = (secondPayload["m.new_content"] ?? {}) as Record<string, unknown>;
+    expect(replacement).toMatchObject({
+      msgtype: "m.notice",
+      body: "[CodeHarbor] thinking 2",
+      format: "org.matrix.custom.html",
+    });
+    expect(String(replacement.formatted_body ?? "")).toContain("CodeHarbor 提示");
 
     await channel.stop();
   });
@@ -672,6 +679,43 @@ describe("MatrixChannel", () => {
     expect(formatted).toContain("T6.5");
     expect(formatted).toContain("<b>completionGate</b>");
     expect(formatted).toContain("CodeHarbor 提示");
+
+    await channel.stop();
+  });
+
+  it("renders CodeHarbor envelope metadata and named output blocks", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    const noticeText = [
+      "[CodeHarbor] [REPAIR] agent=executor, round=1 Executor started repair from reviewer feedback",
+      "",
+      "[executor_repair_output]",
+      "line 1",
+      "line 2",
+      "[/executor_repair_output]",
+    ].join("\n");
+    await channel.sendNotice("!room:example.com", noticeText);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    const formatted = String(payload.formatted_body ?? "");
+    expect(formatted).toContain("CodeHarbor · REPAIR");
+    expect(formatted).toContain("<b>agent</b>");
+    expect(formatted).toContain("executor");
+    expect(formatted).toContain("<b>round</b>");
+    expect(formatted).toContain("<b>message</b>");
+    expect(formatted).toContain("<b>executor_repair_output</b>");
+    expect(formatted).toContain("line 1");
+    expect(formatted).toContain("line 2");
+    expect(formatted).not.toContain("[executor_repair_output]");
 
     await channel.stop();
   });
