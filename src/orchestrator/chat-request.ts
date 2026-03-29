@@ -104,7 +104,9 @@ interface ExecuteChatRequestDeps {
     audioTranscripts: AudioTranscript[],
     documents: DocumentContextItem[],
     bridgeContext: string | null,
+    autoDevRuntimeContext: string | null,
   ) => string;
+  resolveAutoDevRuntimeContext: (sessionKey: string, workdir: string) => Promise<string | null>;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   startTypingHeartbeat: (conversationId: string) => () => Promise<void>;
@@ -151,6 +153,17 @@ export async function executeChatRequest(
   const allowBridgeContext =
     previousCodexSessionId === null && !deps.skipBridgeForNextPrompt.delete(input.sessionKey);
   const bridgeContext = allowBridgeContext ? deps.buildConversationBridgeContext(input.sessionKey) : null;
+  let autoDevRuntimeContext: string | null = null;
+  try {
+    autoDevRuntimeContext = await deps.resolveAutoDevRuntimeContext(input.sessionKey, input.roomWorkdir);
+  } catch (error) {
+    deps.logger.debug("Failed to resolve AutoDev runtime context for chat prompt", {
+      requestId: input.requestId,
+      sessionKey: input.sessionKey,
+      workdir: input.roomWorkdir,
+      error: formatError(error),
+    });
+  }
   const audioTranscripts = await deps.transcribeAudioAttachments(input.message, input.requestId, input.sessionKey);
   const imageSelection = await deps.prepareImageAttachments(input.message, input.requestId, input.sessionKey);
   deps.mediaMetrics.recordImageSelection({
@@ -171,6 +184,7 @@ export async function executeChatRequest(
     audioTranscripts,
     documentSummary.documents,
     bridgeContext,
+    autoDevRuntimeContext,
   );
   const imagePaths = imageSelection.imagePaths;
   let lastProgressAt = 0;

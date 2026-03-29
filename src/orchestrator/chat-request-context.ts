@@ -1,6 +1,8 @@
 import type { CliCompatRecorder } from "../compat/cli-compat-recorder";
 import type { Logger } from "../logger";
+import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { executeChatRequest } from "./chat-request";
+import { buildAutoDevChatRuntimeContext as runBuildAutoDevChatRuntimeContext } from "./autodev-chat-context";
 import { recordCliCompatPrompt as runRecordCliCompatPrompt } from "./cli-compat-prompt-recorder";
 import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./conversation-bridge";
 import { buildExecutionPrompt as runBuildExecutionPrompt } from "./execution-prompt";
@@ -24,6 +26,7 @@ interface ChatRequestContextInput {
   transcribeAudioAttachments: ChatRequestDispatchContext["transcribeAudioAttachments"];
   prepareImageAttachments: ChatRequestDispatchContext["prepareImageAttachments"];
   prepareDocumentAttachments: ChatRequestDispatchContext["prepareDocumentAttachments"];
+  resolveAutoDevRuntimeContext: ChatRequestDispatchContext["resolveAutoDevRuntimeContext"];
   buildExecutionPrompt: ChatRequestDispatchContext["buildExecutionPrompt"];
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
@@ -51,6 +54,7 @@ export function buildChatRequestDispatchContext(input: ChatRequestContextInput):
     transcribeAudioAttachments: input.transcribeAudioAttachments,
     prepareImageAttachments: input.prepareImageAttachments,
     prepareDocumentAttachments: input.prepareDocumentAttachments,
+    resolveAutoDevRuntimeContext: input.resolveAutoDevRuntimeContext,
     buildExecutionPrompt: input.buildExecutionPrompt,
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,
@@ -86,6 +90,7 @@ interface ChatRequestRuntimeContextInput {
   transcribeAudioAttachments: ChatRequestDispatchContext["transcribeAudioAttachments"];
   prepareImageAttachments: ChatRequestDispatchContext["prepareImageAttachments"];
   prepareDocumentAttachments: ChatRequestDispatchContext["prepareDocumentAttachments"];
+  getAutoDevSnapshot: (sessionKey: string) => AutoDevRunSnapshot | null;
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
   startTypingHeartbeat: ChatRequestDispatchContext["startTypingHeartbeat"];
@@ -123,13 +128,26 @@ export function buildChatRequestDispatchContextFromRuntime(
     transcribeAudioAttachments: input.transcribeAudioAttachments,
     prepareImageAttachments: input.prepareImageAttachments,
     prepareDocumentAttachments: input.prepareDocumentAttachments,
-    buildExecutionPrompt: (prompt, message, audioTranscripts, extractedDocuments, bridgeContext) =>
+    resolveAutoDevRuntimeContext: async (sessionKey, workdir) => {
+      try {
+        return await runBuildAutoDevChatRuntimeContext(workdir, input.getAutoDevSnapshot(sessionKey));
+      } catch (error) {
+        input.logger.debug("Failed to build AutoDev runtime context for chat", {
+          sessionKey,
+          workdir,
+          error,
+        });
+        return null;
+      }
+    },
+    buildExecutionPrompt: (prompt, message, audioTranscripts, extractedDocuments, bridgeContext, autoDevRuntimeContext) =>
       runBuildExecutionPrompt({
         prompt,
         message,
         audioTranscripts,
         extractedDocuments,
         bridgeContext,
+        autoDevRuntimeContext,
       }),
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,

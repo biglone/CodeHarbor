@@ -8,6 +8,7 @@ interface BuildExecutionPromptInput {
   audioTranscripts: AudioTranscript[];
   extractedDocuments: DocumentContextItem[];
   bridgeContext: string | null;
+  autoDevRuntimeContext: string | null;
 }
 
 export function buildExecutionPrompt(input: BuildExecutionPromptInput): string {
@@ -51,8 +52,9 @@ export function buildExecutionPrompt(input: BuildExecutionPromptInput): string {
     composed = sections.join("\n\n");
   }
 
+  const currentRequestBody = input.autoDevRuntimeContext ? `${input.autoDevRuntimeContext}\n\n${composed}` : composed;
   if (!input.bridgeContext) {
-    return composed;
+    return currentRequestBody;
   }
-  return `${input.bridgeContext}\n\n[current_request]\n${composed}`;
+  return `${input.bridgeContext}\n\n[current_request]\n${currentRequestBody}`;
 }

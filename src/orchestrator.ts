@@ -1429,6 +1429,7 @@ export class Orchestrator {
         this.prepareImageAttachments(targetMessage, targetRequestId, targetSessionKey),
       prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
+      getAutoDevSnapshot: (sessionKey) => this.autoDevSnapshots.get(sessionKey) ?? null,
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       sendMessage: (conversationId, text, options) => this.channel.sendMessage(conversationId, text, options),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),

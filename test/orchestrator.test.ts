@@ -6228,6 +6228,114 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("injects completed autodev runtime context into follow-up chat prompts", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-followup-context-"));
+    const taskListPath = path.join(tempRoot, "TASK_LIST.md");
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n\n## Scope\n- follow-up prompt context\n", "utf8");
+    await fs.writeFile(
+      taskListPath,
+      [
+        "| Task ID | Task Description | Status |",
+        "|---------|-------------------|--------|",
+        "| T6.5 | follow-up context sync | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const promptCalls: string[] = [];
+    const deterministicWorkflowExecutor = {
+      startExecution: (
+        text: string,
+        sessionId: string | null,
+      ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } => {
+        promptCalls.push(text);
+        if (text.includes("[role:planner]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-planner",
+              reply: "1) implement\n2) verify\n3) deliver",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:executor]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-executor",
+              reply: "VALIDATION_STATUS: PASS\n__EXIT_CODES__ unit=0",
+            }),
+            cancel: () => {},
+          };
+        }
+        if (text.includes("[role:reviewer]")) {
+          return {
+            result: Promise.resolve({
+              sessionId: sessionId ?? "wf-reviewer",
+              reply: "VERDICT: APPROVED\nSUMMARY: approved",
+            }),
+            cancel: () => {},
+          };
+        }
+        return {
+          result: Promise.resolve({
+            sessionId: sessionId ?? "chat-session",
+            reply: `ok:${text}`,
+          }),
+          cancel: () => {},
+        };
+      },
+    };
+
+    try {
+      const channel = new FakeChannel();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(
+        channel,
+        deterministicWorkflowExecutor as never,
+        store as never,
+        logger as never,
+        {
+          commandPrefix: "!code",
+          matrixUserId: "@bot:example.com",
+          progressUpdatesEnabled: false,
+          outputLanguage: "en",
+          defaultCodexWorkdir: tempRoot,
+          autoDevAutoCommit: false,
+          multiAgentWorkflow: {
+            enabled: true,
+            autoRepairMaxRounds: 0,
+          },
+        },
+      );
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/autodev run T6.5",
+          eventId: "$autodev-followup-context-run",
+        }),
+      );
+      const updatedTaskList = await fs.readFile(taskListPath, "utf8");
+      expect(updatedTaskList).toContain("| T6.5 | follow-up context sync | ✅ |");
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "Any follow-up actions?",
+          eventId: "$autodev-followup-context-chat",
+        }),
+      );
+
+      const followUpPrompt = [...promptCalls].reverse().find((entry) => entry.includes("Any follow-up actions?")) ?? "";
+      expect(followUpPrompt).toContain("[autodev_runtime]");
+      expect(followUpPrompt).toContain("status=completed");
+      expect(followUpPrompt).toContain("nextTask=N/A");
+      expect(followUpPrompt).toContain("Do not suggest rerunning completed tasks");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("supports /autodev skills mode switch and injects role skills into workflow prompts", async () => {
     const channel = new FakeChannel();
     const executor = new WorkflowExecutor();
