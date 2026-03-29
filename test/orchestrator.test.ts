@@ -5930,6 +5930,53 @@ describe("Orchestrator", () => {
     expect(channel.notices.some((entry) => entry.text.includes("timeout="))).toBe(false);
   });
 
+  it("emits autodev workflow progress as timeline notices in group chats when detailed progress is enabled", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-group-timeline-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- timeline progress\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T8.1 | group progress timeline | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new WorkflowExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: true,
+        progressMinIntervalMs: 0,
+        defaultCodexWorkdir: tempRoot,
+        multiAgentWorkflow: {
+          enabled: true,
+          autoRepairMaxRounds: 1,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: false,
+          mentionsBot: true,
+          text: "@bot:example.com /autodev run T8.1",
+          eventId: "$autodev-group-progress-timeline",
+        }),
+      );
+
+      expect(channel.notices.some((entry) => entry.text.includes("多智能体流程启动"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("[PLANNER]"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("多智能体流程完成"))).toBe(true);
+      expect(channel.upserts).toHaveLength(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("echoes autodev stage outputs by default and supports /autodev content off", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-content-"));
     await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- deliver T4.x\n", "utf8");

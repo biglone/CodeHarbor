@@ -613,6 +613,43 @@ describe("MatrixChannel", () => {
     await channel.stop();
   });
 
+  it("renders structured key-value blocks for status-like messages", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    const statusText = [
+      "[CodeHarbor] AutoDev task result",
+      "- task: T6.5",
+      "- reviewer approved: yes",
+      "- completionGate: passed",
+      "- nextTask: N/A",
+    ].join("\n");
+    await channel.sendNotice("!room:example.com", statusText);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      msgtype: "m.notice",
+      body: statusText,
+      format: "org.matrix.custom.html",
+    });
+    const formatted = String(payload.formatted_body ?? "");
+    expect(formatted).toContain("<table><tbody>");
+    expect(formatted).toContain("<b>task</b>");
+    expect(formatted).toContain("T6.5");
+    expect(formatted).toContain("<b>completionGate</b>");
+    expect(formatted).toContain("CodeHarbor 提示");
+
+    await channel.stop();
+  });
+
   it("renders multimodal summary blocks for image and audio replies", async () => {
     const client = new FakeMatrixClient();
     client.startClient.mockImplementation(() => {

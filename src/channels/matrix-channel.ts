@@ -1005,6 +1005,13 @@ function renderMarkdownSection(raw: string): string {
       continue;
     }
 
+    const structuredRows = collectStructuredInfoRows(lines, index);
+    if (structuredRows.length >= 2) {
+      blocks.push(renderStructuredInfoRows(structuredRows));
+      index += structuredRows.length;
+      continue;
+    }
+
     if (/^\s*[-*]\s+/.test(line)) {
       const items: string[] = [];
       while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
@@ -1046,6 +1053,60 @@ function renderMarkdownSection(raw: string): string {
   }
 
   return blocks.join("");
+}
+
+interface StructuredInfoRow {
+  key: string;
+  value: string;
+}
+
+function collectStructuredInfoRows(lines: string[], startIndex: number): StructuredInfoRow[] {
+  const rows: StructuredInfoRow[] = [];
+  let index = startIndex;
+  while (index < lines.length) {
+    const parsed = parseStructuredInfoLine(lines[index] ?? "");
+    if (!parsed) {
+      break;
+    }
+    rows.push(parsed);
+    index += 1;
+  }
+  return rows;
+}
+
+function parseStructuredInfoLine(line: string): StructuredInfoRow | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.replace(/^[-*]\s+/, "");
+  const colonIndex = normalized.indexOf(":");
+  if (colonIndex <= 0) {
+    return null;
+  }
+  const key = normalized.slice(0, colonIndex).trim();
+  const value = normalized.slice(colonIndex + 1).trim();
+  if (!key || /^[0-9]+$/.test(key)) {
+    return null;
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*$/.test(key) && value.startsWith("//")) {
+    // Avoid treating protocol-like text (for example https://foo) as structured key/value.
+    return null;
+  }
+  return {
+    key,
+    value: value || "N/A",
+  };
+}
+
+function renderStructuredInfoRows(rows: StructuredInfoRow[]): string {
+  const tableRows = rows
+    .map(
+      (row) =>
+        `<tr><td><b>${renderInlineMarkup(row.key)}</b></td><td>${renderInlineMarkup(row.value)}</td></tr>`,
+    )
+    .join("");
+  return `<table><tbody>${tableRows}</tbody></table>`;
 }
 
 function isBlockBoundaryLine(line: string): boolean {

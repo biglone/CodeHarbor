@@ -10,6 +10,7 @@ import { byOutputLanguage } from "./output-language";
 interface SendProgressContextLike {
   conversationId: string;
   isDirectMessage: boolean;
+  forceTimeline?: boolean;
   getProgressNoticeEventId: () => string | null;
   setProgressNoticeEventId: (next: string) => void;
 }
@@ -124,9 +125,15 @@ export async function executeWorkflowRunRequest(
 
   const requestStartedAt = Date.now();
   let progressNoticeEventId: string | null = null;
+  const detailedProgressEnabled = deps.isAutoDevDetailedProgressEnabled(input.sessionKey);
+  const stageOutputEchoEnabled =
+    input.diagRunKind === "autodev" && deps.isAutoDevStageOutputEchoEnabled(input.sessionKey);
+  const timelineProgressEnabled =
+    !input.message.isDirectMessage && input.diagRunKind === "autodev" && detailedProgressEnabled;
   const progressCtx: SendProgressContextLike = {
     conversationId: input.message.conversationId,
-    isDirectMessage: input.message.isDirectMessage,
+    isDirectMessage: timelineProgressEnabled ? true : input.message.isDirectMessage,
+    forceTimeline: timelineProgressEnabled,
     getProgressNoticeEventId: () => progressNoticeEventId,
     setProgressNoticeEventId: (next) => {
       progressNoticeEventId = next;
@@ -179,9 +186,6 @@ export async function executeWorkflowRunRequest(
     0,
     workflowStartText,
   );
-  const detailedProgressEnabled = deps.isAutoDevDetailedProgressEnabled(input.sessionKey);
-  const stageOutputEchoEnabled =
-    input.diagRunKind === "autodev" && deps.isAutoDevStageOutputEchoEnabled(input.sessionKey);
   const roleSkillPolicy = deps.resolveWorkflowRoleSkillPolicy(input.sessionKey);
 
   try {
