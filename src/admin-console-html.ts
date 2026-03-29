@@ -53,22 +53,27 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         font-size: 14px;
       }
       .tabs {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 8px;
-        flex-wrap: wrap;
         margin-bottom: 12px;
       }
       .tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
         color: var(--text);
         text-decoration: none;
         border: 1px solid var(--panel-border);
-        border-radius: 999px;
-        padding: 6px 12px;
-        font-size: 13px;
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        text-align: center;
+        min-height: 36px;
       }
       .tab.active {
         border-color: var(--accent);
-        background: #155e7555;
+        background: #164e6388;
       }
       .auth-row {
         display: grid;
@@ -259,6 +264,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         .grid {
           grid-template-columns: 1fr;
         }
+        .tabs {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       @media (max-width: 640px) {
         .notice {
@@ -266,6 +274,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           right: 12px;
           bottom: 12px;
           max-width: none;
+        }
+        .tabs {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -276,11 +287,17 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         <h1 class="title" data-i18n="header.title">CodeHarbor 管理后台</h1>
         <p class="subtitle" data-i18n="header.subtitle">管理全局配置、房间策略、健康检查与配置审计记录。</p>
         <nav class="tabs">
-          <a class="tab" data-page="settings-global" href="#/settings/global" data-i18n="tab.global">全局</a>
-          <a class="tab" data-page="settings-rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间</a>
-          <a class="tab" data-page="diagnostics" href="#/diagnostics" data-i18n="tab.diagnostics">诊断</a>
-          <a class="tab" data-page="health" href="#/health" data-i18n="tab.health">健康</a>
-          <a class="tab" data-page="audit" href="#/audit" data-i18n="tab.audit">审计</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/basic" href="#/settings/global/basic" data-i18n="tab.globalBasic">全局·基础</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/autodev" href="#/settings/global/autodev" data-i18n="tab.globalAutoDev">全局·AutoDev</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/rate" href="#/settings/global/rate" data-i18n="tab.globalRate">全局·限流</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/triggers" href="#/settings/global/triggers" data-i18n="tab.globalTriggers">全局·触发</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/cli" href="#/settings/global/cli" data-i18n="tab.globalCli">全局·CLI/多模态</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/agent" href="#/settings/global/agent" data-i18n="tab.globalAgent">全局·技能与高级</a>
+          <a class="tab" data-page="settings-global" data-route="#/settings/global/snapshot" href="#/settings/global/snapshot" data-i18n="tab.globalSnapshot">全局·快照与重启</a>
+          <a class="tab" data-page="settings-rooms" data-route="#/settings/rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间</a>
+          <a class="tab" data-page="diagnostics" data-route="#/diagnostics" href="#/diagnostics" data-i18n="tab.diagnostics">诊断</a>
+          <a class="tab" data-page="health" data-route="#/health" href="#/health" data-i18n="tab.health">健康</a>
+          <a class="tab" data-page="audit" data-route="#/audit" href="#/audit" data-i18n="tab.audit">审计</a>
         </nav>
         <div class="auth-row">
           <label class="field">
@@ -312,7 +329,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
       <section class="panel" data-view="settings-global">
         <h2 class="panel-title" data-i18n="global.title">全局配置</h2>
-        <div class="grid">
+        <div class="grid" id="global-grid">
           <label class="field">
             <span class="field-label" data-i18n="global.commandPrefix">命令前缀</span>
             <input id="global-matrix-prefix" type="text" />
@@ -532,27 +549,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             </p>
           </label>
         </div>
-        <div class="actions">
+        <div id="global-main-actions" class="actions">
           <button id="global-save-btn" type="button" data-i18n="global.save">保存全局配置</button>
           <button id="global-validate-btn" type="button" class="secondary" data-i18n="global.validate">校验全局配置</button>
           <button id="global-reload-btn" type="button" class="secondary" data-i18n="global.reload">重新加载</button>
           <button id="global-restart-main-btn" type="button" class="secondary" data-i18n="global.restartMain">重启主服务</button>
           <button id="global-restart-all-btn" type="button" class="secondary" data-i18n="global.restartAll">重启主服务+管理后台</button>
         </div>
-        <p class="muted" data-i18n="global.restartHint">保存全局配置会更新 .env，并需要重启后完全生效。</p>
-        <h3 class="panel-title" style="margin-top: 18px;" data-i18n="snapshot.title">配置导入/导出</h3>
-        <div class="actions">
-          <button id="config-export-btn" type="button" class="secondary" data-i18n="snapshot.export">导出配置快照</button>
-        </div>
-        <div class="grid">
-          <label class="field full">
-            <span class="field-label" data-i18n="snapshot.importFile">导入文件（JSON）</span>
-            <input id="config-import-file" type="file" accept="application/json,.json" />
-          </label>
-        </div>
-        <div class="actions">
-          <button id="config-import-dry-run-btn" type="button" class="secondary" data-i18n="snapshot.importDryRun">先执行 dry-run</button>
-          <button id="config-import-apply-btn" type="button" data-i18n="snapshot.importApply">应用导入</button>
+        <p id="global-restart-hint" class="muted" data-i18n="global.restartHint">保存全局配置会更新 .env，并需要重启后完全生效。</p>
+
+        <div id="global-snapshot-block" hidden>
+          <h3 class="panel-title" style="margin-top: 18px;" data-i18n="snapshot.title">配置导入/导出</h3>
+          <div class="actions">
+            <button id="config-export-btn" type="button" class="secondary" data-i18n="snapshot.export">导出配置快照</button>
+          </div>
+          <div class="grid">
+            <label class="field full">
+              <span class="field-label" data-i18n="snapshot.importFile">导入文件（JSON）</span>
+              <input id="config-import-file" type="file" accept="application/json,.json" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="config-import-dry-run-btn" type="button" class="secondary" data-i18n="snapshot.importDryRun">先执行 dry-run</button>
+            <button id="config-import-apply-btn" type="button" data-i18n="snapshot.importApply">应用导入</button>
+          </div>
         </div>
       </section>
 
@@ -676,15 +696,31 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       (function () {
         "use strict";
 
+        var globalSections = ["basic", "autodev", "rate", "triggers", "cli", "agent", "snapshot"];
+        var defaultGlobalSection = "basic";
         var routeToView = {
           "#/settings/global": "settings-global",
+          "#/settings/global/basic": "settings-global",
+          "#/settings/global/autodev": "settings-global",
+          "#/settings/global/rate": "settings-global",
+          "#/settings/global/triggers": "settings-global",
+          "#/settings/global/cli": "settings-global",
+          "#/settings/global/agent": "settings-global",
+          "#/settings/global/snapshot": "settings-global",
           "#/settings/rooms": "settings-rooms",
           "#/diagnostics": "diagnostics",
           "#/health": "health",
           "#/audit": "audit"
         };
         var pathToRoute = {
-          "/settings/global": "#/settings/global",
+          "/settings/global": "#/settings/global/basic",
+          "/settings/global/basic": "#/settings/global/basic",
+          "/settings/global/autodev": "#/settings/global/autodev",
+          "/settings/global/rate": "#/settings/global/rate",
+          "/settings/global/triggers": "#/settings/global/triggers",
+          "/settings/global/cli": "#/settings/global/cli",
+          "/settings/global/agent": "#/settings/global/agent",
+          "/settings/global/snapshot": "#/settings/global/snapshot",
           "/settings/rooms": "#/settings/rooms",
           "/diagnostics": "#/diagnostics",
           "/health": "#/health",
@@ -697,8 +733,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var i18n = {
           zh: {
             "header.title": "CodeHarbor 管理后台",
-            "header.subtitle": "管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
-            "tab.global": "全局",
+            "header.subtitle": "按功能分页管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
+            "tab.globalBasic": "全局·基础",
+            "tab.globalAutoDev": "全局·AutoDev",
+            "tab.globalRate": "全局·限流",
+            "tab.globalTriggers": "全局·触发",
+            "tab.globalCli": "全局·CLI/多模态",
+            "tab.globalAgent": "全局·技能与高级",
+            "tab.globalSnapshot": "全局·快照与重启",
             "tab.rooms": "房间",
             "tab.diagnostics": "诊断",
             "tab.health": "健康",
@@ -900,8 +942,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           },
           en: {
             "header.title": "CodeHarbor Admin Console",
-            "header.subtitle": "Manage global settings, room policies, diagnostics, health checks, and config audit records.",
-            "tab.global": "Global",
+            "header.subtitle": "Manage global settings with function-based paged navigation, plus rooms, diagnostics, health checks, and audit records.",
+            "tab.globalBasic": "Global · Basics",
+            "tab.globalAutoDev": "Global · AutoDev",
+            "tab.globalRate": "Global · Rate Limit",
+            "tab.globalTriggers": "Global · Triggers",
+            "tab.globalCli": "Global · CLI/Media",
+            "tab.globalAgent": "Global · Skills/Advanced",
+            "tab.globalSnapshot": "Global · Snapshot/Restart",
             "tab.rooms": "Rooms",
             "tab.diagnostics": "Diagnostics",
             "tab.health": "Health",
@@ -1127,6 +1175,84 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var diagnosticsWarningBody = document.getElementById("diagnostics-warning-body");
         var healthBody = document.getElementById("health-body");
         var auditBody = document.getElementById("audit-body");
+        var globalGrid = document.getElementById("global-grid");
+        var globalMainActions = document.getElementById("global-main-actions");
+        var globalRestartHint = document.getElementById("global-restart-hint");
+        var globalSnapshotBlock = document.getElementById("global-snapshot-block");
+        var globalSectionFieldMap = {
+          basic: [
+            "global-matrix-prefix",
+            "global-workdir",
+            "global-output-language",
+            "global-progress-interval",
+            "global-progress-delivery-mode",
+            "global-typing-timeout",
+            "global-active-window",
+            "global-update-check-enabled",
+            "global-update-check-timeout",
+            "global-update-check-ttl",
+            "global-progress-enabled",
+            "global-notice-badge-enabled"
+          ],
+          autodev: [
+            "global-autodev-loop-max-runs",
+            "global-autodev-loop-max-minutes",
+            "global-autodev-auto-commit",
+            "global-autodev-auto-release-enabled",
+            "global-autodev-auto-release-push",
+            "global-autodev-max-consecutive-failures",
+            "global-autodev-init-enhancement-enabled",
+            "global-autodev-init-enhancement-timeout",
+            "global-autodev-init-enhancement-max-chars"
+          ],
+          rate: [
+            "global-rate-window",
+            "global-rate-user",
+            "global-rate-room",
+            "global-concurrency-global",
+            "global-concurrency-user",
+            "global-concurrency-room"
+          ],
+          triggers: [
+            "global-direct-mode",
+            "global-trigger-mention",
+            "global-trigger-reply",
+            "global-trigger-window",
+            "global-trigger-prefix"
+          ],
+          cli: [
+            "global-cli-enabled",
+            "global-cli-pass",
+            "global-cli-whitespace",
+            "global-cli-disable-split",
+            "global-cli-throttle",
+            "global-cli-fetch-media",
+            "global-cli-image-max-bytes",
+            "global-cli-image-max-count",
+            "global-cli-image-mime-types",
+            "global-cli-transcribe-audio",
+            "global-cli-audio-model",
+            "global-cli-audio-timeout",
+            "global-cli-audio-max-chars",
+            "global-cli-audio-max-retries",
+            "global-cli-audio-retry-delay",
+            "global-cli-audio-max-bytes",
+            "global-cli-audio-local-command",
+            "global-cli-audio-local-timeout",
+            "global-cli-record-path"
+          ],
+          agent: [
+            "global-agent-enabled",
+            "global-agent-repair-rounds",
+            "global-agent-skills-enabled",
+            "global-agent-skills-mode",
+            "global-agent-skills-max-chars",
+            "global-agent-skills-roots",
+            "global-agent-skills-assignments",
+            "global-env-overrides"
+          ],
+          snapshot: []
+        };
 
         tokenInput.value = localStorage.getItem(storageTokenKey) || "";
         actorInput.value = localStorage.getItem(storageActorKey) || "";
@@ -1187,7 +1313,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         window.addEventListener("hashchange", handleRoute);
 
         if (!window.location.hash) {
-          window.location.hash = pathToRoute[window.location.pathname] || "#/settings/global";
+          window.location.hash = pathToRoute[window.location.pathname] || "#/settings/global/basic";
         } else {
           handleRoute();
         }
@@ -1195,12 +1321,55 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         showNotice("ok", t("notice.ready"));
         void refreshAuthStatus();
 
+        function normalizeRouteHash(hashValue) {
+          var raw = (hashValue || "").trim();
+          if (!raw) {
+            return "#/settings/global/basic";
+          }
+          if (raw === "#/settings/global") {
+            return "#/settings/global/basic";
+          }
+          if (raw.indexOf("#/settings/global/") === 0) {
+            var section = raw.slice("#/settings/global/".length).trim().toLowerCase();
+            if (globalSections.indexOf(section) >= 0) {
+              return "#/settings/global/" + section;
+            }
+            return "#/settings/global/basic";
+          }
+          if (routeToView[raw]) {
+            return raw;
+          }
+          return "#/settings/global/basic";
+        }
+
+        function getRouteState() {
+          var hash = normalizeRouteHash(window.location.hash);
+          var view = routeToView[hash] || "settings-global";
+          var globalSection = defaultGlobalSection;
+          if (view === "settings-global") {
+            var prefix = "#/settings/global/";
+            if (hash.indexOf(prefix) === 0) {
+              globalSection = hash.slice(prefix.length) || defaultGlobalSection;
+            }
+          }
+          return {
+            hash: hash,
+            view: view,
+            globalSection: globalSection
+          };
+        }
+
         function getCurrentView() {
-          return routeToView[window.location.hash] || "settings-global";
+          return getRouteState().view;
         }
 
         function handleRoute() {
-          var view = getCurrentView();
+          var route = getRouteState();
+          if (window.location.hash !== route.hash) {
+            window.location.hash = route.hash;
+            return;
+          }
+          var view = route.view;
           var panels = document.querySelectorAll("[data-view]");
           for (var i = 0; i < panels.length; i += 1) {
             var panel = panels[i];
@@ -1209,13 +1378,56 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           var tabs = document.querySelectorAll(".tab");
           for (var j = 0; j < tabs.length; j += 1) {
             var tab = tabs[j];
-            if (tab.getAttribute("data-page") === view) {
+            var targetRoute = tab.getAttribute("data-route");
+            if (targetRoute && targetRoute === route.hash) {
               tab.classList.add("active");
             } else {
               tab.classList.remove("active");
             }
           }
+          renderGlobalSection(route.globalSection);
           ensureLoaded(view);
+        }
+
+        function resolveGlobalFieldContainer(inputId) {
+          var node = document.getElementById(inputId);
+          if (!node || typeof node.closest !== "function") {
+            return null;
+          }
+          return node.closest(".field, .checkbox");
+        }
+
+        function setElementVisible(node, visible) {
+          if (!node) {
+            return;
+          }
+          node.hidden = !visible;
+        }
+
+        function renderGlobalSection(section) {
+          var normalized = (section || defaultGlobalSection).toLowerCase();
+          if (globalSections.indexOf(normalized) < 0) {
+            normalized = defaultGlobalSection;
+          }
+          var isSnapshot = normalized === "snapshot";
+          setElementVisible(globalGrid, !isSnapshot);
+          setElementVisible(globalMainActions, !isSnapshot);
+          setElementVisible(globalRestartHint, !isSnapshot);
+          setElementVisible(globalSnapshotBlock, isSnapshot);
+          if (!globalGrid || isSnapshot) {
+            return;
+          }
+          var containers = globalGrid.querySelectorAll(".field, .checkbox");
+          for (var i = 0; i < containers.length; i += 1) {
+            containers[i].hidden = true;
+          }
+          var fields = globalSectionFieldMap[normalized] || [];
+          for (var j = 0; j < fields.length; j += 1) {
+            var container = resolveGlobalFieldContainer(fields[j]);
+            if (container) {
+              container.hidden = false;
+            }
+          }
         }
 
         function ensureLoaded(view) {
