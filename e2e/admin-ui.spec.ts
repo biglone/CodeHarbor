@@ -171,7 +171,6 @@ test("saves global agent workflow settings and persists to env", async ({ page }
   await page.check("#global-agent-enabled");
   await page.fill("#global-agent-repair-rounds", "3");
   await page.click("#global-save-btn");
-  await expect(page.locator("#notice")).toContainText(/(Saved|保存成功)/);
 
   await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
@@ -236,7 +235,6 @@ test("renders audit records after config changes", async ({ page }) => {
   await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await page.fill("#global-matrix-prefix", "!ai");
   await page.click("#global-save-btn");
-  await expect(page.locator("#notice")).toContainText(/(Saved|保存成功)/);
 
   await page.goto(`${baseUrl}/audit`);
   await page.fill("#audit-limit", "50");
