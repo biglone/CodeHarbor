@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.80] - 2026-03-29
+
+- Matrix structured echo: enhance `[CodeHarbor] ...` envelope rendering to show metadata (`tag`, `key=value`, message) as structured blocks for clearer progress/failure inspection.
+- stage output readability: render `[planner_output]...[/planner_output]` / `[executor_output]...[/executor_output]` / repair output blocks as labeled code sections instead of raw marker text.
+- progress edit consistency: keep rich HTML content in `m.new_content` when upserting progress notices (`m.replace`), so edited timeline messages preserve badges and structure.
+- tests: add regression coverage for structured envelope parsing, named output block rendering, and rich `m.new_content` payload behavior.
+
 ## [0.1.79] - 2026-03-29
 
 - admin console UX: split global settings into functional paged navigation (`basic/autodev/rate/triggers/cli/agent/snapshot`) to avoid long single-page scrolling.
