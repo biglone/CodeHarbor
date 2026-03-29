@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.81] - 2026-03-29
+
+- admin console navigation redesign: move main menu to a left sidebar with hierarchical grouping (`Global Settings`, `Room Governance`, `Observability`) for faster wayfinding.
+- global settings IA improvement: add parent + child menu levels and rename global sub-sections with clearer functional labels (for example `Rate & Concurrency`, `Trigger Policy`, `CLI & Multimodal`).
+- route highlight behavior: keep parent menu highlighted via route-prefix matching while viewing child pages, improving location awareness in deep-linked global routes.
+- responsive UX: optimize sidebar navigation behavior on tablet/mobile while preserving existing hash routes and config operations.
+
 ## [0.1.80] - 2026-03-29
 
 - Matrix structured echo: enhance `[CodeHarbor] ...` envelope rendering to show metadata (`tag`, `key=value`, message) as structured blocks for clearer progress/failure inspection.
