@@ -41,6 +41,8 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('var globalSections = ["basic", "autodev", "rate", "triggers", "cli", "agent", "snapshot"]');
     expectHtmlContains("var globalSectionFieldMap = {");
     expectHtmlContains("snapshot: []");
+    expectHtmlContains("[hidden] {");
+    expectHtmlContains("display: none !important;");
     expectHtmlContains("setElementVisible(globalGrid, !isSnapshot);");
     expectHtmlContains("setElementVisible(globalMainActions, !isSnapshot);");
     expectHtmlContains("setElementVisible(globalRestartHint, !isSnapshot);");

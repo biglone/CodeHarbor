@@ -307,6 +307,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         color: var(--muted);
         font-size: 12px;
       }
+      [hidden] {
+        display: none !important;
+      }
       @media (max-width: 1024px) {
         .workspace {
           grid-template-columns: 240px minmax(0, 1fr);
