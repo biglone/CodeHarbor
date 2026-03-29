@@ -1595,6 +1595,63 @@ describe("AdminServer", () => {
     expect(auditJson).toContain('"actor":"ops-hot-only"');
   });
 
+  it("applies matrix progress delivery mode and notice badge as hot global updates", async () => {
+    const { dir, db, legacy } = createPaths();
+    fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_PROGRESS_DELIVERY_MODE=upsert\n", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const updated = await fetchJson(`${baseUrl}/api/admin/config/global`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-actor": "ops-hot-delivery",
+      },
+      body: JSON.stringify({
+        matrixProgressDeliveryMode: "timeline",
+        matrixNoticeBadgeEnabled: false,
+      }),
+    });
+    expect(updated.status).toBe(200);
+    const updatedBody = updated.body as {
+      restartRequired: boolean;
+      hotAppliedKeys: string[];
+      runtimeConfigVersion: number | null;
+      data: {
+        matrixProgressDeliveryMode: "upsert" | "timeline";
+        matrixNoticeBadgeEnabled: boolean;
+      };
+    };
+    expect(updatedBody.restartRequired).toBe(false);
+    expect(updatedBody.hotAppliedKeys).toEqual(["matrixProgressDeliveryMode", "matrixNoticeBadgeEnabled"]);
+    expect(updatedBody.runtimeConfigVersion).toBe(1);
+    expect(updatedBody.data.matrixProgressDeliveryMode).toBe("timeline");
+    expect(updatedBody.data.matrixNoticeBadgeEnabled).toBe(false);
+
+    const runtimeSnapshot = stateStore.getRuntimeConfigSnapshot(GLOBAL_RUNTIME_HOT_CONFIG_KEY);
+    expect(runtimeSnapshot?.payloadJson ?? "").toContain('"matrixProgressDeliveryMode":"timeline"');
+    expect(runtimeSnapshot?.payloadJson ?? "").toContain('"matrixNoticeBadgeEnabled":false');
+
+    const envRaw = fs.readFileSync(path.join(dir, ".env"), "utf8");
+    expect(envRaw).toContain("MATRIX_PROGRESS_DELIVERY_MODE=timeline");
+    expect(envRaw).toContain("MATRIX_NOTICE_BADGE_ENABLED=false");
+  });
+
   it("splits hot-applied keys and restart-required keys with audit metadata", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");

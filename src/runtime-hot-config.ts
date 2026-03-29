@@ -12,7 +12,9 @@ export const HOT_GLOBAL_CONFIG_KEYS = new Set<string>([
   "rateLimiter.maxConcurrentPerRoom",
   "matrixProgressUpdates",
   "matrixProgressMinIntervalMs",
+  "matrixProgressDeliveryMode",
   "matrixTypingTimeoutMs",
+  "matrixNoticeBadgeEnabled",
   "sessionActiveWindowMinutes",
   "groupDirectModeEnabled",
   "defaultGroupTriggerPolicy.allowMention",
@@ -26,7 +28,9 @@ export interface RuntimeHotConfigPayload {
   rateLimiter: RateLimiterOptions;
   matrixProgressUpdates: boolean;
   matrixProgressMinIntervalMs: number;
+  matrixProgressDeliveryMode: "upsert" | "timeline";
   matrixTypingTimeoutMs: number;
+  matrixNoticeBadgeEnabled: boolean;
   sessionActiveWindowMinutes: number;
   groupDirectModeEnabled: boolean;
   defaultGroupTriggerPolicy: TriggerPolicy;
@@ -49,7 +53,9 @@ export function buildRuntimeHotConfigPayload(config: AppConfig): RuntimeHotConfi
     },
     matrixProgressUpdates: config.matrixProgressUpdates,
     matrixProgressMinIntervalMs: config.matrixProgressMinIntervalMs,
+    matrixProgressDeliveryMode: config.matrixProgressDeliveryMode,
     matrixTypingTimeoutMs: config.matrixTypingTimeoutMs,
+    matrixNoticeBadgeEnabled: config.matrixNoticeBadgeEnabled,
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     groupDirectModeEnabled: config.groupDirectModeEnabled,
     defaultGroupTriggerPolicy: {
@@ -98,7 +104,9 @@ function normalizeRuntimeHotConfigPayload(value: unknown): RuntimeHotConfigPaylo
     },
     matrixProgressUpdates: asBoolean(record.matrixProgressUpdates),
     matrixProgressMinIntervalMs: asInteger(record.matrixProgressMinIntervalMs, 1),
+    matrixProgressDeliveryMode: asOptionalProgressDeliveryMode(record.matrixProgressDeliveryMode, "upsert"),
     matrixTypingTimeoutMs: asInteger(record.matrixTypingTimeoutMs, 1),
+    matrixNoticeBadgeEnabled: asOptionalBoolean(record.matrixNoticeBadgeEnabled, true),
     sessionActiveWindowMinutes: asInteger(record.sessionActiveWindowMinutes, 1),
     groupDirectModeEnabled: asBoolean(record.groupDirectModeEnabled),
     defaultGroupTriggerPolicy: {
@@ -142,4 +150,28 @@ function asOptionalOutputLanguage(value: unknown): OutputLanguage | undefined {
     return value;
   }
   throw new Error("Invalid runtime hot config payload.");
+}
+
+function asProgressDeliveryMode(value: unknown): "upsert" | "timeline" {
+  if (value === "upsert" || value === "timeline") {
+    return value;
+  }
+  throw new Error("Invalid runtime hot config payload.");
+}
+
+function asOptionalProgressDeliveryMode(
+  value: unknown,
+  fallback: "upsert" | "timeline",
+): "upsert" | "timeline" {
+  if (value === undefined) {
+    return fallback;
+  }
+  return asProgressDeliveryMode(value);
+}
+
+function asOptionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  return asBoolean(value);
 }

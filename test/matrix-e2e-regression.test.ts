@@ -1215,6 +1215,58 @@ describe("Matrix e2e regression", () => {
     expect(queueDiagNotices.every((entry) => entry.text.includes("status: unavailable"))).toBe(true);
   });
 
+  it("shows /trace details for same-session sender and masks sensitive fields", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    const first = makeInbound({ isDirectMessage: true, text: "deploy token=abc123 secret=xyz" });
+    await orchestrator.handleMessage(first);
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: `/trace ${first.requestId}`,
+      }),
+    );
+
+    const traceNotice = channel.notices.find((entry) => entry.text.includes("请求追踪"));
+    expect(traceNotice).toBeDefined();
+    expect(traceNotice?.text).toContain(`requestId: ${first.requestId}`);
+    expect(traceNotice?.text).toContain("token=***");
+    expect(traceNotice?.text).toContain("secret=***");
+    expect(traceNotice?.text).not.toContain("abc123");
+    expect(traceNotice?.text).not.toContain("xyz");
+  });
+
+  it("rejects /trace read from different sender without admin privilege", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor();
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: false,
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    const first = makeInbound({ isDirectMessage: true, text: "hello" });
+    await orchestrator.handleMessage(first);
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        senderId: "@bob:example.com",
+        text: `/trace ${first.requestId}`,
+      }),
+    );
+
+    const forbiddenNotice = channel.notices.find((entry) => entry.text.includes("status: forbidden"));
+    expect(forbiddenNotice).toBeDefined();
+  });
+
   it("shows recent upgrade records for /diag upgrade command", async () => {
     const channel = new FakeChannel();
     const executor = new ScriptedExecutor();
@@ -1244,6 +1296,37 @@ describe("Matrix e2e regression", () => {
     expect(upgradeDiagNotice?.text).toContain("error=post-check failed: mismatch");
     expect(upgradeDiagNotice?.text).toContain("lock: idle");
     expect(upgradeDiagNotice?.text).toContain("stats:");
+  });
+
+  it("uses timeline notices for group progress when MATRIX_PROGRESS_DELIVERY_MODE=timeline", async () => {
+    const channel = new FakeChannel();
+    const executor = new ScriptedExecutor((input) => {
+      input.onProgress?.({ stage: "turn_started" });
+      input.onProgress?.({ stage: "reasoning", message: "analyzing group request" });
+      return {
+        result: Promise.resolve({ sessionId: input.sessionId ?? "thread-1", reply: "ok" }),
+        cancel: () => {},
+      };
+    });
+    const store = new InMemoryStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      progressUpdatesEnabled: true,
+      progressMinIntervalMs: 0,
+      progressDeliveryMode: "timeline",
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: false,
+        mentionsBot: true,
+        text: "@bot:example.com 请分析",
+      }),
+    );
+
+    expect(channel.notices.some((entry) => entry.text.includes("开始处理请求，正在思考"))).toBe(true);
+    expect(channel.upserts).toHaveLength(0);
   });
 
   it("shows current version and update hint for /version command", async () => {

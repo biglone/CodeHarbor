@@ -3,6 +3,7 @@ import type { InboundMessage } from "../types";
 import type { MediaMetricEvent } from "./runtime-metrics";
 import { parseTraceTarget } from "./command-routing";
 import { summarizeSingleLine } from "./helpers";
+import { buildSessionKey } from "./misc-utils";
 import { byOutputLanguage } from "./output-language";
 import type { RequestTraceRecord } from "./request-trace";
 import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
@@ -14,6 +15,7 @@ interface TraceCommandDeps {
   listWorkflowDiagRunsByRequestId: (requestId: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   listMediaEventsByRequestId: (requestId: string, limit: number) => MediaMetricEvent[];
+  isAdminUser: (senderId: string) => boolean;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
 }
 
@@ -24,9 +26,32 @@ export async function handleTraceCommand(deps: TraceCommandDeps, message: Inboun
     return;
   }
 
+  const requesterSessionKey = buildSessionKey(message);
+  const isAdmin = deps.isAdminUser(message.senderId);
   const trace = deps.getRequestTraceById(target.requestId);
-  const workflowRuns = deps.listWorkflowDiagRunsByRequestId(target.requestId, 5);
-  const mediaEvents = deps.listMediaEventsByRequestId(target.requestId, 8);
+  const workflowRunsRaw = deps.listWorkflowDiagRunsByRequestId(target.requestId, 5);
+  const mediaEventsRaw = deps.listMediaEventsByRequestId(target.requestId, 8);
+  const workflowRuns = isAdmin
+    ? workflowRunsRaw
+    : workflowRunsRaw.filter((run) => run.sessionKey === requesterSessionKey);
+  const mediaEvents = isAdmin
+    ? mediaEventsRaw
+    : mediaEventsRaw.filter((event) => event.sessionKey === requesterSessionKey);
+
+  if (!isAdmin && trace && trace.sessionKey !== requesterSessionKey) {
+    await deps.sendNotice(
+      message.conversationId,
+      buildTraceForbiddenNotice(deps.botNoticePrefix, deps.outputLanguage),
+    );
+    return;
+  }
+  if (!isAdmin && !trace && (workflowRunsRaw.length > workflowRuns.length || mediaEventsRaw.length > mediaEvents.length)) {
+    await deps.sendNotice(
+      message.conversationId,
+      buildTraceForbiddenNotice(deps.botNoticePrefix, deps.outputLanguage),
+    );
+    return;
+  }
 
   if (!trace && workflowRuns.length === 0 && mediaEvents.length === 0) {
     await deps.sendNotice(
@@ -72,6 +97,17 @@ function buildTraceNotFoundNotice(
 - status: 内存中未找到对应记录`;
 }
 
+function buildTraceForbiddenNotice(botNoticePrefix: string, outputLanguage: OutputLanguage): string {
+  if (outputLanguage === "en") {
+    return `${botNoticePrefix} Request trace
+- status: forbidden
+- reason: only the same session sender or admin can view this trace`;
+  }
+  return `${botNoticePrefix} 请求追踪
+- status: forbidden
+- reason: 仅同一会话发送者或管理员可查看该追踪`;
+}
+
 function buildTraceNotice(input: {
   botNoticePrefix: string;
   requestId: string;
@@ -97,10 +133,10 @@ function buildTraceNotice(input: {
     lines.push(`- startedAt: ${input.trace.startedAt}`);
     lines.push(`- endedAt: ${input.trace.endedAt ?? "N/A"}`);
     lines.push(`- sessionId: ${input.trace.sessionId ?? "N/A"}`);
-    lines.push(`- prompt: ${summarizeSingleLine(input.trace.prompt, 240) || "N/A"}`);
-    lines.push(`- executionPrompt: ${summarizeSingleLine(input.trace.executionPrompt, 240) || "N/A"}`);
-    lines.push(`- reply: ${summarizeSingleLine(input.trace.reply ?? "", 240) || "N/A"}`);
-    lines.push(`- error: ${summarizeSingleLine(input.trace.error ?? "", 240) || "none"}`);
+    lines.push(`- prompt: ${summarizeSingleLine(maskSensitiveText(input.trace.prompt), 240) || "N/A"}`);
+    lines.push(`- executionPrompt: ${summarizeSingleLine(maskSensitiveText(input.trace.executionPrompt), 240) || "N/A"}`);
+    lines.push(`- reply: ${summarizeSingleLine(maskSensitiveText(input.trace.reply ?? ""), 240) || "N/A"}`);
+    lines.push(`- error: ${summarizeSingleLine(maskSensitiveText(input.trace.error ?? ""), 240) || "none"}`);
     lines.push(localize("- progress:", "- progress:"));
     if (input.trace.progress.length === 0) {
       lines.push("- (empty)");
@@ -124,7 +160,7 @@ function buildTraceNotice(input: {
         lines.push("  events=(empty)");
         continue;
       }
-      lines.push(`  events=${events.map((event) => summarizeSingleLine(`${event.stage}#${event.round}:${event.message}`, 120)).join(" -> ")}`);
+      lines.push(`  events=${events.map((event) => summarizeSingleLine(`${event.stage}#${event.round}:${maskSensitiveText(event.message)}`, 120)).join(" -> ")}`);
     }
   }
 
@@ -132,7 +168,7 @@ function buildTraceNotice(input: {
   if (input.mediaEvents.length === 0) {
     lines.push("- (empty)");
   } else {
-    lines.push(...input.mediaEvents.map((event) => `- at=${event.at} type=${event.type} detail=${event.detail}`));
+    lines.push(...input.mediaEvents.map((event) => `- at=${event.at} type=${event.type} detail=${maskSensitiveText(event.detail)}`));
   }
 
   return lines.join("\n");
@@ -140,7 +176,18 @@ function buildTraceNotice(input: {
 
 function formatTraceProgress(progress: RequestTraceRecord["progress"]): string[] {
   return progress.map((item, index) => {
-    const message = summarizeSingleLine(item.message, 160);
+    const message = summarizeSingleLine(maskSensitiveText(item.message), 160);
     return `- #${index + 1} at=${item.at} stage=${item.stage} message=${message}`;
   });
+}
+
+function maskSensitiveText(text: string): string {
+  let masked = text;
+  masked = masked.replace(/\b(Bearer)\s+[A-Za-z0-9._~-]+/gi, "$1 ***");
+  masked = masked.replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "***");
+  masked = masked.replace(
+    /\b(api[_-]?key|token|secret|password|passwd|authorization|auth)\b\s*[:=]\s*([^\s,;]+)/gi,
+    (_all, key: string) => `${key}=***`,
+  );
+  return masked;
 }

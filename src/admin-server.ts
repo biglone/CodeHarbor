@@ -1211,6 +1211,13 @@ export class AdminServer {
       markUpdatedKey("matrixProgressMinIntervalMs");
     }
 
+    if ("matrixProgressDeliveryMode" in body) {
+      const value = normalizeProgressDeliveryMode(body.matrixProgressDeliveryMode, this.config.matrixProgressDeliveryMode);
+      this.config.matrixProgressDeliveryMode = value;
+      envUpdates.MATRIX_PROGRESS_DELIVERY_MODE = value;
+      markUpdatedKey("matrixProgressDeliveryMode");
+    }
+
     if ("matrixTypingTimeoutMs" in body) {
       const value = normalizePositiveInt(
         body.matrixTypingTimeoutMs,
@@ -1221,6 +1228,13 @@ export class AdminServer {
       this.config.matrixTypingTimeoutMs = value;
       envUpdates.MATRIX_TYPING_TIMEOUT_MS = String(value);
       markUpdatedKey("matrixTypingTimeoutMs");
+    }
+
+    if ("matrixNoticeBadgeEnabled" in body) {
+      const value = normalizeBoolean(body.matrixNoticeBadgeEnabled, this.config.matrixNoticeBadgeEnabled);
+      this.config.matrixNoticeBadgeEnabled = value;
+      envUpdates.MATRIX_NOTICE_BADGE_ENABLED = String(value);
+      markUpdatedKey("matrixNoticeBadgeEnabled");
     }
 
     if ("sessionActiveWindowMinutes" in body) {
@@ -1755,9 +1769,19 @@ export class AdminServer {
       markCheckedKey("matrixProgressMinIntervalMs");
     }
 
+    if ("matrixProgressDeliveryMode" in body) {
+      normalizeProgressDeliveryMode(body.matrixProgressDeliveryMode, this.config.matrixProgressDeliveryMode);
+      markCheckedKey("matrixProgressDeliveryMode");
+    }
+
     if ("matrixTypingTimeoutMs" in body) {
       normalizePositiveInt(body.matrixTypingTimeoutMs, this.config.matrixTypingTimeoutMs, 1, Number.MAX_SAFE_INTEGER);
       markCheckedKey("matrixTypingTimeoutMs");
+    }
+
+    if ("matrixNoticeBadgeEnabled" in body) {
+      normalizeBoolean(body.matrixNoticeBadgeEnabled, this.config.matrixNoticeBadgeEnabled);
+      markCheckedKey("matrixNoticeBadgeEnabled");
     }
 
     if ("sessionActiveWindowMinutes" in body) {
@@ -2395,7 +2419,9 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   defaultGroupTriggerPolicy: AppConfig["defaultGroupTriggerPolicy"];
   matrixProgressUpdates: boolean;
   matrixProgressMinIntervalMs: number;
+  matrixProgressDeliveryMode: "upsert" | "timeline";
   matrixTypingTimeoutMs: number;
+  matrixNoticeBadgeEnabled: boolean;
   sessionActiveWindowMinutes: number;
   updateCheck: AppConfig["updateCheck"];
   cliCompat: AppConfig["cliCompat"];
@@ -2429,7 +2455,9 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     defaultGroupTriggerPolicy: { ...config.defaultGroupTriggerPolicy },
     matrixProgressUpdates: config.matrixProgressUpdates,
     matrixProgressMinIntervalMs: config.matrixProgressMinIntervalMs,
+    matrixProgressDeliveryMode: config.matrixProgressDeliveryMode,
     matrixTypingTimeoutMs: config.matrixTypingTimeoutMs,
+    matrixNoticeBadgeEnabled: config.matrixNoticeBadgeEnabled,
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
@@ -2954,6 +2982,20 @@ function normalizeOutputLanguage(value: unknown, fallback: OutputLanguage): Outp
     return normalized;
   }
   throw new HttpError(400, 'outputLanguage must be "zh" or "en".');
+}
+
+function normalizeProgressDeliveryMode(value: unknown, fallback: "upsert" | "timeline"): "upsert" | "timeline" {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, 'matrixProgressDeliveryMode must be "upsert" or "timeline".');
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "upsert" || normalized === "timeline") {
+    return normalized;
+  }
+  throw new HttpError(400, 'matrixProgressDeliveryMode must be "upsert" or "timeline".');
 }
 
 function normalizeOptionalString(value: unknown): string | null {

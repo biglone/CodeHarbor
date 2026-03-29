@@ -31,6 +31,7 @@ describe("trace command", () => {
         listWorkflowDiagRunsByRequestId: () => [],
         listWorkflowDiagEvents: () => [],
         listMediaEventsByRequestId: () => [],
+        isAdminUser: () => false,
         sendNotice: async (_conversationId, text) => {
           notices.push(text);
         },
@@ -52,6 +53,7 @@ describe("trace command", () => {
         listWorkflowDiagRunsByRequestId: () => [],
         listWorkflowDiagEvents: () => [],
         listMediaEventsByRequestId: () => [],
+        isAdminUser: () => false,
         sendNotice,
       },
       makeMessage("/trace req-404"),
@@ -73,18 +75,18 @@ describe("trace command", () => {
       provider: "codex",
       model: "gpt-5.4",
       prompt: "请继续",
-      executionPrompt: "执行提示词",
+      executionPrompt: "authorization=Bearer sk-test-secret-value",
       startedAt: "2026-03-29T10:00:00.000Z",
       endedAt: "2026-03-29T10:00:03.000Z",
       status: "succeeded",
       error: null,
-      reply: "已经完成修复",
+      reply: "已经完成修复 token=top-secret-token",
       sessionId: "thread-1",
       progress: [
         {
           at: "2026-03-29T10:00:01.000Z",
           stage: "command_execution",
-          message: "running tests",
+          message: "running tests password=my-password",
         },
       ],
     };
@@ -122,7 +124,7 @@ describe("trace command", () => {
             kind: "autodev",
             stage: "executor",
             round: 1,
-            message: "patch applied",
+            message: "patch applied secret=abc",
             at: "2026-03-29T10:00:02.000Z",
           },
         ],
@@ -132,9 +134,10 @@ describe("trace command", () => {
             type: "image.accepted",
             requestId: "req-200",
             sessionKey: trace.sessionKey,
-            detail: "count=1",
+            detail: "count=1 token=abc",
           },
         ],
+        isAdminUser: () => false,
         sendNotice,
       },
       makeMessage("/trace req-200"),
@@ -149,5 +152,48 @@ describe("trace command", () => {
     expect(text).toContain("run=diag-1");
     expect(text).toContain("mediaEvents:");
     expect(text).toContain("image.accepted");
+    expect(text).not.toContain("top-secret-token");
+    expect(text).not.toContain("my-password");
+    expect(text).toContain("token=***");
+    expect(text).toContain("password=***");
+  });
+
+  it("blocks cross-session trace reads for non-admin sender", async () => {
+    const trace: RequestTraceRecord = {
+      requestId: "req-300",
+      sessionKey: "matrix:!room:example.com:@bob:example.com",
+      conversationId: "!room:example.com",
+      kind: "chat",
+      provider: "codex",
+      model: null,
+      prompt: "hello",
+      executionPrompt: "hello",
+      startedAt: "2026-03-29T10:00:00.000Z",
+      endedAt: null,
+      status: "running",
+      error: null,
+      reply: null,
+      sessionId: null,
+      progress: [],
+    };
+    const sendNotice = vi.fn(async (_conversationId: string, _text: string) => {});
+    await handleTraceCommand(
+      {
+        outputLanguage: "zh",
+        botNoticePrefix: "[CodeHarbor]",
+        getRequestTraceById: () => trace,
+        listWorkflowDiagRunsByRequestId: () => [],
+        listWorkflowDiagEvents: () => [],
+        listMediaEventsByRequestId: () => [],
+        isAdminUser: () => false,
+        sendNotice,
+      },
+      makeMessage("/trace req-300"),
+    );
+
+    expect(sendNotice).toHaveBeenCalledTimes(1);
+    const text = String(sendNotice.mock.calls[0]?.[1] ?? "");
+    expect(text).toContain("status: forbidden");
+    expect(text).toContain("仅同一会话发送者或管理员可查看");
   });
 });

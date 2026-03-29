@@ -333,6 +333,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-progress-interval" type="number" min="1" />
           </label>
           <label class="field">
+            <span class="field-label" data-i18n="global.progressDeliveryMode">进度投递模式</span>
+            <select id="global-progress-delivery-mode">
+              <option value="upsert">upsert</option>
+              <option value="timeline">timeline</option>
+            </select>
+          </label>
+          <label class="field">
             <span class="field-label" data-i18n="global.typingTimeout">输入状态超时（毫秒）</span>
             <input id="global-typing-timeout" type="number" min="1" />
           </label>
@@ -355,6 +362,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <label class="checkbox">
             <input id="global-progress-enabled" type="checkbox" />
             <span data-i18n="global.progressEnabled">启用进度更新</span>
+          </label>
+          <label class="checkbox">
+            <input id="global-notice-badge-enabled" type="checkbox" />
+            <span data-i18n="global.noticeBadgeEnabled">启用 Matrix 消息徽标（CodeHarbor 提示/AI 回复）</span>
           </label>
           <label class="field">
             <span class="field-label" data-i18n="global.autodevLoopMaxRuns">AutoDev 循环最大轮次（0=不限制）</span>
@@ -712,12 +723,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.defaultWorkdir": "默认工作目录",
             "global.outputLanguage": "机器人输出语言",
             "global.progressInterval": "进度更新间隔（毫秒）",
+            "global.progressDeliveryMode": "进度投递模式（upsert=编辑同一条，timeline=追加时间线）",
             "global.typingTimeout": "输入状态超时（毫秒）",
             "global.sessionWindow": "会话活跃窗口（分钟）",
             "global.updateCheckEnabled": "启用版本更新检查",
             "global.updateCheckTimeout": "更新检查超时（毫秒）",
             "global.updateCheckTtl": "更新检查缓存时间（毫秒）",
             "global.progressEnabled": "启用进度更新",
+            "global.noticeBadgeEnabled": "启用 Matrix 消息徽标（CodeHarbor 提示/AI 回复）",
             "global.autodevLoopMaxRuns": "AutoDev 循环最大轮次（0=不限制）",
             "global.autodevLoopMaxMinutes": "AutoDev 循环最大分钟（0=不限制）",
             "global.autodevAutoCommit": "AutoDev 自动提交",
@@ -779,7 +792,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.reload": "重新加载",
             "global.restartMain": "重启主服务",
             "global.restartAll": "重启主服务+管理后台",
-            "global.restartHint": "保存全局配置会更新 .env，并需要重启后完全生效。",
+            "global.restartHint": "保存后会按字段分类提示：hot（即时生效）或 restart（需重启）。",
             "snapshot.title": "配置导入/导出",
             "snapshot.export": "导出配置快照",
             "snapshot.importFile": "导入文件（JSON）",
@@ -787,7 +800,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "snapshot.importApply": "应用导入",
             "notice.globalLoaded": "全局配置已加载。",
             "notice.globalLoadFailed": "加载全局配置失败：{error}",
-            "notice.globalSaved": "保存成功：{keys}。需要重启后生效。",
+            "notice.globalSavedHot": "保存成功（hot）：{keys}。",
+            "notice.globalSavedRestart": "保存成功（restart）：{keys}。请重启以完全生效。",
             "notice.globalValidated": "全局配置校验通过：{keys}",
             "notice.globalValidateFailed": "全局配置校验失败：{error}",
             "notice.globalSaveFailed": "保存全局配置失败：{error}",
@@ -912,12 +926,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.defaultWorkdir": "Default Workdir",
             "global.outputLanguage": "Bot Output Language",
             "global.progressInterval": "Progress Interval (ms)",
+            "global.progressDeliveryMode": "Progress Delivery Mode (upsert=edit one notice, timeline=append notices)",
             "global.typingTimeout": "Typing Timeout (ms)",
             "global.sessionWindow": "Session Active Window (minutes)",
             "global.updateCheckEnabled": "Enable update check",
             "global.updateCheckTimeout": "Update check timeout (ms)",
             "global.updateCheckTtl": "Update check cache TTL (ms)",
             "global.progressEnabled": "Enable progress updates",
+            "global.noticeBadgeEnabled": "Enable Matrix message badges (CodeHarbor notice/AI reply)",
             "global.autodevLoopMaxRuns": "AutoDev loop max runs (0 = unlimited)",
             "global.autodevLoopMaxMinutes": "AutoDev loop max minutes (0 = unlimited)",
             "global.autodevAutoCommit": "AutoDev auto commit",
@@ -979,7 +995,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.reload": "Reload",
             "global.restartMain": "Restart Main Service",
             "global.restartAll": "Restart Main + Admin",
-            "global.restartHint": "Saving global config updates .env and requires restart to fully take effect.",
+            "global.restartHint": "Save result now labels each field as hot (applied now) or restart (requires service restart).",
             "snapshot.title": "Config Import/Export",
             "snapshot.export": "Export Config Snapshot",
             "snapshot.importFile": "Import file (JSON)",
@@ -987,7 +1003,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "snapshot.importApply": "Apply Import",
             "notice.globalLoaded": "Global config loaded.",
             "notice.globalLoadFailed": "Failed to load global config: {error}",
-            "notice.globalSaved": "Saved: {keys}. Restart is required.",
+            "notice.globalSavedHot": "Saved (hot): {keys}.",
+            "notice.globalSavedRestart": "Saved (restart): {keys}. Please restart services.",
             "notice.globalValidated": "Global config validation passed: {keys}",
             "notice.globalValidateFailed": "Global config validation failed: {error}",
             "notice.globalSaveFailed": "Failed to save global config: {error}",
@@ -1378,6 +1395,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!numberInRange(payload.matrixProgressMinIntervalMs, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.progressInterval");
           }
+          if (payload.matrixProgressDeliveryMode !== "upsert" && payload.matrixProgressDeliveryMode !== "timeline") {
+            errors.push("global.progressDeliveryMode");
+          }
           if (!numberInRange(payload.matrixTypingTimeoutMs, 1, Number.MAX_SAFE_INTEGER)) {
             errors.push("global.typingTimeout");
           }
@@ -1591,7 +1611,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-output-language").value = data.outputLanguage || "zh";
             document.getElementById("global-progress-enabled").checked = Boolean(data.matrixProgressUpdates);
             document.getElementById("global-progress-interval").value = String(data.matrixProgressMinIntervalMs || 2500);
+            document.getElementById("global-progress-delivery-mode").value = data.matrixProgressDeliveryMode || "upsert";
             document.getElementById("global-typing-timeout").value = String(data.matrixTypingTimeoutMs || 10000);
+            document.getElementById("global-notice-badge-enabled").checked =
+              data.matrixNoticeBadgeEnabled === undefined ? true : Boolean(data.matrixNoticeBadgeEnabled);
             document.getElementById("global-active-window").value = String(data.sessionActiveWindowMinutes || 20);
             document.getElementById("global-update-check-enabled").checked =
               updateCheck.enabled === undefined ? true : Boolean(updateCheck.enabled);
@@ -1688,7 +1711,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             outputLanguage: asText("global-output-language") || "zh",
             matrixProgressUpdates: asBool("global-progress-enabled"),
             matrixProgressMinIntervalMs: asNumber("global-progress-interval", 2500),
+            matrixProgressDeliveryMode: asText("global-progress-delivery-mode") || "upsert",
             matrixTypingTimeoutMs: asNumber("global-typing-timeout", 10000),
+            matrixNoticeBadgeEnabled: asBool("global-notice-badge-enabled"),
             sessionActiveWindowMinutes: asNumber("global-active-window", 20),
             updateCheck: {
               enabled: asBool("global-update-check-enabled"),
@@ -1790,7 +1815,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             });
             var response = await apiRequest("/api/admin/config/global", "PUT", body);
             var keys = Array.isArray(response.updatedKeys) ? response.updatedKeys.join(", ") : "global config";
-            showNotice("warn", t("notice.globalSaved", { keys: keys }));
+            var hotKeys = Array.isArray(response.hotAppliedKeys) ? response.hotAppliedKeys : [];
+            var restartKeys = Array.isArray(response.restartRequiredKeys) ? response.restartRequiredKeys : [];
+            if (restartKeys.length > 0) {
+              showNotice("warn", t("notice.globalSavedRestart", { keys: keys }));
+            } else if (hotKeys.length > 0) {
+              showNotice("ok", t("notice.globalSavedHot", { keys: keys }));
+            } else {
+              showNotice("warn", t("notice.globalSavedRestart", { keys: keys }));
+            }
             await loadAudit();
           } catch (error) {
             showNotice("error", t("notice.globalSaveFailed", { error: error.message }));

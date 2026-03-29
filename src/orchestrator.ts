@@ -1698,6 +1698,7 @@ export class Orchestrator {
     this.rateLimiter.updateOptions(config.rateLimiter);
     this.progressUpdatesEnabled = config.matrixProgressUpdates;
     this.progressMinIntervalMs = nextProgressInterval;
+    this.progressDeliveryMode = config.matrixProgressDeliveryMode === "timeline" ? "timeline" : "upsert";
     this.typingTimeoutMs = nextTypingTimeoutMs;
     this.sessionActiveWindowMs = nextSessionActiveWindowMs;
     this.groupDirectModeEnabled = config.groupDirectModeEnabled;
@@ -2155,6 +2156,7 @@ export class Orchestrator {
         listWorkflowDiagRunsByRequestId: (requestId, limit) => this.listWorkflowDiagRunsByRequestId(requestId, limit),
         listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
         listMediaEventsByRequestId: (requestId, limit) => this.mediaMetrics.listEventsByRequestId(requestId, limit),
+        isAdminUser: (senderId) => this.matrixAdminUsers.has(senderId),
         sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       },
       message,

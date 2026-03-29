@@ -192,6 +192,8 @@ Common in-chat control commands:
 - `/diag route [count]` show backend routing diagnostics (rule hit/fallback reason + recent route records)
 - `/diag autodev [count]` show AutoDev diagnostics (stage trace, live loop snapshot, and recent git commit records)
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
+- `/trace <requestId>` show one-request trace (prompt/progress/reply + related workflow/media events)
+  - access is restricted to the same session sender or Matrix admin user
 - `/upgrade [version]` run self-update and auto-restart service from Matrix DM only
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports Linux systemd signal restart fallback, macOS launchd/manual fallback, and Windows safe manual fallback
@@ -582,7 +584,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
+  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//trace req-123`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
@@ -591,6 +593,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/diag route [count]` show backend routing diagnostics (rule hit + fallback reason + recent route records)
   - `/diag autodev [count]` show AutoDev diagnostics (stage trace + loop status + recent git commit records + error summary)
   - `/diag queue [count]` show queue diagnostics (counts + pending sessions + failure archive)
+  - `/trace <requestId>` show per-request trace (prompt/progress/reply + related workflow/media events; same-session sender/admin only)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
@@ -893,9 +896,13 @@ Useful flags:
   - emit stage progress updates (for example reasoning/thinking snippets)
 - `MATRIX_PROGRESS_MIN_INTERVAL_MS=2500`
   - minimum interval between progress updates
+- `MATRIX_PROGRESS_DELIVERY_MODE=upsert|timeline`
+  - `upsert` edits one progress notice in group chats; `timeline` appends progress notices
 - `MATRIX_TYPING_TIMEOUT_MS=10000`
   - typing indicator timeout; CodeHarbor refreshes typing state while handling a request
-- Group rooms use notice edit (`m.replace`) to coalesce progress and reduce spam.
+- `MATRIX_NOTICE_BADGE_ENABLED=true|false`
+  - enable/disable rich-message badge headers (`CodeHarbor 提示` / `CodeHarbor AI 回复`)
+- Group rooms default to notice edit (`m.replace`) to coalesce progress and reduce spam (`MATRIX_PROGRESS_DELIVERY_MODE=upsert`).
 - Reply chunking is paragraph/code-block aware to avoid cutting fenced blocks when possible.
 
 ## Tests

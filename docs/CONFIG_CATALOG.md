@@ -72,7 +72,9 @@ These must be valid before `codeharbor start`.
 | `REPLY_CHUNK_SIZE` | No | `3500` | No | Restart | Message split size |
 | `MATRIX_PROGRESS_UPDATES` | No | `true` | Yes | Hot (new requests) | Emit progress updates |
 | `MATRIX_PROGRESS_MIN_INTERVAL_MS` | No | `2500` | Yes | Hot (new requests) | Progress update interval |
+| `MATRIX_PROGRESS_DELIVERY_MODE` | No | `upsert` | Yes | Hot (new requests) | Group progress delivery: `upsert` or `timeline` |
 | `MATRIX_TYPING_TIMEOUT_MS` | No | `10000` | Yes | Hot (new requests) | Typing indicator timeout |
+| `MATRIX_NOTICE_BADGE_ENABLED` | No | `true` | Yes | Hot (immediate) | Toggle rich-message badge header |
 | `PACKAGE_UPDATE_CHECK_ENABLED` | No | `true` | Yes | Restart | Enable npm latest-version lookup for `/status`, `/version`, and Admin health app row |
 | `PACKAGE_UPDATE_CHECK_TIMEOUT_MS` | No | `3000` | Yes | Restart | Timeout (ms) for npm latest-version lookup |
 | `PACKAGE_UPDATE_CHECK_TTL_MS` | No | `21600000` | Yes | Restart | Cache TTL (ms) for npm latest-version lookup results |

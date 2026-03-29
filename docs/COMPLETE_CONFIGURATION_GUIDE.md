@@ -241,13 +241,18 @@ This section explains all runtime capabilities and the keys that control them.
   - `REPLY_CHUNK_SIZE`
   - `MATRIX_PROGRESS_UPDATES`
   - `MATRIX_PROGRESS_MIN_INTERVAL_MS`
+  - `MATRIX_PROGRESS_DELIVERY_MODE` (`upsert` | `timeline`)
   - `MATRIX_TYPING_TIMEOUT_MS`
+  - `MATRIX_NOTICE_BADGE_ENABLED` (`true` | `false`)
   - `PACKAGE_UPDATE_CHECK_ENABLED`
   - `PACKAGE_UPDATE_CHECK_TIMEOUT_MS`
   - `PACKAGE_UPDATE_CHECK_TTL_MS`
 - **Behavior**:
   - `/status` and `/version` include current version + update hint
+  - `/trace <requestId>` returns per-request trace (same-session sender or admin only)
   - `/status` shows the latest cached check time; `/version` triggers a forced refresh
+  - `MATRIX_PROGRESS_DELIVERY_MODE=upsert` edits one progress notice in groups; `timeline` appends notice timeline
+  - `MATRIX_NOTICE_BADGE_ENABLED=false` disables rich-message badge headers
   - Admin `/health` includes CodeHarbor app version/update row
   - when update check is disabled or lookup fails, health still shows current version with reason
 
