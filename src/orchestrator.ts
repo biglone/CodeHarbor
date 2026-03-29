@@ -36,6 +36,7 @@ import {
   DEFAULT_UPGRADE_LOCK_TTL_MS,
   DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED,
   DEFAULT_WORKFLOW_ROLE_SKILLS_MODE,
+  REQUEST_TRACE_MAX_ENTRIES,
   RUN_SNAPSHOT_MAX_ENTRIES,
   RUN_SNAPSHOT_TTL_MS,
   WORKFLOW_DIAG_SNAPSHOT_KEY,
@@ -230,6 +231,7 @@ import {
   listRecentAutoDevGitCommitEventSummaries as runListRecentAutoDevGitCommitEventSummaries,
   listWorkflowDiagEvents as runListWorkflowDiagEvents,
   listWorkflowDiagRuns as runListWorkflowDiagRuns,
+  listWorkflowDiagRunsByRequestId as runListWorkflowDiagRunsByRequestId,
   listWorkflowDiagRunsBySession as runListWorkflowDiagRunsBySession,
 } from "./orchestrator/workflow-diag-queries";
 import {
@@ -269,6 +271,14 @@ import {
   sendWorkflowStatusCommand as runSendWorkflowStatusCommand,
 } from "./orchestrator/status-command-dispatch";
 import { sendDiagCommand as runSendDiagCommand } from "./orchestrator/diag-command-dispatch";
+import { handleTraceCommand as runHandleTraceCommand } from "./orchestrator/trace-command";
+import {
+  appendRequestTraceProgress as runAppendRequestTraceProgress,
+  beginRequestTrace as runBeginRequestTrace,
+  finishRequestTrace as runFinishRequestTrace,
+  getRequestTraceById as runGetRequestTraceById,
+  type RequestTraceRecord,
+} from "./orchestrator/request-trace";
 
 export { buildApiTaskEventId, buildSessionKey };
 export type {
@@ -334,6 +344,7 @@ export class Orchestrator {
   private readonly lockPruneIntervalMs: number;
   private progressUpdatesEnabled: boolean;
   private progressMinIntervalMs: number;
+  private progressDeliveryMode: "upsert" | "timeline";
   private typingTimeoutMs: number;
   private readonly commandPrefix: string;
   private outputLanguage: OutputLanguage;
@@ -369,6 +380,8 @@ export class Orchestrator {
   private readonly autoDevValidationFailureStreaks = new Map<string, { failureClass: string; streak: number }>();
   private readonly autoDevGitCommitRecords: AutoDevGitCommitRecord[] = [];
   private readonly backendRouteDiagRecords: BackendRouteDiagRecord[] = [];
+  private readonly requestTraces = new Map<string, RequestTraceRecord>();
+  private readonly requestTraceOrder: string[] = [];
   private readonly autoDevLoopMaxRuns: number;
   private readonly autoDevLoopMaxMinutes: number;
   private readonly autoDevAutoCommit: boolean;
@@ -418,6 +431,7 @@ export class Orchestrator {
     this.lockTtlMs = options?.lockTtlMs ?? 30 * 60 * 1000;
     this.lockPruneIntervalMs = options?.lockPruneIntervalMs ?? 5 * 60 * 1000;
     this.progressUpdatesEnabled = options?.progressUpdatesEnabled ?? false;
+    this.progressDeliveryMode = options?.progressDeliveryMode === "timeline" ? "timeline" : "upsert";
     const inputRuntimeConfig = runResolveInputRuntimeConfig({ options });
     this.cliCompat = inputRuntimeConfig.cliCompat;
     this.cliCompatRecorder = inputRuntimeConfig.cliCompatRecorder;
@@ -925,6 +939,7 @@ export class Orchestrator {
         handleStopCommand: this.handleStopCommand.bind(this),
         handleBackendCommand: this.handleBackendCommand.bind(this),
         handleDiagCommand: this.handleDiagCommand.bind(this),
+        handleTraceCommand: this.handleTraceCommand.bind(this),
         handleUpgradeCommand: this.handleUpgradeCommand.bind(this),
       },
     });
@@ -1430,6 +1445,11 @@ export class Orchestrator {
       prepareDocumentAttachments: (targetMessage, targetRequestId, targetSessionKey) =>
         this.prepareDocumentAttachments(targetMessage, targetRequestId, targetSessionKey),
       getAutoDevSnapshot: (sessionKey) => this.autoDevSnapshots.get(sessionKey) ?? null,
+      recordRequestTraceStart: (traceInput) => this.recordRequestTraceStart(traceInput),
+      recordRequestTraceProgress: (requestId, stage, stageMessage) =>
+        this.recordRequestTraceProgress(requestId, stage, stageMessage),
+      recordRequestTraceFinish: (requestId, status, error, reply, sessionId) =>
+        this.recordRequestTraceFinish(requestId, status, error, reply, sessionId),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       sendMessage: (conversationId, text, options) => this.channel.sendMessage(conversationId, text, options),
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
@@ -1642,6 +1662,7 @@ export class Orchestrator {
       outputLanguage: this.outputLanguage,
       progressUpdatesEnabled: this.progressUpdatesEnabled,
       progressMinIntervalMs: this.progressMinIntervalMs,
+      progressDeliveryMode: this.progressDeliveryMode,
       typingTimeoutMs: this.typingTimeoutMs,
       cliCompatEnabled: this.cliCompat.enabled,
       botNoticePrefix: this.botNoticePrefix,
@@ -2125,6 +2146,21 @@ export class Orchestrator {
     await runSendDiagCommand(this.buildDiagCommandDispatchContext(), message);
   }
 
+  private async handleTraceCommand(message: InboundMessage): Promise<void> {
+    await runHandleTraceCommand(
+      {
+        outputLanguage: this.outputLanguage,
+        botNoticePrefix: this.botNoticePrefix,
+        getRequestTraceById: (requestId) => this.getRequestTraceById(requestId),
+        listWorkflowDiagRunsByRequestId: (requestId, limit) => this.listWorkflowDiagRunsByRequestId(requestId, limit),
+        listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
+        listMediaEventsByRequestId: (requestId, limit) => this.mediaMetrics.listEventsByRequestId(requestId, limit),
+        sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
+      },
+      message,
+    );
+  }
+
   private buildDiagCommandDispatchContext(): Parameters<typeof runSendDiagCommand>[0] {
     return runBuildDiagCommandDispatchContextFromRuntime({
       outputLanguage: this.outputLanguage,
@@ -2267,11 +2303,64 @@ export class Orchestrator {
     return runListWorkflowDiagRunsBySession(this.workflowDiagStore, kind, sessionKey, limit);
   }
 
+  private listWorkflowDiagRunsByRequestId(requestId: string, limit: number): WorkflowDiagRunRecord[] {
+    return runListWorkflowDiagRunsByRequestId(this.workflowDiagStore, requestId, limit);
+  }
+
   private listWorkflowDiagEvents(runId: string, limit = 8): WorkflowDiagEventRecord[] {
     return runListWorkflowDiagEvents(this.workflowDiagStore, runId, limit);
   }
 
   private listRecentAutoDevGitCommitEventSummaries(limit: number): string[] {
     return runListRecentAutoDevGitCommitEventSummaries(this.workflowDiagStore, limit);
+  }
+
+  private recordRequestTraceStart(input: {
+    requestId: string;
+    sessionKey: string;
+    conversationId: string;
+    provider: "codex" | "claude";
+    model: string | null;
+    prompt: string;
+    executionPrompt: string;
+  }): void {
+    runBeginRequestTrace(this.requestTraces, this.requestTraceOrder, REQUEST_TRACE_MAX_ENTRIES, {
+      requestId: input.requestId,
+      sessionKey: input.sessionKey,
+      conversationId: input.conversationId,
+      kind: "chat",
+      provider: input.provider,
+      model: input.model,
+      prompt: input.prompt,
+      executionPrompt: input.executionPrompt,
+    });
+  }
+
+  private recordRequestTraceProgress(requestId: string, stage: string, message: string): void {
+    runAppendRequestTraceProgress(this.requestTraces, {
+      requestId,
+      stage,
+      message,
+    });
+  }
+
+  private recordRequestTraceFinish(
+    requestId: string,
+    status: "succeeded" | "failed" | "cancelled" | "timeout",
+    error: string | null,
+    reply: string | null,
+    sessionId: string | null,
+  ): void {
+    runFinishRequestTrace(this.requestTraces, {
+      requestId,
+      status,
+      error,
+      reply,
+      sessionId,
+    });
+  }
+
+  private getRequestTraceById(requestId: string): RequestTraceRecord | null {
+    return runGetRequestTraceById(this.requestTraces, requestId);
   }
 }

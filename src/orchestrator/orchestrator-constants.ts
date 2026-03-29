@@ -26,6 +26,7 @@ export const DEFAULT_WORKFLOW_ROLE_SKILLS_ENABLED = true;
 export const DEFAULT_WORKFLOW_ROLE_SKILLS_MODE: WorkflowRoleSkillDisclosureMode = "progressive";
 export const AUTODEV_GIT_COMMIT_HISTORY_MAX = 120;
 export const BACKEND_ROUTE_DIAG_HISTORY_MAX = 200;
+export const REQUEST_TRACE_MAX_ENTRIES = 400;
 export const DEFAULT_TASK_QUEUE_RETRY_POLICY: RetryPolicyInput = {
   maxAttempts: 4,
   initialDelayMs: 1_000,

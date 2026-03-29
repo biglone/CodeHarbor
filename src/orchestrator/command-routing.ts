@@ -1,6 +1,6 @@
 import type { BackendModelRouteProfile, BackendModelRouteTaskType } from "../routing/backend-model-router";
 
-export type ControlCommand = "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
+export type ControlCommand = "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade";
 
 export type WorkflowCommandLike = { kind: "status" } | { kind: "run"; objective: string } | null;
 
@@ -24,6 +24,10 @@ export type DiagTarget =
   | { kind: "route"; limit: number }
   | { kind: "autodev"; limit: number }
   | { kind: "queue"; limit: number }
+  | { kind: "help" };
+
+export type TraceTarget =
+  | { kind: "request"; requestId: string }
   | { kind: "help" };
 
 export type BackendTarget =
@@ -71,6 +75,9 @@ export function parseControlCommand(text: string): ControlCommand | null {
   if (command === "/diag") {
     return "diag";
   }
+  if (command === "/trace") {
+    return "trace";
+  }
   if (command === "/help") {
     return "help";
   }
@@ -116,6 +123,31 @@ export function parseDiagTarget(text: string): DiagTarget | null {
     return parseDiagTargetWithLimit("queue", limitToken, 10, 50);
   }
   return null;
+}
+
+export function parseTraceTarget(text: string): TraceTarget | null {
+  const tokens = text
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) {
+    return { kind: "help" };
+  }
+  const traceTokenIndex = tokens.findIndex((token) => normalizeSlashCommandToken(token) === "/trace");
+  if (traceTokenIndex < 0) {
+    return null;
+  }
+  const requestId = tokens[traceTokenIndex + 1]?.trim() ?? "";
+  if (!requestId) {
+    return { kind: "help" };
+  }
+  if (tokens.length !== traceTokenIndex + 2) {
+    return null;
+  }
+  return {
+    kind: "request",
+    requestId,
+  };
 }
 
 export function parseBackendTarget(text: string): BackendTarget | null {

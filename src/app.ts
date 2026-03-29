@@ -88,6 +88,7 @@ export class CodeHarborApp {
     this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger, {
       progressUpdatesEnabled: config.matrixProgressUpdates,
       progressMinIntervalMs: config.matrixProgressMinIntervalMs,
+      progressDeliveryMode: config.matrixProgressDeliveryMode,
       typingTimeoutMs: config.matrixTypingTimeoutMs,
       commandPrefix: config.matrixCommandPrefix,
       outputLanguage: config.outputLanguage,

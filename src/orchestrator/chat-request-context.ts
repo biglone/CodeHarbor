@@ -28,6 +28,9 @@ interface ChatRequestContextInput {
   prepareDocumentAttachments: ChatRequestDispatchContext["prepareDocumentAttachments"];
   resolveAutoDevRuntimeContext: ChatRequestDispatchContext["resolveAutoDevRuntimeContext"];
   buildExecutionPrompt: ChatRequestDispatchContext["buildExecutionPrompt"];
+  recordRequestTraceStart: ChatRequestDispatchContext["recordRequestTraceStart"];
+  recordRequestTraceProgress: ChatRequestDispatchContext["recordRequestTraceProgress"];
+  recordRequestTraceFinish: ChatRequestDispatchContext["recordRequestTraceFinish"];
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
   startTypingHeartbeat: ChatRequestDispatchContext["startTypingHeartbeat"];
@@ -56,6 +59,9 @@ export function buildChatRequestDispatchContext(input: ChatRequestContextInput):
     prepareDocumentAttachments: input.prepareDocumentAttachments,
     resolveAutoDevRuntimeContext: input.resolveAutoDevRuntimeContext,
     buildExecutionPrompt: input.buildExecutionPrompt,
+    recordRequestTraceStart: input.recordRequestTraceStart,
+    recordRequestTraceProgress: input.recordRequestTraceProgress,
+    recordRequestTraceFinish: input.recordRequestTraceFinish,
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,
     startTypingHeartbeat: input.startTypingHeartbeat,
@@ -91,6 +97,9 @@ interface ChatRequestRuntimeContextInput {
   prepareImageAttachments: ChatRequestDispatchContext["prepareImageAttachments"];
   prepareDocumentAttachments: ChatRequestDispatchContext["prepareDocumentAttachments"];
   getAutoDevSnapshot: (sessionKey: string) => AutoDevRunSnapshot | null;
+  recordRequestTraceStart: ChatRequestDispatchContext["recordRequestTraceStart"];
+  recordRequestTraceProgress: ChatRequestDispatchContext["recordRequestTraceProgress"];
+  recordRequestTraceFinish: ChatRequestDispatchContext["recordRequestTraceFinish"];
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
   startTypingHeartbeat: ChatRequestDispatchContext["startTypingHeartbeat"];
@@ -149,6 +158,9 @@ export function buildChatRequestDispatchContextFromRuntime(
         bridgeContext,
         autoDevRuntimeContext,
       }),
+    recordRequestTraceStart: input.recordRequestTraceStart,
+    recordRequestTraceProgress: input.recordRequestTraceProgress,
+    recordRequestTraceFinish: input.recordRequestTraceFinish,
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,
     startTypingHeartbeat: input.startTypingHeartbeat,

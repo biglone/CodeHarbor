@@ -145,11 +145,16 @@ const configSchema = z
       .default("2500")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    MATRIX_PROGRESS_DELIVERY_MODE: z.enum(["upsert", "timeline"]).default("upsert"),
     MATRIX_TYPING_TIMEOUT_MS: z
       .string()
       .default("10000")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().positive()),
+    MATRIX_NOTICE_BADGE_ENABLED: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
     SESSION_ACTIVE_WINDOW_MINUTES: z
       .string()
       .default("20")
@@ -401,7 +406,9 @@ const configSchema = z
     replyChunkSize: v.REPLY_CHUNK_SIZE,
     matrixProgressUpdates: v.MATRIX_PROGRESS_UPDATES,
     matrixProgressMinIntervalMs: v.MATRIX_PROGRESS_MIN_INTERVAL_MS,
+    matrixProgressDeliveryMode: v.MATRIX_PROGRESS_DELIVERY_MODE,
     matrixTypingTimeoutMs: v.MATRIX_TYPING_TIMEOUT_MS,
+    matrixNoticeBadgeEnabled: v.MATRIX_NOTICE_BADGE_ENABLED,
     sessionActiveWindowMinutes: v.SESSION_ACTIVE_WINDOW_MINUTES,
     groupDirectModeEnabled: v.GROUP_DIRECT_MODE_ENABLED,
     defaultGroupTriggerPolicy: {

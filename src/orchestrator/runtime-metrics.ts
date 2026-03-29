@@ -314,6 +314,18 @@ export class MediaMetrics {
     };
   }
 
+  listEventsByRequestId(requestId: string, limit = 10): MediaMetricEvent[] {
+    const normalizedRequestId = requestId.trim();
+    if (!normalizedRequestId) {
+      return [];
+    }
+    const safeLimit = Math.max(1, Math.floor(limit));
+    return this.events
+      .filter((event) => event.requestId === normalizedRequestId)
+      .slice(-safeLimit)
+      .reverse();
+  }
+
   private pushEvent(requestId: string, sessionKey: string, type: string, detail: string): void {
     this.events.push({
       at: new Date().toISOString(),

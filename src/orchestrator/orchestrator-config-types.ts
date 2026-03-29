@@ -19,6 +19,7 @@ export interface OrchestratorOptions {
   lockPruneIntervalMs?: number;
   progressUpdatesEnabled?: boolean;
   progressMinIntervalMs?: number;
+  progressDeliveryMode?: "upsert" | "timeline";
   typingTimeoutMs?: number;
   commandPrefix?: string;
   outputLanguage?: OutputLanguage;

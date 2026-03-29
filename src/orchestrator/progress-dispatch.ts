@@ -8,6 +8,7 @@ import { mapProgressText } from "./media-progress";
 export interface SendProgressContext {
   conversationId: string;
   isDirectMessage: boolean;
+  forceTimeline?: boolean;
   getProgressNoticeEventId: () => string | null;
   setProgressNoticeEventId: (next: string) => void;
 }
@@ -16,6 +17,7 @@ export interface ProgressDispatchContext {
   outputLanguage: OutputLanguage;
   progressUpdatesEnabled: boolean;
   progressMinIntervalMs: number;
+  progressDeliveryMode: "upsert" | "timeline";
   typingTimeoutMs: number;
   cliCompatEnabled: boolean;
   botNoticePrefix: string;
@@ -125,7 +127,11 @@ export async function sendProgressUpdate(
   text: string,
 ): Promise<void> {
   try {
-    if (progressContext.isDirectMessage) {
+    if (
+      progressContext.isDirectMessage ||
+      progressContext.forceTimeline === true ||
+      context.progressDeliveryMode === "timeline"
+    ) {
       await context.channel.sendNotice(progressContext.conversationId, text);
       return;
     }

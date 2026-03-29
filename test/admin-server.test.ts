@@ -58,7 +58,9 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
     replyChunkSize: 3500,
     matrixProgressUpdates: true,
     matrixProgressMinIntervalMs: 2500,
+    matrixProgressDeliveryMode: "upsert",
     matrixTypingTimeoutMs: 10_000,
+    matrixNoticeBadgeEnabled: true,
     sessionActiveWindowMinutes: 20,
     groupDirectModeEnabled: false,
     defaultGroupTriggerPolicy: {

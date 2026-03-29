@@ -129,7 +129,7 @@ export class MatrixChannel implements Channel {
     if (!replaceEventId) {
       const response = await this.sendRawEvent(
         conversationId,
-        buildMatrixRichMessageContent(normalized, "m.notice"),
+        buildMatrixRichMessageContent(normalized, "m.notice", null, this.config.matrixNoticeBadgeEnabled),
       );
       return response.event_id;
     }
@@ -329,7 +329,12 @@ export class MatrixChannel implements Channel {
     msgtype: "m.text" | "m.notice",
     multimodalSummary: OutboundMultimodalSummary | null = null,
   ): Promise<void> {
-    const payload = buildMatrixRichMessageContent(text, msgtype, multimodalSummary);
+    const payload = buildMatrixRichMessageContent(
+      text,
+      msgtype,
+      multimodalSummary,
+      this.config.matrixNoticeBadgeEnabled,
+    );
     await this.sendRawEvent(conversationId, payload);
   }
 
@@ -731,13 +736,14 @@ function buildMatrixRichMessageContent(
   body: string,
   msgtype: "m.text" | "m.notice",
   multimodalSummary: OutboundMultimodalSummary | null = null,
+  noticeBadgeEnabled = true,
 ): Record<string, unknown> {
   const plainBody = buildMatrixPlainBody(body, multimodalSummary);
   return {
     msgtype,
     body: plainBody,
     format: "org.matrix.custom.html",
-    formatted_body: renderMatrixHtml(body, msgtype, multimodalSummary),
+    formatted_body: renderMatrixHtml(body, msgtype, multimodalSummary, noticeBadgeEnabled),
   };
 }
 
@@ -745,6 +751,7 @@ function renderMatrixHtml(
   body: string,
   msgtype: "m.text" | "m.notice",
   multimodalSummary: OutboundMultimodalSummary | null = null,
+  noticeBadgeEnabled = true,
 ): string {
   const normalized = body.replace(/\r\n/g, "\n");
   const sections: string[] = [];
@@ -761,10 +768,11 @@ function renderMatrixHtml(
     sections.push(...renderedBodySections);
   }
 
-  const badge =
-    msgtype === "m.notice"
+  const badge = noticeBadgeEnabled
+    ? msgtype === "m.notice"
       ? `<p><font color="#8a5a00"><b>CodeHarbor 提示</b></font></p>`
-      : `<p><font color="#1f7a5a"><b>CodeHarbor AI 回复</b></font></p>`;
+      : `<p><font color="#1f7a5a"><b>CodeHarbor AI 回复</b></font></p>`
+    : "";
 
   return `<div>${badge}${sections.join("")}</div>`;
 }

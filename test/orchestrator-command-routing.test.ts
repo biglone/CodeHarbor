@@ -7,6 +7,7 @@ import {
   parseBackendTarget,
   parseControlCommand,
   parseDiagTarget,
+  parseTraceTarget,
   parseUpgradeTarget,
   serializeBackendTarget,
 } from "../src/orchestrator/command-routing";
@@ -22,6 +23,7 @@ describe("orchestrator command routing helpers", () => {
     expect(parseControlCommand("撤销")).toBe("stop");
     expect(parseControlCommand("升级 latest")).toBe("upgrade");
     expect(parseControlCommand("/upgrade 0.1.50")).toBe("upgrade");
+    expect(parseControlCommand("/trace req-123")).toBe("trace");
     expect(parseControlCommand("/unknown")).toBeNull();
   });
 
@@ -64,6 +66,13 @@ describe("orchestrator command routing helpers", () => {
     expect(parseUpgradeTarget("/upgrade")).toEqual({ ok: true, version: null });
     expect(parseUpgradeTarget("/upgrade v0.1.50")).toEqual({ ok: true, version: "0.1.50" });
     expect(parseUpgradeTarget("/upgrade bad").ok).toBe(false);
+  });
+
+  it("parses trace target", () => {
+    expect(parseTraceTarget("/trace")).toEqual({ kind: "help" });
+    expect(parseTraceTarget("/trace req-123")).toEqual({ kind: "request", requestId: "req-123" });
+    expect(parseTraceTarget("//trace req-456")).toEqual({ kind: "request", requestId: "req-456" });
+    expect(parseTraceTarget("/trace req-123 extra")).toBeNull();
   });
 
   it("classifies backend task type from workflow/autodev command kinds", () => {

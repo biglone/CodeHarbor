@@ -32,6 +32,23 @@ export function listWorkflowDiagRunsBySession(
     .slice(0, safeLimit);
 }
 
+export function listWorkflowDiagRunsByRequestId(
+  store: WorkflowDiagStorePayload,
+  requestId: string,
+  limit: number,
+): WorkflowDiagRunRecord[] {
+  const normalizedRequestId = requestId.trim();
+  if (!normalizedRequestId) {
+    return [];
+  }
+  const safeLimit = Math.max(1, Math.floor(limit));
+  return store.runs
+    .filter((run) => run.requestId === normalizedRequestId)
+    .slice()
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, safeLimit);
+}
+
 export function listWorkflowDiagEvents(
   store: WorkflowDiagStorePayload,
   runId: string,

@@ -316,6 +316,25 @@ describe("loadConfig CONTEXT_BRIDGE settings", () => {
   });
 });
 
+describe("loadConfig MATRIX presentation settings", () => {
+  it("uses default progress delivery mode and notice badge settings", () => {
+    const config = loadConfig(createBaseEnv());
+    expect(config.matrixProgressDeliveryMode).toBe("upsert");
+    expect(config.matrixNoticeBadgeEnabled).toBe(true);
+  });
+
+  it("parses custom progress delivery mode and notice badge settings", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        MATRIX_PROGRESS_DELIVERY_MODE: "timeline",
+        MATRIX_NOTICE_BADGE_ENABLED: "false",
+      }),
+    );
+    expect(config.matrixProgressDeliveryMode).toBe("timeline");
+    expect(config.matrixNoticeBadgeEnabled).toBe(false);
+  });
+});
+
 describe("loadConfig CLI_COMPAT_TRANSCRIBE_AUDIO", () => {
   it("uses safe defaults", () => {
     const config = loadConfig(createBaseEnv());

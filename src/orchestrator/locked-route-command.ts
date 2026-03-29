@@ -7,7 +7,7 @@ type RouteDecisionLike =
   | { kind: "execute"; prompt: string }
   | {
       kind: "command";
-      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
+      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade";
     };
 
 export type WorkflowCommandLike = ReturnType<typeof parseWorkflowCommand>;
@@ -18,7 +18,7 @@ interface HandleLockedRouteCommandDeps {
   markEventProcessed: (sessionKey: string, eventId: string) => void;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   handleControlCommand: (
-    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade",
+    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,

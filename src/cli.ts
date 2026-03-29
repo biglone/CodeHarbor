@@ -65,6 +65,7 @@ program.addHelpText(
     "  - /diag version",
     "  - /diag media [count]",
     "  - /diag upgrade [count]",
+    "  - /trace [requestId]",
     "  - /upgrade [version]",
     "  - /backend codex|claude [model] | /backend auto|status",
     "  - /autodev stop",

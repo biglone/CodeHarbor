@@ -28,6 +28,7 @@ interface ControlCommandContextInput {
   handleStopCommand: ControlCommandDispatchContext["handleStopCommand"];
   handleBackendCommand: ControlCommandDispatchContext["handleBackendCommand"];
   handleDiagCommand: ControlCommandDispatchContext["handleDiagCommand"];
+  handleTraceCommand: ControlCommandDispatchContext["handleTraceCommand"];
   handleUpgradeCommand: ControlCommandDispatchContext["handleUpgradeCommand"];
 }
 
@@ -59,6 +60,7 @@ interface ControlCommandRuntimeContextInput {
     | "handleStopCommand"
     | "handleBackendCommand"
     | "handleDiagCommand"
+    | "handleTraceCommand"
     | "handleUpgradeCommand"
   >;
 }
@@ -92,6 +94,7 @@ export function buildControlCommandDispatchContext(
     handleStopCommand: input.handleStopCommand,
     handleBackendCommand: input.handleBackendCommand,
     handleDiagCommand: input.handleDiagCommand,
+    handleTraceCommand: input.handleTraceCommand,
     handleUpgradeCommand: input.handleUpgradeCommand,
   };
 }
@@ -125,6 +128,7 @@ export function buildControlCommandDispatchContextFromRuntime(
     handleStopCommand: input.handlers.handleStopCommand,
     handleBackendCommand: input.handlers.handleBackendCommand,
     handleDiagCommand: input.handlers.handleDiagCommand,
+    handleTraceCommand: input.handlers.handleTraceCommand,
     handleUpgradeCommand: input.handlers.handleUpgradeCommand,
   });
 }

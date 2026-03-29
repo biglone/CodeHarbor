@@ -4,7 +4,7 @@ import type { OutputLanguage } from "../config";
 import { buildHelpNotice } from "./control-text";
 import { byOutputLanguage } from "./output-language";
 
-export type ControlCommand = "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
+export type ControlCommand = "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade";
 
 interface MinimalStateStoreLike {
   clearCodexSessionId: (sessionKey: string) => void;
@@ -37,6 +37,7 @@ interface HandleControlCommandDeps {
   handleStopCommand: (sessionKey: string, message: InboundMessage, requestId: string) => Promise<void>;
   handleBackendCommand: (sessionKey: string, message: InboundMessage) => Promise<void>;
   handleDiagCommand: (message: InboundMessage) => Promise<void>;
+  handleTraceCommand: (message: InboundMessage) => Promise<void>;
   handleUpgradeCommand: (message: InboundMessage) => Promise<void>;
 }
 
@@ -103,6 +104,11 @@ export async function handleControlCommand(
 
   if (input.command === "diag") {
     await deps.handleDiagCommand(input.message);
+    return;
+  }
+
+  if (input.command === "trace") {
+    await deps.handleTraceCommand(input.message);
     return;
   }
 

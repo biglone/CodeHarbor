@@ -107,6 +107,23 @@ interface ExecuteChatRequestDeps {
     autoDevRuntimeContext: string | null,
   ) => string;
   resolveAutoDevRuntimeContext: (sessionKey: string, workdir: string) => Promise<string | null>;
+  recordRequestTraceStart: (input: {
+    requestId: string;
+    sessionKey: string;
+    conversationId: string;
+    provider: "codex" | "claude";
+    model: string | null;
+    prompt: string;
+    executionPrompt: string;
+  }) => void;
+  recordRequestTraceProgress: (requestId: string, stage: string, message: string) => void;
+  recordRequestTraceFinish: (
+    requestId: string,
+    status: "succeeded" | "failed" | "cancelled" | "timeout",
+    error: string | null,
+    reply: string | null,
+    sessionId: string | null,
+  ) => void;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   startTypingHeartbeat: (conversationId: string) => () => Promise<void>;
@@ -215,6 +232,15 @@ export async function executeChatRequest(
     prompt: executionPrompt,
     imageCount: imagePaths.length,
   });
+  deps.recordRequestTraceStart({
+    requestId: input.requestId,
+    sessionKey: input.sessionKey,
+    conversationId: input.message.conversationId,
+    provider: input.backendProfile.provider,
+    model: input.backendProfile.model ?? null,
+    prompt: input.routePrompt,
+    executionPrompt,
+  });
   deps.stateStore.appendConversationMessage(input.sessionKey, "user", input.backendProfile.provider, input.routePrompt);
   deps.logger.info("Processing message", {
     requestId: input.requestId,
@@ -243,6 +269,11 @@ export async function executeChatRequest(
         executionPrompt,
         previousCodexSessionId,
         (progress) => {
+          const progressText = summarizeSingleLine(
+            `${progress.stage}${progress.message ? `: ${progress.message}` : ""}`,
+            300,
+          );
+          deps.recordRequestTraceProgress(input.requestId, progress.stage, progressText);
           progressChain = progressChain
             .then(() =>
               deps.handleProgress(
@@ -359,6 +390,7 @@ export async function executeChatRequest(
     sendDurationMs = Date.now() - sendStartedAt;
 
     deps.stateStore.commitExecutionSuccess(input.sessionKey, input.message.eventId, result.sessionId);
+    deps.recordRequestTraceFinish(input.requestId, "succeeded", null, result.reply, result.sessionId);
     deps.recordRequestMetrics("success", input.queueWaitMs, executionDurationMs, sendDurationMs);
     deps.logger.info("Request completed", {
       requestId: input.requestId,
@@ -386,6 +418,8 @@ export async function executeChatRequest(
       buildFailureProgressSummary(status, requestStartedAt, error, deps.outputLanguage),
     );
 
+    const traceStatus = status === "timeout" ? "timeout" : status === "cancelled" ? "cancelled" : "failed";
+    deps.recordRequestTraceFinish(input.requestId, traceStatus, formatError(error), null, null);
     if (status !== "cancelled" && !input.deferFailureHandlingToQueue) {
       try {
         await deps.sendMessage(

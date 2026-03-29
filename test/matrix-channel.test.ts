@@ -59,7 +59,9 @@ const config = {
   replyChunkSize: 3500,
   matrixProgressUpdates: true,
   matrixProgressMinIntervalMs: 2500,
+  matrixProgressDeliveryMode: "upsert",
   matrixTypingTimeoutMs: 10_000,
+  matrixNoticeBadgeEnabled: true,
   sessionActiveWindowMinutes: 20,
   defaultGroupTriggerPolicy: {
     allowMention: true,
@@ -646,6 +648,34 @@ describe("MatrixChannel", () => {
     expect(formatted).toContain("T6.5");
     expect(formatted).toContain("<b>completionGate</b>");
     expect(formatted).toContain("CodeHarbor 提示");
+
+    await channel.stop();
+  });
+
+  it("omits CodeHarbor notice badge when MATRIX_NOTICE_BADGE_ENABLED=false", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(
+      {
+        ...config,
+        matrixNoticeBadgeEnabled: false,
+      } as never,
+      logger as never,
+    );
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendNotice("!room:example.com", "[CodeHarbor] AutoDev loop completed\n- completedRuns: 5");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    const formatted = String(payload.formatted_body ?? "");
+    expect(formatted).not.toContain("CodeHarbor 提示");
+    expect(formatted).toContain("AutoDev loop completed");
 
     await channel.stop();
   });

@@ -9,7 +9,7 @@ type RouteDecisionLike =
   | { kind: "execute"; prompt: string }
   | {
       kind: "command";
-      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade";
+      command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade";
     };
 
 interface NonBlockingStatusRouteDeps {
@@ -19,7 +19,7 @@ interface NonBlockingStatusRouteDeps {
   markEventProcessed: (sessionKey: string, eventId: string) => void;
   recordRequestMetrics: (outcome: RequestOutcomeMetric, queueMs: number, execMs: number, sendMs: number) => void;
   handleControlCommand: (
-    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "help" | "upgrade",
+    command: "status" | "version" | "backend" | "stop" | "reset" | "diag" | "trace" | "help" | "upgrade",
     sessionKey: string,
     message: InboundMessage,
     requestId: string,
@@ -61,7 +61,11 @@ export async function tryHandleNonBlockingStatusRoute(
   const { route, sessionKey, message, requestId, workdir, queueWaitMs } = input;
   const isReadOnlyControlCommand =
     route.kind === "command" &&
-    (route.command === "status" || route.command === "version" || route.command === "help" || route.command === "diag");
+    (route.command === "status" ||
+      route.command === "version" ||
+      route.command === "help" ||
+      route.command === "diag" ||
+      route.command === "trace");
   const workflowCommand = route.kind === "execute" && deps.workflowEnabled ? parseWorkflowCommand(route.prompt) : null;
   const autoDevCommand = route.kind === "execute" && deps.workflowEnabled ? parseAutoDevCommand(route.prompt) : null;
   const isWorkflowStatus = workflowCommand?.kind === "status";
