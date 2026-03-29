@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.79] - 2026-03-29
+
+- admin console UX: split global settings into functional paged navigation (`basic/autodev/rate/triggers/cli/agent/snapshot`) to avoid long single-page scrolling.
+- route behavior hardening: normalize legacy `#/settings/global` and invalid section hashes to `#/settings/global/basic`, keeping deep-link behavior stable.
+- regression coverage: add automated test coverage for paged route mappings, hash normalization fallback, and snapshot-only visibility toggling.
+
 ## [0.1.78] - 2026-03-29
 
 - trace usability: support `/trace latest` to resolve the newest request trace in current session without manually locating request IDs.
