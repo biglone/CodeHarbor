@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.78] - 2026-03-29
+
+- trace usability: support `/trace latest` to resolve the newest request trace in current session without manually locating request IDs.
+- trace discoverability: append `requestId` footer to final chat replies so users can directly copy-and-run `/trace <requestId>`.
+- diagnostics/docs/tests: refresh help/manual wording and add regression coverage for `latest` parsing/resolution and Matrix requestId rendering.
+
 ## [0.1.77] - 2026-03-28
 
 - autodev completion gate hardening: add `AUTODEV_VALIDATION_STRICT` fail-closed mode and wire it through runtime config, config snapshot export/import, admin global settings, and env overrides.
