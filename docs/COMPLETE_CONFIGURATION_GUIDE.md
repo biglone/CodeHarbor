@@ -249,7 +249,7 @@ This section explains all runtime capabilities and the keys that control them.
   - `PACKAGE_UPDATE_CHECK_TTL_MS`
 - **Behavior**:
   - `/status` and `/version` include current version + update hint
-  - `/trace <requestId>` returns per-request trace (same-session sender or admin only)
+  - `/trace <requestId|latest>` returns per-request trace (`latest` = current session latest; same-session sender or admin only)
   - `/status` shows the latest cached check time; `/version` triggers a forced refresh
   - `MATRIX_PROGRESS_DELIVERY_MODE=upsert` edits one progress notice in groups; `timeline` appends notice timeline
   - `MATRIX_NOTICE_BADGE_ENABLED=false` disables rich-message badge headers

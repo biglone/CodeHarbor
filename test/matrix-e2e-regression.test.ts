@@ -395,6 +395,7 @@ describe("Matrix e2e regression", () => {
 
     expect(executor.calls).toHaveLength(1);
     expect(channel.sent[0]?.text).toBe("ok:fix this");
+    expect(channel.sent[0]?.options?.requestId).toBeDefined();
   });
 
   it("handles group mention and reply flows", async () => {
@@ -424,6 +425,8 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls).toHaveLength(2);
     expect(channel.sent[0]?.text).toBe("ok:do it");
     expect(channel.sent[1]?.text).toBe("ok:follow-up");
+    expect(channel.sent[0]?.options?.requestId).toBeDefined();
+    expect(channel.sent[1]?.options?.requestId).toBeDefined();
   });
 
   it("coalesces group progress updates into edited status notice", async () => {

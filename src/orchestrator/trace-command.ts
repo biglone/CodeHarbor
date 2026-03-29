@@ -12,6 +12,7 @@ interface TraceCommandDeps {
   outputLanguage: OutputLanguage;
   botNoticePrefix: string;
   getRequestTraceById: (requestId: string) => RequestTraceRecord | null;
+  findLatestRequestIdBySession: (sessionKey: string) => string | null;
   listWorkflowDiagRunsByRequestId: (requestId: string, limit: number) => WorkflowDiagRunRecord[];
   listWorkflowDiagEvents: (runId: string, limit?: number) => WorkflowDiagEventRecord[];
   listMediaEventsByRequestId: (requestId: string, limit: number) => MediaMetricEvent[];
@@ -27,10 +28,24 @@ export async function handleTraceCommand(deps: TraceCommandDeps, message: Inboun
   }
 
   const requesterSessionKey = buildSessionKey(message);
+  let targetRequestId: string;
+  if (target.kind === "latest") {
+    const latestRequestId = deps.findLatestRequestIdBySession(requesterSessionKey);
+    if (!latestRequestId) {
+      await deps.sendNotice(
+        message.conversationId,
+        buildTraceLatestNotFoundNotice(deps.botNoticePrefix, deps.outputLanguage),
+      );
+      return;
+    }
+    targetRequestId = latestRequestId;
+  } else {
+    targetRequestId = target.requestId;
+  }
   const isAdmin = deps.isAdminUser(message.senderId);
-  const trace = deps.getRequestTraceById(target.requestId);
-  const workflowRunsRaw = deps.listWorkflowDiagRunsByRequestId(target.requestId, 5);
-  const mediaEventsRaw = deps.listMediaEventsByRequestId(target.requestId, 8);
+  const trace = deps.getRequestTraceById(targetRequestId);
+  const workflowRunsRaw = deps.listWorkflowDiagRunsByRequestId(targetRequestId, 5);
+  const mediaEventsRaw = deps.listMediaEventsByRequestId(targetRequestId, 8);
   const workflowRuns = isAdmin
     ? workflowRunsRaw
     : workflowRunsRaw.filter((run) => run.sessionKey === requesterSessionKey);
@@ -56,7 +71,7 @@ export async function handleTraceCommand(deps: TraceCommandDeps, message: Inboun
   if (!trace && workflowRuns.length === 0 && mediaEvents.length === 0) {
     await deps.sendNotice(
       message.conversationId,
-      buildTraceNotFoundNotice(deps.botNoticePrefix, target.requestId, deps.outputLanguage),
+      buildTraceNotFoundNotice(deps.botNoticePrefix, targetRequestId, deps.outputLanguage),
     );
     return;
   }
@@ -65,7 +80,7 @@ export async function handleTraceCommand(deps: TraceCommandDeps, message: Inboun
     message.conversationId,
     buildTraceNotice({
       botNoticePrefix: deps.botNoticePrefix,
-      requestId: target.requestId,
+      requestId: targetRequestId,
       trace,
       workflowRuns,
       resolveWorkflowEvents: (runId) => deps.listWorkflowDiagEvents(runId, 4),
@@ -77,9 +92,9 @@ export async function handleTraceCommand(deps: TraceCommandDeps, message: Inboun
 
 function buildTraceUsageNotice(outputLanguage: OutputLanguage): string {
   if (outputLanguage === "en") {
-    return "[CodeHarbor] usage: /trace <requestId> (example: /trace req-123)";
+    return "[CodeHarbor] usage: /trace <requestId|latest> (example: /trace req-123)";
   }
-  return "[CodeHarbor] 用法: /trace <requestId>（示例: /trace req-123）";
+  return "[CodeHarbor] 用法: /trace <requestId|latest>（示例: /trace req-123）";
 }
 
 function buildTraceNotFoundNotice(
@@ -106,6 +121,19 @@ function buildTraceForbiddenNotice(botNoticePrefix: string, outputLanguage: Outp
   return `${botNoticePrefix} 请求追踪
 - status: forbidden
 - reason: 仅同一会话发送者或管理员可查看该追踪`;
+}
+
+function buildTraceLatestNotFoundNotice(botNoticePrefix: string, outputLanguage: OutputLanguage): string {
+  if (outputLanguage === "en") {
+    return `${botNoticePrefix} Request trace
+- requestId: N/A
+- status: not found
+- reason: no recent trace record in current session`;
+  }
+  return `${botNoticePrefix} 请求追踪
+- requestId: N/A
+- status: 未找到
+- reason: 当前会话没有最近可用追踪记录`;
 }
 
 function buildTraceNotice(input: {

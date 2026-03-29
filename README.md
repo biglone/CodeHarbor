@@ -192,7 +192,8 @@ Common in-chat control commands:
 - `/diag route [count]` show backend routing diagnostics (rule hit/fallback reason + recent route records)
 - `/diag autodev [count]` show AutoDev diagnostics (stage trace, live loop snapshot, and recent git commit records)
 - `/diag queue [count]` show recoverable queue diagnostics (pending/running/retry/failure archive)
-- `/trace <requestId>` show one-request trace (prompt/progress/reply + related workflow/media events)
+- `/trace <requestId|latest>` show one-request trace (prompt/progress/reply + related workflow/media events; `latest` resolves the newest request in current session)
+- Chat final reply includes `requestId` footer so you can copy it directly for `/trace`.
   - access is restricted to the same session sender or Matrix admin user
 - `/upgrade [version]` run self-update and auto-restart service from Matrix DM only
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
@@ -584,7 +585,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - activation TTL: `SESSION_ACTIVE_WINDOW_MINUTES` (default: `20`)
 - Control commands
   - `/help` show command cheat sheet for in-chat controls
-  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//trace req-123`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
+  - if Matrix intercepts `/...`, use escaped `//...` command form for all slash controls (for example `//status`, `//version`, `//diag queue 5`, `//trace req-123`, `//trace latest`, `//upgrade`, `//autodev init StrawBerry`, `//autodev run T6.2`)
   - `/status` show session + limiter + metrics + runtime worker status, current version, update hint, latest upgrade result, recent upgrade ids, upgrade metrics/lock, and update checked time (cached by TTL)
   - `/version` show current package version and latest-update hint (force refresh)
   - `/diag version` show runtime diagnostics (pid/start time/binary path/backend)
@@ -593,7 +594,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/diag route [count]` show backend routing diagnostics (rule hit + fallback reason + recent route records)
   - `/diag autodev [count]` show AutoDev diagnostics (stage trace + loop status + recent git commit records + error summary)
   - `/diag queue [count]` show queue diagnostics (counts + pending sessions + failure archive)
-  - `/trace <requestId>` show per-request trace (prompt/progress/reply + related workflow/media events; same-session sender/admin only)
+  - `/trace <requestId|latest>` show per-request trace (prompt/progress/reply + related workflow/media events; same-session sender/admin only; `latest` = current session latest)
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable

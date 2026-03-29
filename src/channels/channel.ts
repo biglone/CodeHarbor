@@ -26,6 +26,7 @@ export interface OutboundMultimodalSummary {
 
 export interface SendMessageOptions {
   multimodalSummary?: OutboundMultimodalSummary | null;
+  requestId?: string | null;
 }
 
 export interface Channel {

@@ -615,6 +615,30 @@ describe("MatrixChannel", () => {
     await channel.stop();
   });
 
+  it("appends requestId footer when sendMessage options include requestId", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    await channel.start(async (_message: unknown) => {});
+
+    await channel.sendMessage("!room:example.com", "done", {
+      requestId: "req-12345",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstSendCall = fetchMock.mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(firstSendCall[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(String(payload.body ?? "")).toContain("done");
+    expect(String(payload.body ?? "")).toContain("requestId: req-12345");
+    expect(String(payload.formatted_body ?? "")).toContain("requestId: req-12345");
+
+    await channel.stop();
+  });
+
   it("renders structured key-value blocks for status-like messages", async () => {
     const client = new FakeMatrixClient();
     client.startClient.mockImplementation(() => {

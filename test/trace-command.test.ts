@@ -28,6 +28,7 @@ describe("trace command", () => {
         outputLanguage: "zh",
         botNoticePrefix: "[CodeHarbor]",
         getRequestTraceById: () => null,
+        findLatestRequestIdBySession: () => null,
         listWorkflowDiagRunsByRequestId: () => [],
         listWorkflowDiagEvents: () => [],
         listMediaEventsByRequestId: () => [],
@@ -40,7 +41,7 @@ describe("trace command", () => {
     );
 
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain("用法: /trace <requestId>");
+    expect(notices[0]).toContain("用法: /trace <requestId|latest>");
   });
 
   it("returns not-found notice when no trace data exists", async () => {
@@ -50,6 +51,7 @@ describe("trace command", () => {
         outputLanguage: "en",
         botNoticePrefix: "[CodeHarbor]",
         getRequestTraceById: () => null,
+        findLatestRequestIdBySession: () => null,
         listWorkflowDiagRunsByRequestId: () => [],
         listWorkflowDiagEvents: () => [],
         listMediaEventsByRequestId: () => [],
@@ -117,6 +119,7 @@ describe("trace command", () => {
         outputLanguage: "zh",
         botNoticePrefix: "[CodeHarbor]",
         getRequestTraceById: (requestId) => (requestId === "req-200" ? trace : null),
+        findLatestRequestIdBySession: () => "req-200",
         listWorkflowDiagRunsByRequestId: () => [run],
         listWorkflowDiagEvents: () => [
           {
@@ -182,6 +185,7 @@ describe("trace command", () => {
         outputLanguage: "zh",
         botNoticePrefix: "[CodeHarbor]",
         getRequestTraceById: () => trace,
+        findLatestRequestIdBySession: () => "req-300",
         listWorkflowDiagRunsByRequestId: () => [],
         listWorkflowDiagEvents: () => [],
         listMediaEventsByRequestId: () => [],
@@ -195,5 +199,70 @@ describe("trace command", () => {
     const text = String(sendNotice.mock.calls[0]?.[1] ?? "");
     expect(text).toContain("status: forbidden");
     expect(text).toContain("仅同一会话发送者或管理员可查看");
+  });
+
+  it("resolves /trace latest using current session latest requestId", async () => {
+    const sendNotice = vi.fn(async (_conversationId: string, _text: string) => {});
+    await handleTraceCommand(
+      {
+        outputLanguage: "en",
+        botNoticePrefix: "[CodeHarbor]",
+        getRequestTraceById: (requestId) =>
+          requestId === "req-latest"
+            ? {
+                requestId: "req-latest",
+                sessionKey: "matrix:!room:example.com:@alice:example.com",
+                conversationId: "!room:example.com",
+                kind: "chat",
+                provider: "codex",
+                model: null,
+                prompt: "hello",
+                executionPrompt: "hello",
+                startedAt: "2026-03-29T10:00:00.000Z",
+                endedAt: "2026-03-29T10:00:01.000Z",
+                status: "succeeded",
+                error: null,
+                reply: "ok",
+                sessionId: "thread-1",
+                progress: [],
+              }
+            : null,
+        findLatestRequestIdBySession: () => "req-latest",
+        listWorkflowDiagRunsByRequestId: () => [],
+        listWorkflowDiagEvents: () => [],
+        listMediaEventsByRequestId: () => [],
+        isAdminUser: () => false,
+        sendNotice,
+      },
+      makeMessage("/trace latest"),
+    );
+
+    expect(sendNotice).toHaveBeenCalledTimes(1);
+    const text = String(sendNotice.mock.calls[0]?.[1] ?? "");
+    expect(text).toContain("Request trace");
+    expect(text).toContain("requestId: req-latest");
+  });
+
+  it("returns latest-not-found notice when current session has no trace record", async () => {
+    const sendNotice = vi.fn(async (_conversationId: string, _text: string) => {});
+    await handleTraceCommand(
+      {
+        outputLanguage: "zh",
+        botNoticePrefix: "[CodeHarbor]",
+        getRequestTraceById: () => null,
+        findLatestRequestIdBySession: () => null,
+        listWorkflowDiagRunsByRequestId: () => [],
+        listWorkflowDiagEvents: () => [],
+        listMediaEventsByRequestId: () => [],
+        isAdminUser: () => false,
+        sendNotice,
+      },
+      makeMessage("/trace latest"),
+    );
+
+    expect(sendNotice).toHaveBeenCalledTimes(1);
+    const text = String(sendNotice.mock.calls[0]?.[1] ?? "");
+    expect(text).toContain("status: 未找到");
+    expect(text).toContain("当前会话没有最近可用追踪记录");
   });
 });

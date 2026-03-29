@@ -93,6 +93,7 @@ export class MatrixChannel implements Channel {
     }
 
     const multimodalSummary = normalizeMultimodalSummary(options?.multimodalSummary ?? null);
+    const requestId = normalizeRequestId(options?.requestId ?? null);
     const chunks = this.splitReplies ? splitText(text, this.chunkSize) : [text];
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index] ?? "";
@@ -101,6 +102,7 @@ export class MatrixChannel implements Channel {
         chunk,
         "m.text",
         index === 0 ? multimodalSummary : null,
+        index === chunks.length - 1 ? requestId : null,
       );
     }
   }
@@ -328,12 +330,14 @@ export class MatrixChannel implements Channel {
     text: string,
     msgtype: "m.text" | "m.notice",
     multimodalSummary: OutboundMultimodalSummary | null = null,
+    requestId: string | null = null,
   ): Promise<void> {
     const payload = buildMatrixRichMessageContent(
       text,
       msgtype,
       multimodalSummary,
       this.config.matrixNoticeBadgeEnabled,
+      requestId,
     );
     await this.sendRawEvent(conversationId, payload);
   }
@@ -737,13 +741,14 @@ function buildMatrixRichMessageContent(
   msgtype: "m.text" | "m.notice",
   multimodalSummary: OutboundMultimodalSummary | null = null,
   noticeBadgeEnabled = true,
+  requestId: string | null = null,
 ): Record<string, unknown> {
-  const plainBody = buildMatrixPlainBody(body, multimodalSummary);
+  const plainBody = buildMatrixPlainBody(body, multimodalSummary, requestId);
   return {
     msgtype,
     body: plainBody,
     format: "org.matrix.custom.html",
-    formatted_body: renderMatrixHtml(body, msgtype, multimodalSummary, noticeBadgeEnabled),
+    formatted_body: renderMatrixHtml(body, msgtype, multimodalSummary, noticeBadgeEnabled, requestId),
   };
 }
 
@@ -752,6 +757,7 @@ function renderMatrixHtml(
   msgtype: "m.text" | "m.notice",
   multimodalSummary: OutboundMultimodalSummary | null = null,
   noticeBadgeEnabled = true,
+  requestId: string | null = null,
 ): string {
   const normalized = body.replace(/\r\n/g, "\n");
   const sections: string[] = [];
@@ -766,6 +772,9 @@ function renderMatrixHtml(
     sections.push(normalizedSummary ? "<p>（未返回文本结论）</p>" : "<p>(空消息)</p>");
   } else {
     sections.push(...renderedBodySections);
+  }
+  if (requestId) {
+    sections.push(renderRequestIdHtml(requestId));
   }
 
   const badge = noticeBadgeEnabled
@@ -806,19 +815,19 @@ function renderMarkdownAndCodeSections(normalized: string): string[] {
   return sections;
 }
 
-function buildMatrixPlainBody(body: string, multimodalSummary: OutboundMultimodalSummary | null): string {
+function buildMatrixPlainBody(
+  body: string,
+  multimodalSummary: OutboundMultimodalSummary | null,
+  requestId: string | null,
+): string {
   const normalizedSummary = normalizeMultimodalSummary(multimodalSummary);
-  if (!normalizedSummary) {
+  const summaryText = normalizedSummary ? buildMultimodalSummaryText(normalizedSummary) : "";
+  const requestIdText = requestId ? buildRequestIdText(requestId) : "";
+  const segments = [summaryText, body.trim() ? body : "", requestIdText].filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
     return body;
   }
-  const summaryText = buildMultimodalSummaryText(normalizedSummary);
-  if (!summaryText) {
-    return body;
-  }
-  if (!body.trim()) {
-    return summaryText;
-  }
-  return `${summaryText}\n\n${body}`;
+  return segments.join("\n\n");
 }
 
 function buildMultimodalSummaryText(summary: OutboundMultimodalSummary): string {
@@ -882,6 +891,14 @@ function renderMultimodalSummaryHtml(summary: OutboundMultimodalSummary): string
   return blocks.join("");
 }
 
+function buildRequestIdText(requestId: string): string {
+  return `requestId: ${requestId}`;
+}
+
+function renderRequestIdHtml(requestId: string): string {
+  return `<p><code>${escapeHtml(buildRequestIdText(requestId))}</code></p>`;
+}
+
 function normalizeMultimodalSummary(summary: OutboundMultimodalSummary | null): OutboundMultimodalSummary | null {
   if (!summary || typeof summary !== "object") {
     return null;
@@ -893,6 +910,17 @@ function normalizeMultimodalSummary(summary: OutboundMultimodalSummary | null): 
     return null;
   }
   return { images, audio };
+}
+
+function normalizeRequestId(requestId: string | null): string | null {
+  if (typeof requestId !== "string") {
+    return null;
+  }
+  const normalized = requestId.trim();
+  if (!normalized) {
+    return null;
+  }
+  return normalized.length > 240 ? normalized.slice(0, 240) : normalized;
 }
 
 function normalizeImageSummary(

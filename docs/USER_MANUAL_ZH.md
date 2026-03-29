@@ -243,7 +243,7 @@ codeharbor admin serve
 ### 5.6 版本检查与更新提示
 
 - `/help`：查看机器人可用命令列表（包含当前多模态状态摘要）
-- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（适用于所有斜杠命令；例如 `//status`、`//version`、`//diag queue 5`、`//trace req-123`、`//upgrade`、`//autodev init StrawBerry`、`//autodev run T6.2`）
+- 若 Matrix 客户端拦截 `/...`，可改发 `//...`（适用于所有斜杠命令；例如 `//status`、`//version`、`//diag queue 5`、`//trace req-123`、`//trace latest`、`//upgrade`、`//autodev init StrawBerry`、`//autodev run T6.2`）
 - `/status`：包含当前版本、更新提示、最近升级结果、最近升级记录（带任务ID）、升级指标/锁状态，以及最近一次检查时间（缓存结果，受 TTL 控制）
 - `/version`：单独查看当前版本与更新提示（会强制实时检查）
 - `/diag version`：输出运行实例诊断信息（PID、启动时间、执行路径、当前后端）
@@ -252,7 +252,8 @@ codeharbor admin serve
 - `/diag route [count]`：输出后端路由诊断（策略命中/回退原因 + 最近路由记录）
 - `/diag autodev [count]`：输出 AutoDev 诊断（最近运行状态统计、循环快照、最近 Git 提交记录与阶段轨迹）
 - `/diag queue [count]`：输出可恢复任务队列诊断（pending/running 计数、待重试会话、失败归档）
-- `/trace <requestId>`：输出单次请求轨迹（提示词/进度/回复 + 关联 workflow/media 事件）；仅当前会话发送者或管理员可查看
+- `/trace <requestId|latest>`：输出单次请求轨迹（提示词/进度/回复 + 关联 workflow/media 事件）；`latest` 表示当前会话最新请求；仅当前会话发送者或管理员可查看
+- 聊天请求最终回复会附带 `requestId` 尾注，可直接复制后执行 `/trace <requestId>`
 - `/upgrade [version]`：在私聊中触发升级与自动重启（默认 latest，也可指定版本）
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - Linux 支持 systemd 信号重启回退；macOS 支持 launchd/手工回退；Windows 默认安全降级为手工回退

@@ -29,7 +29,7 @@ export function buildHelpNotice(input: {
 - /diag route [count]: Show backend routing hit/fallback diagnosis (default count 10)
 - /diag autodev [count]: Show AutoDev diagnosis (default count 10)
 - /diag queue [count]: Show task queue diagnosis (default count 10)
-- /trace [requestId]: Show in-memory trace for one request (chat prompt/progress/reply plus related diag/media events)
+- /trace [requestId|latest]: Show in-memory trace for one request (chat prompt/progress/reply plus related diag/media events)
 - /upgrade [version]: Upgrade and auto-restart services (DM only; MATRIX_UPGRADE_ALLOWED_USERS first, then MATRIX_ADMIN_USERS)
 - /backend codex|claude [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
 - /reset: Clear current session context
@@ -59,7 +59,7 @@ export function buildHelpNotice(input: {
 - /diag route [count]: 查看后端路由命中与回退原因诊断（count 默认 10）
 - /diag autodev [count]: 查看自动化开发运行诊断（count 默认 10）
 - /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
-- /trace [requestId]: 查看单次请求的内存追踪（chat prompt/progress/reply + 关联 diag/media 事件）
+- /trace [requestId|latest]: 查看单次请求的内存追踪（chat prompt/progress/reply + 关联 diag/media 事件）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
 - /backend codex|claude [model] | /backend auto|status: 查看/切换后端工具（auto=恢复自动路由）
 - /reset: 清空当前会话上下文

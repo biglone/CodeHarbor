@@ -70,6 +70,8 @@ describe("orchestrator command routing helpers", () => {
 
   it("parses trace target", () => {
     expect(parseTraceTarget("/trace")).toEqual({ kind: "help" });
+    expect(parseTraceTarget("/trace latest")).toEqual({ kind: "latest" });
+    expect(parseTraceTarget("//trace latest")).toEqual({ kind: "latest" });
     expect(parseTraceTarget("/trace req-123")).toEqual({ kind: "request", requestId: "req-123" });
     expect(parseTraceTarget("//trace req-456")).toEqual({ kind: "request", requestId: "req-456" });
     expect(parseTraceTarget("/trace req-123 extra")).toBeNull();

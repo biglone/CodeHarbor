@@ -370,6 +370,7 @@ export async function executeChatRequest(
     const sendStartedAt = Date.now();
     const messageOptions: SendMessageOptions = {
       multimodalSummary: buildMultimodalSummary(input.message, successfulImagePaths, audioTranscripts),
+      requestId: input.requestId,
     };
     await deps.sendMessage(input.message.conversationId, result.reply, messageOptions);
     deps.stateStore.appendConversationMessage(input.sessionKey, "assistant", input.backendProfile.provider, result.reply);
@@ -382,10 +383,10 @@ export async function executeChatRequest(
           progressNoticeEventId = next;
         },
       },
-      localize(
+      `${localize(
         `处理完成（后端工具: ${deps.formatBackendToolLabel(input.backendProfile)}；耗时 ${formatDurationMs(Date.now() - requestStartedAt)}）`,
         `Completed (backend: ${deps.formatBackendToolLabel(input.backendProfile)}; elapsed: ${formatDurationMs(Date.now() - requestStartedAt)})`,
-      ),
+      )}\n- requestId: ${input.requestId}`,
     );
     sendDurationMs = Date.now() - sendStartedAt;
 
@@ -415,7 +416,7 @@ export async function executeChatRequest(
           progressNoticeEventId = next;
         },
       },
-      buildFailureProgressSummary(status, requestStartedAt, error, deps.outputLanguage),
+      `${buildFailureProgressSummary(status, requestStartedAt, error, deps.outputLanguage)}\n- requestId: ${input.requestId}`,
     );
 
     const traceStatus = status === "timeout" ? "timeout" : status === "cancelled" ? "cancelled" : "failed";
@@ -428,6 +429,9 @@ export async function executeChatRequest(
             `[CodeHarbor] 请求处理失败: ${formatError(error)}`,
             `[CodeHarbor] Failed to process request: ${formatError(error)}`,
           ),
+          {
+            requestId: input.requestId,
+          },
         );
       } catch (sendError) {
         deps.logger.error("Failed to send error reply to Matrix", sendError);

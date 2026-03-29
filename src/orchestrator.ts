@@ -2153,6 +2153,7 @@ export class Orchestrator {
         outputLanguage: this.outputLanguage,
         botNoticePrefix: this.botNoticePrefix,
         getRequestTraceById: (requestId) => this.getRequestTraceById(requestId),
+        findLatestRequestIdBySession: (sessionKey) => this.findLatestRequestIdBySession(sessionKey),
         listWorkflowDiagRunsByRequestId: (requestId, limit) => this.listWorkflowDiagRunsByRequestId(requestId, limit),
         listWorkflowDiagEvents: (runId, limit) => this.listWorkflowDiagEvents(runId, limit),
         listMediaEventsByRequestId: (requestId, limit) => this.mediaMetrics.listEventsByRequestId(requestId, limit),
@@ -2364,5 +2365,23 @@ export class Orchestrator {
 
   private getRequestTraceById(requestId: string): RequestTraceRecord | null {
     return runGetRequestTraceById(this.requestTraces, requestId);
+  }
+
+  private findLatestRequestIdBySession(sessionKey: string): string | null {
+    const normalized = sessionKey.trim();
+    if (!normalized) {
+      return null;
+    }
+    for (let index = this.requestTraceOrder.length - 1; index >= 0; index -= 1) {
+      const requestId = this.requestTraceOrder[index];
+      if (!requestId) {
+        continue;
+      }
+      const trace = this.requestTraces.get(requestId);
+      if (trace?.sessionKey === normalized) {
+        return trace.requestId;
+      }
+    }
+    return null;
   }
 }

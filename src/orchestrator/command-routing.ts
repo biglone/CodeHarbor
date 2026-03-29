@@ -27,6 +27,7 @@ export type DiagTarget =
   | { kind: "help" };
 
 export type TraceTarget =
+  | { kind: "latest" }
   | { kind: "request"; requestId: string }
   | { kind: "help" };
 
@@ -143,6 +144,11 @@ export function parseTraceTarget(text: string): TraceTarget | null {
   }
   if (tokens.length !== traceTokenIndex + 2) {
     return null;
+  }
+  if (requestId.toLowerCase() === "latest") {
+    return {
+      kind: "latest",
+    };
   }
   return {
     kind: "request",
