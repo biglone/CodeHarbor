@@ -149,10 +149,12 @@ test("loads global settings page and fetches initial config", async ({ page }) =
 
   await expect(page).toHaveTitle(/CodeHarbor .*Admin Console/);
   await expect(page.locator('[data-view="settings-global"]')).toBeVisible();
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await expect(page.locator("#global-matrix-prefix")).toHaveValue("!code");
   await expect(page.locator("#global-update-check-enabled")).toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("3000");
   await expect(page.locator("#global-update-check-ttl")).toHaveValue("21600000");
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
   await expect(page.locator("#global-agent-enabled")).not.toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("1");
   await expect(page.locator("#notice")).toContainText(/(Global config loaded\.|全局配置已加载。)/);
@@ -161,22 +163,29 @@ test("loads global settings page and fetches initial config", async ({ page }) =
 test("saves global agent workflow settings and persists to env", async ({ page }) => {
   await page.goto(`${baseUrl}/settings/global`);
 
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await page.uncheck("#global-update-check-enabled");
   await page.fill("#global-update-check-timeout", "1800");
   await page.fill("#global-update-check-ttl", "600000");
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
   await page.check("#global-agent-enabled");
   await page.fill("#global-agent-repair-rounds", "3");
   await page.click("#global-save-btn");
+  await expect(page.locator("#notice")).toContainText(/(Saved|保存成功)/);
 
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
   await expect(page.locator("#global-update-check-ttl")).toHaveValue("600000");
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
   await page.click("#global-reload-btn");
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await expect(page.locator("#global-update-check-enabled")).not.toBeChecked();
   await expect(page.locator("#global-update-check-timeout")).toHaveValue("1800");
   await expect(page.locator("#global-update-check-ttl")).toHaveValue("600000");
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
   await expect(page.locator("#global-agent-enabled")).toBeChecked();
   await expect(page.locator("#global-agent-repair-rounds")).toHaveValue("3");
 
@@ -224,8 +233,10 @@ test("runs health check and displays OK for codex and matrix", async ({ page }) 
 
 test("renders audit records after config changes", async ({ page }) => {
   await page.goto(`${baseUrl}/settings/global`);
+  await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
   await page.fill("#global-matrix-prefix", "!ai");
   await page.click("#global-save-btn");
+  await expect(page.locator("#notice")).toContainText(/(Saved|保存成功)/);
 
   await page.goto(`${baseUrl}/audit`);
   await page.fill("#audit-limit", "50");
@@ -270,6 +281,7 @@ test("viewer token cannot write global config (403)", async ({ page }) => {
     await page.click("#auth-save-btn");
     await expect(page.locator("#auth-role")).toContainText("VIEWER");
 
+    await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
     await page.fill("#global-matrix-prefix", "!viewer");
     await page.click("#global-save-btn");
     await expect(page.locator("#notice")).toContainText(/(admin write permission|admin\.write)/i);
