@@ -36,6 +36,14 @@ Publish runs when one of these is true:
 
 If the version already exists on npm, publish is skipped and workflow logs include a suggested next patch version (`Suggested next version`).
 
+## Failed Publish & Version Gaps
+
+If a release commit/tag is pushed but `Release NPM` fails before publish, npm will not have that version.
+
+- Example: `v0.1.85` tag exists in git, but npm latest stays `0.1.84`.
+- After fixing CI/workflow blockers, publish the next patch version (for example `0.1.86`) instead of force-rewriting the failed release commit/tag.
+- Keep the failed version trace in git history and mention it in release notes/changelog to avoid confusion.
+
 ## npm Publish Auth Modes
 
 CodeHarbor release workflow supports two auth modes:
