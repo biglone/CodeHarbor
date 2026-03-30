@@ -86,6 +86,19 @@ export async function prepareImageAttachments(
       }
       continue;
     }
+    const localFileExists = await hasLocalFile(localPath);
+    if (!localFileExists) {
+      if (deps.cliCompat.fetchMedia) {
+        result.skippedMissingPath += 1;
+      }
+      deps.logger.warn("Skip image attachment due to missing local file", {
+        requestId: input.requestId,
+        sessionKey: input.sessionKey,
+        name: attachment.name,
+        localPath,
+      });
+      continue;
+    }
     if (dedup.has(localPath)) {
       continue;
     }
@@ -360,5 +373,14 @@ async function resolveAttachmentSizeBytes(sizeBytes: number | null, localPath: s
     return stats.size;
   } catch {
     return null;
+  }
+}
+
+async function hasLocalFile(localPath: string): Promise<boolean> {
+  try {
+    const stats = await fs.stat(localPath);
+    return stats.isFile();
+  } catch {
+    return false;
   }
 }

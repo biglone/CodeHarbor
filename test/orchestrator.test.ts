@@ -2471,6 +2471,68 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("skips missing local image file even when attachment metadata includes size", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-image-missing-local-"));
+    const missingPng = path.join(tempRoot, "missing.png");
+
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const store = new FakeStateStore();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        cliCompat: {
+          enabled: false,
+          passThroughEvents: false,
+          preserveWhitespace: false,
+          disableReplyChunkSplit: false,
+          progressThrottleMs: 300,
+          fetchMedia: true,
+          imageMaxBytes: 10485760,
+          imageMaxCount: 4,
+          imageAllowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+          transcribeAudio: false,
+          audioTranscribeModel: "gpt-4o-mini-transcribe",
+          audioTranscribeTimeoutMs: 120000,
+          audioTranscribeMaxChars: 6000,
+          audioTranscribeMaxRetries: 1,
+          audioTranscribeRetryDelayMs: 800,
+          audioTranscribeMaxBytes: 26214400,
+          audioLocalWhisperCommand: null,
+          audioLocalWhisperTimeoutMs: 180000,
+          recordPath: null,
+        },
+      });
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "分析图片",
+          eventId: "$image-missing-local",
+          attachments: [
+            {
+              kind: "image",
+              name: "missing.png",
+              mxcUrl: "mxc://example.com/missing",
+              mimeType: "image/png",
+              sizeBytes: 64,
+              localPath: missingPng,
+            },
+          ],
+        }),
+      );
+
+      expect(executor.calls).toHaveLength(1);
+      expect(executor.calls[0]?.imagePaths).toEqual([]);
+      expect(channel.notices.some((entry) => entry.text.includes("图片处理提示"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("未下载到本地 1 张"))).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("applies roomTriggerPolicies override when config service is absent", async () => {
     const channel = new FakeChannel();
     const executor = new ImmediateExecutor();
