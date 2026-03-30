@@ -1131,6 +1131,7 @@ describe("Matrix e2e regression", () => {
       const mediaDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（media）"));
       expect(mediaDiagNotice).toBeDefined();
       expect(mediaDiagNotice?.text).toContain("image.accepted=1");
+      expect(mediaDiagNotice?.text).toContain("image.skipped_missing_local_file=0");
       expect(mediaDiagNotice?.text).toContain("records:");
       expect(mediaDiagNotice?.text).toContain("type=image.accepted");
       await expect(fs.access(imagePath)).rejects.toBeDefined();

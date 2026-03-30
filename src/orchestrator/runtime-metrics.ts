@@ -193,6 +193,7 @@ export class AutoDevRuntimeMetrics {
 export interface MediaMetricCounters {
   imageAccepted: number;
   imageSkippedMissingPath: number;
+  imageSkippedMissingLocalFile: number;
   imageSkippedUnsupportedMime: number;
   imageSkippedTooLarge: number;
   imageSkippedOverLimit: number;
@@ -215,6 +216,7 @@ export interface MediaMetricEvent {
 interface MediaImageSelectionResult {
   imagePaths: string[];
   skippedMissingPath: number;
+  skippedMissingLocalFile: number;
   skippedUnsupportedMime: number;
   skippedTooLarge: number;
   skippedOverLimit: number;
@@ -224,6 +226,7 @@ export class MediaMetrics {
   private readonly counters: MediaMetricCounters = {
     imageAccepted: 0,
     imageSkippedMissingPath: 0,
+    imageSkippedMissingLocalFile: 0,
     imageSkippedUnsupportedMime: 0,
     imageSkippedTooLarge: 0,
     imageSkippedOverLimit: 0,
@@ -251,6 +254,10 @@ export class MediaMetrics {
     if (result.skippedMissingPath > 0) {
       this.counters.imageSkippedMissingPath += result.skippedMissingPath;
       this.pushEvent(requestId, sessionKey, "image.skipped_missing_path", `count=${result.skippedMissingPath}`);
+    }
+    if (result.skippedMissingLocalFile > 0) {
+      this.counters.imageSkippedMissingLocalFile += result.skippedMissingLocalFile;
+      this.pushEvent(requestId, sessionKey, "image.skipped_missing_local_file", `count=${result.skippedMissingLocalFile}`);
     }
     if (result.skippedUnsupportedMime > 0) {
       this.counters.imageSkippedUnsupportedMime += result.skippedUnsupportedMime;

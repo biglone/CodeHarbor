@@ -64,6 +64,7 @@ interface MediaMetricsLike {
     counters: {
       imageAccepted: number;
       imageSkippedMissingPath: number;
+      imageSkippedMissingLocalFile: number;
       imageSkippedUnsupportedMime: number;
       imageSkippedTooLarge: number;
       imageSkippedOverLimit: number;

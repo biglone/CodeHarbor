@@ -2527,7 +2527,21 @@ describe("Orchestrator", () => {
       expect(executor.calls).toHaveLength(1);
       expect(executor.calls[0]?.imagePaths).toEqual([]);
       expect(channel.notices.some((entry) => entry.text.includes("图片处理提示"))).toBe(true);
-      expect(channel.notices.some((entry) => entry.text.includes("未下载到本地 1 张"))).toBe(true);
+      expect(channel.notices.some((entry) => entry.text.includes("本地文件不存在 1 张"))).toBe(true);
+
+      await orchestrator.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "/diag media 5",
+          eventId: "$diag-image-missing-local",
+        }),
+      );
+
+      const mediaDiagNotice = channel.notices.find((entry) => entry.text.includes("诊断信息（media）"));
+      expect(mediaDiagNotice).toBeDefined();
+      expect(mediaDiagNotice?.text).toContain("image.skipped_missing=1");
+      expect(mediaDiagNotice?.text).toContain("image.skipped_missing_local_file=1");
+      expect(mediaDiagNotice?.text).toContain("type=image.skipped_missing_local_file");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

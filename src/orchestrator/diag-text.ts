@@ -53,6 +53,7 @@ export function buildDiagMediaNotice(input: {
   counters: {
     imageAccepted: number;
     imageSkippedMissingPath: number;
+    imageSkippedMissingLocalFile: number;
     imageSkippedUnsupportedMime: number;
     imageSkippedTooLarge: number;
     imageSkippedOverLimit: number;
@@ -70,7 +71,7 @@ export function buildDiagMediaNotice(input: {
 - backend: ${input.backendLabel}
 - imagePolicy: ${input.imagePolicy}
 - audioPolicy: ${input.audioPolicy}
-- counters: image.accepted=${input.counters.imageAccepted}, image.skipped_missing=${input.counters.imageSkippedMissingPath}, image.skipped_mime=${input.counters.imageSkippedUnsupportedMime}, image.skipped_size=${input.counters.imageSkippedTooLarge}, image.skipped_limit=${input.counters.imageSkippedOverLimit}
+- counters: image.accepted=${input.counters.imageAccepted}, image.skipped_missing=${input.counters.imageSkippedMissingPath + input.counters.imageSkippedMissingLocalFile}, image.skipped_missing_path=${input.counters.imageSkippedMissingPath}, image.skipped_missing_local_file=${input.counters.imageSkippedMissingLocalFile}, image.skipped_mime=${input.counters.imageSkippedUnsupportedMime}, image.skipped_size=${input.counters.imageSkippedTooLarge}, image.skipped_limit=${input.counters.imageSkippedOverLimit}
 - counters: audio.transcribed=${input.counters.audioTranscribed}, audio.failed=${input.counters.audioFailed}, audio.skipped_size=${input.counters.audioSkippedTooLarge}
 - counters: claude.fallback_triggered=${input.counters.claudeImageFallbackTriggered}, claude.fallback_ok=${input.counters.claudeImageFallbackSucceeded}, claude.fallback_failed=${input.counters.claudeImageFallbackFailed}
 - records:
@@ -80,7 +81,7 @@ ${input.recordsText}`;
 - backend: ${input.backendLabel}
 - imagePolicy: ${input.imagePolicy}
 - audioPolicy: ${input.audioPolicy}
-- counters: image.accepted=${input.counters.imageAccepted}, image.skipped_missing=${input.counters.imageSkippedMissingPath}, image.skipped_mime=${input.counters.imageSkippedUnsupportedMime}, image.skipped_size=${input.counters.imageSkippedTooLarge}, image.skipped_limit=${input.counters.imageSkippedOverLimit}
+- counters: image.accepted=${input.counters.imageAccepted}, image.skipped_missing=${input.counters.imageSkippedMissingPath + input.counters.imageSkippedMissingLocalFile}, image.skipped_missing_path=${input.counters.imageSkippedMissingPath}, image.skipped_missing_local_file=${input.counters.imageSkippedMissingLocalFile}, image.skipped_mime=${input.counters.imageSkippedUnsupportedMime}, image.skipped_size=${input.counters.imageSkippedTooLarge}, image.skipped_limit=${input.counters.imageSkippedOverLimit}
 - counters: audio.transcribed=${input.counters.audioTranscribed}, audio.failed=${input.counters.audioFailed}, audio.skipped_size=${input.counters.audioSkippedTooLarge}
 - counters: claude.fallback_triggered=${input.counters.claudeImageFallbackTriggered}, claude.fallback_ok=${input.counters.claudeImageFallbackSucceeded}, claude.fallback_failed=${input.counters.claudeImageFallbackFailed}
 - records:

@@ -24,6 +24,7 @@ interface ImageSelectionResultLike {
   imagePaths: string[];
   acceptedCount: number;
   skippedMissingPath: number;
+  skippedMissingLocalFile: number;
   skippedUnsupportedMime: number;
   skippedTooLarge: number;
   skippedOverLimit: number;

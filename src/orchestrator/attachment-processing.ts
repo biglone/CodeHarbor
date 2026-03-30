@@ -35,6 +35,7 @@ export interface ImageSelectionResultLike {
   imagePaths: string[];
   acceptedCount: number;
   skippedMissingPath: number;
+  skippedMissingLocalFile: number;
   skippedUnsupportedMime: number;
   skippedTooLarge: number;
   skippedOverLimit: number;
@@ -61,6 +62,7 @@ export async function prepareImageAttachments(
     imagePaths: [],
     acceptedCount: 0,
     skippedMissingPath: 0,
+    skippedMissingLocalFile: 0,
     skippedUnsupportedMime: 0,
     skippedTooLarge: 0,
     skippedOverLimit: 0,
@@ -89,7 +91,7 @@ export async function prepareImageAttachments(
     const localFileExists = await hasLocalFile(localPath);
     if (!localFileExists) {
       if (deps.cliCompat.fetchMedia) {
-        result.skippedMissingPath += 1;
+        result.skippedMissingLocalFile += 1;
       }
       deps.logger.warn("Skip image attachment due to missing local file", {
         requestId: input.requestId,
@@ -143,6 +145,7 @@ export async function prepareImageAttachments(
 
   if (
     result.skippedMissingPath > 0 ||
+    result.skippedMissingLocalFile > 0 ||
     result.skippedUnsupportedMime > 0 ||
     result.skippedTooLarge > 0 ||
     result.skippedOverLimit > 0
@@ -150,6 +153,9 @@ export async function prepareImageAttachments(
     const parts: string[] = [];
     if (result.skippedMissingPath > 0) {
       parts.push(`未下载到本地 ${result.skippedMissingPath} 张`);
+    }
+    if (result.skippedMissingLocalFile > 0) {
+      parts.push(`本地文件不存在 ${result.skippedMissingLocalFile} 张`);
     }
     if (result.skippedUnsupportedMime > 0) {
       parts.push(`格式不支持 ${result.skippedUnsupportedMime} 张（允许: ${deps.cliCompat.imageAllowedMimeTypes.join(", ")}）`);
