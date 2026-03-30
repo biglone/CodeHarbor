@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.84] - 2026-03-30
+
+- gemini stream parsing: support assistant `message` delta events in `stream-json` output and append chunks into a final reply instead of dropping partial text.
+- session resilience: when Gemini resume fails with invalid/expired session identifiers, runtime now retries once with a fresh session automatically.
+- tests: add regression coverage for Gemini assistant delta assembly and resume-failure fallback behavior in executor/session runtime suites.
+
 ## [0.1.83] - 2026-03-30
 
 - media pipeline robustness: skip image attachments whose `localPath` is present in metadata but missing on disk, preventing request aborts from `ENOENT` in executor image reads.

@@ -185,6 +185,9 @@ export class CodexExecutor {
           (value) => {
             latestMessage = value;
           },
+          (value) => {
+            latestMessage = `${latestMessage}${value}`;
+          },
           latestProviderError,
         );
         return;
@@ -551,6 +554,7 @@ function handleGeminiEvent(
   onProgress: CodexProgressHandler | undefined,
   setSessionId: (value: string) => void,
   setLatestMessage: (value: string) => void,
+  appendLatestMessage: (value: string) => void,
   currentError: string | null,
 ): string | null {
   const eventType = typeof event.type === "string" ? event.type : "unknown";
@@ -572,11 +576,19 @@ function handleGeminiEvent(
   }
 
   const maybeText = extractGeminiText(event);
+  const maybeRole = extractGeminiRole(event);
+  const isDelta = isGeminiDelta(event);
   if (maybeText) {
     if (eventType === "thought") {
       onProgress?.({ stage: "reasoning", message: maybeText, eventType, raw: event });
     } else if (eventType === "assistant") {
       setLatestMessage(maybeText);
+    } else if (eventType === "message" && (maybeRole === "assistant" || maybeRole === "model")) {
+      if (isDelta) {
+        appendLatestMessage(maybeText);
+      } else {
+        setLatestMessage(maybeText);
+      }
     } else if (eventType === "final" || eventType === "result") {
       setLatestMessage(maybeText);
       onProgress?.({ stage: "turn_completed", eventType, raw: event });
@@ -692,6 +704,36 @@ function extractGeminiText(event: GeminiJsonEvent): string | null {
     }
   }
   return null;
+}
+
+function extractGeminiRole(event: GeminiJsonEvent): string | null {
+  const directRole = (event as { role?: unknown }).role;
+  if (typeof directRole === "string" && directRole.trim()) {
+    return directRole.trim().toLowerCase();
+  }
+  const messagePayload = (event as { message?: unknown }).message;
+  if (messagePayload && typeof messagePayload === "object" && !Array.isArray(messagePayload)) {
+    const nestedRole = (messagePayload as { role?: unknown }).role;
+    if (typeof nestedRole === "string" && nestedRole.trim()) {
+      return nestedRole.trim().toLowerCase();
+    }
+  }
+  return null;
+}
+
+function isGeminiDelta(event: GeminiJsonEvent): boolean {
+  const directDelta = (event as { delta?: unknown }).delta;
+  if (typeof directDelta === "boolean") {
+    return directDelta;
+  }
+  const messagePayload = (event as { message?: unknown }).message;
+  if (messagePayload && typeof messagePayload === "object" && !Array.isArray(messagePayload)) {
+    const nestedDelta = (messagePayload as { delta?: unknown }).delta;
+    if (typeof nestedDelta === "boolean") {
+      return nestedDelta;
+    }
+  }
+  return false;
 }
 
 function extractTextFromNestedPayload(payload: unknown): string | null {

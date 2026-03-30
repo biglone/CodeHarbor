@@ -441,4 +441,34 @@ describe("CodexExecutor", () => {
       expect.any(Object),
     );
   });
+
+  it("supports gemini stream-json message events with assistant deltas", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      provider: "gemini",
+      bin: "gemini",
+      model: "gemini-2.5-flash",
+      workdir: process.cwd(),
+      dangerousBypass: false,
+      timeoutMs: 1_000,
+      sandboxMode: null,
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("hello gemini", null);
+    child.stdout.write('{"type":"init","session_id":"gem-session-stream"}\n');
+    child.stdout.write('{"type":"message","role":"assistant","content":"Hel","delta":true}\n');
+    child.stdout.write('{"type":"message","role":"assistant","content":"lo","delta":true}\n');
+    child.stdout.write('{"type":"result","status":"success"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "gem-session-stream",
+      reply: "Hello",
+    });
+  });
 });

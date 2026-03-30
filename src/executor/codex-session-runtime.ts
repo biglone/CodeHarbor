@@ -36,26 +36,42 @@ export class CodexSessionRuntime {
     const worker = this.getOrCreateWorker(sessionKey, persistedSessionId);
     const effectiveSessionId = worker.lastSessionId ?? persistedSessionId;
     worker.lastUsedAt = Date.now();
+    let cancelled = false;
+    let activeHandle: CodexExecutionHandle | null = null;
 
-    const handle = this.executor.startExecution(prompt, effectiveSessionId, onProgress, startOptions);
-    worker.runningHandle = handle;
-
-    const result = handle.result
-      .then((executionResult) => {
-        worker.lastSessionId = executionResult.sessionId;
-        worker.lastUsedAt = Date.now();
-        return executionResult;
-      })
-      .finally(() => {
+    const runAttempt = (sessionIdForAttempt: string | null): Promise<{ sessionId: string; reply: string }> => {
+      const handle = this.executor.startExecution(prompt, sessionIdForAttempt, onProgress, startOptions);
+      activeHandle = handle;
+      worker.runningHandle = handle;
+      return handle.result.catch((error) => {
+        if (
+          !cancelled &&
+          sessionIdForAttempt &&
+          isRecoverableSessionResumeError(error)
+        ) {
+          worker.lastSessionId = null;
+          worker.lastUsedAt = Date.now();
+          return runAttempt(null);
+        }
+        throw error;
+      }).finally(() => {
         if (worker.runningHandle === handle) {
           worker.runningHandle = null;
         }
       });
+    };
+
+    const result = runAttempt(effectiveSessionId).then((executionResult) => {
+      worker.lastSessionId = executionResult.sessionId;
+      worker.lastUsedAt = Date.now();
+      return executionResult;
+    });
 
     return {
       result,
       cancel: () => {
-        handle.cancel();
+        cancelled = true;
+        activeHandle?.cancel();
       },
     };
   }
@@ -121,4 +137,22 @@ export class CodexSessionRuntime {
       this.workers.delete(key);
     }
   }
+}
+
+function isRecoverableSessionResumeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (normalized.includes("error resuming session")) {
+    return true;
+  }
+  if (normalized.includes("invalid session identifier")) {
+    return true;
+  }
+  if (normalized.includes("use --list-sessions")) {
+    return true;
+  }
+  return false;
 }

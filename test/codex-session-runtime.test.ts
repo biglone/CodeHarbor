@@ -26,6 +26,58 @@ class FakeExecutor {
   }
 }
 
+class ResumeFailingExecutor {
+  calls: Array<{ prompt: string; sessionId: string | null; workdir: string | null }> = [];
+
+  startExecution(
+    prompt: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.calls.push({
+      prompt,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
+    if (sessionId) {
+      return {
+        result: Promise.reject(
+          new Error(
+            `gemini exited with code 42: Error resuming session: Invalid session identifier "${sessionId}". Use --list-sessions to see available sessions.`,
+          ),
+        ),
+        cancel: vi.fn(),
+      };
+    }
+    return {
+      result: Promise.resolve({ sessionId: "gem-new-session", reply: "ok" }),
+      cancel: vi.fn(),
+    };
+  }
+}
+
+class GenericFailingExecutor {
+  calls: Array<{ prompt: string; sessionId: string | null; workdir: string | null }> = [];
+
+  startExecution(
+    prompt: string,
+    sessionId: string | null,
+    _onProgress?: (event: unknown) => void,
+    startOptions?: { workdir?: string },
+  ): { result: Promise<{ sessionId: string; reply: string }>; cancel: () => void } {
+    this.calls.push({
+      prompt,
+      sessionId,
+      workdir: startOptions?.workdir ?? null,
+    });
+    return {
+      result: Promise.reject(new Error("network unavailable")),
+      cancel: vi.fn(),
+    };
+  }
+}
+
 describe("CodexSessionRuntime", () => {
   it("reuses last session id across executions within same session key", async () => {
     const executor = new FakeExecutor();
@@ -64,6 +116,31 @@ describe("CodexSessionRuntime", () => {
 
     expect(executor.calls).toEqual([
       { prompt: "hello", sessionId: null, workdir: "/tmp/project-z" },
+    ]);
+  });
+
+  it("retries once without session when resume identifier is invalid", async () => {
+    const executor = new ResumeFailingExecutor();
+    const runtime = new CodexSessionRuntime(executor as never, { idleTtlMs: 60_000 });
+
+    const handle = runtime.startExecution("matrix:r:u", "hello", "old-session-id");
+    await expect(handle.result).resolves.toMatchObject({ sessionId: "gem-new-session", reply: "ok" });
+
+    expect(executor.calls).toEqual([
+      { prompt: "hello", sessionId: "old-session-id", workdir: null },
+      { prompt: "hello", sessionId: null, workdir: null },
+    ]);
+  });
+
+  it("does not retry for non-resume failures", async () => {
+    const executor = new GenericFailingExecutor();
+    const runtime = new CodexSessionRuntime(executor as never, { idleTtlMs: 60_000 });
+
+    const handle = runtime.startExecution("matrix:r:u", "hello", "old-session-id");
+    await expect(handle.result).rejects.toThrow("network unavailable");
+
+    expect(executor.calls).toEqual([
+      { prompt: "hello", sessionId: "old-session-id", workdir: null },
     ]);
   });
 });
