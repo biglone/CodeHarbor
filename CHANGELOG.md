@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.86] - 2026-03-30
+
+- release pipeline stability: harden Admin global-config env serialization to avoid crashes when legacy in-memory arrays are absent (`imageAllowedMimeTypes` / role-skill roots).
+- ci e2e fixture alignment: update Admin UI e2e test base config to include full current `AppConfig` defaults, matching runtime expectations after recent config-surface expansion.
+- release reliability: re-run publish flow after fixing Admin UI e2e blocker.
+
 ## [0.1.85] - 2026-03-30
 
 - admin global config: add first-class proxy controls (`enabled`, `httpProxy`, `httpsProxy`, `allProxy`, `noProxy`) and persist them through `CODEX_EXTRA_ENV_JSON`.

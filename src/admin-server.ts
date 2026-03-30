@@ -1432,7 +1432,7 @@ export class AdminServer {
       if ("imageAllowedMimeTypes" in compat) {
         const value = normalizeMimeTypeCsv(compat.imageAllowedMimeTypes, this.config.cliCompat.imageAllowedMimeTypes);
         this.config.cliCompat.imageAllowedMimeTypes = value;
-        envUpdates.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES = value.join(",");
+        envUpdates.CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES = Array.isArray(value) ? value.join(",") : "";
         markUpdatedKey("cliCompat.imageAllowedMimeTypes");
       }
       if ("transcribeAudio" in compat) {
@@ -1616,7 +1616,7 @@ export class AdminServer {
         if ("roots" in roleSkills) {
           const value = normalizeRoleSkillRoots(roleSkills.roots, currentRoleSkills.roots);
           currentRoleSkills.roots = value;
-          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS = value.join(",");
+          envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ROOTS = Array.isArray(value) ? value.join(",") : "";
           markUpdatedKey("agentWorkflow.roleSkills.roots");
         }
         if ("roleAssignments" in roleSkills) {
