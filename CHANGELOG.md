@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.83] - 2026-03-30
+
+- media pipeline robustness: skip image attachments whose `localPath` is present in metadata but missing on disk, preventing request aborts from `ENOENT` in executor image reads.
+- user-facing fallback behavior: missing local image files are now counted as `未下载到本地` in image-processing notice instead of failing the whole request.
+- tests: add regression coverage for missing-local-file image attachments to ensure degraded handling path stays stable.
+
 ## [0.1.82] - 2026-03-29
 
 - admin e2e stability: align global settings tests with left hierarchical submenus (`basic` / `agent`) before interacting with section-scoped fields.
