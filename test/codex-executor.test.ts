@@ -255,6 +255,57 @@ describe("CodexExecutor", () => {
     );
   });
 
+  it("clears inherited proxy env when clearProxyEnv is enabled", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+    const proxyEnvKeys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] as const;
+    const previousValues = new Map<string, string | undefined>();
+    for (const key of proxyEnvKeys) {
+      previousValues.set(key, process.env[key]);
+      process.env[key] = `http://proxy-for-${key.toLowerCase()}:7890`;
+    }
+
+    try {
+      const executor = new CodexExecutor({
+        bin: "codex",
+        model: null,
+        workdir: process.cwd(),
+        dangerousBypass: false,
+        timeoutMs: 1_000,
+        sandboxMode: null,
+        approvalPolicy: null,
+        extraArgs: [],
+        extraEnv: {},
+        clearProxyEnv: true,
+      });
+
+      const resultPromise = executor.execute("hello", null);
+      child.stdout.write('{"type":"thread.started","thread_id":"thread-proxy-clear"}\n');
+      child.stdout.write('{"type":"item.completed","item":{"type":"agent_message","text":"done"}}\n');
+      setImmediate(() => child.emit("close", 0));
+
+      await expect(resultPromise).resolves.toEqual({
+        sessionId: "thread-proxy-clear",
+        reply: "done",
+      });
+
+      const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string | undefined> };
+      expect(spawnOptions.env?.HTTP_PROXY).toBeUndefined();
+      expect(spawnOptions.env?.HTTPS_PROXY).toBeUndefined();
+      expect(spawnOptions.env?.ALL_PROXY).toBeUndefined();
+      expect(spawnOptions.env?.NO_PROXY).toBeUndefined();
+    } finally {
+      for (const key of proxyEnvKeys) {
+        const previous = previousValues.get(key);
+        if (previous === undefined) {
+          delete process.env[key];
+          continue;
+        }
+        process.env[key] = previous;
+      }
+    }
+  });
+
   it("supports claude provider with print JSON output", async () => {
     const child = createFakeChildProcess();
     spawnMock.mockReturnValue(child);

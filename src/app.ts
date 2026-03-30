@@ -13,6 +13,7 @@ import { HistoryService } from "./history-service";
 import { Logger } from "./logger";
 import { Orchestrator } from "./orchestrator";
 import { NpmRegistryUpdateChecker, resolvePackageVersion } from "./package-update-checker";
+import { resolveExecutorProxyEnv } from "./proxy-env";
 import { StateStore } from "./store/state-store";
 
 const execFileAsync = promisify(execFile);
@@ -44,8 +45,9 @@ export class CodeHarborApp {
       cleanupOwner: `main:${process.pid}`,
     });
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
-    const buildExecutor = (provider: "codex" | "claude" | "gemini", model: string | null = config.codexModel): CodexExecutor =>
-      new CodexExecutor({
+    const buildExecutor = (provider: "codex" | "claude" | "gemini", model: string | null = config.codexModel): CodexExecutor => {
+      const proxyEnv = resolveExecutorProxyEnv(config.codexExtraEnv);
+      return new CodexExecutor({
         provider,
         bin: resolveProviderBin(config, provider),
         model,
@@ -55,8 +57,10 @@ export class CodeHarborApp {
         sandboxMode: config.codexSandboxMode,
         approvalPolicy: config.codexApprovalPolicy,
         extraArgs: config.codexExtraArgs,
-        extraEnv: config.codexExtraEnv,
+        extraEnv: proxyEnv.extraEnv,
+        clearProxyEnv: proxyEnv.clearProxyEnv,
       });
+    };
     const executor = buildExecutor(config.aiCliProvider, config.codexModel);
     const workflowExecTimeoutMs = Math.max(config.codexExecTimeoutMs, DEFAULT_WORKFLOW_EXEC_TIMEOUT_MS);
 

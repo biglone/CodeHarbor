@@ -4,6 +4,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { CodexExecutionResult } from "../types";
+import { PROXY_ENV_INHERITED_KEYS } from "../proxy-env";
 
 type AiCliProvider = "codex" | "claude" | "gemini";
 
@@ -18,6 +19,7 @@ export interface CodexExecutorOptions {
   approvalPolicy: string | null;
   extraArgs: string[];
   extraEnv: Record<string, string>;
+  clearProxyEnv?: boolean;
 }
 
 export interface CodexExecutionStartOptions {
@@ -125,10 +127,16 @@ export class CodexExecutor {
       this.provider,
       Boolean(claudeStreamInput),
     );
+    const inheritedEnv: NodeJS.ProcessEnv = { ...process.env };
+    if (this.options.clearProxyEnv) {
+      for (const key of PROXY_ENV_INHERITED_KEYS) {
+        delete inheritedEnv[key];
+      }
+    }
     const child = spawn(this.options.bin, args, {
       cwd: startOptions?.workdir ?? this.options.workdir,
       env: {
-        ...process.env,
+        ...inheritedEnv,
         ...this.options.extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],

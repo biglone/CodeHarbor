@@ -361,6 +361,47 @@ describe("AdminServer", () => {
     expect(invalidCliMimeTypes.status).toBe(400);
     expect(JSON.stringify(invalidCliMimeTypes.body)).toContain("imageAllowedMimeTypes");
 
+    const invalidProxyConfig = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          proxy: {
+            enabled: true,
+            httpProxy: "",
+            httpsProxy: "",
+            allProxy: "",
+          },
+        },
+      }),
+    });
+    expect(invalidProxyConfig.status).toBe(400);
+    expect(JSON.stringify(invalidProxyConfig.body)).toContain("proxy.enabled");
+
+    const validProxyConfig = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          proxy: {
+            enabled: true,
+            httpProxy: "http://127.0.0.1:7890",
+            httpsProxy: "",
+            allProxy: "",
+            noProxy: "localhost,127.0.0.1",
+          },
+        },
+      }),
+    });
+    expect(validProxyConfig.status).toBe(200);
+    expect(JSON.stringify(validProxyConfig.body)).toContain("proxy.enabled");
+
     const invalidEnvOverrides = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -1115,6 +1156,51 @@ describe("AdminServer", () => {
     }
   });
 
+  it("reads proxy config from CODEX_EXTRA_ENV_JSON", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    config.codexExtraEnv = {
+      CODEHARBOR_PROXY_ENABLED: "false",
+      HTTP_PROXY: "http://127.0.0.1:7890",
+      HTTPS_PROXY: "http://127.0.0.1:7890",
+      NO_PROXY: "localhost,127.0.0.1",
+    };
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const response = await fetchJson(`${baseUrl}/api/admin/config/global`);
+    expect(response.status).toBe(200);
+    const payload = response.body as {
+      data?: {
+        proxy?: {
+          enabled?: boolean;
+          httpProxy?: string;
+          httpsProxy?: string;
+          allProxy?: string;
+          noProxy?: string;
+        };
+      };
+    };
+    expect(payload.data?.proxy?.enabled).toBe(false);
+    expect(payload.data?.proxy?.httpProxy).toBe("http://127.0.0.1:7890");
+    expect(payload.data?.proxy?.httpsProxy).toBe("http://127.0.0.1:7890");
+    expect(payload.data?.proxy?.allProxy).toBe("");
+    expect(payload.data?.proxy?.noProxy).toBe("localhost,127.0.0.1");
+  });
+
   it("supports scoped admin/viewer tokens with write protection", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
@@ -1536,6 +1622,13 @@ describe("AdminServer", () => {
           imageAllowedMimeTypes: ["image/png", "image/webp"],
           recordPath: path.join(dir, "logs", "cli-record.ndjson"),
         },
+        proxy: {
+          enabled: true,
+          httpProxy: "http://127.0.0.1:7890",
+          httpsProxy: "http://127.0.0.1:7890",
+          allProxy: "socks5://127.0.0.1:7890",
+          noProxy: "localhost,127.0.0.1",
+        },
         envOverrides: {
           MATRIX_ADMIN_USERS: "@ops:example.com,@oncall:example.com",
           CONTEXT_BRIDGE_HISTORY_LIMIT: "24",
@@ -1586,6 +1679,12 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("CLI_COMPAT_IMAGE_MAX_COUNT=6");
     expect(envRaw).toContain('CLI_COMPAT_IMAGE_ALLOWED_MIME_TYPES="image/png,image/webp"');
     expect(envRaw).toContain(`CLI_COMPAT_RECORD_PATH=${path.join(dir, "logs", "cli-record.ndjson")}`);
+    expect(envRaw).toContain("CODEX_EXTRA_ENV_JSON=");
+    expect(envRaw).toContain("CODEHARBOR_PROXY_ENABLED");
+    expect(envRaw).toContain("HTTP_PROXY");
+    expect(envRaw).toContain("HTTPS_PROXY");
+    expect(envRaw).toContain("ALL_PROXY");
+    expect(envRaw).toContain("NO_PROXY");
     expect(envRaw).toContain('MATRIX_ADMIN_USERS="@ops:example.com,@oncall:example.com"');
     expect(envRaw).toContain("CONTEXT_BRIDGE_HISTORY_LIMIT=24");
     expect(envRaw).toContain("AUTODEV_LOOP_MAX_RUNS=9");

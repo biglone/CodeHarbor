@@ -607,6 +607,23 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label" data-i18n="global.cliRecordPath">CLI 回放记录文件路径（可选）</span>
             <input id="global-cli-record-path" type="text" placeholder="./logs/cli-record.ndjson" data-i18n-placeholder="global.cliRecordPathPlaceholder" />
           </label>
+          <label class="checkbox"><input id="global-proxy-enabled" type="checkbox" /><span data-i18n="global.proxyEnabled">启用 CLI 代理</span></label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.proxyHttp">HTTP 代理（HTTP_PROXY）</span>
+            <input id="global-proxy-http" type="text" placeholder="http://127.0.0.1:7890" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.proxyHttps">HTTPS 代理（HTTPS_PROXY）</span>
+            <input id="global-proxy-https" type="text" placeholder="http://127.0.0.1:7890" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.proxyAll">全局代理（ALL_PROXY）</span>
+            <input id="global-proxy-all" type="text" placeholder="socks5://127.0.0.1:7890" />
+          </label>
+          <label class="field full">
+            <span class="field-label" data-i18n="global.proxyNo">代理白名单（NO_PROXY）</span>
+            <input id="global-proxy-no" type="text" placeholder="localhost,127.0.0.1" />
+          </label>
           <label class="checkbox"><input id="global-agent-enabled" type="checkbox" /><span data-i18n="global.agentEnabled">启用多智能体工作流</span></label>
           <label class="field">
             <span class="field-label" data-i18n="global.agentRounds">工作流自动修复轮次</span>
@@ -917,6 +934,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalTimeout": "本地 Whisper 超时（毫秒）",
             "global.cliRecordPath": "CLI 回放记录文件路径（可选）",
             "global.cliRecordPathPlaceholder": "./logs/cli-record.ndjson",
+            "global.proxyEnabled": "启用 CLI 代理",
+            "global.proxyHttp": "HTTP 代理（HTTP_PROXY）",
+            "global.proxyHttps": "HTTPS 代理（HTTPS_PROXY）",
+            "global.proxyAll": "全局代理（ALL_PROXY）",
+            "global.proxyNo": "代理白名单（NO_PROXY）",
             "global.agentEnabled": "启用多智能体工作流",
             "global.agentRounds": "工作流自动修复轮次",
             "global.agentSkillsEnabled": "启用角色技能注入",
@@ -1131,6 +1153,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.audioLocalTimeout": "Local whisper timeout (ms)",
             "global.cliRecordPath": "CLI replay record path (optional)",
             "global.cliRecordPathPlaceholder": "./logs/cli-record.ndjson",
+            "global.proxyEnabled": "Enable CLI proxy",
+            "global.proxyHttp": "HTTP proxy (HTTP_PROXY)",
+            "global.proxyHttps": "HTTPS proxy (HTTPS_PROXY)",
+            "global.proxyAll": "Global proxy (ALL_PROXY)",
+            "global.proxyNo": "Proxy bypass list (NO_PROXY)",
             "global.agentEnabled": "Enable multi-agent workflow",
             "global.agentRounds": "Workflow auto-repair rounds",
             "global.agentSkillsEnabled": "Enable role skill injection",
@@ -1348,7 +1375,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global-cli-audio-max-bytes",
             "global-cli-audio-local-command",
             "global-cli-audio-local-timeout",
-            "global-cli-record-path"
+            "global-cli-record-path",
+            "global-proxy-enabled",
+            "global-proxy-http",
+            "global-proxy-https",
+            "global-proxy-all",
+            "global-proxy-no"
           ],
           agent: [
             "global-agent-enabled",
@@ -1784,6 +1816,15 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (!payload.cliCompat.imageAllowedMimeTypes || payload.cliCompat.imageAllowedMimeTypes.length === 0) {
             errors.push("global.cliImageMimeTypes");
           }
+          if (
+            payload.proxy &&
+            payload.proxy.enabled &&
+            !payload.proxy.httpProxy &&
+            !payload.proxy.httpsProxy &&
+            !payload.proxy.allProxy
+          ) {
+            errors.push("global.proxyHttp");
+          }
           if (!numberInRange(payload.agentWorkflow.autoRepairMaxRounds, 0, 10)) {
             errors.push("global.agentRounds");
           }
@@ -1928,6 +1969,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var roleSkills = agentWorkflow.roleSkills || {};
             var updateCheck = data.updateCheck || {};
             var autoDev = data.autoDev || {};
+            var proxy = data.proxy || {};
 
             document.getElementById("global-matrix-prefix").value = data.matrixCommandPrefix || "";
             document.getElementById("global-workdir").value = data.codexWorkdir || "";
@@ -2002,6 +2044,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             document.getElementById("global-cli-audio-local-command").value = cliCompat.audioLocalWhisperCommand || "";
             document.getElementById("global-cli-audio-local-timeout").value = String(cliCompat.audioLocalWhisperTimeoutMs || 180000);
             document.getElementById("global-cli-record-path").value = cliCompat.recordPath || "";
+            document.getElementById("global-proxy-enabled").checked = Boolean(proxy.enabled);
+            document.getElementById("global-proxy-http").value = proxy.httpProxy || "";
+            document.getElementById("global-proxy-https").value = proxy.httpsProxy || "";
+            document.getElementById("global-proxy-all").value = proxy.allProxy || "";
+            document.getElementById("global-proxy-no").value = proxy.noProxy || "";
             document.getElementById("global-agent-enabled").checked = Boolean(agentWorkflow.enabled);
             document.getElementById("global-agent-repair-rounds").value = String(
               typeof agentWorkflow.autoRepairMaxRounds === "number" ? agentWorkflow.autoRepairMaxRounds : 1
@@ -2089,6 +2136,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               audioLocalWhisperCommand: asText("global-cli-audio-local-command"),
               audioLocalWhisperTimeoutMs: asNumber("global-cli-audio-local-timeout", 180000),
               recordPath: asText("global-cli-record-path")
+            },
+            proxy: {
+              enabled: asBool("global-proxy-enabled"),
+              httpProxy: asText("global-proxy-http"),
+              httpsProxy: asText("global-proxy-https"),
+              allProxy: asText("global-proxy-all"),
+              noProxy: asText("global-proxy-no")
             },
             agentWorkflow: {
               enabled: asBool("global-agent-enabled"),

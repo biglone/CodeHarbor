@@ -32,6 +32,7 @@ import {
   GLOBAL_RUNTIME_HOT_CONFIG_KEY,
   isHotGlobalConfigKey,
 } from "./runtime-hot-config";
+import { hasProxyEndpoint, mergeProxyConfigIntoExtraEnv, readProxyConfigFromExtraEnv } from "./proxy-env";
 import { queueAdminSystemdRestart, restartSystemdServices } from "./service-manager";
 import {
   ConfigRevisionRecord,
@@ -1532,6 +1533,45 @@ export class AdminServer {
       }
     }
 
+    if ("proxy" in body) {
+      const proxy = asObject(body.proxy, "proxy");
+      const currentProxy = readProxyConfigFromExtraEnv(this.config.codexExtraEnv);
+      const nextProxy = { ...currentProxy };
+      let proxyUpdated = false;
+      if ("enabled" in proxy) {
+        nextProxy.enabled = normalizeBoolean(proxy.enabled, currentProxy.enabled);
+        markUpdatedKey("proxy.enabled");
+        proxyUpdated = true;
+      }
+      if ("httpProxy" in proxy) {
+        nextProxy.httpProxy = normalizeString(proxy.httpProxy, currentProxy.httpProxy, "proxy.httpProxy");
+        markUpdatedKey("proxy.httpProxy");
+        proxyUpdated = true;
+      }
+      if ("httpsProxy" in proxy) {
+        nextProxy.httpsProxy = normalizeString(proxy.httpsProxy, currentProxy.httpsProxy, "proxy.httpsProxy");
+        markUpdatedKey("proxy.httpsProxy");
+        proxyUpdated = true;
+      }
+      if ("allProxy" in proxy) {
+        nextProxy.allProxy = normalizeString(proxy.allProxy, currentProxy.allProxy, "proxy.allProxy");
+        markUpdatedKey("proxy.allProxy");
+        proxyUpdated = true;
+      }
+      if ("noProxy" in proxy) {
+        nextProxy.noProxy = normalizeString(proxy.noProxy, currentProxy.noProxy, "proxy.noProxy");
+        markUpdatedKey("proxy.noProxy");
+        proxyUpdated = true;
+      }
+      if (proxyUpdated) {
+        if (nextProxy.enabled && !hasProxyEndpoint(nextProxy)) {
+          throw new HttpError(400, "proxy.enabled requires at least one of proxy.httpProxy, proxy.httpsProxy, proxy.allProxy.");
+        }
+        this.config.codexExtraEnv = mergeProxyConfigIntoExtraEnv(this.config.codexExtraEnv, nextProxy);
+        envUpdates.CODEX_EXTRA_ENV_JSON = JSON.stringify(this.config.codexExtraEnv);
+      }
+    }
+
     if ("agentWorkflow" in body) {
       const workflow = asObject(body.agentWorkflow, "agentWorkflow");
       const currentAgentWorkflow = ensureAgentWorkflowConfig(this.config);
@@ -1986,6 +2026,46 @@ export class AdminServer {
       }
     }
 
+    if ("proxy" in body) {
+      const proxy = asObject(body.proxy, "proxy");
+      const currentProxy = readProxyConfigFromExtraEnv(this.config.codexExtraEnv);
+      const nextProxy = { ...currentProxy };
+      let proxyChecked = false;
+      if ("enabled" in proxy) {
+        nextProxy.enabled = normalizeBoolean(proxy.enabled, currentProxy.enabled);
+        markCheckedKey("proxy.enabled");
+        proxyChecked = true;
+      }
+      if ("httpProxy" in proxy) {
+        nextProxy.httpProxy = normalizeString(proxy.httpProxy, currentProxy.httpProxy, "proxy.httpProxy");
+        markCheckedKey("proxy.httpProxy");
+        proxyChecked = true;
+      }
+      if ("httpsProxy" in proxy) {
+        nextProxy.httpsProxy = normalizeString(proxy.httpsProxy, currentProxy.httpsProxy, "proxy.httpsProxy");
+        markCheckedKey("proxy.httpsProxy");
+        proxyChecked = true;
+      }
+      if ("allProxy" in proxy) {
+        nextProxy.allProxy = normalizeString(proxy.allProxy, currentProxy.allProxy, "proxy.allProxy");
+        markCheckedKey("proxy.allProxy");
+        proxyChecked = true;
+      }
+      if ("noProxy" in proxy) {
+        nextProxy.noProxy = normalizeString(proxy.noProxy, currentProxy.noProxy, "proxy.noProxy");
+        markCheckedKey("proxy.noProxy");
+        proxyChecked = true;
+      }
+      if (proxyChecked) {
+        if (nextProxy.enabled && !hasProxyEndpoint(nextProxy)) {
+          throw new HttpError(400, "proxy.enabled requires at least one of proxy.httpProxy, proxy.httpsProxy, proxy.allProxy.");
+        }
+        resolveNextConfigFromEnvUpdates(this.config, this.stateStore, {
+          CODEX_EXTRA_ENV_JSON: JSON.stringify(mergeProxyConfigIntoExtraEnv(this.config.codexExtraEnv, nextProxy)),
+        });
+      }
+    }
+
     if ("agentWorkflow" in body) {
       const workflow = asObject(body.agentWorkflow, "agentWorkflow");
       const currentAgentWorkflow = ensureAgentWorkflowConfig(this.config);
@@ -2425,6 +2505,13 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
   sessionActiveWindowMinutes: number;
   updateCheck: AppConfig["updateCheck"];
   cliCompat: AppConfig["cliCompat"];
+  proxy: {
+    enabled: boolean;
+    httpProxy: string;
+    httpsProxy: string;
+    allProxy: string;
+    noProxy: string;
+  };
   autoDev: {
     loopMaxRuns: number;
     loopMaxMinutes: number;
@@ -2446,6 +2533,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
 } {
   const agentWorkflow = ensureAgentWorkflowConfig(config);
   const roleSkills = ensureAgentWorkflowRoleSkillsConfig(agentWorkflow);
+  const proxy = readProxyConfigFromExtraEnv(config.codexExtraEnv);
   return {
     matrixCommandPrefix: config.matrixCommandPrefix,
     outputLanguage: config.outputLanguage,
@@ -2461,6 +2549,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     sessionActiveWindowMinutes: config.sessionActiveWindowMinutes,
     updateCheck: { ...config.updateCheck },
     cliCompat: { ...config.cliCompat },
+    proxy,
     autoDev: {
       loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 0, Number.MAX_SAFE_INTEGER),
       loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 0, Number.MAX_SAFE_INTEGER),
