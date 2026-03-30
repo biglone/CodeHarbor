@@ -2464,22 +2464,38 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     autoDev: {
       loopMaxRuns: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_RUNS, 20, 0, Number.MAX_SAFE_INTEGER),
       loopMaxMinutes: normalizePositiveInt(process.env.AUTODEV_LOOP_MAX_MINUTES, 120, 0, Number.MAX_SAFE_INTEGER),
-      autoCommit: normalizeBoolean(process.env.AUTODEV_AUTO_COMMIT, true),
+      autoCommit: normalizeBooleanEnv(process.env.AUTODEV_AUTO_COMMIT, true, "AUTODEV_AUTO_COMMIT"),
       gitAuthorName: process.env.AUTODEV_GIT_AUTHOR_NAME?.trim() || "CodeHarbor AutoDev",
       gitAuthorEmail: process.env.AUTODEV_GIT_AUTHOR_EMAIL?.trim() || "autodev@codeharbor.local",
-      autoReleaseEnabled: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_ENABLED, true),
-      autoReleasePush: normalizeBoolean(process.env.AUTODEV_AUTO_RELEASE_PUSH, false),
-      runArchiveEnabled: normalizeBoolean(process.env.AUTODEV_RUN_ARCHIVE_ENABLED, true),
+      autoReleaseEnabled: normalizeBooleanEnv(
+        process.env.AUTODEV_AUTO_RELEASE_ENABLED,
+        true,
+        "AUTODEV_AUTO_RELEASE_ENABLED",
+      ),
+      autoReleasePush: normalizeBooleanEnv(process.env.AUTODEV_AUTO_RELEASE_PUSH, false, "AUTODEV_AUTO_RELEASE_PUSH"),
+      runArchiveEnabled: normalizeBooleanEnv(
+        process.env.AUTODEV_RUN_ARCHIVE_ENABLED,
+        true,
+        "AUTODEV_RUN_ARCHIVE_ENABLED",
+      ),
       runArchiveDir: process.env.AUTODEV_RUN_ARCHIVE_DIR?.trim() || ".codeharbor/autodev-runs",
-      validationStrict: normalizeBoolean(process.env.AUTODEV_VALIDATION_STRICT, false),
-      stageOutputEchoEnabled: normalizeBoolean(process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED, true),
+      validationStrict: normalizeBooleanEnv(process.env.AUTODEV_VALIDATION_STRICT, false, "AUTODEV_VALIDATION_STRICT"),
+      stageOutputEchoEnabled: normalizeBooleanEnv(
+        process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED,
+        true,
+        "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
+      ),
       maxConsecutiveFailures: normalizePositiveInt(
         process.env.AUTODEV_MAX_CONSECUTIVE_FAILURES,
         3,
         1,
         Number.MAX_SAFE_INTEGER,
       ),
-      initEnhancementEnabled: normalizeBoolean(process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED, true),
+      initEnhancementEnabled: normalizeBooleanEnv(
+        process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED,
+        true,
+        "AUTODEV_INIT_ENHANCEMENT_ENABLED",
+      ),
       initEnhancementTimeoutMs: normalizePositiveInt(
         process.env.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
         480_000,
@@ -2958,6 +2974,26 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
     throw new HttpError(400, "Expected boolean value.");
   }
   return value;
+}
+
+function normalizeBooleanEnv(value: unknown, fallback: boolean, fieldName: string): boolean {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  throw new HttpError(400, `${fieldName} must be a boolean string.`);
 }
 
 function normalizeString(value: unknown, fallback: string, fieldName: string): string {

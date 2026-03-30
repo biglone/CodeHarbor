@@ -1039,6 +1039,82 @@ describe("AdminServer", () => {
     expect(ui.body).toContain("CodeHarbor Admin Console");
   });
 
+  it("reads global config when AUTODEV env booleans are string values", async () => {
+    const envKeys = [
+      "AUTODEV_AUTO_COMMIT",
+      "AUTODEV_AUTO_RELEASE_ENABLED",
+      "AUTODEV_AUTO_RELEASE_PUSH",
+      "AUTODEV_RUN_ARCHIVE_ENABLED",
+      "AUTODEV_VALIDATION_STRICT",
+      "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
+      "AUTODEV_INIT_ENHANCEMENT_ENABLED",
+    ] as const;
+    const previousEnv = new Map<string, string | undefined>();
+    for (const key of envKeys) {
+      previousEnv.set(key, process.env[key]);
+    }
+
+    process.env.AUTODEV_AUTO_COMMIT = "false";
+    process.env.AUTODEV_AUTO_RELEASE_ENABLED = "true";
+    process.env.AUTODEV_AUTO_RELEASE_PUSH = "true";
+    process.env.AUTODEV_RUN_ARCHIVE_ENABLED = "false";
+    process.env.AUTODEV_VALIDATION_STRICT = "true";
+    process.env.AUTODEV_STAGE_OUTPUT_ECHO_ENABLED = "false";
+    process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED = "true";
+
+    try {
+      const { dir, db, legacy } = createPaths();
+      const config = createBaseConfig(dir, db, legacy);
+      const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+      const configService = new ConfigService(stateStore, dir);
+      const logger = new Logger("info");
+      const server = new AdminServer(config, logger, stateStore, configService, {
+        host: "127.0.0.1",
+        port: 0,
+        adminToken: null,
+        cwd: dir,
+        checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+        checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+      });
+      startedServers.push(server);
+      await server.start();
+      const address = server.getAddress();
+      const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+      const response = await fetchJson(`${baseUrl}/api/admin/config/global`);
+      expect(response.status).toBe(200);
+      const payload = response.body as {
+        data?: {
+          autoDev?: {
+            autoCommit?: boolean;
+            autoReleaseEnabled?: boolean;
+            autoReleasePush?: boolean;
+            runArchiveEnabled?: boolean;
+            validationStrict?: boolean;
+            stageOutputEchoEnabled?: boolean;
+            initEnhancementEnabled?: boolean;
+          };
+        };
+      };
+      expect(payload.data?.autoDev?.autoCommit).toBe(false);
+      expect(payload.data?.autoDev?.autoReleaseEnabled).toBe(true);
+      expect(payload.data?.autoDev?.autoReleasePush).toBe(true);
+      expect(payload.data?.autoDev?.runArchiveEnabled).toBe(false);
+      expect(payload.data?.autoDev?.validationStrict).toBe(true);
+      expect(payload.data?.autoDev?.stageOutputEchoEnabled).toBe(false);
+      expect(payload.data?.autoDev?.initEnhancementEnabled).toBe(true);
+    } finally {
+      for (const key of envKeys) {
+        const previous = previousEnv.get(key);
+        if (previous === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = previous;
+        }
+      }
+    }
+  });
+
   it("supports scoped admin/viewer tokens with write protection", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
