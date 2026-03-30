@@ -1,7 +1,7 @@
 {
   "name": "codeharbor",
   "version": "0.1.84",
-  "description": "Self-hosted Matrix AI assistant bridge for Codex and Claude Code CLI sessions",
+  "description": "Self-hosted Matrix AI assistant bridge for Codex, Claude Code, and Gemini CLI sessions",
   "author": "biglone <jjoyceu@gmail.com> (https://github.com/biglone)",
   "license": "MIT",
   "main": "dist/cli.js",
@@ -38,6 +38,9 @@
     "codex-cli",
     "claude",
     "claude-code",
+    "gemini",
+    "gemini-cli",
+    "google-gemini",
     "openai",
     "cli",
     "matrix",
