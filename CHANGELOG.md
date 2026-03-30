@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.85] - 2026-03-30
+
+- admin global config: add first-class proxy controls (`enabled`, `httpProxy`, `httpsProxy`, `allProxy`, `noProxy`) and persist them through `CODEX_EXTRA_ENV_JSON`.
+- executor proxy behavior: support explicit proxy-off mode that clears inherited host proxy env vars for child CLI processes.
+- admin UI: add proxy toggle and structured proxy fields under CLI settings, including local validation when proxy is enabled.
+- tests: add regression coverage for proxy config validation/snapshot reading and executor proxy-env clearing behavior.
+- npm metadata: update package description/keywords to include Gemini CLI support for better discoverability.
+
 ## [0.1.84] - 2026-03-30
 
 - gemini stream parsing: support assistant `message` delta events in `stream-json` output and append chunks into a final reply instead of dropping partial text.
