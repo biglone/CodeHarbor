@@ -341,7 +341,7 @@ function parseDiagTargetWithLimit<K extends DiagTarget["kind"]>(
 }
 
 function normalizeBackendProviderToken(token: string): BackendModelRouteProfile["provider"] | null {
-  if (token === "codex" || token === "claude") {
+  if (token === "codex" || token === "claude" || token === "gemini") {
     return token;
   }
   return null;

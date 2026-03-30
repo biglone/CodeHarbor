@@ -192,7 +192,7 @@ const envSnapshotSchema: z.ZodType<ConfigSnapshotEnv> = z
     OUTPUT_LANGUAGE: z.enum(["zh", "en"]).default("zh"),
     MATRIX_ADMIN_USERS: z.string().default(""),
     MATRIX_UPGRADE_ALLOWED_USERS: z.string().default(""),
-    AI_CLI_PROVIDER: z.enum(["codex", "claude"]).default("codex"),
+    AI_CLI_PROVIDER: z.enum(["codex", "claude", "gemini"]).default("codex"),
     CODEX_BIN: z.string().min(1),
     CODEX_MODEL: z.string(),
     CODEX_WORKDIR: z.string().min(1),

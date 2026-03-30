@@ -48,7 +48,7 @@ interface StateStoreLike {
   appendConversationMessage: (
     sessionKey: string,
     role: "user" | "assistant",
-    provider: "codex" | "claude",
+    provider: "codex" | "claude" | "gemini",
     content: string,
   ) => void;
   commitExecutionSuccess: (sessionKey: string, eventId: string, sessionId: string) => void;
@@ -112,7 +112,7 @@ interface ExecuteChatRequestDeps {
     requestId: string;
     sessionKey: string;
     conversationId: string;
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     model: string | null;
     prompt: string;
     executionPrompt: string;

@@ -1018,6 +1018,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
             "health.component.claude": "Claude Code",
+            "health.component.gemini": "Gemini CLI",
             "health.component.matrix": "Matrix",
             "health.component.overall": "整体",
             "health.app.detail.updateAvailable": "当前 {current}，最新 {latest}（可更新）",
@@ -1231,6 +1232,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "health.component.app": "CodeHarbor",
             "health.component.codex": "Codex",
             "health.component.claude": "Claude Code",
+            "health.component.gemini": "Gemini CLI",
             "health.component.matrix": "Matrix",
             "health.component.overall": "Overall",
             "health.app.detail.updateAvailable": "Current {current}, latest {latest} (update available)",
@@ -2393,8 +2395,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               t("diagnostics.key.latestRevision"),
               config.latestRevision ? String(config.latestRevision.summary || "-") : "-"
             );
+            var diagProvider = data.cliProvider === "claude" ? "claude" : (data.cliProvider === "gemini" ? "gemini" : "codex");
+            var diagCliComponentKey =
+              diagProvider === "claude"
+                ? "health.component.claude"
+                : (diagProvider === "gemini" ? "health.component.gemini" : "health.component.codex");
             appendDiagnosticsRow(
-              t("health.component.codex"),
+              t(diagCliComponentKey),
               health.codex && health.codex.ok ? t("health.status.ok") : t("health.status.fail")
             );
             appendDiagnosticsRow(
@@ -2442,8 +2449,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var app = response.app || {};
             var codex = response.codex || {};
             var matrix = response.matrix || {};
-            var provider = response.cliProvider === "claude" ? "claude" : "codex";
-            var cliComponentKey = provider === "claude" ? "health.component.claude" : "health.component.codex";
+            var provider = response.cliProvider === "claude" ? "claude" : (response.cliProvider === "gemini" ? "gemini" : "codex");
+            var cliComponentKey =
+              provider === "claude" ? "health.component.claude" : (provider === "gemini" ? "health.component.gemini" : "health.component.codex");
 
             appendHealthRow(t("health.component.app"), isAppHealthOk(app), formatAppHealthDetail(app));
             appendHealthRow(

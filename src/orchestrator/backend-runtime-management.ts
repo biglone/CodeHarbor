@@ -46,7 +46,7 @@ export function prepareBackendRuntimeForSession(input: {
 export function ensureBackendRuntime(input: {
   profile: BackendModelRouteProfile;
   backendRuntimes: Map<string, BackendRuntimeBundle>;
-  executorFactory: ((provider: "codex" | "claude", model?: string | null) => CodexExecutor) | null;
+  executorFactory: ((provider: "codex" | "claude" | "gemini", model?: string | null) => CodexExecutor) | null;
 }): BackendRuntimeBundle {
   const normalized = normalizeBackendProfile(input.profile);
   const key = serializeBackendProfile(normalized);

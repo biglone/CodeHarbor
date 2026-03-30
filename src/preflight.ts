@@ -101,9 +101,10 @@ export async function runStartupPreflight(options: PreflightOptions = {}): Promi
     });
   }
 
-  const aiCliProvider = readEnv(env, "AI_CLI_PROVIDER").toLowerCase() === "claude" ? "claude" : "codex";
-  const aiCliCommand = aiCliProvider === "claude" ? "claude" : "codex";
-  const aiCliName = aiCliProvider === "claude" ? "Claude Code CLI" : "Codex CLI";
+  const aiCliProvider = normalizeAiCliProvider(readEnv(env, "AI_CLI_PROVIDER"));
+  const aiCliCommand = aiCliProvider === "claude" ? "claude" : aiCliProvider === "gemini" ? "gemini" : "codex";
+  const aiCliName =
+    aiCliProvider === "claude" ? "Claude Code CLI" : aiCliProvider === "gemini" ? "Gemini CLI" : "Codex CLI";
   const codexBin = readEnv(env, "CODEX_BIN") || aiCliCommand;
   try {
     await checkCodexBinary(codexBin);
@@ -194,4 +195,15 @@ function defaultIsDirectory(targetPath: string): boolean {
 
 function readEnv(env: NodeJS.ProcessEnv, key: string): string {
   return env[key]?.trim() ?? "";
+}
+
+function normalizeAiCliProvider(raw: string): "codex" | "claude" | "gemini" {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "claude") {
+    return "claude";
+  }
+  if (normalized === "gemini") {
+    return "gemini";
+  }
+  return "codex";
 }

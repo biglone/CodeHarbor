@@ -48,7 +48,7 @@ class InMemoryStateStore {
       id: number;
       sessionKey: string;
       role: "user" | "assistant";
-      provider: "codex" | "claude";
+      provider: "codex" | "claude" | "gemini";
       content: string;
       createdAt: number;
     }>
@@ -125,7 +125,7 @@ class InMemoryStateStore {
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",
-    provider: "codex" | "claude",
+    provider: "codex" | "claude" | "gemini",
     content: string,
   ): void {
     const normalized = content.trim();
@@ -152,7 +152,7 @@ class InMemoryStateStore {
     id: number;
     sessionKey: string;
     role: "user" | "assistant";
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     content: string;
     createdAt: number;
   }> {
@@ -1377,7 +1377,7 @@ describe("Matrix e2e regression", () => {
       cancel: () => {},
     }));
     const store = new InMemoryStateStore();
-    const executorFactory = vi.fn((provider: "codex" | "claude", _model?: string | null) =>
+    const executorFactory = vi.fn((provider: "codex" | "claude" | "gemini", _model?: string | null) =>
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
 
@@ -1439,7 +1439,7 @@ describe("Matrix e2e regression", () => {
       cancel: () => {},
     }));
     const store = new InMemoryStateStore();
-    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+    const executorFactory = vi.fn((provider: "codex" | "claude" | "gemini") =>
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
     const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
@@ -1472,7 +1472,7 @@ describe("Matrix e2e regression", () => {
       cancel: () => {},
     }));
     const store = new InMemoryStateStore();
-    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+    const executorFactory = vi.fn((provider: "codex" | "claude" | "gemini") =>
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
     const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {
@@ -1508,7 +1508,7 @@ describe("Matrix e2e regression", () => {
       cancel: () => {},
     }));
     const store = new InMemoryStateStore();
-    const executorFactory = vi.fn((provider: "codex" | "claude") =>
+    const executorFactory = vi.fn((provider: "codex" | "claude" | "gemini") =>
       provider === "claude" ? (claudeExecutor as never) : (codexExecutor as never),
     );
     const orchestrator = new Orchestrator(channel, codexExecutor as never, store as never, logger as never, {

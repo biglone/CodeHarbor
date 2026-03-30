@@ -60,7 +60,7 @@ export interface ExternalTaskIntegrationConfig {
   authToken: string | null;
 }
 
-export type AiCliProvider = "codex" | "claude";
+export type AiCliProvider = "codex" | "claude" | "gemini";
 
 export type AdminTokenRole = "admin" | "viewer";
 
@@ -80,7 +80,7 @@ const configSchema = z
     OUTPUT_LANGUAGE: z.enum(["zh", "en"]).default("zh"),
     MATRIX_ADMIN_USERS: z.string().default(""),
     MATRIX_UPGRADE_ALLOWED_USERS: z.string().default(""),
-    AI_CLI_PROVIDER: z.enum(["codex", "claude"]).default("codex"),
+    AI_CLI_PROVIDER: z.enum(["codex", "claude", "gemini"]).default("codex"),
     CODEX_BIN: z.string().default(""),
     CODEX_MODEL: z.string().optional(),
     CODEX_WORKDIR: z.string().default("."),
@@ -375,7 +375,7 @@ const configSchema = z
     matrixAdminUsers: parseCsvList(v.MATRIX_ADMIN_USERS),
     matrixUpgradeAllowedUsers: parseCsvList(v.MATRIX_UPGRADE_ALLOWED_USERS),
     aiCliProvider: v.AI_CLI_PROVIDER,
-    codexBin: v.CODEX_BIN.trim() || (v.AI_CLI_PROVIDER === "claude" ? "claude" : "codex"),
+    codexBin: v.CODEX_BIN.trim() || defaultCliCommandForProvider(v.AI_CLI_PROVIDER),
     codexModel: v.CODEX_MODEL?.trim() || null,
     codexWorkdir: path.resolve(v.CODEX_WORKDIR),
     codexDangerousBypass: v.CODEX_DANGEROUS_BYPASS,
@@ -637,10 +637,12 @@ function normalizeBackendModelRoutingRule(entry: unknown, index: number): Backen
   }
   const targetPayload = payload.target as Record<string, unknown>;
   const providerRaw = targetPayload.provider;
-  let provider: "codex" | "claude" | undefined;
+  let provider: "codex" | "claude" | "gemini" | undefined;
   if (providerRaw !== undefined) {
-    if (providerRaw !== "codex" && providerRaw !== "claude") {
-      throw new Error(`BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target.provider must be "codex" or "claude".`);
+    if (providerRaw !== "codex" && providerRaw !== "claude" && providerRaw !== "gemini") {
+      throw new Error(
+        `BACKEND_MODEL_ROUTING_RULES_JSON[${index}].target.provider must be "codex", "claude", or "gemini".`,
+      );
     }
     provider = providerRaw;
   }
@@ -692,6 +694,16 @@ function parseOptionalBoolean(
     throw new Error(`${field} must be boolean.`);
   }
   return value;
+}
+
+function defaultCliCommandForProvider(provider: AiCliProvider): string {
+  if (provider === "claude") {
+    return "claude";
+  }
+  if (provider === "gemini") {
+    return "gemini";
+  }
+  return "codex";
 }
 
 function parseOptionalInteger(value: unknown, fallback: number, field: string): number {

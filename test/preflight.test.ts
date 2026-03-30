@@ -130,6 +130,33 @@ describe("runStartupPreflight", () => {
     expect(result.resolvedCodexBin).toBe("claude");
     expect(checks[0]).toBe("claude");
   });
+
+  it("supports gemini provider binary probing", async () => {
+    const checks: string[] = [];
+    const result = await runStartupPreflight({
+      cwd: "/tmp/work",
+      env: {
+        MATRIX_HOMESERVER: "https://matrix.example.com",
+        MATRIX_USER_ID: "@bot:example.com",
+        MATRIX_ACCESS_TOKEN: "token",
+        AI_CLI_PROVIDER: "gemini",
+        CODEX_WORKDIR: "/tmp/work",
+      },
+      checkCodexBinary: async (bin) => {
+        checks.push(bin);
+        if (bin === "gemini") {
+          return;
+        }
+        throw new Error("ENOENT");
+      },
+      fileExists: () => true,
+      isDirectory: () => true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.resolvedCodexBin).toBe("gemini");
+    expect(checks[0]).toBe("gemini");
+  });
 });
 
 describe("formatPreflightReport", () => {

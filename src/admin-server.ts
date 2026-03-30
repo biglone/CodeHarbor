@@ -2676,7 +2676,7 @@ function formatSessionMessageEntry(entry: SessionMessageRecord): {
   id: number;
   sessionKey: string;
   role: "user" | "assistant";
-  provider: "codex" | "claude";
+  provider: "codex" | "claude" | "gemini";
   content: string;
   createdAt: number;
   createdAtIso: string;
@@ -2709,7 +2709,7 @@ function formatSessionExportEntry(entry: SessionHistoryRecord & { messages?: Ses
     id: number;
     sessionKey: string;
     role: "user" | "assistant";
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     content: string;
     createdAt: number;
     createdAtIso: string;

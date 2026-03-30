@@ -50,13 +50,13 @@ export interface OrchestratorOptions {
   audioTranscriber?: AudioTranscriberLike;
   configService?: ConfigService;
   defaultCodexWorkdir?: string;
-  aiCliProvider?: "codex" | "claude";
+  aiCliProvider?: "codex" | "claude" | "gemini";
   aiCliModel?: string | null;
   backendModelRoutingRules?: BackendModelRouteRule[];
   contextBridgeHistoryLimit?: number;
   contextBridgeMaxChars?: number;
   matrixAdminUsers?: string[];
-  executorFactory?: (provider: "codex" | "claude", model?: string | null) => CodexExecutor;
+  executorFactory?: (provider: "codex" | "claude" | "gemini", model?: string | null) => CodexExecutor;
   upgradeAllowedUsers?: string[];
   selfUpdateTimeoutMs?: number;
   selfUpdateRunner?: SelfUpdateRunner;

@@ -44,7 +44,7 @@ export class CodeHarborApp {
       cleanupOwner: `main:${process.pid}`,
     });
     this.configService = new ConfigService(this.stateStore, config.codexWorkdir);
-    const buildExecutor = (provider: "codex" | "claude", model: string | null = config.codexModel): CodexExecutor =>
+    const buildExecutor = (provider: "codex" | "claude" | "gemini", model: string | null = config.codexModel): CodexExecutor =>
       new CodexExecutor({
         provider,
         bin: resolveProviderBin(config, provider),
@@ -258,7 +258,7 @@ export class CodeHarborAdminApp {
 export async function runDoctor(config: AppConfig): Promise<void> {
   const logger = new Logger(config.logLevel);
   logger.info("Doctor check started");
-  const cliLabel = config.aiCliProvider === "claude" ? "claude code" : "codex";
+  const cliLabel = config.aiCliProvider === "claude" ? "claude code" : config.aiCliProvider === "gemini" ? "gemini" : "codex";
 
   try {
     const { stdout } = await execFileAsync(config.codexBin, ["--version"]);
@@ -291,9 +291,15 @@ export async function runDoctor(config: AppConfig): Promise<void> {
   logger.info("Doctor check passed");
 }
 
-function resolveProviderBin(config: AppConfig, provider: "codex" | "claude"): string {
+function resolveProviderBin(config: AppConfig, provider: "codex" | "claude" | "gemini"): string {
   if (provider === config.aiCliProvider) {
     return config.codexBin;
   }
-  return provider === "claude" ? "claude" : "codex";
+  if (provider === "claude") {
+    return "claude";
+  }
+  if (provider === "gemini") {
+    return "gemini";
+  }
+  return "codex";
 }

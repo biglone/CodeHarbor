@@ -6,7 +6,7 @@ import type { OrchestratorOptions } from "./orchestrator-config-types";
 import { serializeBackendProfile } from "./backend-runtime-registry";
 
 export interface BackendRuntimeConfig {
-  executorFactory: ((provider: "codex" | "claude", model?: string | null) => CodexExecutor) | null;
+  executorFactory: ((provider: "codex" | "claude" | "gemini", model?: string | null) => CodexExecutor) | null;
   defaultBackendProfile: BackendModelRouteProfile;
   backendModelRouter: BackendModelRouter;
   defaultBackendRuntimeKey: string;

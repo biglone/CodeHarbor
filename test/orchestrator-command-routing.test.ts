@@ -60,6 +60,10 @@ describe("orchestrator command routing helpers", () => {
       kind: "manual",
       profile: { provider: "claude", model: "claude-sonnet-4-5" },
     });
+    expect(parseBackendTarget("/backend gemini gemini-2.5-pro")).toEqual({
+      kind: "manual",
+      profile: { provider: "gemini", model: "gemini-2.5-pro" },
+    });
     expect(parseBackendTarget("/backend bad")).toBeNull();
     expect(parseBackendTarget("/backend auto extra")).toBeNull();
 

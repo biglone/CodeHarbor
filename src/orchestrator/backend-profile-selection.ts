@@ -16,7 +16,7 @@ export function resolveSessionBackendStatusProfile(input: {
 
 export function resolveManualBackendProfile(
   input: {
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     model?: string | null;
   },
   defaultBackendProfile: BackendModelRouteProfile,

@@ -31,7 +31,7 @@ export function buildHelpNotice(input: {
 - /diag queue [count]: Show task queue diagnosis (default count 10)
 - /trace [requestId|latest]: Show in-memory trace for one request (chat prompt/progress/reply plus related diag/media events)
 - /upgrade [version]: Upgrade and auto-restart services (DM only; MATRIX_UPGRADE_ALLOWED_USERS first, then MATRIX_ADMIN_USERS)
-- /backend codex|claude [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
+- /backend codex|claude|gemini [model] | /backend auto|status: Show/switch backend tool (auto = restore auto routing)
 - /reset: Clear current session context
 - /stop: Stop current execution (aliases: /cancel, /esc)
 - If Matrix client intercepts / commands, use //autodev init StrawBerry (also supports //autodev run T6.2, //agents, //diag, //trace, //upgrade)
@@ -61,7 +61,7 @@ export function buildHelpNotice(input: {
 - /diag queue [count]: 查看任务队列状态诊断（count 默认 10）
 - /trace [requestId|latest]: 查看单次请求的内存追踪（chat prompt/progress/reply + 关联 diag/media 事件）
 - /upgrade [version]: 升级并自动重启服务（仅私聊；优先 MATRIX_UPGRADE_ALLOWED_USERS，否则 MATRIX_ADMIN_USERS）
-- /backend codex|claude [model] | /backend auto|status: 查看/切换后端工具（auto=恢复自动路由）
+- /backend codex|claude|gemini [model] | /backend auto|status: 查看/切换后端工具（auto=恢复自动路由）
 - /reset: 清空当前会话上下文
 - /stop: 停止当前执行任务（别名：/cancel、/esc、/撤回、/撤销）
 - Matrix 客户端若拦截 / 命令，可发送 //autodev init StrawBerry（兼容 //autodev run T6.2、//agents、//diag、//trace、//upgrade）

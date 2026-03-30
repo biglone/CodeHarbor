@@ -36,7 +36,7 @@ interface HandleBackendCommandDeps {
   resolveSessionBackendStatusProfile: (sessionKey: string) => BackendModelRouteProfile;
   formatBackendToolLabel: (profile: BackendModelRouteProfile) => string;
   resolveManualBackendProfile: (input: {
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     model?: string | null;
   }) => BackendModelRouteProfile;
   serializeBackendProfile: (profile: BackendModelRouteProfile) => string;
@@ -76,14 +76,14 @@ export async function handleBackendCommand(
 原因说明: ${reasonDesc}
 命中规则: ${rule}
 是否回退: ${fallback}
-可用命令: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
+可用命令: /backend codex [model] | /backend claude [model] | /backend gemini [model] | /backend auto | /backend status`,
         `[CodeHarbor] Current backend tool: ${deps.formatBackendToolLabel(statusProfile)}
 routeMode: ${mode}
 reason: ${reason}
 reasonDesc: ${reasonDesc}
 rule: ${rule}
 fallback: ${fallback}
-usage: /backend codex [model] | /backend claude [model] | /backend auto | /backend status`,
+usage: /backend codex [model] | /backend claude [model] | /backend gemini [model] | /backend auto | /backend status`,
       ),
     );
     return;

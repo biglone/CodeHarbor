@@ -34,7 +34,7 @@ const program = new Command();
 
 program
   .name("codeharbor")
-  .description("Instant-messaging bridge for Codex/Claude Code CLI sessions")
+  .description("Instant-messaging bridge for Codex/Claude/Gemini CLI sessions")
   .version(cliVersion);
 
 program.addHelpText(
@@ -42,7 +42,7 @@ program.addHelpText(
   [
     "",
     "Prerequisites:",
-    "  - AI CLI installed and authenticated (Codex: codex login; Claude Code: claude login)",
+    "  - AI CLI installed and authenticated (Codex: codex login; Claude Code: claude login; Gemini: gemini)",
     "  - Matrix bot credentials in .env: MATRIX_HOMESERVER, MATRIX_USER_ID, MATRIX_ACCESS_TOKEN",
     "",
     "Runtime:",
@@ -67,7 +67,7 @@ program.addHelpText(
     "  - /diag upgrade [count]",
     "  - /trace [requestId]",
     "  - /upgrade [version]",
-    "  - /backend codex|claude [model] | /backend auto|status",
+    "  - /backend codex|claude|gemini [model] | /backend auto|status",
     "  - /autodev stop",
     "  - /reset",
     "  - /stop",

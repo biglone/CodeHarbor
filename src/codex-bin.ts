@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export type CodexBinaryChecker = (bin: string) => Promise<void>;
-export type AiCliProvider = "codex" | "claude";
+export type AiCliProvider = "codex" | "claude" | "gemini";
 
 export interface FindWorkingCodexBinOptions {
   env?: NodeJS.ProcessEnv;
@@ -28,7 +28,7 @@ export function buildCliBinCandidates(
   provider: AiCliProvider,
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  const command = provider === "claude" ? "claude" : "codex";
+  const command = defaultCliCommandForProvider(provider);
   const normalized = configuredBin.trim() || command;
   const home = env.HOME?.trim() || os.homedir();
   const npmGlobalBin = home ? path.resolve(home, `.npm-global/bin/${command}`) : "";
@@ -87,4 +87,14 @@ export async function findWorkingCliBin(
 
 async function defaultCheckBinary(bin: string): Promise<void> {
   await execFileAsync(bin, ["--version"]);
+}
+
+function defaultCliCommandForProvider(provider: AiCliProvider): string {
+  if (provider === "claude") {
+    return "claude";
+  }
+  if (provider === "gemini") {
+    return "gemini";
+  }
+  return "codex";
 }

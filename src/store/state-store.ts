@@ -103,7 +103,7 @@ export interface SessionMessageRecord {
   id: number;
   sessionKey: string;
   role: "user" | "assistant";
-  provider: "codex" | "claude";
+  provider: "codex" | "claude" | "gemini";
   content: string;
   createdAt: number;
 }
@@ -1494,7 +1494,7 @@ export class StateStore {
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",
-    provider: "codex" | "claude",
+    provider: "codex" | "claude" | "gemini",
     content: string,
   ): void {
     const normalized = content.trim();
@@ -1544,7 +1544,7 @@ export class StateStore {
       id: number;
       session_key: string;
       role: "user" | "assistant";
-      provider: "codex" | "claude";
+      provider: "codex" | "claude" | "gemini";
       content: string;
       created_at: number;
     }>;

@@ -14,7 +14,7 @@ export interface RequestTraceRecord {
   sessionKey: string;
   conversationId: string;
   kind: RequestTraceKind;
-  provider: "codex" | "claude" | null;
+  provider: "codex" | "claude" | "gemini" | null;
   model: string | null;
   prompt: string;
   executionPrompt: string;
@@ -32,7 +32,7 @@ interface BeginRequestTraceInput {
   sessionKey: string;
   conversationId: string;
   kind: RequestTraceKind;
-  provider: "codex" | "claude" | null;
+  provider: "codex" | "claude" | "gemini" | null;
   model: string | null;
   prompt: string;
   executionPrompt: string;

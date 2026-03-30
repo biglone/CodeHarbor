@@ -13,7 +13,11 @@ export interface MediaDiagEventLike {
   detail: string;
 }
 
-export function shouldRetryClaudeImageFailure(provider: "codex" | "claude", imagePaths: string[], error: unknown): boolean {
+export function shouldRetryClaudeImageFailure(
+  provider: "codex" | "claude" | "gemini",
+  imagePaths: string[],
+  error: unknown,
+): boolean {
   if (provider !== "claude" || imagePaths.length === 0) {
     return false;
   }

@@ -41,7 +41,7 @@ class FakeStateStore {
       id: number;
       sessionKey: string;
       role: "user" | "assistant";
-      provider: "codex" | "claude";
+      provider: "codex" | "claude" | "gemini";
       content: string;
       createdAt: number;
     }>
@@ -106,7 +106,7 @@ class FakeStateStore {
   appendConversationMessage(
     sessionKey: string,
     role: "user" | "assistant",
-    provider: "codex" | "claude",
+    provider: "codex" | "claude" | "gemini",
     content: string,
   ): void {
     const normalized = content.trim();
@@ -133,7 +133,7 @@ class FakeStateStore {
     id: number;
     sessionKey: string;
     role: "user" | "assistant";
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     content: string;
     createdAt: number;
   }> {

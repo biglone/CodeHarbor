@@ -1,6 +1,6 @@
 # CodeHarbor
 
-CodeHarbor is a self-hosted Matrix bot and AI chat bridge for `codex` and `claude` CLI.
+CodeHarbor is a self-hosted Matrix bot and AI chat bridge for `codex`, `claude`, and `gemini` CLI.
 Users send messages in Matrix rooms, CodeHarbor routes each request to the selected backend,
 keeps room/session state in SQLite, and sends the final result back to the same room.
 
@@ -24,7 +24,7 @@ Quick feedback:
 - Duplicate Matrix event protection
 - Context-aware trigger (DM direct chat + group mention/reply + active session window)
 - Room-level trigger policy overrides
-- Runtime backend switch: `/backend codex|claude [model] | /backend auto|status`
+- Runtime backend switch: `/backend codex|claude|gemini [model] | /backend auto|status`
 - Cross-backend context bridge on next request after switch
 - Real `/stop` cancellation (kills in-flight AI CLI process)
 - Session runtime workers (logical worker per `channel:room:user`, with worker stats in `/status`)
@@ -39,7 +39,7 @@ Quick feedback:
 ## Architecture
 
 ```text
-Matrix Room -> MatrixChannel -> Orchestrator -> AI CLI Executor (codex/claude)
+Matrix Room -> MatrixChannel -> Orchestrator -> AI CLI Executor (codex/claude/gemini)
                                           |
                                           -> StateStore (SQLite)
 ```
@@ -57,6 +57,7 @@ Matrix Room -> MatrixChannel -> Orchestrator -> AI CLI Executor (codex/claude)
 - AI CLI installed and authenticated:
   - Codex: `codex login`
   - Claude Code: `claude login`
+  - Gemini CLI: `gemini`
 - A Matrix bot user + access token
 
 ## Install
@@ -199,7 +200,7 @@ Common in-chat control commands:
   - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
   - supports Linux systemd signal restart fallback, macOS launchd/manual fallback, and Windows safe manual fallback
   - emits structured success/failure summary with rollback and restart command templates
-- `/backend codex|claude [model] | /backend auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
+- `/backend codex|claude|gemini [model] | /backend auto|status` switch or inspect active AI backend (`auto` restores rule-based routing)
 - `/reset` clear current conversation context and suppress one-shot history bridge on the next request
 - `/stop` cancel current running request (or queue the stop), clear session context, and drop pending queued tasks for this session
   - aliases: `/cancel`, `/esc`, `/撤回`, `/撤销`
@@ -598,7 +599,7 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/upgrade [version]` install latest (or specified) npm version and trigger service restart (DM only)
     - auth priority: `MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > any DM user (when both empty)
     - includes service-context signal restart fallback when sudo escalation is unavailable
-  - `/backend codex|claude [model] | /backend auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
+  - `/backend codex|claude|gemini [model] | /backend auto|status` switch backend AI CLI tool at runtime (`auto` restores rule routing; next request auto-bridges recent local history)
   - `/reset` clear bound Codex session, keep conversation active, and suppress one-shot history bridge on the next request
   - `/stop` cancel in-flight execution (or queue a pending stop when busy), reset session context, and clear pending queue tasks for current session
     - aliases: `/cancel`, `/esc`, `/撤回`, `/撤销`
@@ -638,10 +639,10 @@ CLI update helper:
 
 AI CLI backend controls:
 
-- `AI_CLI_PROVIDER=codex|claude`
+- `AI_CLI_PROVIDER=codex|claude|gemini`
   - select runtime backend (`codex` by default)
 - `CODEX_BIN=<path-or-command>`
-  - executable for selected provider (for example `codex` or `claude`)
+  - executable for selected provider (for example `codex` / `claude` / `gemini`)
 - `CODEX_MODEL=<model>`
   - optional model override for selected provider
 - `CODEX_EXEC_TIMEOUT_MS`
@@ -651,7 +652,7 @@ AI CLI backend controls:
 Cross-backend context bridge behavior:
 
 - CodeHarbor stores recent local `user/assistant` turns per Matrix session.
-- After `/backend codex|claude [model]` or `/backend auto`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
+- After `/backend codex|claude|gemini [model]` or `/backend auto`, the next non-command request injects a `[conversation_bridge]` block so the new backend can continue with recent context.
 - `/reset` and `/stop` explicitly suppress this one-shot bridge on the immediate next request so users can start fresh.
 - `CONTEXT_BRIDGE_HISTORY_LIMIT` controls how many recent local turns are considered for bridge assembly.
 - `CONTEXT_BRIDGE_MAX_CHARS` controls the max bridge payload length (characters).
@@ -661,7 +662,7 @@ Backend/model rule routing:
 - `BACKEND_MODEL_ROUTING_RULES_JSON`
   - optional JSON array rule engine for automatic backend/model selection per request
   - conditions support `roomIds` / `senderIds` / `taskTypes` / `directMessage` / `textIncludes` / `textRegex`
-  - targets support `provider` (`codex|claude`) and/or `model`; rules are evaluated by `priority` (high -> low), then declaration order
+  - targets support `provider` (`codex|claude|gemini`) and/or `model`; rules are evaluated by `priority` (high -> low), then declaration order
   - when rule target cannot be instantiated (for example no `executorFactory` runtime), CodeHarbor falls back to default backend and marks status reason as `factory_unavailable`
 
 ### Multi-Agent Workflow (Phase B, Opt-In)

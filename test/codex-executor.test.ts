@@ -397,4 +397,48 @@ describe("CodexExecutor", () => {
 
     await expect(resultPromise).rejects.toThrow("claude returned error: denied");
   });
+
+  it("supports gemini provider with stream-json output", async () => {
+    const child = createFakeChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const executor = new CodexExecutor({
+      provider: "gemini",
+      bin: "gemini",
+      model: "gemini-2.5-pro",
+      workdir: process.cwd(),
+      dangerousBypass: true,
+      timeoutMs: 1_000,
+      sandboxMode: "on",
+      approvalPolicy: null,
+      extraArgs: [],
+      extraEnv: {},
+    });
+
+    const resultPromise = executor.execute("hello gemini", null);
+    child.stdout.write('{"type":"init","session":{"id":"gem-session-1"}}\n');
+    child.stdout.write('{"type":"assistant","text":"Hi from Gemini"}\n');
+    child.stdout.write('{"type":"done"}\n');
+    setImmediate(() => child.emit("close", 0));
+
+    await expect(resultPromise).resolves.toEqual({
+      sessionId: "gem-session-1",
+      reply: "Hi from Gemini",
+    });
+    expect(spawnMock).toHaveBeenCalledWith(
+      "gemini",
+      expect.arrayContaining([
+        "--prompt",
+        "hello gemini",
+        "--output-format",
+        "stream-json",
+        "--model",
+        "gemini-2.5-pro",
+        "--sandbox",
+        "--approval-mode",
+        "yolo",
+      ]),
+      expect.any(Object),
+    );
+  });
 });

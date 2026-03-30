@@ -50,7 +50,8 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
     output.write("CodeHarbor setup wizard\n");
     output.write(`Target file: ${envPath}\n`);
     const existingProviderRaw = (existingValues.AI_CLI_PROVIDER ?? "").trim().toLowerCase();
-    const providerFallback: AiCliProvider = existingProviderRaw === "claude" ? "claude" : "codex";
+    const providerFallback: AiCliProvider =
+      existingProviderRaw === "claude" ? "claude" : existingProviderRaw === "gemini" ? "gemini" : "codex";
     const detectedDefaultBin = await findWorkingCliBin(existingValues.CODEX_BIN ?? "", {
       provider: providerFallback,
     });
@@ -93,12 +94,12 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       },
       {
         key: "AI_CLI_PROVIDER",
-        label: "AI CLI provider (codex/claude)",
+        label: "AI CLI provider (codex/claude/gemini)",
         fallbackValue: providerFallback,
         validate: (value) => {
           const normalized = value.trim().toLowerCase();
-          if (normalized !== "codex" && normalized !== "claude") {
-            return 'Provider must be "codex" or "claude"';
+          if (normalized !== "codex" && normalized !== "claude" && normalized !== "gemini") {
+            return 'Provider must be "codex", "claude", or "gemini"';
           }
           return null;
         },
@@ -106,7 +107,8 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       {
         key: "CODEX_BIN",
         label: "AI CLI binary",
-        fallbackValue: detectedDefaultBin ?? (providerFallback === "claude" ? "claude" : "codex"),
+        fallbackValue:
+          detectedDefaultBin ?? (providerFallback === "claude" ? "claude" : providerFallback === "gemini" ? "gemini" : "codex"),
       },
       {
         key: "CODEX_WORKDIR",
@@ -129,11 +131,12 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       updates[question.key] = value;
 
       if (question.key === "AI_CLI_PROVIDER") {
-        const provider = value.trim().toLowerCase() === "claude" ? "claude" : "codex";
+        const provider: AiCliProvider =
+          value.trim().toLowerCase() === "claude" ? "claude" : value.trim().toLowerCase() === "gemini" ? "gemini" : "codex";
         const detectedBin = await findWorkingCliBin(existingValues.CODEX_BIN ?? "", { provider });
         const binaryQuestion = questions.find((item) => item.key === "CODEX_BIN");
         if (binaryQuestion) {
-          binaryQuestion.fallbackValue = detectedBin ?? (provider === "claude" ? "claude" : "codex");
+          binaryQuestion.fallbackValue = detectedBin ?? (provider === "claude" ? "claude" : provider === "gemini" ? "gemini" : "codex");
         }
       }
     }
@@ -143,7 +146,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 
     output.write(`Wrote ${envPath}\n`);
     output.write("Next steps:\n");
-    output.write("1. login selected AI CLI (codex login / claude login)\n");
+    output.write("1. login selected AI CLI (codex login / claude login / gemini)\n");
     output.write("2. codeharbor doctor\n");
     output.write("3. codeharbor start\n");
   } finally {

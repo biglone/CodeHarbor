@@ -324,7 +324,7 @@ type TaskQueueStateStore = Pick<
 
 export class Orchestrator {
   private readonly channel: Channel;
-  private readonly executorFactory: ((provider: "codex" | "claude", model?: string | null) => CodexExecutor) | null;
+  private readonly executorFactory: ((provider: "codex" | "claude" | "gemini", model?: string | null) => CodexExecutor) | null;
   private readonly backendRuntimes = new Map<string, BackendRuntimeBundle>();
   private readonly sessionBackendOverrides = new Map<string, SessionBackendOverride>();
   private readonly sessionBackendProfiles = new Map<string, BackendModelRouteProfile>();
@@ -1764,7 +1764,7 @@ export class Orchestrator {
   }
 
   private resolveManualBackendProfile(input: {
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     model?: string | null;
   }): BackendModelRouteProfile {
     return runResolveManualBackendProfile(input, this.defaultBackendProfile);
@@ -2132,7 +2132,9 @@ export class Orchestrator {
     const audioEnabled = this.audioTranscriber.isEnabled() ? "on" : "off";
     const mimeText = formatMimeAllowlist(this.cliCompat.imageAllowedMimeTypes);
     const backendImageSupport =
-      this.defaultBackendProfile.provider === "codex" || this.defaultBackendProfile.provider === "claude"
+      this.defaultBackendProfile.provider === "codex" ||
+      this.defaultBackendProfile.provider === "claude" ||
+      this.defaultBackendProfile.provider === "gemini"
         ? "yes"
         : "unknown";
     if (this.outputLanguage === "en") {
@@ -2322,7 +2324,7 @@ export class Orchestrator {
     requestId: string;
     sessionKey: string;
     conversationId: string;
-    provider: "codex" | "claude";
+    provider: "codex" | "claude" | "gemini";
     model: string | null;
     prompt: string;
     executionPrompt: string;

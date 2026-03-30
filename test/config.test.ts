@@ -168,6 +168,16 @@ describe("loadConfig AI_CLI_PROVIDER", () => {
     expect(config.aiCliProvider).toBe("claude");
     expect(config.codexBin).toBe("claude");
   });
+
+  it("supports gemini provider", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        AI_CLI_PROVIDER: "gemini",
+      }),
+    );
+    expect(config.aiCliProvider).toBe("gemini");
+    expect(config.codexBin).toBe("gemini");
+  });
 });
 
 describe("loadConfig OUTPUT_LANGUAGE", () => {
@@ -238,6 +248,33 @@ describe("loadConfig BACKEND_MODEL_ROUTING_RULES_JSON", () => {
       },
       target: {
         model: "gpt-5-mini",
+      },
+    });
+  });
+
+  it("accepts gemini as routing target provider", () => {
+    const config = loadConfig(
+      createBaseEnv({
+        BACKEND_MODEL_ROUTING_RULES_JSON: JSON.stringify([
+          {
+            id: "prefer-gemini-chat",
+            when: {
+              taskTypes: ["chat"],
+            },
+            target: {
+              provider: "gemini",
+              model: "gemini-2.5-pro",
+            },
+          },
+        ]),
+      }),
+    );
+
+    expect(config.backendModelRoutingRules[0]).toMatchObject({
+      id: "prefer-gemini-chat",
+      target: {
+        provider: "gemini",
+        model: "gemini-2.5-pro",
       },
     });
   });

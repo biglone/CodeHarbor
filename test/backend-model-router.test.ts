@@ -199,4 +199,40 @@ describe("BackendModelRouter", () => {
       enabled: 1,
     });
   });
+
+  it("supports gemini provider target", () => {
+    const router = new BackendModelRouter([
+      {
+        id: "prefer-gemini",
+        enabled: true,
+        priority: 10,
+        when: {
+          taskTypes: ["chat"],
+        },
+        target: {
+          provider: "gemini",
+          model: "gemini-2.5-pro",
+        },
+      },
+    ]);
+
+    const decision = router.resolve(
+      {
+        roomId: "!room:example.com",
+        senderId: "@alice:example.com",
+        taskType: "chat",
+        directMessage: true,
+        text: "hello",
+      },
+      {
+        provider: "codex",
+        model: "gpt-5",
+      },
+    );
+
+    expect(decision.profile).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
+  });
 });

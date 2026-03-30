@@ -1,4 +1,4 @@
-export type BackendModelRouteProvider = "codex" | "claude";
+export type BackendModelRouteProvider = "codex" | "claude" | "gemini";
 
 export type BackendModelRouteTaskType =
   | "chat"
