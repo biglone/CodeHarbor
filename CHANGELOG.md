@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.91] - 2026-03-31
+
+- e2e assertion fix: read SKILL catalog textarea via `toHaveValue(...)` instead of `toContainText(...)`, matching browser behavior where JS writes to `value` (not text node).
+- release stability: keep SKILL catalog load verification + unknown-assignment rejection coverage while removing false negatives in CI.
+
 ## [0.1.90] - 2026-03-31
 
 - e2e hardening: verify SKILL catalog refresh against stable builtin ids and keep unknown-assignment rejection coverage without local-root timing dependencies.

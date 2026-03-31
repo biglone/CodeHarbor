@@ -245,7 +245,7 @@ test("loads skill catalog and rejects unknown role skill assignments", async ({ 
   await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
   await page.click("#global-agent-skills-refresh-btn");
 
-  await expect(page.locator("#global-agent-skills-catalog")).toContainText("autonomous-dev (builtin)");
+  await expect(page.locator("#global-agent-skills-catalog")).toHaveValue(/autonomous-dev \(builtin\)/);
   await expect(page.locator("#global-agent-skills-missing")).toContainText(/(Missing SKILL: none|缺失 SKILL：无)/);
 
   await page.fill(
