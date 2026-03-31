@@ -82,54 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           latest="$(npm view "${PACKAGE_NAME}" version 2>/dev/null || true)"
-          if [ -z "${latest}" ]; then
-            echo "No published npm version found. Skip progression check."
-            exit 0
-          fi
-
-          LATEST_VERSION="${latest}" node - <<'NODE'
-          const latest = String(process.env.LATEST_VERSION ?? "");
-          const target = String(process.env.TARGET_VERSION ?? "");
-
-          function parseSemver(input) {
-            const match = input.trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
-            if (!match) {
-              return null;
-            }
-            return {
-              major: Number.parseInt(match[1], 10),
-              minor: Number.parseInt(match[2], 10),
-              patch: Number.parseInt(match[3], 10),
-            };
-          }
-
-          function isNextSemverStep(from, to) {
-            const patchStep = to.major === from.major && to.minor === from.minor && to.patch === from.patch + 1;
-            const minorStep = to.major === from.major && to.minor === from.minor + 1 && to.patch === 0;
-            const majorStep = to.major === from.major + 1 && to.minor === 0 && to.patch === 0;
-            return patchStep || minorStep || majorStep;
-          }
-
-          const latestParsed = parseSemver(latest);
-          const targetParsed = parseSemver(target);
-          if (!latestParsed || !targetParsed) {
-            console.error(`Invalid semver input: latest=${latest}, target=${target}`);
-            process.exit(1);
-          }
-
-          if (target === latest) {
-            console.log(`Target ${target} equals npm latest ${latest}; will be skipped later if already published.`);
-            process.exit(0);
-          }
-
-          if (!isNextSemverStep(latestParsed, targetParsed)) {
-            console.error(`Release version jump detected: npm latest=${latest}, target=${target}.`);
-            console.error("Policy: do not skip versions. If last release CI failed pre-publish, fix CI and retry the same version.");
-            process.exit(1);
-          }
-
-          console.log(`Version progression OK: ${latest} -> ${target}`);
-          NODE
+          LATEST_VERSION="${latest}" TARGET_VERSION="${TARGET_VERSION}" node ./scripts/check-release-version-progression.mjs
 
       - name: Changelog check
         if: steps.intent.outputs.publish == 'true'

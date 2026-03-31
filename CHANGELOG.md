@@ -6,7 +6,8 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
-- (none yet)
+- release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
+- regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
 
 ## [0.1.91] - 2026-03-31
 
