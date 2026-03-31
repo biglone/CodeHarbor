@@ -296,6 +296,30 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
       th {
         color: var(--muted);
       }
+      tr.row-active {
+        background: #0e749066;
+      }
+      .split-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      details.advanced-json {
+        margin-top: 12px;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #0f172a88;
+      }
+      details.advanced-json summary {
+        cursor: pointer;
+        color: #93c5fd;
+        font-size: 12px;
+      }
+      .table-actions {
+        width: 110px;
+      }
       pre {
         margin: 0;
         white-space: pre-wrap;
@@ -323,6 +347,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           grid-template-columns: 1fr;
         }
         .workspace {
+          grid-template-columns: 1fr;
+        }
+        .split-grid {
           grid-template-columns: 1fr;
         }
         .sidebar {
@@ -712,30 +739,121 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <button id="bots-apply-dry-run-btn" type="button" class="secondary" data-i18n="bots.applyDryRun">应用预检（dry-run）</button>
           <button id="bots-apply-btn" type="button" class="secondary" data-i18n="bots.apply">应用实例变更</button>
         </div>
-        <div class="grid">
-          <label class="field full">
-            <span class="field-label" data-i18n="bots.jsonLabel">实例配置 JSON（数组）</span>
-            <textarea
-              id="bots-profiles-json"
-              rows="14"
-              placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
-              data-i18n-placeholder="bots.jsonPlaceholder"
-            ></textarea>
-          </label>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th data-i18n="bots.table.id">实例 ID</th>
-                <th data-i18n="bots.table.enabled">启用</th>
-                <th data-i18n="bots.table.matrixUser">Matrix 账号</th>
-                <th data-i18n="bots.table.runtimeHome">运行目录</th>
-                <th data-i18n="bots.table.backend">后端</th>
-              </tr>
-            </thead>
-            <tbody id="bots-list-body"></tbody>
-          </table>
+        <div class="split-grid">
+          <div class="panel" style="padding: 12px;">
+            <h3 class="panel-title" style="font-size: 16px; margin-bottom: 10px;" data-i18n="bots.editorTitle">实例表单</h3>
+            <p id="bots-selected-label" class="muted" data-i18n="bots.selectedNone">当前：未选择实例（新建模式）</p>
+            <div class="grid">
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.id">实例 ID</span>
+                <input id="bots-form-id" type="text" placeholder="bot-a" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.runUser">运行用户</span>
+                <input id="bots-form-run-user" type="text" placeholder="bot-a" />
+              </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.field.runtimeHome">运行目录</span>
+                <input id="bots-form-runtime-home" type="text" placeholder="/home/bot-a/.codeharbor" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.matrixUserId">Matrix 用户 ID</span>
+                <input id="bots-form-matrix-user-id" type="text" placeholder="@bot-a:example.com" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.matrixHomeserver">Matrix Homeserver</span>
+                <input id="bots-form-matrix-homeserver" type="text" placeholder="https://matrix.example.com" />
+              </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.field.matrixAccessToken">Matrix Access Token</span>
+                <input
+                  id="bots-form-matrix-token"
+                  type="password"
+                  placeholder="留空=保持现有 token；填写=覆盖 token"
+                  data-i18n-placeholder="bots.field.matrixAccessTokenPlaceholder"
+                />
+                <p id="bots-token-state" class="muted" data-i18n="bots.tokenState.unknown">token 状态：未知</p>
+              </label>
+              <label class="checkbox">
+                <input id="bots-form-enabled" type="checkbox" />
+                <span data-i18n="bots.field.enabled">启用该实例</span>
+              </label>
+              <label class="checkbox">
+                <input id="bots-form-with-admin" type="checkbox" />
+                <span data-i18n="bots.field.withAdmin">安装 Admin 子服务</span>
+              </label>
+              <label class="checkbox full">
+                <input id="bots-form-clear-token" type="checkbox" />
+                <span data-i18n="bots.field.clearToken">清空已有 Matrix token（危险）</span>
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.backendProvider">后端提供方</span>
+                <select id="bots-form-backend-provider">
+                  <option value="">(inherit/default)</option>
+                  <option value="codex">codex</option>
+                  <option value="claude">claude</option>
+                  <option value="gemini">gemini</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="bots.field.backendModel">后端模型（可选）</span>
+                <input id="bots-form-backend-model" type="text" placeholder="gpt-5.4 / sonnet / gemini-2.5-pro" />
+              </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.field.backendBin">后端命令路径（可选）</span>
+                <input id="bots-form-backend-bin" type="text" placeholder="/usr/local/bin/codex" />
+              </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.field.workdir">工作目录（可选）</span>
+                <input id="bots-form-workdir" type="text" placeholder="/srv/project-a" />
+              </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.field.notes">备注（可选）</span>
+                <textarea id="bots-form-notes" rows="3" placeholder="用途/负责人/环境说明"></textarea>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="bots-new-btn" type="button" class="secondary" data-i18n="bots.new">新建实例</button>
+              <button id="bots-upsert-btn" type="button" data-i18n="bots.upsert">加入/更新列表</button>
+              <button id="bots-delete-btn" type="button" class="danger" data-i18n="bots.delete">从列表移除</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="table-wrap" style="margin-top: 0;">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="bots.table.id">实例 ID</th>
+                    <th data-i18n="bots.table.enabled">启用</th>
+                    <th data-i18n="bots.table.matrixUser">Matrix 账号</th>
+                    <th data-i18n="bots.table.runtimeHome">运行目录</th>
+                    <th data-i18n="bots.table.backend">后端</th>
+                    <th class="table-actions" data-i18n="bots.table.actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="bots-list-body"></tbody>
+              </table>
+            </div>
+            <details class="advanced-json">
+              <summary data-i18n="bots.advancedTitle">高级：JSON 批量编辑</summary>
+              <div class="grid" style="margin-top: 8px;">
+                <label class="field full">
+                  <span class="field-label" data-i18n="bots.jsonLabel">实例配置 JSON（数组）</span>
+                  <textarea
+                    id="bots-profiles-json"
+                    rows="12"
+                    placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
+                    data-i18n-placeholder="bots.jsonPlaceholder"
+                  ></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="bots-load-json-btn" type="button" class="secondary" data-i18n="bots.loadJson">从 JSON 覆盖列表</button>
+                <button id="bots-sync-json-btn" type="button" class="secondary" data-i18n="bots.syncJson">从列表同步 JSON</button>
+              </div>
+            </details>
+          </div>
         </div>
       </section>
 
@@ -1046,14 +1164,43 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.save": "保存实例配置",
             "bots.applyDryRun": "应用预检（dry-run）",
             "bots.apply": "应用实例变更",
+            "bots.editorTitle": "实例表单",
+            "bots.selectedNone": "当前：未选择实例（新建模式）",
+            "bots.selectedPrefix": "当前实例：{id}",
+            "bots.new": "新建实例",
+            "bots.upsert": "加入/更新列表",
+            "bots.delete": "从列表移除",
+            "bots.advancedTitle": "高级：JSON 批量编辑",
+            "bots.loadJson": "从 JSON 覆盖列表",
+            "bots.syncJson": "从列表同步 JSON",
             "bots.jsonLabel": "实例配置 JSON（数组）",
             "bots.jsonPlaceholder":
               '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+            "bots.field.id": "实例 ID",
+            "bots.field.runUser": "运行用户",
+            "bots.field.runtimeHome": "运行目录",
+            "bots.field.matrixUserId": "Matrix 用户 ID",
+            "bots.field.matrixHomeserver": "Matrix Homeserver",
+            "bots.field.matrixAccessToken": "Matrix Access Token",
+            "bots.field.matrixAccessTokenPlaceholder": "留空=保持现有 token；填写=覆盖 token",
+            "bots.field.enabled": "启用该实例",
+            "bots.field.withAdmin": "安装 Admin 子服务",
+            "bots.field.clearToken": "清空已有 Matrix token（危险）",
+            "bots.field.backendProvider": "后端提供方",
+            "bots.field.backendModel": "后端模型（可选）",
+            "bots.field.backendBin": "后端命令路径（可选）",
+            "bots.field.workdir": "工作目录（可选）",
+            "bots.field.notes": "备注（可选）",
+            "bots.tokenState.unknown": "token 状态：未知",
+            "bots.tokenState.present": "token 状态：已配置（{masked}）",
+            "bots.tokenState.empty": "token 状态：未配置",
             "bots.table.id": "实例 ID",
             "bots.table.enabled": "启用",
             "bots.table.matrixUser": "Matrix 账号",
             "bots.table.runtimeHome": "运行目录",
             "bots.table.backend": "后端",
+            "bots.table.actions": "操作",
+            "bots.table.edit": "编辑",
             "notice.botsLoaded": "机器人实例配置已加载：{count} 项。",
             "notice.botsLoadFailed": "加载机器人实例配置失败：{error}",
             "notice.botsJsonInvalid": "实例配置 JSON 解析失败：{error}",
@@ -1062,6 +1209,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsApplied": "实例应用结果：成功 {succeeded}，失败 {failed}，跳过 {skipped}。",
             "notice.botsApplyFailed": "应用实例配置失败：{error}",
             "notice.botsEmpty": "暂无机器人实例配置。",
+            "notice.botsFormInvalid": "实例表单校验失败：{error}",
+            "notice.botsProfileStaged": "实例已加入本地列表：{id}",
+            "notice.botsProfileRemoved": "实例已从本地列表移除：{id}",
+            "notice.botsProfileNotSelected": "请先在列表中选择实例。",
+            "notice.botsJsonLoaded": "已从 JSON 覆盖本地实例列表：{count} 项。",
             "rooms.title": "房间配置",
             "rooms.roomId": "房间 ID",
             "rooms.roomIdPlaceholder": "!room:example.com",
@@ -1295,14 +1447,43 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.save": "Save Profiles",
             "bots.applyDryRun": "Apply Dry-Run",
             "bots.apply": "Apply Changes",
+            "bots.editorTitle": "Profile Form",
+            "bots.selectedNone": "Current: none selected (create mode)",
+            "bots.selectedPrefix": "Current profile: {id}",
+            "bots.new": "New Profile",
+            "bots.upsert": "Add/Update List",
+            "bots.delete": "Remove From List",
+            "bots.advancedTitle": "Advanced: Bulk JSON Editor",
+            "bots.loadJson": "Load List From JSON",
+            "bots.syncJson": "Sync JSON From List",
             "bots.jsonLabel": "Profiles JSON (array)",
             "bots.jsonPlaceholder":
               '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+            "bots.field.id": "Instance ID",
+            "bots.field.runUser": "Run User",
+            "bots.field.runtimeHome": "Runtime Home",
+            "bots.field.matrixUserId": "Matrix User ID",
+            "bots.field.matrixHomeserver": "Matrix Homeserver",
+            "bots.field.matrixAccessToken": "Matrix Access Token",
+            "bots.field.matrixAccessTokenPlaceholder": "Leave empty to keep existing token; fill to replace",
+            "bots.field.enabled": "Enable this instance",
+            "bots.field.withAdmin": "Install Admin sidecar service",
+            "bots.field.clearToken": "Clear existing Matrix token (dangerous)",
+            "bots.field.backendProvider": "Backend Provider",
+            "bots.field.backendModel": "Backend Model (optional)",
+            "bots.field.backendBin": "Backend Binary Path (optional)",
+            "bots.field.workdir": "Workdir (optional)",
+            "bots.field.notes": "Notes (optional)",
+            "bots.tokenState.unknown": "Token state: unknown",
+            "bots.tokenState.present": "Token state: configured ({masked})",
+            "bots.tokenState.empty": "Token state: not configured",
             "bots.table.id": "Instance ID",
             "bots.table.enabled": "Enabled",
             "bots.table.matrixUser": "Matrix User",
             "bots.table.runtimeHome": "Runtime Home",
             "bots.table.backend": "Backend",
+            "bots.table.actions": "Actions",
+            "bots.table.edit": "Edit",
             "notice.botsLoaded": "Loaded bot profiles: {count}.",
             "notice.botsLoadFailed": "Failed to load bot profiles: {error}",
             "notice.botsJsonInvalid": "Profiles JSON parse failed: {error}",
@@ -1311,6 +1492,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsApplied": "Apply result: succeeded {succeeded}, failed {failed}, skipped {skipped}.",
             "notice.botsApplyFailed": "Failed to apply bot profiles: {error}",
             "notice.botsEmpty": "No bot profiles.",
+            "notice.botsFormInvalid": "Profile form validation failed: {error}",
+            "notice.botsProfileStaged": "Profile staged in local list: {id}",
+            "notice.botsProfileRemoved": "Profile removed from local list: {id}",
+            "notice.botsProfileNotSelected": "Select a profile from the list first.",
+            "notice.botsJsonLoaded": "Loaded list from JSON: {count} profile(s).",
             "rooms.title": "Room Config",
             "rooms.roomId": "Room ID",
             "rooms.roomIdPlaceholder": "!room:example.com",
@@ -1408,6 +1594,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           health: false,
           audit: false
         };
+        var botProfilesState = [];
+        var selectedBotProfileId = null;
 
         var tokenInput = document.getElementById("auth-token");
         var actorInput = document.getElementById("auth-actor");
@@ -1560,6 +1748,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         });
         document.getElementById("bots-load-btn").addEventListener("click", loadBotProfiles);
         document.getElementById("bots-save-btn").addEventListener("click", saveBotProfiles);
+        document.getElementById("bots-new-btn").addEventListener("click", startCreateBotProfile);
+        document.getElementById("bots-upsert-btn").addEventListener("click", upsertBotProfileLocal);
+        document.getElementById("bots-delete-btn").addEventListener("click", removeSelectedBotProfileLocal);
+        document.getElementById("bots-load-json-btn").addEventListener("click", loadBotProfilesFromJsonEditor);
+        document.getElementById("bots-sync-json-btn").addEventListener("click", syncBotProfilesJsonEditor);
         document.getElementById("bots-apply-dry-run-btn").addEventListener("click", function () {
           applyBotProfiles(true);
         });
@@ -2025,6 +2218,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           if (langSelect.value !== currentLang) {
             langSelect.value = currentLang;
           }
+          refreshBotSelectionLabel();
+          renderBotTokenState(getSelectedBotProfile());
         }
 
         function hideNotice() {
@@ -2456,6 +2651,149 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           }
         }
 
+        function getSelectedBotProfile() {
+          if (!selectedBotProfileId) {
+            return null;
+          }
+          for (var i = 0; i < botProfilesState.length; i += 1) {
+            if (botProfilesState[i].id === selectedBotProfileId) {
+              return botProfilesState[i];
+            }
+          }
+          return null;
+        }
+
+        function refreshBotSelectionLabel() {
+          var labelNode = document.getElementById("bots-selected-label");
+          if (!labelNode) {
+            return;
+          }
+          var selected = getSelectedBotProfile();
+          if (!selected) {
+            labelNode.textContent = t("bots.selectedNone");
+            return;
+          }
+          labelNode.textContent = t("bots.selectedPrefix", { id: selected.id });
+        }
+
+        function maskTokenLocal(value) {
+          if (!value) {
+            return null;
+          }
+          if (value.length <= 6) {
+            return "***";
+          }
+          return value.slice(0, 3) + "***" + value.slice(-3);
+        }
+
+        function renderBotTokenState(profile) {
+          var tokenStateNode = document.getElementById("bots-token-state");
+          if (!tokenStateNode) {
+            return;
+          }
+          if (!profile) {
+            tokenStateNode.textContent = t("bots.tokenState.unknown");
+            return;
+          }
+          if (profile.hasMatrixAccessToken) {
+            tokenStateNode.textContent = t("bots.tokenState.present", {
+              masked: profile.matrixAccessTokenMasked || "***",
+            });
+            return;
+          }
+          tokenStateNode.textContent = t("bots.tokenState.empty");
+        }
+
+        function normalizeOptionalTextValue(value) {
+          if (value === null || value === undefined) {
+            return null;
+          }
+          var text = String(value).trim();
+          return text ? text : null;
+        }
+
+        function normalizeBotProfileForState(input) {
+          var item = input || {};
+          var normalized = {
+            id: String(item.id || "").trim(),
+            enabled: Boolean(item.enabled),
+            runtimeHome: String(item.runtimeHome || "").trim(),
+            runUser: String(item.runUser || "").trim(),
+            withAdmin: item.withAdmin === undefined ? true : Boolean(item.withAdmin),
+            matrixUserId: String(item.matrixUserId || "").trim(),
+            matrixHomeserver: String(item.matrixHomeserver || "").trim(),
+            hasMatrixAccessToken: Boolean(item.hasMatrixAccessToken),
+            matrixAccessTokenMasked: item.matrixAccessTokenMasked ? String(item.matrixAccessTokenMasked) : null,
+            workdir: normalizeOptionalTextValue(item.workdir),
+            notes: normalizeOptionalTextValue(item.notes),
+            backend: null,
+          };
+
+          if (item.backend && typeof item.backend === "object" && !Array.isArray(item.backend)) {
+            var backendProvider = String(item.backend.provider || "").trim();
+            if (backendProvider) {
+              normalized.backend = {
+                provider: backendProvider,
+                model: normalizeOptionalTextValue(item.backend.model),
+                bin: normalizeOptionalTextValue(item.backend.bin),
+              };
+            }
+          }
+
+          if (Object.prototype.hasOwnProperty.call(item, "matrixAccessToken")) {
+            normalized.matrixAccessToken = typeof item.matrixAccessToken === "string" ? item.matrixAccessToken : "";
+            if (normalized.matrixAccessToken) {
+              normalized.hasMatrixAccessToken = true;
+              normalized.matrixAccessTokenMasked = maskTokenLocal(normalized.matrixAccessToken);
+            } else {
+              normalized.hasMatrixAccessToken = false;
+              normalized.matrixAccessTokenMasked = null;
+            }
+          }
+
+          return normalized;
+        }
+
+        function serializeBotProfilesForSave(items) {
+          var output = [];
+          for (var i = 0; i < items.length; i += 1) {
+            var item = items[i];
+            var next = {
+              id: item.id,
+              enabled: Boolean(item.enabled),
+              runtimeHome: item.runtimeHome,
+              runUser: item.runUser,
+              withAdmin: Boolean(item.withAdmin),
+              matrixUserId: item.matrixUserId,
+              matrixHomeserver: item.matrixHomeserver,
+              backend: null,
+              workdir: item.workdir || null,
+              notes: item.notes || null,
+            };
+
+            if (item.backend && item.backend.provider) {
+              next.backend = {
+                provider: String(item.backend.provider).trim(),
+                model: item.backend.model || null,
+                bin: item.backend.bin || null,
+              };
+            } else {
+              next.backend = null;
+            }
+
+            if (Object.prototype.hasOwnProperty.call(item, "matrixAccessToken")) {
+              next.matrixAccessToken = typeof item.matrixAccessToken === "string" ? item.matrixAccessToken : "";
+            }
+
+            output.push(next);
+          }
+          return output;
+        }
+
+        function syncBotProfilesJsonEditor() {
+          document.getElementById("bots-profiles-json").value = JSON.stringify(serializeBotProfilesForSave(botProfilesState), null, 2);
+        }
+
         function parseBotProfilesEditor() {
           var raw = document.getElementById("bots-profiles-json").value.trim();
           if (!raw) {
@@ -2467,32 +2805,269 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           } catch (error) {
             throw new Error(t("notice.botsJsonInvalid", { error: error && error.message ? String(error.message) : "invalid JSON" }));
           }
+          var items = [];
           if (Array.isArray(parsed)) {
-            return parsed;
+            items = parsed;
+          } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.profiles)) {
+            items = parsed.profiles;
+          } else {
+            throw new Error(t("notice.botsJsonInvalid", { error: "expected JSON array or {profiles: [...]}" }));
           }
-          if (parsed && typeof parsed === "object" && Array.isArray(parsed.profiles)) {
-            return parsed.profiles;
+
+          var normalizedItems = [];
+          var seen = {};
+          for (var i = 0; i < items.length; i += 1) {
+            var normalized = normalizeBotProfileForState(items[i]);
+            if (!normalized.id) {
+              throw new Error(t("notice.botsJsonInvalid", { error: "profile.id is required" }));
+            }
+            if (seen[normalized.id]) {
+              throw new Error(t("notice.botsJsonInvalid", { error: "duplicate id: " + normalized.id }));
+            }
+            seen[normalized.id] = true;
+            normalizedItems.push(normalized);
           }
-          throw new Error(t("notice.botsJsonInvalid", { error: "expected JSON array or {profiles: [...]}" }));
+          return normalizedItems;
+        }
+
+        function setSelectedBotProfileById(id) {
+          var target = null;
+          for (var i = 0; i < botProfilesState.length; i += 1) {
+            if (botProfilesState[i].id === id) {
+              target = botProfilesState[i];
+              break;
+            }
+          }
+          if (!target) {
+            selectedBotProfileId = null;
+            startCreateBotProfile();
+            return;
+          }
+          selectedBotProfileId = target.id;
+          fillBotProfileForm(target);
+          renderBotProfileTable(botProfilesState);
+        }
+
+        function startCreateBotProfile() {
+          selectedBotProfileId = null;
+          document.getElementById("bots-form-id").value = "";
+          document.getElementById("bots-form-enabled").checked = true;
+          document.getElementById("bots-form-runtime-home").value = "";
+          document.getElementById("bots-form-run-user").value = "";
+          document.getElementById("bots-form-with-admin").checked = true;
+          document.getElementById("bots-form-matrix-user-id").value = "";
+          document.getElementById("bots-form-matrix-homeserver").value = "";
+          document.getElementById("bots-form-matrix-token").value = "";
+          document.getElementById("bots-form-clear-token").checked = false;
+          document.getElementById("bots-form-backend-provider").value = "";
+          document.getElementById("bots-form-backend-model").value = "";
+          document.getElementById("bots-form-backend-bin").value = "";
+          document.getElementById("bots-form-workdir").value = "";
+          document.getElementById("bots-form-notes").value = "";
+          refreshBotSelectionLabel();
+          renderBotTokenState(null);
+          renderBotProfileTable(botProfilesState);
+        }
+
+        function fillBotProfileForm(profile) {
+          document.getElementById("bots-form-id").value = profile.id || "";
+          document.getElementById("bots-form-enabled").checked = Boolean(profile.enabled);
+          document.getElementById("bots-form-runtime-home").value = profile.runtimeHome || "";
+          document.getElementById("bots-form-run-user").value = profile.runUser || "";
+          document.getElementById("bots-form-with-admin").checked = profile.withAdmin === undefined ? true : Boolean(profile.withAdmin);
+          document.getElementById("bots-form-matrix-user-id").value = profile.matrixUserId || "";
+          document.getElementById("bots-form-matrix-homeserver").value = profile.matrixHomeserver || "";
+          document.getElementById("bots-form-matrix-token").value = "";
+          document.getElementById("bots-form-clear-token").checked = false;
+          document.getElementById("bots-form-backend-provider").value = profile.backend && profile.backend.provider ? profile.backend.provider : "";
+          document.getElementById("bots-form-backend-model").value = profile.backend && profile.backend.model ? profile.backend.model : "";
+          document.getElementById("bots-form-backend-bin").value = profile.backend && profile.backend.bin ? profile.backend.bin : "";
+          document.getElementById("bots-form-workdir").value = profile.workdir || "";
+          document.getElementById("bots-form-notes").value = profile.notes || "";
+          refreshBotSelectionLabel();
+          renderBotTokenState(profile);
+        }
+
+        function readBotProfileFromForm() {
+          var id = asText("bots-form-id");
+          var runtimeHome = asText("bots-form-runtime-home");
+          var runUser = asText("bots-form-run-user");
+          var matrixUserId = asText("bots-form-matrix-user-id");
+          var matrixHomeserver = asText("bots-form-matrix-homeserver");
+          if (!id) {
+            throw new Error("id");
+          }
+          if (!runtimeHome) {
+            throw new Error("runtimeHome");
+          }
+          if (!runUser) {
+            throw new Error("runUser");
+          }
+          if (!matrixUserId) {
+            throw new Error("matrixUserId");
+          }
+          if (!/^@[^:\\s]+:.+/.test(matrixUserId)) {
+            throw new Error("matrixUserId format");
+          }
+          if (!matrixHomeserver) {
+            throw new Error("matrixHomeserver");
+          }
+          try {
+            new URL(matrixHomeserver);
+          } catch (error) {
+            throw new Error("matrixHomeserver url");
+          }
+
+          var backendProvider = asText("bots-form-backend-provider");
+          var backendModel = normalizeOptionalTextValue(asText("bots-form-backend-model"));
+          var backendBin = normalizeOptionalTextValue(asText("bots-form-backend-bin"));
+          var profile = {
+            id: id,
+            enabled: asBool("bots-form-enabled"),
+            runtimeHome: runtimeHome,
+            runUser: runUser,
+            withAdmin: asBool("bots-form-with-admin"),
+            matrixUserId: matrixUserId,
+            matrixHomeserver: matrixHomeserver,
+            backend: backendProvider
+              ? {
+                  provider: backendProvider,
+                  model: backendModel,
+                  bin: backendBin,
+                }
+              : null,
+            workdir: normalizeOptionalTextValue(asText("bots-form-workdir")),
+            notes: normalizeOptionalTextValue(asText("bots-form-notes")),
+          };
+
+          var tokenInputValue = asText("bots-form-matrix-token");
+          var clearToken = asBool("bots-form-clear-token");
+          if (clearToken) {
+            profile.matrixAccessToken = "";
+          } else if (tokenInputValue) {
+            profile.matrixAccessToken = tokenInputValue;
+          }
+          return profile;
+        }
+
+        function upsertBotProfileLocal() {
+          try {
+            var draft = readBotProfileFromForm();
+            if (selectedBotProfileId && selectedBotProfileId !== draft.id) {
+              botProfilesState = botProfilesState.filter(function (item) {
+                return item.id !== selectedBotProfileId;
+              });
+            }
+            var next = normalizeBotProfileForState(draft);
+            var existingIndex = -1;
+            for (var i = 0; i < botProfilesState.length; i += 1) {
+              if (botProfilesState[i].id === next.id) {
+                existingIndex = i;
+                break;
+              }
+            }
+            if (existingIndex >= 0) {
+              var existing = botProfilesState[existingIndex];
+              if (!Object.prototype.hasOwnProperty.call(next, "matrixAccessToken") && Object.prototype.hasOwnProperty.call(existing, "matrixAccessToken")) {
+                next.matrixAccessToken = existing.matrixAccessToken;
+              }
+              if (!Object.prototype.hasOwnProperty.call(next, "matrixAccessToken")) {
+                next.hasMatrixAccessToken = existing.hasMatrixAccessToken;
+                next.matrixAccessTokenMasked = existing.matrixAccessTokenMasked;
+              }
+              botProfilesState[existingIndex] = next;
+            } else {
+              botProfilesState.push(next);
+            }
+            botProfilesState.sort(function (a, b) {
+              return a.id.localeCompare(b.id);
+            });
+            selectedBotProfileId = next.id;
+            syncBotProfilesJsonEditor();
+            setSelectedBotProfileById(next.id);
+            showNotice("ok", t("notice.botsProfileStaged", { id: next.id }));
+          } catch (error) {
+            showNotice("error", t("notice.botsFormInvalid", { error: error.message }));
+          }
+        }
+
+        function removeSelectedBotProfileLocal() {
+          if (!selectedBotProfileId) {
+            showNotice("warn", t("notice.botsProfileNotSelected"));
+            return;
+          }
+          var removedId = selectedBotProfileId;
+          botProfilesState = botProfilesState.filter(function (item) {
+            return item.id !== removedId;
+          });
+          selectedBotProfileId = null;
+          syncBotProfilesJsonEditor();
+          if (botProfilesState.length > 0) {
+            setSelectedBotProfileById(botProfilesState[0].id);
+          } else {
+            startCreateBotProfile();
+          }
+          showNotice("warn", t("notice.botsProfileRemoved", { id: removedId }));
+        }
+
+        function loadBotProfilesFromJsonEditor() {
+          try {
+            botProfilesState = parseBotProfilesEditor();
+            syncBotProfilesJsonEditor();
+            if (botProfilesState.length > 0) {
+              setSelectedBotProfileById(botProfilesState[0].id);
+            } else {
+              startCreateBotProfile();
+            }
+            renderBotProfileTable(botProfilesState);
+            showNotice("ok", t("notice.botsJsonLoaded", { count: botProfilesState.length }));
+          } catch (error) {
+            showNotice("error", t("notice.botsJsonInvalid", { error: error.message }));
+          }
+        }
+
+        function buildBackendSummary(item) {
+          if (!item.backend || !item.backend.provider) {
+            return "-";
+          }
+          return String(item.backend.provider) + (item.backend.model ? " (" + String(item.backend.model) + ")" : "");
         }
 
         function renderBotProfileTable(items) {
           botsListBody.innerHTML = "";
           if (!Array.isArray(items) || items.length === 0) {
-            renderEmptyRow(botsListBody, 5, t("notice.botsEmpty"));
+            renderEmptyRow(botsListBody, 6, t("notice.botsEmpty"));
             return;
           }
           for (var i = 0; i < items.length; i += 1) {
             var item = items[i] || {};
             var row = document.createElement("tr");
+            if (selectedBotProfileId && item.id === selectedBotProfileId) {
+              row.classList.add("row-active");
+            }
             appendCell(row, item.id || "");
             appendCell(row, String(Boolean(item.enabled)));
             appendCell(row, item.matrixUserId || "");
             appendCell(row, item.runtimeHome || "");
-            var backend = item.backend && item.backend.provider
-              ? String(item.backend.provider) + (item.backend.model ? " (" + String(item.backend.model) + ")" : "")
-              : "-";
-            appendCell(row, backend);
+            appendCell(row, buildBackendSummary(item));
+            var actionCell = document.createElement("td");
+            var editButton = document.createElement("button");
+            editButton.type = "button";
+            editButton.className = "secondary";
+            editButton.textContent = t("bots.table.edit");
+            (function (profileId) {
+              editButton.addEventListener("click", function () {
+                setSelectedBotProfileById(profileId);
+              });
+              row.addEventListener("click", function (event) {
+                if (event.target && event.target.tagName === "BUTTON") {
+                  return;
+                }
+                setSelectedBotProfileById(profileId);
+              });
+            })(item.id || "");
+            actionCell.appendChild(editButton);
+            row.appendChild(actionCell);
             botsListBody.appendChild(row);
           }
         }
@@ -2502,26 +3077,44 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var response = await apiRequest("/api/admin/bot-profiles", "GET");
             var data = response.data || {};
             var profiles = Array.isArray(data.profiles) ? data.profiles : [];
-            document.getElementById("bots-profiles-json").value = JSON.stringify(profiles, null, 2);
-            renderBotProfileTable(profiles);
-            showNotice("ok", t("notice.botsLoaded", { count: profiles.length }));
+            botProfilesState = profiles.map(function (item) {
+              return normalizeBotProfileForState(item);
+            });
+            syncBotProfilesJsonEditor();
+            if (botProfilesState.length > 0) {
+              setSelectedBotProfileById(botProfilesState[0].id);
+            } else {
+              startCreateBotProfile();
+            }
+            renderBotProfileTable(botProfilesState);
+            showNotice("ok", t("notice.botsLoaded", { count: botProfilesState.length }));
           } catch (error) {
             showNotice("error", t("notice.botsLoadFailed", { error: error.message }));
-            renderEmptyRow(botsListBody, 5, t("table.loadFailed"));
+            renderEmptyRow(botsListBody, 6, t("table.loadFailed"));
           }
         }
 
         async function saveBotProfiles() {
           try {
-            var profiles = parseBotProfilesEditor();
+            var profilesForSave = serializeBotProfilesForSave(botProfilesState);
             var response = await apiRequest("/api/admin/bot-profiles", "PUT", {
-              profiles: profiles
+              profiles: profilesForSave
             });
             var data = response.data || {};
             var nextProfiles = Array.isArray(data.profiles) ? data.profiles : [];
-            document.getElementById("bots-profiles-json").value = JSON.stringify(nextProfiles, null, 2);
-            renderBotProfileTable(nextProfiles);
-            showNotice("ok", t("notice.botsSaved", { count: nextProfiles.length }));
+            botProfilesState = nextProfiles.map(function (item) {
+              return normalizeBotProfileForState(item);
+            });
+            syncBotProfilesJsonEditor();
+            if (selectedBotProfileId) {
+              setSelectedBotProfileById(selectedBotProfileId);
+            } else if (botProfilesState.length > 0) {
+              setSelectedBotProfileById(botProfilesState[0].id);
+            } else {
+              startCreateBotProfile();
+            }
+            renderBotProfileTable(botProfilesState);
+            showNotice("ok", t("notice.botsSaved", { count: botProfilesState.length }));
             await loadAudit();
           } catch (error) {
             showNotice("error", t("notice.botsSaveFailed", { error: error.message }));
