@@ -1477,9 +1477,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         if (!window.location.hash) {
           window.location.hash = pathToRoute[window.location.pathname] || "#/settings/global/basic";
-        } else {
-          handleRoute();
         }
+        handleRoute();
         applyLanguage();
         showNotice("ok", t("notice.ready"));
         void refreshAuthStatus();

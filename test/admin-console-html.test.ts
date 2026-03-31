@@ -26,6 +26,7 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('"/settings/global": "#/settings/global/basic"');
     expectHtmlContains('"/settings/global/basic": "#/settings/global/basic"');
     expectHtmlContains('window.location.hash = pathToRoute[window.location.pathname] || "#/settings/global/basic";');
+    expectHtmlContains("handleRoute();");
   });
 
   it("normalizes hash route and falls back to global basic section", () => {

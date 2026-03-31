@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.88] - 2026-03-31
+
+- admin console route bootstrap: run `handleRoute()` immediately after initial hash normalization so first-load view/data initialization does not rely on `hashchange` timing.
+- ci e2e stability: prevent hidden-panel/empty-field failures on first page load in Admin UI Playwright suite (`/settings/global`, `/settings/rooms`, `/health`, `/audit`).
+
 ## [0.1.87] - 2026-03-31
 
 - admin skill-management docs: document `GET /api/admin/config/skills` snapshot payload and update Admin UI walkthrough with SKILL catalog/missing-assignment checks.
