@@ -241,23 +241,16 @@ test("saves global agent workflow settings and persists to env", async ({ page }
 });
 
 test("loads skill catalog and rejects unknown role skill assignments", async ({ page }) => {
-  const skillRoot = path.join(paths.dir, "skills-e2e");
-  const localSkillDir = path.join(skillRoot, "matrix-audit-helper");
-  fs.mkdirSync(localSkillDir, { recursive: true });
-  fs.writeFileSync(path.join(localSkillDir, "SKILL.md"), "# Matrix Audit Helper\nLocal e2e skill.", "utf8");
-
   await page.goto(`${baseUrl}/settings/global`);
   await page.click('.submenu .tab-sub[data-route="#/settings/global/agent"]');
-  await page.fill("#global-agent-skills-roots", skillRoot);
-  await page.click("#global-save-btn");
   await page.click("#global-agent-skills-refresh-btn");
 
-  await expect(page.locator("#global-agent-skills-catalog")).toContainText("matrix-audit-helper (local)");
+  await expect(page.locator("#global-agent-skills-catalog")).toContainText("autonomous-dev (builtin)");
   await expect(page.locator("#global-agent-skills-missing")).toContainText(/(Missing SKILL: none|缺失 SKILL：无)/);
 
   await page.fill(
     "#global-agent-skills-assignments",
-    '{"planner":["matrix-audit-helper","missing-skill-e2e"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
+    '{"planner":["missing-skill-e2e"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
   );
   await page.click("#global-save-btn");
 

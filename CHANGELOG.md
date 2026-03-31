@@ -8,6 +8,10 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.90] - 2026-03-31
+
+- e2e hardening: verify SKILL catalog refresh against stable builtin ids and keep unknown-assignment rejection coverage without local-root timing dependencies.
+
 ## [0.1.89] - 2026-03-31
 
 - admin UI parser fix: escape newline in SKILL catalog textarea rendering (`lines.join("\\n")`) to prevent inline-script syntax errors on page load.
