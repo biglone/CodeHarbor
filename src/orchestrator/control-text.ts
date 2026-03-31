@@ -72,6 +72,15 @@ export function buildStatusNotice(input: {
   botNoticePrefix: string;
   outputLanguage: OutputLanguage;
   scope: string;
+  topologyBotUserId: string;
+  topologyConversationId: string;
+  topologySenderId: string;
+  topologySessionKey: string;
+  topologyTriggerMode: string;
+  topologyRoomSource: "default" | "room";
+  topologyRoomEnabled: boolean;
+  topologyRoomPolicy: string;
+  topologyRoleChain: string;
   isActive: boolean;
   activeUntil: string;
   hasCodexSession: boolean;
@@ -141,6 +150,12 @@ export function buildStatusNotice(input: {
   );
   const title = byOutputLanguage(input.outputLanguage, "当前状态", "Current status");
   const sessionType = byOutputLanguage(input.outputLanguage, "会话类型", "session");
+  const topology = byOutputLanguage(input.outputLanguage, "会话拓扑", "topology");
+  const triggerMode = byOutputLanguage(input.outputLanguage, "触发模式", "triggerMode");
+  const roomSource = byOutputLanguage(input.outputLanguage, "房间配置来源", "roomConfigSource");
+  const roomEnabled = byOutputLanguage(input.outputLanguage, "房间启用", "roomEnabled");
+  const roomPolicy = byOutputLanguage(input.outputLanguage, "房间触发策略", "roomPolicy");
+  const roleTopology = byOutputLanguage(input.outputLanguage, "角色链路", "roleTopology");
   const active = byOutputLanguage(input.outputLanguage, "激活中", "active");
   const bound = byOutputLanguage(input.outputLanguage, "已绑定会话", "sessionBound");
   const cwd = byOutputLanguage(input.outputLanguage, "当前工作目录", "workdir");
@@ -161,6 +176,12 @@ export function buildStatusNotice(input: {
 
   return `${input.botNoticePrefix} ${title}
 - ${sessionType}: ${input.scope}
+- ${topology}: bot=${input.topologyBotUserId}, room=${input.topologyConversationId}, user=${input.topologySenderId}, session=${input.topologySessionKey}
+- ${triggerMode}: ${input.topologyTriggerMode}
+- ${roomSource}: ${input.topologyRoomSource}
+- ${roomEnabled}: ${yesNoByOutputLanguage(input.outputLanguage, input.topologyRoomEnabled)}
+- ${roomPolicy}: ${input.topologyRoomPolicy}
+- ${roleTopology}: ${input.topologyRoleChain}
 - ${active}: ${activeText}
 - activeUntil: ${input.activeUntil}
 - ${bound}: ${sessionText}

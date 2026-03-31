@@ -788,6 +788,13 @@ describe("Orchestrator", () => {
     expect(executorFactory).toHaveBeenCalledWith("claude", "claude-sonnet-4-5");
     expect(channel.sent.some((entry) => entry.text.includes("claude:please ask anthropic model"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("backend route: mode=auto, reason=rule_match, rule=prefer-claude-chat"))).toBe(true);
+    expect(
+      channel.notices.some((entry) =>
+        entry.text.includes(
+          "bot=@bot:example.com, room=!room:example.com, user=@alice:example.com, session=matrix:!room:example.com:@alice:example.com",
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("falls back to default backend when routing rule needs unavailable executor", async () => {

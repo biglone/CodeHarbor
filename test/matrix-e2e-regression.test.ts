@@ -728,6 +728,14 @@ describe("Matrix e2e regression", () => {
     expect(executor.calls[1]?.sessionId).toBeNull();
     expect(executor.calls[1]?.prompt).not.toContain("[conversation_bridge]");
     expect(channel.notices.some((entry) => entry.text.includes("当前状态"))).toBe(true);
+    expect(
+      channel.notices.some((entry) =>
+        entry.text.includes(
+          "会话拓扑: bot=@bot:example.com, room=!room:example.com, user=@alice:example.com, session=matrix:!room:example.com:@alice:example.com",
+        ),
+      ),
+    ).toBe(true);
+    expect(channel.notices.some((entry) => entry.text.includes("触发模式: dm_direct"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("当前版本:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查:"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("更新检查时间:"))).toBe(true);

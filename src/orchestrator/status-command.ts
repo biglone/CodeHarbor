@@ -64,6 +64,7 @@ interface RoleSkillStatusLike {
 interface StatusCommandDeps {
   botNoticePrefix: string;
   outputLanguage: OutputLanguage;
+  matrixUserId: string;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -74,7 +75,17 @@ interface StatusCommandDeps {
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
   getSessionStatus: (sessionKey: string) => SessionStatusLike;
-  resolveRoomRuntimeConfig: (conversationId: string) => { workdir: string };
+  resolveRoomRuntimeConfig: (conversationId: string) => {
+    source: "default" | "room";
+    enabled: boolean;
+    triggerPolicy: {
+      allowMention: boolean;
+      allowReply: boolean;
+      allowActiveWindow: boolean;
+      allowPrefix: boolean;
+    };
+    workdir: string;
+  };
   getRuntimeMetricsSnapshot: () => RuntimeMetricsSnapshotLike;
   getRateLimiterSnapshot: () => RateLimiterSnapshot;
   getBackendRuntimeStats: () => { workerCount: number; runningCount: number };
@@ -115,6 +126,20 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
     : deps.groupDirectModeEnabled
       ? localize("群聊（默认直通）", "Group (direct mode)")
       : localize("群聊（按房间触发策略）", "Group (room trigger policy)");
+  const triggerMode = input.message.isDirectMessage
+    ? "dm_direct"
+    : deps.groupDirectModeEnabled
+      ? "group_direct"
+      : "group_policy";
+  const roomPolicy = input.message.isDirectMessage
+    ? "N/A"
+    : `mention=${roomConfig.triggerPolicy.allowMention ? "on" : "off"}, reply=${roomConfig.triggerPolicy.allowReply ? "on" : "off"}, activeWindow=${
+        roomConfig.triggerPolicy.allowActiveWindow ? "on" : "off"
+      }, prefix=${roomConfig.triggerPolicy.allowPrefix ? "on" : "off"}`;
+  const roleTopology =
+    deps.outputLanguage === "en"
+      ? "single-bot planner->executor->reviewer (same session)"
+      : "单机器人 planner->executor->reviewer（同一会话）";
   const activeUntil = status.activeUntil ?? localize("未激活", "inactive");
   const metrics = deps.getRuntimeMetricsSnapshot();
   const limiter = deps.getRateLimiterSnapshot();
@@ -176,6 +201,15 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       botNoticePrefix: deps.botNoticePrefix,
       outputLanguage: deps.outputLanguage,
       scope,
+      topologyBotUserId: deps.matrixUserId,
+      topologyConversationId: input.message.conversationId,
+      topologySenderId: input.message.senderId,
+      topologySessionKey: input.sessionKey,
+      topologyTriggerMode: triggerMode,
+      topologyRoomSource: roomConfig.source,
+      topologyRoomEnabled: roomConfig.enabled,
+      topologyRoomPolicy: roomPolicy,
+      topologyRoleChain: roleTopology,
       isActive: status.isActive,
       activeUntil,
       hasCodexSession: status.hasCodexSession,

@@ -17,6 +17,7 @@ type StatusCommandDispatchContext = Parameters<typeof runSendStatusCommand>[0] &
 interface StatusCommandContextInput {
   botNoticePrefix: string;
   outputLanguage: StatusCommandDispatchContext["outputLanguage"];
+  matrixUserId: string;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -45,7 +46,17 @@ interface StatusCommandContextInput {
       hasCodexSession: boolean;
     };
   };
-  resolveRoomRuntimeConfig: (conversationId: string) => { workdir: string };
+  resolveRoomRuntimeConfig: (conversationId: string) => {
+    source: "default" | "room";
+    enabled: boolean;
+    triggerPolicy: {
+      allowMention: boolean;
+      allowReply: boolean;
+      allowActiveWindow: boolean;
+      allowPrefix: boolean;
+    };
+    workdir: string;
+  };
   getRuntimeMetricsSnapshot: () => {
     activeExecutions: number;
     total: number;
@@ -91,6 +102,7 @@ interface StatusCommandContextInput {
 interface StatusCommandRuntimeConfigInput {
   botNoticePrefix: string;
   outputLanguage: StatusCommandDispatchContext["outputLanguage"];
+  matrixUserId: string;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompat: { enabled: boolean };
@@ -156,6 +168,7 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
   return {
     botNoticePrefix: input.botNoticePrefix,
     outputLanguage: input.outputLanguage,
+    matrixUserId: input.matrixUserId,
     groupDirectModeEnabled: input.groupDirectModeEnabled,
     updateCheckTtlMs: input.updateCheckTtlMs,
     cliCompatEnabled: input.cliCompatEnabled,
@@ -212,6 +225,7 @@ export function buildStatusCommandDispatchContextFromRuntime(
   return buildStatusCommandDispatchContext({
     botNoticePrefix: input.config.botNoticePrefix,
     outputLanguage: input.config.outputLanguage,
+    matrixUserId: input.config.matrixUserId,
     groupDirectModeEnabled: input.config.groupDirectModeEnabled,
     updateCheckTtlMs: input.config.updateCheckTtlMs,
     cliCompatEnabled: input.config.cliCompat.enabled,

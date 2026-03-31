@@ -986,6 +986,7 @@ export class Orchestrator {
       config: {
         botNoticePrefix: this.botNoticePrefix,
         outputLanguage: this.outputLanguage,
+        matrixUserId: this.matrixUserId,
         groupDirectModeEnabled: this.groupDirectModeEnabled,
         updateCheckTtlMs: this.updateCheckTtlMs,
         cliCompat: this.cliCompat,

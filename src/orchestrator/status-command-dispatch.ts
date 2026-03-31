@@ -47,6 +47,7 @@ interface BackendDecisionLike {
 interface StatusCommandDispatchContext {
   botNoticePrefix: string;
   outputLanguage: OutputLanguage;
+  matrixUserId: string;
   groupDirectModeEnabled: boolean;
   updateCheckTtlMs: number;
   cliCompatEnabled: boolean;
@@ -57,7 +58,17 @@ interface StatusCommandDispatchContext {
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
   getSessionStatus: (sessionKey: string) => SessionStatusLike;
-  resolveRoomRuntimeConfig: (conversationId: string) => { workdir: string };
+  resolveRoomRuntimeConfig: (conversationId: string) => {
+    source: "default" | "room";
+    enabled: boolean;
+    triggerPolicy: {
+      allowMention: boolean;
+      allowReply: boolean;
+      allowActiveWindow: boolean;
+      allowPrefix: boolean;
+    };
+    workdir: string;
+  };
   getRuntimeMetricsSnapshot: () => RuntimeMetricsSnapshotLike;
   getRateLimiterSnapshot: () => RateLimiterSnapshot;
   getBackendRuntimeStats: () => { workerCount: number; runningCount: number };
@@ -115,6 +126,7 @@ export async function sendStatusCommand(
     {
       botNoticePrefix: context.botNoticePrefix,
       outputLanguage: context.outputLanguage,
+      matrixUserId: context.matrixUserId,
       groupDirectModeEnabled: context.groupDirectModeEnabled,
       updateCheckTtlMs: context.updateCheckTtlMs,
       cliCompatEnabled: context.cliCompatEnabled,
