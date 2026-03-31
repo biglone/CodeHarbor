@@ -422,6 +422,7 @@ Main endpoints:
 - `GET /metrics` (Prometheus exposition format)
 - `GET /api/admin/auth/status`
 - `GET /api/admin/config/global`
+- `GET /api/admin/config/skills`
 - `PUT /api/admin/config/global`
 - `GET /api/admin/config/rooms`
 - `GET /api/admin/config/rooms/:roomId`
@@ -436,6 +437,12 @@ Main endpoints:
 - `PUT /api/admin/history/retention`
 - `POST /api/admin/history/cleanup`
 - `GET /api/admin/history/cleanup/runs?limit=20`
+
+`GET /api/admin/config/skills` returns a read-only snapshot for role-skill management:
+
+- effective `agentWorkflow.roleSkills` config
+- `catalog.availableSkills` (builtin + discovered local skills)
+- `catalog.missingAssignments` (per-role unresolved skill ids)
 
 When `ADMIN_TOKEN` or `ADMIN_TOKENS_JSON` is set, requests must include:
 
@@ -539,12 +546,15 @@ Boundary: hot updates affect new requests only; in-flight requests are not rolle
 
 1. Start server: `codeharbor admin serve`.
 2. Open `/settings/global`, set `Admin Token` (if enabled), then click `Save Auth`.
-3. Adjust global fields and click `Save Global Config` (UI shows restart-required warning).
-4. Use `Restart Main Service` or `Restart Main + Admin` buttons for one-click restart from Admin UI.
+3. Open `Global Settings -> Skills & Advanced`:
+   - click `Refresh SKILL catalog` to review builtin/local skill IDs
+   - check `Missing SKILL` hint before saving role assignments
+4. Adjust global fields and click `Save Global Config` (UI shows restart-required warning).
+5. Use `Restart Main Service` or `Restart Main + Admin` buttons for one-click restart from Admin UI.
    If services were installed with `--with-admin`, restart permissions are auto-configured by installer.
-5. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
-6. Open `/health` to run connectivity checks (`codex` + Matrix).
-7. Open `/audit` to verify config revisions (actor/summary/payload).
+6. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
+7. Open `/health` to run connectivity checks (`codex` + Matrix).
+8. Open `/audit` to verify config revisions (actor/summary/payload).
 
 ## Standalone Admin Deployment
 

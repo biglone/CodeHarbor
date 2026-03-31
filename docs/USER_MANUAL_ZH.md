@@ -125,9 +125,10 @@ codeharbor admin serve
 建议操作顺序：
 
 1. 在“全局配置”调整前缀、工作目录、限流、CLI 兼容等。
-2. 在“房间配置”设置房间是否启用、房间工作目录、触发策略。
-3. 到“健康检查”确认 Codex/Matrix 都正常。
-4. 到“配置审计”检查变更记录是否准确。
+2. 在“全局配置 -> 技能与高级”点击“刷新 SKILL 目录”，确认可用 SKILL 与“缺失 SKILL”提示。
+3. 在“房间配置”设置房间是否启用、房间工作目录、触发策略。
+4. 到“健康检查”确认 Codex/Matrix 都正常。
+5. 到“配置审计”检查变更记录是否准确。
 
 补充：`/health` 页面会显示 CodeHarbor 当前版本、最新版本（如可查询）以及是否可更新。
 
@@ -189,6 +190,8 @@ codeharbor admin serve
 - `AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON`：可选，角色到 SKILL 列表映射（JSON）
   - 默认映射已内置可开箱即用的基础 SKILL；若本地存在同名 SKILL，会自动覆盖内置版本
   - 内置兜底 SKILL 提示词统一维护为英文，保证国际化场景的一致默认体验
+  - 管理后台会在保存前校验 assignment 中的 skill id；若存在未知 id，将报错并阻止保存
+  - 可通过 `GET /api/admin/config/skills` 获取当前 SKILL 目录快照（可用 skill 列表 + 缺失映射）
   - 默认内置映射：
     - planner: `task-planner`, `requirements-doc`, `builtin-planner-core`, `dependency-analyzer`
     - executor: `autonomous-dev`, `bug-finder`, `test-generator`, `builtin-executor-core`, `refactoring`

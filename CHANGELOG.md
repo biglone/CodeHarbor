@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.87] - 2026-03-31
+
+- admin skill-management docs: document `GET /api/admin/config/skills` snapshot payload and update Admin UI walkthrough with SKILL catalog/missing-assignment checks.
+- Chinese user manual update: add explicit “技能与高级”操作步骤 and note that unknown role-skill ids are blocked during global-config validation.
+- e2e regression coverage: add Admin UI scenario that verifies SKILL catalog refresh shows local skills and save is rejected when role assignments include unknown skill ids.
+
 ## [0.1.86] - 2026-03-30
 
 - release pipeline stability: harden Admin global-config env serialization to avoid crashes when legacy in-memory arrays are absent (`imageAllowedMimeTypes` / role-skill roots).
