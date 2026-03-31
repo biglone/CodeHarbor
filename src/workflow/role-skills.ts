@@ -41,6 +41,12 @@ export interface WorkflowRoleSkillStatusSnapshot {
   roots: string[];
   roleAssignments: Record<WorkflowRole, string[]>;
   loadedSkills: Record<WorkflowRole, string[]>;
+  availableSkills: Array<{
+    id: string;
+    title: string;
+    source: "builtin" | "local";
+  }>;
+  missingAssignments: Record<WorkflowRole, string[]>;
 }
 
 interface WorkflowSkillEntry {
@@ -657,6 +663,13 @@ export class WorkflowRoleSkillCatalog {
   }
 
   getStatusSnapshot(): WorkflowRoleSkillStatusSnapshot {
+    const availableSkills = this.listAvailableSkills();
+    const availableSkillIds = new Set(availableSkills.map((skill) => skill.id.toLowerCase()));
+    const missingAssignments = {
+      planner: collectMissingAssignments(this.roleAssignments.planner, availableSkillIds),
+      executor: collectMissingAssignments(this.roleAssignments.executor, availableSkillIds),
+      reviewer: collectMissingAssignments(this.roleAssignments.reviewer, availableSkillIds),
+    };
     return {
       enabled: this.enabled,
       mode: this.mode,
@@ -668,7 +681,30 @@ export class WorkflowRoleSkillCatalog {
         executor: this.resolveRoleSkills("executor").map((skill) => `${skill.id}(${skill.source})`),
         reviewer: this.resolveRoleSkills("reviewer").map((skill) => `${skill.id}(${skill.source})`),
       },
+      availableSkills,
+      missingAssignments,
     };
+  }
+
+  listAvailableSkills(): Array<{
+    id: string;
+    title: string;
+    source: "builtin" | "local";
+  }> {
+    const canonical = new Map<string, WorkflowSkillEntry>();
+    for (const [key, skill] of this.allSkills.entries()) {
+      if (key !== skill.id.toLowerCase()) {
+        continue;
+      }
+      canonical.set(skill.id.toLowerCase(), skill);
+    }
+    return [...canonical.values()]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((skill) => ({
+        id: skill.id,
+        title: skill.title,
+        source: skill.source,
+      }));
   }
 
   buildPrompt(input: WorkflowRoleSkillPromptInput): WorkflowRoleSkillPromptResult {
@@ -833,6 +869,18 @@ function resolveDisclosureLevel(
     return "full";
   }
   return "summary";
+}
+
+function collectMissingAssignments(assigned: string[], availableSkillIds: Set<string>): string[] {
+  const missing: string[] = [];
+  for (const skillId of assigned) {
+    const normalized = skillId.trim().toLowerCase();
+    if (!normalized || availableSkillIds.has(normalized)) {
+      continue;
+    }
+    missing.push(skillId.trim());
+  }
+  return missing;
 }
 
 function normalizeMaxChars(value: number | undefined): number {

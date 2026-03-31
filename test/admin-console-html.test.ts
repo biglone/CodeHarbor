@@ -48,4 +48,13 @@ describe("admin console paged navigation", () => {
     expectHtmlContains("setElementVisible(globalRestartHint, !isSnapshot);");
     expectHtmlContains("setElementVisible(globalSnapshotBlock, isSnapshot);");
   });
+
+  it("renders skill catalog management controls in global agent section", () => {
+    expectHtmlContains('id="global-agent-skills-refresh-btn"');
+    expectHtmlContains('id="global-agent-skills-catalog"');
+    expectHtmlContains('id="global-agent-skills-missing"');
+    expectHtmlContains('apiRequest("/api/admin/config/skills", "GET")');
+    expectHtmlContains('"global.agentSkillsCatalog"');
+    expectHtmlContains('"global.agentSkillsLoadFailed"');
+  });
 });

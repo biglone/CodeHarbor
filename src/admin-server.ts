@@ -32,6 +32,7 @@ import {
   GLOBAL_RUNTIME_HOT_CONFIG_KEY,
   isHotGlobalConfigKey,
 } from "./runtime-hot-config";
+import { WorkflowRoleSkillCatalog, type WorkflowRole } from "./workflow/role-skills";
 import { hasProxyEndpoint, mergeProxyConfigIntoExtraEnv, readProxyConfigFromExtraEnv } from "./proxy-env";
 import { queueAdminSystemdRestart, restartSystemdServices } from "./service-manager";
 import {
@@ -427,6 +428,17 @@ export class AdminServer {
         });
         appendResolvedOperationAudit("allowed", 200, null, {
           type: "config_read_global",
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/config/skills") {
+        this.sendJson(res, 200, {
+          ok: true,
+          data: buildSkillConfigSnapshot(this.config),
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "config_read_skills",
         });
         return;
       }
@@ -1621,6 +1633,7 @@ export class AdminServer {
         }
         if ("roleAssignments" in roleSkills) {
           const value = normalizeRoleSkillAssignments(roleSkills.roleAssignments, currentRoleSkills.roleAssignments);
+          assertKnownRoleSkills(value, currentRoleSkills.roots);
           currentRoleSkills.roleAssignments = value;
           envUpdates.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON = serializeRoleSkillAssignments(value);
           markUpdatedKey("agentWorkflow.roleSkills.roleAssignments");
@@ -2080,6 +2093,7 @@ export class AdminServer {
       if ("roleSkills" in workflow) {
         const roleSkills = asObject(workflow.roleSkills, "agentWorkflow.roleSkills");
         const currentRoleSkills = ensureAgentWorkflowRoleSkillsConfig(currentAgentWorkflow);
+        let nextRoleSkillRoots = [...currentRoleSkills.roots];
         if ("enabled" in roleSkills) {
           normalizeBoolean(roleSkills.enabled, currentRoleSkills.enabled);
           markCheckedKey("agentWorkflow.roleSkills.enabled");
@@ -2093,11 +2107,12 @@ export class AdminServer {
           markCheckedKey("agentWorkflow.roleSkills.maxChars");
         }
         if ("roots" in roleSkills) {
-          normalizeRoleSkillRoots(roleSkills.roots, currentRoleSkills.roots);
+          nextRoleSkillRoots = normalizeRoleSkillRoots(roleSkills.roots, currentRoleSkills.roots);
           markCheckedKey("agentWorkflow.roleSkills.roots");
         }
         if ("roleAssignments" in roleSkills) {
-          normalizeRoleSkillAssignments(roleSkills.roleAssignments, currentRoleSkills.roleAssignments);
+          const value = normalizeRoleSkillAssignments(roleSkills.roleAssignments, currentRoleSkills.roleAssignments);
+          assertKnownRoleSkills(value, nextRoleSkillRoots);
           markCheckedKey("agentWorkflow.roleSkills.roleAssignments");
         }
       }
@@ -2609,6 +2624,40 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
         roleAssignments: normalizeRoleSkillAssignments(roleSkills.roleAssignments, undefined),
       },
     },
+  };
+}
+
+function buildSkillConfigSnapshot(config: AppConfig): {
+  roleSkills: {
+    enabled: boolean;
+    mode: "summary" | "progressive" | "full";
+    maxChars: number | null;
+    roots: string[];
+    roleAssignments: Partial<Record<WorkflowRole, string[]>> | undefined;
+  };
+  catalog: ReturnType<WorkflowRoleSkillCatalog["getStatusSnapshot"]>;
+} {
+  const agentWorkflow = ensureAgentWorkflowConfig(config);
+  const roleSkills = ensureAgentWorkflowRoleSkillsConfig(agentWorkflow);
+  const roleAssignments = normalizeRoleSkillAssignments(roleSkills.roleAssignments, undefined);
+  const roots = normalizeRoleSkillRoots(roleSkills.roots, []);
+  const catalog = new WorkflowRoleSkillCatalog({
+    enabled: roleSkills.enabled,
+    mode: roleSkills.mode,
+    maxChars: roleSkills.maxChars ?? undefined,
+    roots,
+    roleAssignments,
+  }).getStatusSnapshot();
+
+  return {
+    roleSkills: {
+      enabled: roleSkills.enabled,
+      mode: roleSkills.mode,
+      maxChars: roleSkills.maxChars,
+      roots,
+      roleAssignments,
+    },
+    catalog,
   };
 }
 
@@ -3393,6 +3442,33 @@ function normalizeRoleSkillAssignments(
     return normalizeRoleSkillAssignmentsObject(parsed);
   }
   return normalizeRoleSkillAssignmentsObject(value);
+}
+
+function assertKnownRoleSkills(
+  roleAssignments: Partial<Record<(typeof ROLE_SKILL_ROLES)[number], string[]>> | undefined,
+  roots: string[],
+): void {
+  if (!roleAssignments) {
+    return;
+  }
+  const catalog = new WorkflowRoleSkillCatalog({
+    roots,
+    roleAssignments,
+  }).getStatusSnapshot();
+  const unresolved: string[] = [];
+  for (const role of ROLE_SKILL_ROLES) {
+    const missing = catalog.missingAssignments[role];
+    if (missing.length === 0) {
+      continue;
+    }
+    unresolved.push(`${role}: ${missing.join(", ")}`);
+  }
+  if (unresolved.length > 0) {
+    throw new HttpError(
+      400,
+      `agentWorkflow.roleSkills.roleAssignments contains unknown skill ids (${unresolved.join("; ")}).`,
+    );
+  }
 }
 
 function normalizeRoleSkillAssignmentsObject(

@@ -344,6 +344,28 @@ describe("AdminServer", () => {
     expect(validRoleSkills.status).toBe(200);
     expect(JSON.stringify(validRoleSkills.body)).toContain("agentWorkflow.roleSkills.mode");
 
+    const invalidUnknownSkillAssignment = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "global",
+        data: {
+          agentWorkflow: {
+            roleSkills: {
+              roots: [path.join(dir, "skills")],
+              roleAssignments: {
+                planner: ["not-existing-skill"],
+              },
+            },
+          },
+        },
+      }),
+    });
+    expect(invalidUnknownSkillAssignment.status).toBe(400);
+    expect(JSON.stringify(invalidUnknownSkillAssignment.body)).toContain("unknown skill ids");
+
     const invalidCliMimeTypes = await fetchJson(`${baseUrl}/api/admin/config/validate`, {
       method: "POST",
       headers: {
@@ -1199,6 +1221,67 @@ describe("AdminServer", () => {
     expect(payload.data?.proxy?.httpsProxy).toBe("http://127.0.0.1:7890");
     expect(payload.data?.proxy?.allProxy).toBe("");
     expect(payload.data?.proxy?.noProxy).toBe("localhost,127.0.0.1");
+  });
+
+  it("reads skill catalog snapshot for admin config", async () => {
+    const { dir, db, legacy } = createPaths();
+    const localSkillDir = path.join(dir, "skills", "executor-local");
+    fs.mkdirSync(localSkillDir, { recursive: true });
+    fs.writeFileSync(path.join(localSkillDir, "SKILL.md"), "# Executor Local\n\nLocal execution skill.", "utf8");
+
+    const config = createBaseConfig(dir, db, legacy);
+    config.agentWorkflow.roleSkills = {
+      enabled: true,
+      mode: "full",
+      maxChars: 3200,
+      roots: [path.join(dir, "skills")],
+      roleAssignments: {
+        planner: ["task-planner"],
+        executor: ["executor-local"],
+        reviewer: ["unknown-reviewer-skill"],
+      },
+    };
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const response = await fetchJson(`${baseUrl}/api/admin/config/skills`);
+    expect(response.status).toBe(200);
+    const payload = response.body as {
+      data?: {
+        roleSkills?: {
+          mode?: string;
+          roots?: string[];
+        };
+        catalog?: {
+          availableSkills?: Array<{ id?: string; source?: string }>;
+          missingAssignments?: {
+            reviewer?: string[];
+          };
+        };
+      };
+    };
+    expect(payload.data?.roleSkills?.mode).toBe("full");
+    expect(payload.data?.roleSkills?.roots).toEqual([path.join(dir, "skills")]);
+    expect(payload.data?.catalog?.availableSkills?.some((entry) => entry.id === "executor-local" && entry.source === "local")).toBe(
+      true,
+    );
+    expect(payload.data?.catalog?.availableSkills?.some((entry) => entry.id === "task-planner" && entry.source === "builtin")).toBe(
+      true,
+    );
+    expect(payload.data?.catalog?.missingAssignments?.reviewer).toContain("unknown-reviewer-skill");
   });
 
   it("supports scoped admin/viewer tokens with write protection", async () => {

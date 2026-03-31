@@ -180,7 +180,7 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   {
     surface: "admin",
     method: "GET|HEAD",
-    path: "/api/admin/config/global|/api/admin/config/rooms|/api/admin/config/rooms/:roomId",
+    path: "/api/admin/config/global|/api/admin/config/skills|/api/admin/config/rooms|/api/admin/config/rooms/:roomId",
     action: TOKEN_SCOPES.ADMIN_READ_CONFIG,
     requiredScopes: [TOKEN_SCOPES.ADMIN_READ_CONFIG],
   },
@@ -312,6 +312,9 @@ export function resolveAdminScopeRequirement(method: string | undefined, pathnam
   }
   if (pathname === "/api/admin/config/global") {
     return isReadMethod ? ADMIN_READ_CONFIG_REQUIREMENT : ADMIN_WRITE_CONFIG_REQUIREMENT;
+  }
+  if (pathname === "/api/admin/config/skills") {
+    return ADMIN_READ_CONFIG_REQUIREMENT;
   }
   if (ADMIN_READ_PATH_REGEXES.some((regex) => regex.test(pathname))) {
     if (pathname.startsWith("/api/admin/sessions")) {

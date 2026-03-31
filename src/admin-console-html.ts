@@ -655,6 +655,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <span class="field-label" data-i18n="global.agentSkillsAssignments">角色技能分配 JSON（planner/executor/reviewer）</span>
             <textarea id="global-agent-skills-assignments" rows="6" placeholder='{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}' data-i18n-placeholder="global.agentSkillsAssignmentsPlaceholder"></textarea>
           </label>
+          <div class="field full">
+            <span class="field-label" data-i18n="global.agentSkillsCatalog">可用 SKILL 目录（内置 + 本地）</span>
+            <div class="actions">
+              <button id="global-agent-skills-refresh-btn" type="button" class="secondary" data-i18n="global.agentSkillsRefresh">刷新 SKILL 目录</button>
+            </div>
+            <textarea id="global-agent-skills-catalog" rows="8" readonly></textarea>
+            <p id="global-agent-skills-missing" class="muted" data-i18n="global.agentSkillsMissingEmpty">缺失 SKILL：无</p>
+          </div>
           <label class="field full">
             <span class="field-label" data-i18n="global.envOverrides">高级环境变量覆盖（JSON，可选）</span>
             <textarea id="global-env-overrides" rows="8" placeholder='{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}' data-i18n-placeholder="global.envOverridesPlaceholder"></textarea>
@@ -949,6 +957,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentSkillsAssignments": "角色技能分配 JSON（planner/executor/reviewer）",
             "global.agentSkillsAssignmentsPlaceholder":
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
+            "global.agentSkillsCatalog": "可用 SKILL 目录（内置 + 本地）",
+            "global.agentSkillsRefresh": "刷新 SKILL 目录",
+            "global.agentSkillsMissingEmpty": "缺失 SKILL：无",
+            "global.agentSkillsMissingPrefix": "缺失 SKILL：{items}",
+            "global.agentSkillsLoadFailed": "加载 SKILL 目录失败：{error}",
             "global.envOverrides": "高级环境变量覆盖（JSON，可选）",
             "global.envOverridesPlaceholder":
               '{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}',
@@ -1168,6 +1181,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.agentSkillsAssignments": "Role skill assignment JSON (planner/executor/reviewer)",
             "global.agentSkillsAssignmentsPlaceholder":
               '{"planner":["task-planner"],"executor":["autonomous-dev"],"reviewer":["code-reviewer"]}',
+            "global.agentSkillsCatalog": "Available SKILL catalog (builtin + local)",
+            "global.agentSkillsRefresh": "Refresh SKILL Catalog",
+            "global.agentSkillsMissingEmpty": "Missing SKILLs: none",
+            "global.agentSkillsMissingPrefix": "Missing SKILLs: {items}",
+            "global.agentSkillsLoadFailed": "Failed to load SKILL catalog: {error}",
             "global.envOverrides": "Advanced env overrides (JSON, optional)",
             "global.envOverridesPlaceholder":
               '{"AUTODEV_STAGE_OUTPUT_ECHO_ENABLED":"true","AUTODEV_PREFLIGHT_AUTO_STASH":"true","AUTODEV_RUN_ARCHIVE_ENABLED":"true","AUTODEV_RUN_ARCHIVE_DIR":".codeharbor/autodev-runs"}',
@@ -1390,6 +1408,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global-agent-skills-max-chars",
             "global-agent-skills-roots",
             "global-agent-skills-assignments",
+            "global-agent-skills-refresh-btn",
+            "global-agent-skills-catalog",
+            "global-agent-skills-missing",
             "global-env-overrides"
           ],
           snapshot: []
@@ -1429,6 +1450,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         document.getElementById("global-save-btn").addEventListener("click", saveGlobal);
         document.getElementById("global-validate-btn").addEventListener("click", validateGlobalConfig);
         document.getElementById("global-reload-btn").addEventListener("click", loadGlobal);
+        document.getElementById("global-agent-skills-refresh-btn").addEventListener("click", loadSkillCatalog);
         document.getElementById("global-restart-main-btn").addEventListener("click", function () {
           restartManagedServices(false);
         });
@@ -1958,6 +1980,50 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           body.appendChild(row);
         }
 
+        async function loadSkillCatalog(options) {
+          var quiet = Boolean(options && options.quiet);
+          var catalogNode = document.getElementById("global-agent-skills-catalog");
+          var missingNode = document.getElementById("global-agent-skills-missing");
+          try {
+            var response = await apiRequest("/api/admin/config/skills", "GET");
+            var data = response.data || {};
+            var catalog = data.catalog || {};
+            var available = Array.isArray(catalog.availableSkills) ? catalog.availableSkills : [];
+            var lines = [];
+            for (var i = 0; i < available.length; i += 1) {
+              var entry = available[i] || {};
+              if (!entry.id) {
+                continue;
+              }
+              var title = entry.title ? " - " + String(entry.title) : "";
+              lines.push(String(entry.id) + " (" + String(entry.source || "unknown") + ")" + title);
+            }
+            catalogNode.value = lines.join("\n");
+
+            var missingAssignments = catalog.missingAssignments || {};
+            var roleLabels = { planner: "planner", executor: "executor", reviewer: "reviewer" };
+            var missingParts = [];
+            var roles = ["planner", "executor", "reviewer"];
+            for (var j = 0; j < roles.length; j += 1) {
+              var role = roles[j];
+              var missing = Array.isArray(missingAssignments[role]) ? missingAssignments[role] : [];
+              if (missing.length === 0) {
+                continue;
+              }
+              missingParts.push(roleLabels[role] + ": " + missing.join(", "));
+            }
+            missingNode.textContent = missingParts.length > 0
+              ? t("global.agentSkillsMissingPrefix", { items: missingParts.join(" ; ") })
+              : t("global.agentSkillsMissingEmpty");
+          } catch (error) {
+            catalogNode.value = "";
+            missingNode.textContent = t("global.agentSkillsLoadFailed", { error: error.message });
+            if (!quiet) {
+              showNotice("error", t("global.agentSkillsLoadFailed", { error: error.message }));
+            }
+          }
+        }
+
         async function loadGlobal() {
           try {
             var response = await apiRequest("/api/admin/config/global", "GET");
@@ -2065,6 +2131,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               roleSkills.roleAssignments
             );
             document.getElementById("global-env-overrides").value = "";
+            await loadSkillCatalog({ quiet: true });
 
             showNotice("ok", t("notice.globalLoaded"));
           } catch (error) {
