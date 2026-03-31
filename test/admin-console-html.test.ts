@@ -23,6 +23,10 @@ describe("admin console paged navigation", () => {
       expectHtmlContains(`"${route}": "settings-global"`);
     }
 
+    expectHtmlContains('data-route="#/settings/bots"');
+    expectHtmlContains('"#/settings/bots": "settings-bots"');
+    expectHtmlContains('"/settings/bots": "#/settings/bots"');
+
     expectHtmlContains('"/settings/global": "#/settings/global/basic"');
     expectHtmlContains('"/settings/global/basic": "#/settings/global/basic"');
     expectHtmlContains('window.location.hash = pathToRoute[window.location.pathname] || "#/settings/global/basic";');
@@ -57,5 +61,16 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('apiRequest("/api/admin/config/skills", "GET")');
     expectHtmlContains('"global.agentSkillsCatalog"');
     expectHtmlContains('"global.agentSkillsLoadFailed"');
+  });
+
+  it("renders bot profile management actions and apply API wiring", () => {
+    expectHtmlContains('data-view="settings-bots"');
+    expectHtmlContains('id="bots-profiles-json"');
+    expectHtmlContains('id="bots-load-btn"');
+    expectHtmlContains('id="bots-save-btn"');
+    expectHtmlContains('id="bots-apply-btn"');
+    expectHtmlContains('apiRequest("/api/admin/bot-profiles", "GET")');
+    expectHtmlContains('apiRequest("/api/admin/bot-profiles", "PUT"');
+    expectHtmlContains('apiRequest("/api/admin/bot-profiles/apply", "POST"');
   });
 });

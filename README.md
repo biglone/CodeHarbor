@@ -81,6 +81,13 @@ codeharbor --version
 codeharbor self-update
 ```
 
+Systemd multi-instance example (Linux):
+
+```bash
+codeharbor service install --instance bot-a --runtime-home /srv/codeharbor-bot-a --with-admin
+codeharbor service install --instance bot-b --runtime-home /srv/codeharbor-bot-b --with-admin
+```
+
 Linux one-command install (creates `/opt/codeharbor`, sets ownership, installs latest package):
 
 ```bash
@@ -414,6 +421,7 @@ codeharbor admin serve --host 0.0.0.0 --allow-insecure-no-token
 Open these UI routes in browser:
 
 - `/` or `/settings/global`
+- `/settings/bots`
 - `/settings/rooms`
 - `/health`
 - `/audit`
@@ -431,6 +439,9 @@ Main endpoints:
 - `GET /api/admin/config/rooms/:roomId`
 - `PUT /api/admin/config/rooms/:roomId`
 - `DELETE /api/admin/config/rooms/:roomId`
+- `GET /api/admin/bot-profiles`
+- `PUT /api/admin/bot-profiles`
+- `POST /api/admin/bot-profiles/apply`
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error&actor=...&source=...&action=...&method=GET&pathPrefix=/api/...&reasonContains=...&createdFrom=...&createdTo=...`
 - `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`

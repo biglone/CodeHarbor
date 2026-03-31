@@ -8,6 +8,7 @@ import {
   buildRestartSudoersPolicy,
   resolveDefaultRunUser,
   resolveRuntimeHomeForUser,
+  resolveSystemdServiceUnitNames,
 } from "../src/service-manager";
 
 describe("service-manager defaults", () => {
@@ -40,11 +41,17 @@ describe("service-manager unit templates", () => {
       runtimeHome: "/home/appuser/.codeharbor",
       nodeBinPath: "/usr/bin/node",
       cliScriptPath: "/usr/lib/node_modules/codeharbor/dist/cli.js",
+      instanceName: null,
+      mainServiceName: "codeharbor.service",
+      adminServiceName: "codeharbor-admin.service",
     });
 
     expect(unit).toContain("Description=CodeHarbor main service");
     expect(unit).toContain("User=appuser");
     expect(unit).toContain("Environment=CODEHARBOR_HOME=/home/appuser/.codeharbor");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_INSTANCE=default");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_MAIN_UNIT=codeharbor.service");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_ADMIN_UNIT=codeharbor-admin.service");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js start");
     expect(unit).toContain("ProtectHome=false");
   });
@@ -55,9 +62,15 @@ describe("service-manager unit templates", () => {
       runtimeHome: "/home/appuser/.codeharbor",
       nodeBinPath: "/usr/bin/node",
       cliScriptPath: "/usr/lib/node_modules/codeharbor/dist/cli.js",
+      instanceName: null,
+      mainServiceName: "codeharbor.service",
+      adminServiceName: "codeharbor-admin.service",
     });
 
     expect(unit).toContain("Description=CodeHarbor admin service");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_INSTANCE=default");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_MAIN_UNIT=codeharbor.service");
+    expect(unit).toContain("Environment=CODEHARBOR_SYSTEMD_ADMIN_UNIT=codeharbor-admin.service");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js admin serve");
     expect(unit).toContain("NoNewPrivileges=false");
     expect(unit).toContain("ProtectHome=false");
@@ -72,6 +85,31 @@ describe("service-manager unit templates", () => {
     expect(policy).toContain("Defaults:appuser !requiretty");
     expect(policy).toContain(
       "appuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart codeharbor.service, /usr/bin/systemctl restart codeharbor-admin.service",
+    );
+  });
+
+  it("resolves instance service names with dedicated units", () => {
+    const names = resolveSystemdServiceUnitNames("bot-a");
+    expect(names.instanceName).toBe("bot-a");
+    expect(names.mainServiceName).toBe("codeharbor-bot-a.service");
+    expect(names.adminServiceName).toBe("codeharbor-admin-bot-a.service");
+    expect(names.restartSudoersFile).toBe("codeharbor-restart-bot-a");
+  });
+
+  it("rejects invalid instance names", () => {
+    expect(() => resolveSystemdServiceUnitNames("-bad")).toThrow(/instanceName/);
+  });
+
+  it("builds instance sudoers policy with instance unit names", () => {
+    const policy = buildRestartSudoersPolicy({
+      runUser: "appuser",
+      systemctlPath: "/usr/bin/systemctl",
+      mainServiceName: "codeharbor-bot-a.service",
+      adminServiceName: "codeharbor-admin-bot-a.service",
+    });
+
+    expect(policy).toContain(
+      "appuser ALL=(root) NOPASSWD: /usr/bin/systemctl restart codeharbor-bot-a.service, /usr/bin/systemctl restart codeharbor-admin-bot-a.service",
     );
   });
 });

@@ -413,6 +413,9 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               <a class="tab tab-sub" data-page="settings-global" data-route="#/settings/global/snapshot" href="#/settings/global/snapshot" data-i18n="tab.globalSnapshot">快照与重启</a>
             </div>
 
+            <p class="menu-group-title" data-i18n="menu.group.instances">实例编排</p>
+            <a class="tab tab-parent" data-page="settings-bots" data-route="#/settings/bots" href="#/settings/bots" data-i18n="tab.bots">机器人实例</a>
+
             <p class="menu-group-title" data-i18n="menu.group.workspace">房间治理</p>
             <a class="tab tab-parent" data-page="settings-rooms" data-route="#/settings/rooms" href="#/settings/rooms" data-i18n="tab.rooms">房间配置</a>
 
@@ -698,6 +701,44 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         </div>
       </section>
 
+      <section class="panel" data-view="settings-bots" hidden>
+        <h2 class="panel-title" data-i18n="bots.title">机器人实例</h2>
+        <p class="muted" data-i18n="bots.description">
+          在同一管理后台维护多实例配置：每个实例对应独立 Matrix 账号、运行目录和可选后端模型。保存后可一键应用服务变更。
+        </p>
+        <div class="actions">
+          <button id="bots-load-btn" type="button" class="secondary" data-i18n="bots.load">加载实例配置</button>
+          <button id="bots-save-btn" type="button" data-i18n="bots.save">保存实例配置</button>
+          <button id="bots-apply-dry-run-btn" type="button" class="secondary" data-i18n="bots.applyDryRun">应用预检（dry-run）</button>
+          <button id="bots-apply-btn" type="button" class="secondary" data-i18n="bots.apply">应用实例变更</button>
+        </div>
+        <div class="grid">
+          <label class="field full">
+            <span class="field-label" data-i18n="bots.jsonLabel">实例配置 JSON（数组）</span>
+            <textarea
+              id="bots-profiles-json"
+              rows="14"
+              placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
+              data-i18n-placeholder="bots.jsonPlaceholder"
+            ></textarea>
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="bots.table.id">实例 ID</th>
+                <th data-i18n="bots.table.enabled">启用</th>
+                <th data-i18n="bots.table.matrixUser">Matrix 账号</th>
+                <th data-i18n="bots.table.runtimeHome">运行目录</th>
+                <th data-i18n="bots.table.backend">后端</th>
+              </tr>
+            </thead>
+            <tbody id="bots-list-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="panel" data-view="settings-rooms" hidden>
         <h2 class="panel-title" data-i18n="rooms.title">房间配置</h2>
         <div class="grid">
@@ -831,6 +872,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           "#/settings/global/cli": "settings-global",
           "#/settings/global/agent": "settings-global",
           "#/settings/global/snapshot": "settings-global",
+          "#/settings/bots": "settings-bots",
           "#/settings/rooms": "settings-rooms",
           "#/diagnostics": "diagnostics",
           "#/health": "health",
@@ -845,6 +887,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           "/settings/global/cli": "#/settings/global/cli",
           "/settings/global/agent": "#/settings/global/agent",
           "/settings/global/snapshot": "#/settings/global/snapshot",
+          "/settings/bots": "#/settings/bots",
           "/settings/rooms": "#/settings/rooms",
           "/diagnostics": "#/diagnostics",
           "/health": "#/health",
@@ -859,6 +902,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "header.title": "CodeHarbor 管理后台",
             "header.subtitle": "通过左侧分层菜单管理全局配置、房间策略、诊断视图、健康检查与配置审计记录。",
             "menu.group.global": "全局配置",
+            "menu.group.instances": "实例编排",
             "menu.group.workspace": "房间治理",
             "menu.group.observe": "运行观测",
             "menu.global": "全局配置中心",
@@ -869,6 +913,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "tab.globalCli": "CLI 与多模态",
             "tab.globalAgent": "技能与高级",
             "tab.globalSnapshot": "快照与重启",
+            "tab.bots": "机器人实例",
             "tab.rooms": "房间配置",
             "tab.diagnostics": "运行诊断",
             "tab.health": "健康检查",
@@ -995,6 +1040,28 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.restartRequested": "已请求重启：{services}。{suffix}",
             "notice.restartFailed": "重启服务失败：{error}",
             "notice.restartSuffixAll": "管理后台页面可能在重启期间短暂断连。",
+            "bots.title": "机器人实例",
+            "bots.description": "在同一管理后台维护多实例配置：每个实例对应独立 Matrix 账号、运行目录和可选后端模型。",
+            "bots.load": "加载实例配置",
+            "bots.save": "保存实例配置",
+            "bots.applyDryRun": "应用预检（dry-run）",
+            "bots.apply": "应用实例变更",
+            "bots.jsonLabel": "实例配置 JSON（数组）",
+            "bots.jsonPlaceholder":
+              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+            "bots.table.id": "实例 ID",
+            "bots.table.enabled": "启用",
+            "bots.table.matrixUser": "Matrix 账号",
+            "bots.table.runtimeHome": "运行目录",
+            "bots.table.backend": "后端",
+            "notice.botsLoaded": "机器人实例配置已加载：{count} 项。",
+            "notice.botsLoadFailed": "加载机器人实例配置失败：{error}",
+            "notice.botsJsonInvalid": "实例配置 JSON 解析失败：{error}",
+            "notice.botsSaved": "机器人实例配置已保存：{count} 项。",
+            "notice.botsSaveFailed": "保存机器人实例配置失败：{error}",
+            "notice.botsApplied": "实例应用结果：成功 {succeeded}，失败 {failed}，跳过 {skipped}。",
+            "notice.botsApplyFailed": "应用实例配置失败：{error}",
+            "notice.botsEmpty": "暂无机器人实例配置。",
             "rooms.title": "房间配置",
             "rooms.roomId": "房间 ID",
             "rooms.roomIdPlaceholder": "!room:example.com",
@@ -1083,6 +1150,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "header.title": "CodeHarbor Admin Console",
             "header.subtitle": "Use left hierarchical navigation to manage global settings, rooms, diagnostics, health checks, and audit records.",
             "menu.group.global": "Global Settings",
+            "menu.group.instances": "Instance Orchestration",
             "menu.group.workspace": "Room Governance",
             "menu.group.observe": "Observability",
             "menu.global": "Global Control Center",
@@ -1093,6 +1161,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "tab.globalCli": "CLI & Multimodal",
             "tab.globalAgent": "Skills & Advanced",
             "tab.globalSnapshot": "Snapshot & Restart",
+            "tab.bots": "Bot Instances",
             "tab.rooms": "Rooms",
             "tab.diagnostics": "Runtime Diagnostics",
             "tab.health": "Health Check",
@@ -1219,6 +1288,29 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.restartRequested": "Restart requested: {services}. {suffix}",
             "notice.restartFailed": "Failed to restart service(s): {error}",
             "notice.restartSuffixAll": "Admin page may reconnect during restart.",
+            "bots.title": "Bot Instances",
+            "bots.description":
+              "Manage multiple bot instances from one control plane. Each profile can define Matrix identity, runtime home, and backend model overrides.",
+            "bots.load": "Load Profiles",
+            "bots.save": "Save Profiles",
+            "bots.applyDryRun": "Apply Dry-Run",
+            "bots.apply": "Apply Changes",
+            "bots.jsonLabel": "Profiles JSON (array)",
+            "bots.jsonPlaceholder":
+              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+            "bots.table.id": "Instance ID",
+            "bots.table.enabled": "Enabled",
+            "bots.table.matrixUser": "Matrix User",
+            "bots.table.runtimeHome": "Runtime Home",
+            "bots.table.backend": "Backend",
+            "notice.botsLoaded": "Loaded bot profiles: {count}.",
+            "notice.botsLoadFailed": "Failed to load bot profiles: {error}",
+            "notice.botsJsonInvalid": "Profiles JSON parse failed: {error}",
+            "notice.botsSaved": "Saved bot profiles: {count}.",
+            "notice.botsSaveFailed": "Failed to save bot profiles: {error}",
+            "notice.botsApplied": "Apply result: succeeded {succeeded}, failed {failed}, skipped {skipped}.",
+            "notice.botsApplyFailed": "Failed to apply bot profiles: {error}",
+            "notice.botsEmpty": "No bot profiles.",
             "rooms.title": "Room Config",
             "rooms.roomId": "Room ID",
             "rooms.roomIdPlaceholder": "!room:example.com",
@@ -1310,6 +1402,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         }
         var loaded = {
           "settings-global": false,
+          "settings-bots": false,
           "settings-rooms": false,
           diagnostics: false,
           health: false,
@@ -1324,6 +1417,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         var noticeCloseBtn = document.getElementById("notice-close-btn");
         var noticeTimer = null;
         var authRoleNode = document.getElementById("auth-role");
+        var botsListBody = document.getElementById("bots-list-body");
         var roomListBody = document.getElementById("room-list-body");
         var diagnosticsSummaryBody = document.getElementById("diagnostics-summary-body");
         var diagnosticsWarningBody = document.getElementById("diagnostics-warning-body");
@@ -1464,6 +1558,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         document.getElementById("config-import-apply-btn").addEventListener("click", function () {
           importConfigSnapshot(false);
         });
+        document.getElementById("bots-load-btn").addEventListener("click", loadBotProfiles);
+        document.getElementById("bots-save-btn").addEventListener("click", saveBotProfiles);
+        document.getElementById("bots-apply-dry-run-btn").addEventListener("click", function () {
+          applyBotProfiles(true);
+        });
+        document.getElementById("bots-apply-btn").addEventListener("click", function () {
+          applyBotProfiles(false);
+        });
         document.getElementById("room-load-btn").addEventListener("click", loadRoom);
         document.getElementById("room-save-btn").addEventListener("click", saveRoom);
         document.getElementById("room-validate-btn").addEventListener("click", validateRoomConfig);
@@ -1600,6 +1702,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           }
           if (view === "settings-global") {
             loadGlobal();
+          } else if (view === "settings-bots") {
+            loadBotProfiles();
           } else if (view === "settings-rooms") {
             refreshRoomList();
           } else if (view === "diagnostics") {
@@ -1617,6 +1721,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           loaded[view] = false;
           if (view === "settings-global") {
             await loadGlobal();
+          } else if (view === "settings-bots") {
+            await loadBotProfiles();
           } else if (view === "settings-rooms") {
             await refreshRoomList();
           } else if (view === "diagnostics") {
@@ -2347,6 +2453,103 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             }
           } catch (error) {
             showNotice("error", t("notice.snapshotImportFailed", { error: error.message }));
+          }
+        }
+
+        function parseBotProfilesEditor() {
+          var raw = document.getElementById("bots-profiles-json").value.trim();
+          if (!raw) {
+            return [];
+          }
+          var parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (error) {
+            throw new Error(t("notice.botsJsonInvalid", { error: error && error.message ? String(error.message) : "invalid JSON" }));
+          }
+          if (Array.isArray(parsed)) {
+            return parsed;
+          }
+          if (parsed && typeof parsed === "object" && Array.isArray(parsed.profiles)) {
+            return parsed.profiles;
+          }
+          throw new Error(t("notice.botsJsonInvalid", { error: "expected JSON array or {profiles: [...]}" }));
+        }
+
+        function renderBotProfileTable(items) {
+          botsListBody.innerHTML = "";
+          if (!Array.isArray(items) || items.length === 0) {
+            renderEmptyRow(botsListBody, 5, t("notice.botsEmpty"));
+            return;
+          }
+          for (var i = 0; i < items.length; i += 1) {
+            var item = items[i] || {};
+            var row = document.createElement("tr");
+            appendCell(row, item.id || "");
+            appendCell(row, String(Boolean(item.enabled)));
+            appendCell(row, item.matrixUserId || "");
+            appendCell(row, item.runtimeHome || "");
+            var backend = item.backend && item.backend.provider
+              ? String(item.backend.provider) + (item.backend.model ? " (" + String(item.backend.model) + ")" : "")
+              : "-";
+            appendCell(row, backend);
+            botsListBody.appendChild(row);
+          }
+        }
+
+        async function loadBotProfiles() {
+          try {
+            var response = await apiRequest("/api/admin/bot-profiles", "GET");
+            var data = response.data || {};
+            var profiles = Array.isArray(data.profiles) ? data.profiles : [];
+            document.getElementById("bots-profiles-json").value = JSON.stringify(profiles, null, 2);
+            renderBotProfileTable(profiles);
+            showNotice("ok", t("notice.botsLoaded", { count: profiles.length }));
+          } catch (error) {
+            showNotice("error", t("notice.botsLoadFailed", { error: error.message }));
+            renderEmptyRow(botsListBody, 5, t("table.loadFailed"));
+          }
+        }
+
+        async function saveBotProfiles() {
+          try {
+            var profiles = parseBotProfilesEditor();
+            var response = await apiRequest("/api/admin/bot-profiles", "PUT", {
+              profiles: profiles
+            });
+            var data = response.data || {};
+            var nextProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+            document.getElementById("bots-profiles-json").value = JSON.stringify(nextProfiles, null, 2);
+            renderBotProfileTable(nextProfiles);
+            showNotice("ok", t("notice.botsSaved", { count: nextProfiles.length }));
+            await loadAudit();
+          } catch (error) {
+            showNotice("error", t("notice.botsSaveFailed", { error: error.message }));
+          }
+        }
+
+        async function applyBotProfiles(dryRun) {
+          try {
+            var response = await apiRequest("/api/admin/bot-profiles/apply", "POST", {
+              dryRun: Boolean(dryRun),
+              includeDisabled: true
+            });
+            var data = response.data || {};
+            var summary = data.summary || {};
+            showNotice(
+              summary.failed > 0 ? "warn" : "ok",
+              t("notice.botsApplied", {
+                succeeded: String(summary.succeeded || 0),
+                failed: String(summary.failed || 0),
+                skipped: String(summary.skipped || 0)
+              })
+            );
+            if (Array.isArray(data.items) && data.items.length > 0) {
+              console.log("[bot-profiles-apply]", data.items);
+            }
+            await loadAudit();
+          } catch (error) {
+            showNotice("error", t("notice.botsApplyFailed", { error: error.message }));
           }
         }
 

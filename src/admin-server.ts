@@ -34,13 +34,19 @@ import {
 } from "./runtime-hot-config";
 import { WorkflowRoleSkillCatalog, type WorkflowRole } from "./workflow/role-skills";
 import { hasProxyEndpoint, mergeProxyConfigIntoExtraEnv, readProxyConfigFromExtraEnv } from "./proxy-env";
-import { queueAdminSystemdRestart, restartSystemdServices } from "./service-manager";
+import {
+  queueAdminSystemdRestart,
+  resolveDefaultRunUser,
+  resolveRuntimeSystemdServiceUnitNames,
+  restartSystemdServices,
+} from "./service-manager";
 import {
   ConfigRevisionRecord,
   HistoryCleanupRunRecord,
   HistoryRetentionPolicyRecord,
   OperationAuditOutcome,
   OperationAuditRecord,
+  RuntimeConfigSnapshotRecord,
   SessionHistoryRecord,
   SessionMessageRecord,
   StateStore,
@@ -86,6 +92,11 @@ const LAUNCHD_LABEL_ENV_OVERRIDE_KEYS = new Set<string>([
   "CODEHARBOR_LAUNCHD_ADMIN_LABEL",
 ]);
 const SAFE_LAUNCHD_LABEL_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const BOT_INSTANCE_PROFILES_SNAPSHOT_KEY = "bot_instance_profiles_v1";
+const BOT_INSTANCE_PROFILE_SCHEMA_VERSION = 1;
+const BOT_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const BOT_RUN_USER_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+const BOT_ALLOWED_PROVIDER_SET = new Set<AppConfig["aiCliProvider"]>(["codex", "claude", "gemini"]);
 
 interface CodexHealthResult {
   ok: boolean;
@@ -102,6 +113,75 @@ interface MatrixHealthResult {
 
 interface RestartServicesResult {
   restarted: string[];
+}
+
+interface BotProfileBackendConfig {
+  provider: AppConfig["aiCliProvider"];
+  model: string | null;
+  bin: string | null;
+}
+
+interface BotInstanceProfileRecord {
+  id: string;
+  enabled: boolean;
+  runtimeHome: string;
+  runUser: string;
+  withAdmin: boolean;
+  matrixUserId: string;
+  matrixHomeserver: string;
+  matrixAccessToken: string | null;
+  backend: BotProfileBackendConfig | null;
+  workdir: string | null;
+  notes: string | null;
+}
+
+interface BotInstanceProfileView {
+  id: string;
+  enabled: boolean;
+  runtimeHome: string;
+  runUser: string;
+  withAdmin: boolean;
+  matrixUserId: string;
+  matrixHomeserver: string;
+  hasMatrixAccessToken: boolean;
+  matrixAccessTokenMasked: string | null;
+  backend: BotProfileBackendConfig | null;
+  workdir: string | null;
+  notes: string | null;
+}
+
+interface BotProfilesSnapshot {
+  schemaVersion: number;
+  profiles: BotInstanceProfileRecord[];
+  updatedAt: string;
+}
+
+interface BotProfilesApplyItemResult {
+  id: string;
+  enabled: boolean;
+  action: "install" | "uninstall" | "skip";
+  status: "planned" | "succeeded" | "failed" | "skipped";
+  command: string | null;
+  message: string;
+}
+
+interface BotProfilesApplyResult {
+  dryRun: boolean;
+  includeDisabled: boolean;
+  summary: {
+    total: number;
+    planned: number;
+    succeeded: number;
+    failed: number;
+    skipped: number;
+  };
+  items: BotProfilesApplyItemResult[];
+}
+
+interface BotProfilesApplyInput {
+  profiles: BotInstanceProfileRecord[];
+  dryRun: boolean;
+  includeDisabled: boolean;
 }
 
 interface ConfigImportResult {
@@ -134,6 +214,7 @@ interface AdminServerOptions {
   checkMatrix?: (homeserver: string, timeoutMs: number) => Promise<MatrixHealthResult>;
   packageUpdateChecker?: PackageUpdateChecker;
   restartServices?: (restartAdmin: boolean) => Promise<RestartServicesResult>;
+  applyBotProfiles?: (input: BotProfilesApplyInput) => Promise<BotProfilesApplyResult>;
 }
 
 interface AddressInfo {
@@ -168,6 +249,7 @@ export class AdminServer {
   private readonly hasCustomPackageUpdateChecker: boolean;
   private packageUpdateChecker: PackageUpdateChecker;
   private readonly restartServices: (restartAdmin: boolean) => Promise<RestartServicesResult>;
+  private readonly applyBotProfiles: (input: BotProfilesApplyInput) => Promise<BotProfilesApplyResult>;
   private readonly appVersion: string;
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
@@ -200,6 +282,7 @@ export class AdminServer {
     this.hasCustomPackageUpdateChecker = Boolean(options.packageUpdateChecker);
     this.packageUpdateChecker = options.packageUpdateChecker ?? this.createPackageUpdateChecker();
     this.restartServices = options.restartServices ?? defaultRestartServices;
+    this.applyBotProfiles = options.applyBotProfiles ?? ((input) => this.executeBotProfilesApply(input));
     this.appVersion = resolvePackageVersion();
   }
 
@@ -655,6 +738,99 @@ export class AdminServer {
           });
           return;
         }
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/admin/bot-profiles") {
+        const snapshot = this.loadBotProfilesSnapshot();
+        this.sendJson(res, 200, {
+          ok: true,
+          data: {
+            schemaVersion: snapshot.schemaVersion,
+            updatedAt: snapshot.updatedAt,
+            profiles: snapshot.profiles.map((profile) => sanitizeBotProfileForView(profile)),
+          },
+          runtimeConfigVersion: snapshot.runtimeConfigVersion,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "bot_profiles_read",
+          profileCount: snapshot.profiles.length,
+        });
+        return;
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/admin/bot-profiles") {
+        const actor = resolveAuditActor(req, authIdentity);
+        const body = await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES);
+        const result = this.updateBotProfiles(body, actor);
+        this.sendJson(res, 200, {
+          ok: true,
+          data: {
+            schemaVersion: result.schemaVersion,
+            updatedAt: result.updatedAt,
+            profiles: result.profiles.map((profile) => sanitizeBotProfileForView(profile)),
+          },
+          runtimeConfigVersion: result.runtimeConfigVersion,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "bot_profiles_update",
+          profileCount: result.profiles.length,
+          runtimeConfigVersion: result.runtimeConfigVersion,
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/admin/bot-profiles/apply") {
+        const actor = resolveAuditActor(req, authIdentity);
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "bot profiles apply payload");
+        const dryRun = normalizeBoolean(body.dryRun, false);
+        const includeDisabled = normalizeBoolean(body.includeDisabled, true);
+        const requestedIds = parseOptionalBotProfileIdList(body.instanceIds, "instanceIds");
+        const snapshot = this.loadBotProfilesSnapshot();
+        const selectedProfiles = requestedIds
+          ? snapshot.profiles.filter((profile) => requestedIds.includes(profile.id))
+          : [...snapshot.profiles];
+
+        if (requestedIds) {
+          const selectedIds = new Set(selectedProfiles.map((profile) => profile.id));
+          const missingIds = requestedIds.filter((id) => !selectedIds.has(id));
+          if (missingIds.length > 0) {
+            throw new HttpError(400, `Unknown bot profile id(s): ${missingIds.join(", ")}.`);
+          }
+        }
+
+        const applyResult = await this.applyBotProfiles({
+          profiles: selectedProfiles,
+          dryRun,
+          includeDisabled,
+        });
+
+        this.stateStore.appendConfigRevision(
+          actor,
+          `apply bot profiles (${dryRun ? "dry-run" : "execute"}): planned=${applyResult.summary.planned}, failed=${applyResult.summary.failed}`,
+          JSON.stringify({
+            type: "bot_profiles_apply",
+            dryRun,
+            includeDisabled,
+            requestedIds,
+            summary: applyResult.summary,
+            items: applyResult.items,
+          }),
+        );
+
+        this.sendJson(res, 200, {
+          ok: true,
+          data: applyResult,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "bot_profiles_apply",
+          dryRun,
+          includeDisabled,
+          total: applyResult.summary.total,
+          planned: applyResult.summary.planned,
+          failed: applyResult.summary.failed,
+          skipped: applyResult.summary.skipped,
+        });
+        return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/admin/audit") {
@@ -2166,6 +2342,218 @@ export class AdminServer {
     };
   }
 
+  private loadBotProfilesSnapshot(): {
+    schemaVersion: number;
+    updatedAt: string;
+    runtimeConfigVersion: number | null;
+    profiles: BotInstanceProfileRecord[];
+  } {
+    const record = this.stateStore.getRuntimeConfigSnapshot(BOT_INSTANCE_PROFILES_SNAPSHOT_KEY);
+    const parsed = parseStoredBotProfilesSnapshot(record);
+    return {
+      schemaVersion: parsed.schemaVersion,
+      updatedAt: parsed.updatedAt,
+      runtimeConfigVersion: record?.version ?? null,
+      profiles: parsed.profiles,
+    };
+  }
+
+  private updateBotProfiles(
+    rawBody: unknown,
+    actor: string | null,
+  ): {
+    schemaVersion: number;
+    updatedAt: string;
+    runtimeConfigVersion: number;
+    profiles: BotInstanceProfileRecord[];
+  } {
+    const current = this.loadBotProfilesSnapshot();
+    const profiles = normalizeBotProfilesPayload(rawBody, current.profiles);
+    const nextSnapshot: BotProfilesSnapshot = {
+      schemaVersion: BOT_INSTANCE_PROFILE_SCHEMA_VERSION,
+      profiles,
+      updatedAt: new Date().toISOString(),
+    };
+    const runtimeSnapshot = this.stateStore.upsertRuntimeConfigSnapshot(
+      BOT_INSTANCE_PROFILES_SNAPSHOT_KEY,
+      JSON.stringify(nextSnapshot),
+    );
+
+    this.stateStore.appendConfigRevision(
+      actor,
+      `update bot profiles: ${profiles.length} item(s)`,
+      JSON.stringify({
+        type: "bot_profiles_update",
+        schemaVersion: BOT_INSTANCE_PROFILE_SCHEMA_VERSION,
+        profileCount: profiles.length,
+        profileIds: profiles.map((profile) => profile.id),
+        runtimeConfigVersion: runtimeSnapshot.version,
+      }),
+    );
+
+    return {
+      schemaVersion: nextSnapshot.schemaVersion,
+      updatedAt: nextSnapshot.updatedAt,
+      runtimeConfigVersion: runtimeSnapshot.version,
+      profiles: nextSnapshot.profiles,
+    };
+  }
+
+  private async executeBotProfilesApply(input: BotProfilesApplyInput): Promise<BotProfilesApplyResult> {
+    const items: BotProfilesApplyItemResult[] = [];
+    const enabledProfiles = input.includeDisabled
+      ? input.profiles
+      : input.profiles.filter((profile) => profile.enabled);
+
+    for (const profile of enabledProfiles) {
+      const action: BotProfilesApplyItemResult["action"] = profile.enabled ? "install" : "uninstall";
+      const serviceArgs = buildBotServiceCommandArgs(profile, action);
+      const command = formatShellCommand(
+        shouldUseSudoForServiceCommand() ? "sudo" : process.execPath,
+        shouldUseSudoForServiceCommand() ? ["-n", process.execPath, resolveRuntimeCliScriptPath(), "service", ...serviceArgs] : [resolveRuntimeCliScriptPath(), "service", ...serviceArgs],
+      );
+
+      if (input.dryRun) {
+        items.push({
+          id: profile.id,
+          enabled: profile.enabled,
+          action,
+          status: "planned",
+          command,
+          message: "dry-run: command planned.",
+        });
+        continue;
+      }
+
+      try {
+        if (action === "install") {
+          const envPath = this.persistBotProfileRuntimeEnv(profile);
+          await this.runServiceCommand(serviceArgs);
+          items.push({
+            id: profile.id,
+            enabled: profile.enabled,
+            action,
+            status: "succeeded",
+            command,
+            message: `updated runtime env: ${envPath}`,
+          });
+        } else {
+          await this.runServiceCommand(serviceArgs);
+          items.push({
+            id: profile.id,
+            enabled: profile.enabled,
+            action,
+            status: "succeeded",
+            command,
+            message: "service removed.",
+          });
+        }
+      } catch (error) {
+        items.push({
+          id: profile.id,
+          enabled: profile.enabled,
+          action,
+          status: "failed",
+          command,
+          message: formatError(error),
+        });
+      }
+    }
+
+    if (!input.includeDisabled) {
+      const skippedDisabled = input.profiles.filter((profile) => !profile.enabled);
+      for (const profile of skippedDisabled) {
+        items.push({
+          id: profile.id,
+          enabled: profile.enabled,
+          action: "skip",
+          status: "skipped",
+          command: null,
+          message: "disabled profile skipped (includeDisabled=false).",
+        });
+      }
+    }
+
+    const summary = {
+      total: input.profiles.length,
+      planned: items.filter((item) => item.status === "planned").length,
+      succeeded: items.filter((item) => item.status === "succeeded").length,
+      failed: items.filter((item) => item.status === "failed").length,
+      skipped: items.filter((item) => item.status === "skipped").length,
+    };
+
+    return {
+      dryRun: input.dryRun,
+      includeDisabled: input.includeDisabled,
+      summary,
+      items,
+    };
+  }
+
+  private persistBotProfileRuntimeEnv(profile: BotInstanceProfileRecord): string {
+    const runtimeHome = path.resolve(profile.runtimeHome);
+    fs.mkdirSync(runtimeHome, { recursive: true });
+    const envPath = path.join(runtimeHome, ".env");
+    const template = fs.existsSync(envPath)
+      ? fs.readFileSync(envPath, "utf8")
+      : this.resolveFallbackEnvTemplate();
+
+    const baseEnv = buildConfigSnapshot(this.config, this.configService.listRoomSettings()).env;
+    const mergedEnv: Record<string, string> = {
+      ...baseEnv,
+      MATRIX_HOMESERVER: profile.matrixHomeserver,
+      MATRIX_USER_ID: profile.matrixUserId,
+      MATRIX_ACCESS_TOKEN: profile.matrixAccessToken ?? "",
+    };
+
+    if (profile.backend) {
+      mergedEnv.AI_CLI_PROVIDER = profile.backend.provider;
+      mergedEnv.CODEX_MODEL = profile.backend.model ?? "";
+      if (profile.backend.bin) {
+        mergedEnv.CODEX_BIN = profile.backend.bin;
+      }
+    }
+    if (profile.workdir) {
+      mergedEnv.CODEX_WORKDIR = profile.workdir;
+    }
+
+    const next = applyEnvOverrides(template, mergedEnv);
+    fs.writeFileSync(envPath, next, "utf8");
+    return envPath;
+  }
+
+  private resolveFallbackEnvTemplate(): string {
+    const envPath = path.resolve(this.cwd, ".env");
+    const examplePath = path.resolve(this.cwd, ".env.example");
+    if (fs.existsSync(envPath)) {
+      return fs.readFileSync(envPath, "utf8");
+    }
+    if (fs.existsSync(examplePath)) {
+      return fs.readFileSync(examplePath, "utf8");
+    }
+    return "";
+  }
+
+  private async runServiceCommand(serviceArgs: string[]): Promise<void> {
+    const cliScriptPath = resolveRuntimeCliScriptPath();
+    const useSudo = shouldUseSudoForServiceCommand();
+    const command = useSudo ? "sudo" : process.execPath;
+    const args = useSudo
+      ? ["-n", process.execPath, cliScriptPath, "service", ...serviceArgs]
+      : [cliScriptPath, "service", ...serviceArgs];
+
+    try {
+      await execFileAsync(command, args, {
+        maxBuffer: 1024 * 1024,
+      });
+    } catch (error) {
+      const detail = formatExecFileError(error);
+      throw new Error(`service command failed (${formatShellCommand(command, args)}): ${detail}`, {
+        cause: error,
+      });
+    }
+  }
+
   private async runConfigImportFromSnapshot(snapshot: unknown, dryRun: boolean, actor: string | null): Promise<ConfigImportResult> {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codeharbor-admin-config-"));
     const snapshotPath = path.join(tempDir, "snapshot.json");
@@ -2929,6 +3317,385 @@ function formatHistoryCleanupRunEntry(entry: HistoryCleanupRunRecord): {
   };
 }
 
+function parseStoredBotProfilesSnapshot(record: RuntimeConfigSnapshotRecord | null): BotProfilesSnapshot {
+  if (!record) {
+    return {
+      schemaVersion: BOT_INSTANCE_PROFILE_SCHEMA_VERSION,
+      profiles: [],
+      updatedAt: new Date(0).toISOString(),
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(record.payloadJson) as unknown;
+  } catch (error) {
+    throw new HttpError(500, `Failed to parse bot profile snapshot JSON: ${formatError(error)}`);
+  }
+
+  try {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("snapshot payload must be an object.");
+    }
+    const snapshot = payload as Record<string, unknown>;
+    const rawProfiles = Array.isArray(snapshot.profiles) ? snapshot.profiles : [];
+    const profiles = rawProfiles.map((entry, index) => normalizeStoredBotProfile(entry, `botProfiles[${index}]`));
+    const ids = new Set<string>();
+    for (const profile of profiles) {
+      if (ids.has(profile.id)) {
+        throw new Error(`duplicate bot profile id in snapshot: ${profile.id}`);
+      }
+      ids.add(profile.id);
+    }
+
+    const rawUpdatedAt = typeof snapshot.updatedAt === "string" ? snapshot.updatedAt.trim() : "";
+    const updatedAt = rawUpdatedAt && Number.isFinite(Date.parse(rawUpdatedAt)) ? rawUpdatedAt : new Date(record.updatedAt).toISOString();
+    return {
+      schemaVersion: BOT_INSTANCE_PROFILE_SCHEMA_VERSION,
+      profiles,
+      updatedAt,
+    };
+  } catch (error) {
+    throw new HttpError(500, `Invalid bot profile snapshot payload: ${formatError(error)}`);
+  }
+}
+
+function normalizeBotProfilesPayload(
+  rawBody: unknown,
+  existingProfiles: BotInstanceProfileRecord[],
+): BotInstanceProfileRecord[] {
+  let rawProfiles: unknown;
+  if (Array.isArray(rawBody)) {
+    rawProfiles = rawBody;
+  } else if (rawBody && typeof rawBody === "object") {
+    const payload = rawBody as Record<string, unknown>;
+    rawProfiles = "profiles" in payload ? payload.profiles : undefined;
+  }
+
+  if (!Array.isArray(rawProfiles)) {
+    throw new HttpError(400, "bot profiles payload must provide a profiles array.");
+  }
+
+  const existingById = new Map(existingProfiles.map((profile) => [profile.id, profile]));
+  const nextProfiles: BotInstanceProfileRecord[] = [];
+  const seenIds = new Set<string>();
+  for (const [index, entry] of rawProfiles.entries()) {
+    const label = `botProfiles[${index}]`;
+    const payload = asObject(entry, label);
+    const id = normalizeBotProfileId(payload.id, `${label}.id`);
+    if (seenIds.has(id)) {
+      throw new HttpError(400, `Duplicate bot profile id: ${id}.`);
+    }
+    seenIds.add(id);
+    const existing = existingById.get(id) ?? null;
+
+    const runtimeHomeRaw = normalizeString(payload.runtimeHome, existing?.runtimeHome ?? "", `${label}.runtimeHome`);
+    if (!runtimeHomeRaw) {
+      throw new HttpError(400, `${label}.runtimeHome is required.`);
+    }
+    const matrixUserId = normalizeMatrixUserId(payload.matrixUserId, existing?.matrixUserId ?? "", `${label}.matrixUserId`);
+    const matrixHomeserver = normalizeHomeserverUrl(payload.matrixHomeserver, existing?.matrixHomeserver ?? "", `${label}.matrixHomeserver`);
+    const runUser = normalizeRunUser(payload.runUser, existing?.runUser ?? resolveDefaultRunUser(), `${label}.runUser`);
+    const enabled = normalizeBoolean(payload.enabled, existing?.enabled ?? true);
+    const withAdmin = normalizeBoolean(payload.withAdmin, existing?.withAdmin ?? true);
+    const backend = normalizeBotBackend(payload.backend, existing?.backend ?? null, `${label}.backend`);
+    const workdir = normalizeOptionalResolvedPath(payload.workdir, existing?.workdir ?? null, `${label}.workdir`);
+    const notes = normalizeOptionalNote(payload.notes, existing?.notes ?? null, `${label}.notes`);
+
+    let matrixAccessToken = existing?.matrixAccessToken ?? null;
+    if (Object.prototype.hasOwnProperty.call(payload, "matrixAccessToken")) {
+      matrixAccessToken = normalizeOptionalToken(payload.matrixAccessToken, `${label}.matrixAccessToken`);
+    }
+
+    nextProfiles.push({
+      id,
+      enabled,
+      runtimeHome: path.resolve(runtimeHomeRaw),
+      runUser,
+      withAdmin,
+      matrixUserId,
+      matrixHomeserver,
+      matrixAccessToken,
+      backend,
+      workdir,
+      notes,
+    });
+  }
+
+  return nextProfiles;
+}
+
+function normalizeStoredBotProfile(value: unknown, label: string): BotInstanceProfileRecord {
+  const payload = asObject(value, label);
+  const id = normalizeBotProfileId(payload.id, `${label}.id`);
+  const runtimeHomeRaw = normalizeString(payload.runtimeHome, "", `${label}.runtimeHome`);
+  if (!runtimeHomeRaw) {
+    throw new HttpError(400, `${label}.runtimeHome is required.`);
+  }
+  return {
+    id,
+    enabled: normalizeBoolean(payload.enabled, true),
+    runtimeHome: path.resolve(runtimeHomeRaw),
+    runUser: normalizeRunUser(payload.runUser, resolveDefaultRunUser(), `${label}.runUser`),
+    withAdmin: normalizeBoolean(payload.withAdmin, true),
+    matrixUserId: normalizeMatrixUserId(payload.matrixUserId, "", `${label}.matrixUserId`),
+    matrixHomeserver: normalizeHomeserverUrl(payload.matrixHomeserver, "", `${label}.matrixHomeserver`),
+    matrixAccessToken: normalizeOptionalToken(payload.matrixAccessToken, `${label}.matrixAccessToken`),
+    backend: normalizeBotBackend(payload.backend, null, `${label}.backend`),
+    workdir: normalizeOptionalResolvedPath(payload.workdir, null, `${label}.workdir`),
+    notes: normalizeOptionalNote(payload.notes, null, `${label}.notes`),
+  };
+}
+
+function sanitizeBotProfileForView(profile: BotInstanceProfileRecord): BotInstanceProfileView {
+  return {
+    id: profile.id,
+    enabled: profile.enabled,
+    runtimeHome: profile.runtimeHome,
+    runUser: profile.runUser,
+    withAdmin: profile.withAdmin,
+    matrixUserId: profile.matrixUserId,
+    matrixHomeserver: profile.matrixHomeserver,
+    hasMatrixAccessToken: Boolean(profile.matrixAccessToken),
+    matrixAccessTokenMasked: maskSecret(profile.matrixAccessToken),
+    backend: profile.backend ? { ...profile.backend } : null,
+    workdir: profile.workdir,
+    notes: profile.notes,
+  };
+}
+
+function parseOptionalBotProfileIdList(value: unknown, fieldName: string): string[] | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, `${fieldName} must be a string array.`);
+  }
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    const id = normalizeBotProfileId(entry, `${fieldName}[${index}]`);
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    output.push(id);
+  }
+  return output;
+}
+
+function normalizeBotProfileId(value: unknown, fieldName: string): string {
+  const normalized = normalizeString(value, "", fieldName);
+  if (!normalized) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+  if (!BOT_INSTANCE_ID_PATTERN.test(normalized)) {
+    throw new HttpError(
+      400,
+      `${fieldName} must match /^[A-Za-z0-9][A-Za-z0-9._-]*$/ (letters/numbers with optional . _ -).`,
+    );
+  }
+  return normalized;
+}
+
+function normalizeMatrixUserId(value: unknown, fallback: string, fieldName: string): string {
+  const normalized = normalizeString(value, fallback, fieldName);
+  if (!normalized) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+  if (!/^@[^:\s]+:.+/.test(normalized)) {
+    throw new HttpError(400, `${fieldName} must be a valid Matrix user id (example: @bot:example.com).`);
+  }
+  return normalized;
+}
+
+function normalizeHomeserverUrl(value: unknown, fallback: string, fieldName: string): string {
+  const normalized = normalizeString(value, fallback, fieldName);
+  if (!normalized) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+  try {
+    const parsed = new URL(normalized);
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    throw new HttpError(400, `${fieldName} must be a valid URL.`);
+  }
+}
+
+function normalizeRunUser(value: unknown, fallback: string, fieldName: string): string {
+  const normalized = normalizeString(value, fallback, fieldName);
+  if (!normalized) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+  if (!BOT_RUN_USER_PATTERN.test(normalized)) {
+    throw new HttpError(400, `${fieldName} must match /^[A-Za-z_][A-Za-z0-9_-]*$/.`);
+  }
+  return normalized;
+}
+
+function normalizeOptionalToken(value: unknown, fieldName: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, `${fieldName} must be a string.`);
+  }
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function normalizeOptionalResolvedPath(value: unknown, fallback: string | null, fieldName: string): string | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, `${fieldName} must be a string.`);
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  return path.resolve(normalized);
+}
+
+function normalizeOptionalNote(value: unknown, fallback: string | null, fieldName: string): string | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, `${fieldName} must be a string.`);
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.length > 400) {
+    throw new HttpError(400, `${fieldName} must not exceed 400 characters.`);
+  }
+  return normalized;
+}
+
+function normalizeBotBackend(
+  value: unknown,
+  fallback: BotProfileBackendConfig | null,
+  fieldName: string,
+): BotProfileBackendConfig | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new HttpError(400, `${fieldName} must be an object.`);
+  }
+  const payload = value as Record<string, unknown>;
+  const providerRaw = "provider" in payload ? normalizeString(payload.provider, "", `${fieldName}.provider`) : fallback?.provider ?? "";
+  if (!providerRaw) {
+    if ("model" in payload || "bin" in payload) {
+      throw new HttpError(400, `${fieldName}.provider is required when backend model/bin is set.`);
+    }
+    return null;
+  }
+  if (!BOT_ALLOWED_PROVIDER_SET.has(providerRaw as AppConfig["aiCliProvider"])) {
+    throw new HttpError(400, `${fieldName}.provider must be one of codex/claude/gemini.`);
+  }
+
+  const model = "model" in payload ? normalizeOptionalToken(payload.model, `${fieldName}.model`) : (fallback?.model ?? null);
+  const bin = "bin" in payload ? normalizeOptionalToken(payload.bin, `${fieldName}.bin`) : (fallback?.bin ?? null);
+  return {
+    provider: providerRaw as AppConfig["aiCliProvider"],
+    model,
+    bin,
+  };
+}
+
+function maskSecret(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  if (value.length <= 6) {
+    return "*".repeat(value.length);
+  }
+  return `${value.slice(0, 3)}***${value.slice(-3)}`;
+}
+
+function buildBotServiceCommandArgs(
+  profile: BotInstanceProfileRecord,
+  action: "install" | "uninstall",
+): string[] {
+  if (action === "install") {
+    const args = [
+      "install",
+      "--instance",
+      profile.id,
+      "--run-user",
+      profile.runUser,
+      "--runtime-home",
+      profile.runtimeHome,
+      "--start",
+    ];
+    if (profile.withAdmin) {
+      args.push("--with-admin");
+    }
+    return args;
+  }
+  return ["uninstall", "--instance", profile.id, "--with-admin"];
+}
+
+function shouldUseSudoForServiceCommand(): boolean {
+  return typeof process.getuid === "function" && process.getuid() !== 0;
+}
+
+function resolveRuntimeCliScriptPath(): string {
+  const argvPath = process.argv[1]?.trim() ?? "";
+  if (argvPath && fs.existsSync(argvPath)) {
+    return path.resolve(argvPath);
+  }
+  const candidate = path.resolve(__dirname, "cli.js");
+  if (fs.existsSync(candidate)) {
+    return candidate;
+  }
+  throw new Error("Unable to resolve CodeHarbor CLI script path.");
+}
+
+function formatExecFileError(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return String(error);
+  }
+  const typed = error as { message?: string; stderr?: string | Buffer; stdout?: string | Buffer };
+  const stderr = typed.stderr ? String(typed.stderr).trim() : "";
+  const stdout = typed.stdout ? String(typed.stdout).trim() : "";
+  if (stderr) {
+    return stderr;
+  }
+  if (stdout) {
+    return stdout;
+  }
+  return typed.message ?? String(error);
+}
+
+function formatShellCommand(command: string, args: string[]): string {
+  const parts = [command, ...args].map((entry) => shellQuote(entry));
+  return parts.join(" ");
+}
+
+function shellQuote(value: string): string {
+  if (!value) {
+    return "''";
+  }
+  if (/^[A-Za-z0-9_./:@+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function parseJsonLoose(raw: string | null): unknown {
   if (raw === null || raw === "") {
     return raw;
@@ -2941,6 +3708,7 @@ function parseJsonLoose(raw: string | null): unknown {
 }
 
 async function defaultRestartServices(restartAdmin: boolean): Promise<RestartServicesResult> {
+  const serviceNames = resolveRuntimeSystemdServiceUnitNames();
   const outputChunks: string[] = [];
   const output = {
     write: (chunk: string | Uint8Array): boolean => {
@@ -2960,7 +3728,7 @@ async function defaultRestartServices(restartAdmin: boolean): Promise<RestartSer
   }
 
   return {
-    restarted: restartAdmin ? ["codeharbor", "codeharbor-admin"] : ["codeharbor"],
+    restarted: restartAdmin ? [serviceNames.mainServiceName, serviceNames.adminServiceName] : [serviceNames.mainServiceName],
   };
 }
 
@@ -2969,6 +3737,7 @@ function isUiPath(pathname: string): boolean {
     pathname === "/" ||
     pathname === "/index.html" ||
     pathname === "/settings/global" ||
+    pathname === "/settings/bots" ||
     pathname === "/settings/rooms" ||
     pathname === "/health" ||
     pathname === "/diagnostics" ||

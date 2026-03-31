@@ -180,14 +180,14 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   {
     surface: "admin",
     method: "GET|HEAD",
-    path: "/api/admin/config/global|/api/admin/config/skills|/api/admin/config/rooms|/api/admin/config/rooms/:roomId",
+    path: "/api/admin/config/global|/api/admin/config/skills|/api/admin/config/rooms|/api/admin/config/rooms/:roomId|/api/admin/bot-profiles",
     action: TOKEN_SCOPES.ADMIN_READ_CONFIG,
     requiredScopes: [TOKEN_SCOPES.ADMIN_READ_CONFIG],
   },
   {
     surface: "admin",
     method: "POST|PUT|DELETE",
-    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/rooms/:roomId",
+    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/rooms/:roomId|/api/admin/bot-profiles",
     action: TOKEN_SCOPES.ADMIN_WRITE_CONFIG,
     requiredScopes: [TOKEN_SCOPES.ADMIN_WRITE_CONFIG],
   },
@@ -243,7 +243,7 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   {
     surface: "admin",
     method: "POST",
-    path: "/api/admin/service/restart",
+    path: "/api/admin/service/restart|/api/admin/bot-profiles/apply",
     action: TOKEN_SCOPES.ADMIN_WRITE_SERVICE,
     requiredScopes: [TOKEN_SCOPES.ADMIN_WRITE_SERVICE],
   },
@@ -312,6 +312,12 @@ export function resolveAdminScopeRequirement(method: string | undefined, pathnam
   }
   if (pathname === "/api/admin/config/global") {
     return isReadMethod ? ADMIN_READ_CONFIG_REQUIREMENT : ADMIN_WRITE_CONFIG_REQUIREMENT;
+  }
+  if (pathname === "/api/admin/bot-profiles") {
+    return isReadMethod ? ADMIN_READ_CONFIG_REQUIREMENT : ADMIN_WRITE_CONFIG_REQUIREMENT;
+  }
+  if (pathname === "/api/admin/bot-profiles/apply") {
+    return ADMIN_WRITE_SERVICE_REQUIREMENT;
   }
   if (pathname === "/api/admin/config/skills") {
     return ADMIN_READ_CONFIG_REQUIREMENT;

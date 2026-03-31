@@ -1531,6 +1531,167 @@ describe("AdminServer", () => {
     expect(operationsText).not.toContain('"outcome":"allowed"');
   });
 
+  it("manages bot profiles with masked tokens and apply orchestration", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const applyCalls: Array<{ dryRun: boolean; includeDisabled: boolean; profileCount: number; hasToken: boolean }> = [];
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      adminTokens: [
+        {
+          token: "viewer-token",
+          role: "viewer",
+          actor: "ops-view",
+          scopes: ["admin.read.config"],
+        },
+        {
+          token: "admin-token",
+          role: "admin",
+          actor: "ops-admin",
+          scopes: ["admin.read.config", "admin.write.config", "admin.write.service", "admin.read.audit"],
+        },
+      ],
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+      applyBotProfiles: async (input) => {
+        applyCalls.push({
+          dryRun: input.dryRun,
+          includeDisabled: input.includeDisabled,
+          profileCount: input.profiles.length,
+          hasToken: Boolean(input.profiles[0]?.matrixAccessToken),
+        });
+        return {
+          dryRun: input.dryRun,
+          includeDisabled: input.includeDisabled,
+          summary: {
+            total: input.profiles.length,
+            planned: input.dryRun ? input.profiles.length : 0,
+            succeeded: input.dryRun ? 0 : input.profiles.length,
+            failed: 0,
+            skipped: 0,
+          },
+          items: input.profiles.map((profile) => ({
+            id: profile.id,
+            enabled: profile.enabled,
+            action: profile.enabled ? "install" : "uninstall",
+            status: input.dryRun ? "planned" : "succeeded",
+            command: "codeharbor service install --instance " + profile.id,
+            message: input.dryRun ? "dry-run" : "ok",
+          })),
+        };
+      },
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = `http://127.0.0.1:${address?.port}`;
+
+    const put = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "bot-a",
+            enabled: true,
+            runtimeHome: path.join(dir, "runtime-bot-a"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@bot-a:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            matrixAccessToken: "secret-token-a",
+            backend: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+            workdir: dir,
+            notes: "first bot",
+          },
+        ],
+      }),
+    });
+    expect(put.status).toBe(200);
+
+    const viewerRead = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
+      headers: {
+        authorization: "Bearer viewer-token",
+      },
+    });
+    expect(viewerRead.status).toBe(200);
+    const viewerBodyText = JSON.stringify(viewerRead.body);
+    expect(viewerBodyText).toContain('"hasMatrixAccessToken":true');
+    expect(viewerBodyText).toContain("sec***n-a");
+    expect(viewerBodyText).not.toContain("secret-token-a");
+
+    const putWithoutToken = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "bot-a",
+            enabled: true,
+            runtimeHome: path.join(dir, "runtime-bot-a"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@bot-a:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            backend: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+            workdir: dir,
+            notes: "updated note",
+          },
+        ],
+      }),
+    });
+    expect(putWithoutToken.status).toBe(200);
+
+    const applyDenied = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer viewer-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+      }),
+    });
+    expect(applyDenied.status).toBe(403);
+
+    const apply = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+      }),
+    });
+    expect(apply.status).toBe(200);
+    expect(applyCalls.length).toBe(1);
+    expect(applyCalls[0]).toEqual({
+      dryRun: true,
+      includeDisabled: true,
+      profileCount: 1,
+      hasToken: true,
+    });
+  });
+
   it("rejects oversized JSON request payloads", async () => {
     const { dir, db, legacy } = createPaths();
     fs.writeFileSync(path.join(dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");

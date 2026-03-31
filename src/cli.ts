@@ -17,6 +17,7 @@ import {
   installSystemdServices,
   restartSystemdServices,
   resolveDefaultRunUser,
+  resolveRuntimeSystemdServiceUnitNames,
   resolveRuntimeHomeForUser,
   uninstallSystemdServices,
 } from "./service-manager";
@@ -154,6 +155,7 @@ serviceCommand.addHelpText(
     "Notes:",
     "  - Service subcommands auto-elevate with sudo when required.",
     "  - Use --with-admin to manage both main and admin services together.",
+    "  - Use --instance <name> for multi-instance units (example: codeharbor-bot-a.service).",
   ].join("\n"),
 );
 
@@ -240,9 +242,10 @@ serviceCommand
   .description("Install and enable codeharbor systemd service (requires root)")
   .option("--run-user <user>", "service user (default: sudo user or current user)")
   .option("--runtime-home <path>", "runtime home used as CODEHARBOR_HOME")
-  .option("--with-admin", "also install codeharbor-admin.service")
+  .option("--instance <name>", "instance name for parallel service units")
+  .option("--with-admin", "also install admin service unit for the same instance")
   .option("--no-start", "enable service without starting immediately")
-  .action((options: { runUser?: string; runtimeHome?: string; withAdmin?: boolean; start?: boolean }) => {
+  .action((options: { runUser?: string; runtimeHome?: string; instance?: string; withAdmin?: boolean; start?: boolean }) => {
     try {
       maybeReexecServiceCommandWithSudo();
       const runUser = options.runUser?.trim() || resolveDefaultRunUser();
@@ -254,15 +257,17 @@ serviceCommand
         cliScriptPath: resolveCliScriptPath(),
         installAdmin: options.withAdmin ?? false,
         startNow: options.start ?? true,
+        instanceName: options.instance,
       });
     } catch (error) {
+      const instanceArg = options.instance?.trim() ? ` --instance ${options.instance.trim()}` : "";
       process.stderr.write(`Service install failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
           "Hint:",
-          "  - Run directly: codeharbor service install --with-admin",
+          `  - Run directly: codeharbor service install --with-admin${instanceArg}`,
           "  - The command auto-elevates with sudo when needed.",
-          `  - Fallback explicit form: ${buildExplicitSudoCommand("service install --with-admin")}`,
+          `  - Fallback explicit form: ${buildExplicitSudoCommand(`service install --with-admin${instanceArg}`)}`,
           "",
         ].join("\n"),
       );
@@ -273,21 +278,24 @@ serviceCommand
 serviceCommand
   .command("uninstall")
   .description("Remove codeharbor systemd service (requires root)")
-  .option("--with-admin", "also remove codeharbor-admin.service")
-  .action((options: { withAdmin?: boolean }) => {
+  .option("--instance <name>", "instance name for parallel service units")
+  .option("--with-admin", "also remove admin service unit for the same instance")
+  .action((options: { instance?: string; withAdmin?: boolean }) => {
     try {
       maybeReexecServiceCommandWithSudo();
       uninstallSystemdServices({
         removeAdmin: options.withAdmin ?? false,
+        instanceName: options.instance,
       });
     } catch (error) {
+      const instanceArg = options.instance?.trim() ? ` --instance ${options.instance.trim()}` : "";
       process.stderr.write(`Service uninstall failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
           "Hint:",
-          "  - Run directly: codeharbor service uninstall --with-admin",
+          `  - Run directly: codeharbor service uninstall --with-admin${instanceArg}`,
           "  - The command auto-elevates with sudo when needed.",
-          `  - Fallback explicit form: ${buildExplicitSudoCommand("service uninstall --with-admin")}`,
+          `  - Fallback explicit form: ${buildExplicitSudoCommand(`service uninstall --with-admin${instanceArg}`)}`,
           "",
         ].join("\n"),
       );
@@ -298,21 +306,24 @@ serviceCommand
 serviceCommand
   .command("restart")
   .description("Restart installed codeharbor systemd service (requires root)")
-  .option("--with-admin", "also restart codeharbor-admin.service")
-  .action((options: { withAdmin?: boolean }) => {
+  .option("--instance <name>", "instance name for parallel service units")
+  .option("--with-admin", "also restart admin service unit for the same instance")
+  .action((options: { instance?: string; withAdmin?: boolean }) => {
     try {
       maybeReexecServiceCommandWithSudo();
       restartSystemdServices({
         restartAdmin: options.withAdmin ?? false,
+        instanceName: options.instance,
       });
     } catch (error) {
+      const instanceArg = options.instance?.trim() ? ` --instance ${options.instance.trim()}` : "";
       process.stderr.write(`Service restart failed: ${formatError(error)}\n`);
       process.stderr.write(
         [
           "Hint:",
-          "  - Run directly: codeharbor service restart --with-admin",
+          `  - Run directly: codeharbor service restart --with-admin${instanceArg}`,
           "  - The command auto-elevates with sudo when needed.",
-          `  - Fallback explicit form: ${buildExplicitSudoCommand("service restart --with-admin")}`,
+          `  - Fallback explicit form: ${buildExplicitSudoCommand(`service restart --with-admin${instanceArg}`)}`,
           "",
         ].join("\n"),
       );
@@ -567,6 +578,7 @@ function runLinuxPostUpdateRestart(input: {
   includeAdminService: boolean;
   skipRestart: boolean;
 }): PostUpdateRestartResult {
+  const serviceNames = resolveRuntimeSystemdServiceUnitNames();
   const manualCommands = buildManualRestartCommands({
     platform: "linux",
     includeAdminService: input.includeAdminService,
@@ -585,21 +597,22 @@ function runLinuxPostUpdateRestart(input: {
     };
   }
 
-  const hasMainService = hasSystemdUnit("codeharbor.service");
+  const hasMainService = hasSystemdUnit(serviceNames.mainServiceName);
   if (!hasMainService) {
     return {
-      summary: "需手工重启（未检测到 codeharbor.service）",
+      summary: `需手工重启（未检测到 ${serviceNames.mainServiceName}）`,
       manualCommands: ["codeharbor start"],
     };
   }
-  const hasAdminService = hasSystemdUnit("codeharbor-admin.service");
+  const hasAdminService = hasSystemdUnit(serviceNames.adminServiceName);
   const restartAdmin = input.includeAdminService && hasAdminService;
   try {
     restartSystemdServices({
       restartAdmin,
+      instanceName: serviceNames.instanceName ?? undefined,
     });
     return {
-      summary: `已自动重启（systemd${restartAdmin ? ", main+admin" : ", main"}）`,
+      summary: `已自动重启（systemd: ${serviceNames.mainServiceName}${restartAdmin ? ` + ${serviceNames.adminServiceName}` : ""}）`,
       manualCommands,
     };
   } catch (error) {

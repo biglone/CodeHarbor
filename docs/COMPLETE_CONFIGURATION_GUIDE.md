@@ -105,6 +105,16 @@ Main + admin:
 codeharbor service install --with-admin
 ```
 
+Multi-instance example (one host, multiple bots):
+
+```bash
+# bot-a
+codeharbor service install --instance bot-a --runtime-home /srv/codeharbor-bot-a --with-admin
+
+# bot-b
+codeharbor service install --instance bot-b --runtime-home /srv/codeharbor-bot-b --with-admin
+```
+
 ### Step 8: Open Admin Console
 
 Start admin API/UI:
@@ -116,6 +126,7 @@ codeharbor admin serve
 Open:
 
 - `/settings/global`
+- `/settings/bots`
 - `/settings/rooms`
 - `/health`
 - `/audit`
@@ -125,9 +136,10 @@ Open:
 Recommended order:
 
 1. Global settings (prefix/workdir/limits/progress/CLI compat)
-2. Room settings (room-specific workdir and trigger policy)
-3. Health check
-4. Audit review
+2. Bot profiles (multi-instance Matrix identities + runtime homes)
+3. Room settings (room-specific workdir and trigger policy)
+4. Health check
+5. Audit review
 
 ### Step 10: Restart when needed
 
@@ -135,6 +147,7 @@ Global config writes `.env` and is restart-scoped. Restart after save:
 
 - Admin UI button: `Restart Main Service` or `Restart Main + Admin`
 - CLI: `codeharbor service restart --with-admin`
+- Multi-instance CLI: `codeharbor service restart --instance bot-a --with-admin`
 
 ### Step 11: Enable backup automation
 

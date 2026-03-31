@@ -6,32 +6,44 @@ import path from "node:path";
 import { RUNTIME_HOME_ENV_KEY, USER_RUNTIME_HOME_DIR } from "./runtime-home";
 
 const SYSTEMD_DIR = "/etc/systemd/system";
-const MAIN_SERVICE_NAME = "codeharbor.service";
-const ADMIN_SERVICE_NAME = "codeharbor-admin.service";
+const MAIN_SERVICE_BASENAME = "codeharbor";
+const ADMIN_SERVICE_BASENAME = "codeharbor-admin";
 const SUDOERS_DIR = "/etc/sudoers.d";
-const RESTART_SUDOERS_FILE = "codeharbor-restart";
+const RESTART_SUDOERS_BASENAME = "codeharbor-restart";
+const SERVICE_SUFFIX = ".service";
+const SYSTEMD_INSTANCE_ENV_KEY = "CODEHARBOR_SYSTEMD_INSTANCE";
+const SYSTEMD_MAIN_UNIT_ENV_KEY = "CODEHARBOR_SYSTEMD_MAIN_UNIT";
+const SYSTEMD_ADMIN_UNIT_ENV_KEY = "CODEHARBOR_SYSTEMD_ADMIN_UNIT";
+const INSTANCE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 interface UnitBuildOptions {
   runUser: string;
   runtimeHome: string;
   nodeBinPath: string;
   cliScriptPath: string;
+  instanceName: string | null;
+  mainServiceName: string;
+  adminServiceName: string;
 }
 
 interface RestartSudoersPolicyOptions {
   runUser: string;
   systemctlPath: string;
+  mainServiceName?: string;
+  adminServiceName?: string;
 }
 
 interface RestartAdminSystemdServiceOptions {
   output?: NodeJS.WritableStream;
   allowSudoFallback?: boolean;
+  instanceName?: string;
 }
 
 interface QueueAdminSystemdRestartOptions {
   output?: NodeJS.WritableStream;
   allowSudoFallback?: boolean;
   delayMs?: number;
+  instanceName?: string;
 }
 
 export interface InstallSystemdServicesOptions {
@@ -41,11 +53,13 @@ export interface InstallSystemdServicesOptions {
   cliScriptPath: string;
   installAdmin: boolean;
   startNow: boolean;
+  instanceName?: string;
   output?: NodeJS.WritableStream;
 }
 
 export interface UninstallSystemdServicesOptions {
   removeAdmin: boolean;
+  instanceName?: string;
   output?: NodeJS.WritableStream;
 }
 
@@ -53,6 +67,14 @@ export interface RestartSystemdServicesOptions {
   restartAdmin: boolean;
   output?: NodeJS.WritableStream;
   allowSudoFallback?: boolean;
+  instanceName?: string;
+}
+
+export interface SystemdServiceUnitNames {
+  instanceName: string | null;
+  mainServiceName: string;
+  adminServiceName: string;
+  restartSudoersFile: string;
 }
 
 export function resolveDefaultRunUser(env: NodeJS.ProcessEnv = process.env): string {
@@ -91,13 +113,53 @@ export function resolveRuntimeHomeForUser(
   return path.resolve(os.homedir(), USER_RUNTIME_HOME_DIR);
 }
 
+export function resolveSystemdServiceUnitNames(instanceName?: string | null): SystemdServiceUnitNames {
+  const normalizedInstance = normalizeInstanceName(instanceName);
+  if (!normalizedInstance) {
+    return {
+      instanceName: null,
+      mainServiceName: `${MAIN_SERVICE_BASENAME}${SERVICE_SUFFIX}`,
+      adminServiceName: `${ADMIN_SERVICE_BASENAME}${SERVICE_SUFFIX}`,
+      restartSudoersFile: RESTART_SUDOERS_BASENAME,
+    };
+  }
+
+  return {
+    instanceName: normalizedInstance,
+    mainServiceName: `${MAIN_SERVICE_BASENAME}-${normalizedInstance}${SERVICE_SUFFIX}`,
+    adminServiceName: `${ADMIN_SERVICE_BASENAME}-${normalizedInstance}${SERVICE_SUFFIX}`,
+    restartSudoersFile: `${RESTART_SUDOERS_BASENAME}-${normalizedInstance}`,
+  };
+}
+
+export function resolveRuntimeSystemdServiceUnitNames(env: NodeJS.ProcessEnv = process.env): SystemdServiceUnitNames {
+  const runtimeMainUnit = env[SYSTEMD_MAIN_UNIT_ENV_KEY]?.trim() ?? "";
+  const runtimeAdminUnit = env[SYSTEMD_ADMIN_UNIT_ENV_KEY]?.trim() ?? "";
+  const runtimeInstance = normalizeInstanceNameSafe(env[SYSTEMD_INSTANCE_ENV_KEY]);
+
+  if (isValidSystemdUnitName(runtimeMainUnit) && isValidSystemdUnitName(runtimeAdminUnit)) {
+    return {
+      instanceName: runtimeInstance,
+      mainServiceName: runtimeMainUnit,
+      adminServiceName: runtimeAdminUnit,
+      restartSudoersFile: runtimeInstance
+        ? `${RESTART_SUDOERS_BASENAME}-${runtimeInstance}`
+        : RESTART_SUDOERS_BASENAME,
+    };
+  }
+
+  return resolveSystemdServiceUnitNames(runtimeInstance);
+}
+
 export function buildMainServiceUnit(options: UnitBuildOptions): string {
   validateUnitOptions(options);
   const runtimeHome = path.resolve(options.runtimeHome);
+  const instanceLabel = options.instanceName ? ` (${options.instanceName})` : "";
+  const instanceEnvValue = options.instanceName ?? "default";
 
   return [
     "[Unit]",
-    "Description=CodeHarbor main service",
+    `Description=CodeHarbor main service${instanceLabel}`,
     "After=network-online.target",
     "Wants=network-online.target",
     "",
@@ -106,6 +168,9 @@ export function buildMainServiceUnit(options: UnitBuildOptions): string {
     `User=${options.runUser}`,
     `WorkingDirectory=${runtimeHome}`,
     `Environment=CODEHARBOR_HOME=${runtimeHome}`,
+    `Environment=${SYSTEMD_INSTANCE_ENV_KEY}=${instanceEnvValue}`,
+    `Environment=${SYSTEMD_MAIN_UNIT_ENV_KEY}=${options.mainServiceName}`,
+    `Environment=${SYSTEMD_ADMIN_UNIT_ENV_KEY}=${options.adminServiceName}`,
     `ExecStart=${path.resolve(options.nodeBinPath)} ${path.resolve(options.cliScriptPath)} start`,
     "Restart=always",
     "RestartSec=3",
@@ -124,10 +189,12 @@ export function buildMainServiceUnit(options: UnitBuildOptions): string {
 export function buildAdminServiceUnit(options: UnitBuildOptions): string {
   validateUnitOptions(options);
   const runtimeHome = path.resolve(options.runtimeHome);
+  const instanceLabel = options.instanceName ? ` (${options.instanceName})` : "";
+  const instanceEnvValue = options.instanceName ?? "default";
 
   return [
     "[Unit]",
-    "Description=CodeHarbor admin service",
+    `Description=CodeHarbor admin service${instanceLabel}`,
     "After=network-online.target",
     "Wants=network-online.target",
     "",
@@ -136,6 +203,9 @@ export function buildAdminServiceUnit(options: UnitBuildOptions): string {
     `User=${options.runUser}`,
     `WorkingDirectory=${runtimeHome}`,
     `Environment=CODEHARBOR_HOME=${runtimeHome}`,
+    `Environment=${SYSTEMD_INSTANCE_ENV_KEY}=${instanceEnvValue}`,
+    `Environment=${SYSTEMD_MAIN_UNIT_ENV_KEY}=${options.mainServiceName}`,
+    `Environment=${SYSTEMD_ADMIN_UNIT_ENV_KEY}=${options.adminServiceName}`,
     `ExecStart=${path.resolve(options.nodeBinPath)} ${path.resolve(options.cliScriptPath)} admin serve`,
     "Restart=always",
     "RestartSec=3",
@@ -154,6 +224,11 @@ export function buildAdminServiceUnit(options: UnitBuildOptions): string {
 export function buildRestartSudoersPolicy(options: RestartSudoersPolicyOptions): string {
   const runUser = options.runUser.trim();
   const systemctlPath = options.systemctlPath.trim();
+  const serviceNames = resolveSystemdServiceUnitNamesFromInput({
+    instanceName: null,
+    explicitMainServiceName: options.mainServiceName,
+    explicitAdminServiceName: options.adminServiceName,
+  });
 
   validateSimpleValue(runUser, "runUser");
   validateSimpleValue(systemctlPath, "systemctlPath");
@@ -164,7 +239,7 @@ export function buildRestartSudoersPolicy(options: RestartSudoersPolicyOptions):
   return [
     "# Managed by CodeHarbor service install; do not edit manually.",
     `Defaults:${runUser} !requiretty`,
-    `${runUser} ALL=(root) NOPASSWD: ${systemctlPath} restart ${MAIN_SERVICE_NAME}, ${systemctlPath} restart ${ADMIN_SERVICE_NAME}`,
+    `${runUser} ALL=(root) NOPASSWD: ${systemctlPath} restart ${serviceNames.mainServiceName}, ${systemctlPath} restart ${serviceNames.adminServiceName}`,
     "",
   ].join("\n");
 }
@@ -176,6 +251,7 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
   const output = options.output ?? process.stdout;
   const runUser = options.runUser.trim();
   const runtimeHome = path.resolve(options.runtimeHome);
+  const serviceNames = resolveSystemdServiceUnitNames(options.instanceName ?? null);
 
   validateSimpleValue(runUser, "runUser");
   validateSimpleValue(runtimeHome, "runtimeHome");
@@ -188,15 +264,18 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
   fs.mkdirSync(runtimeHome, { recursive: true });
   runCommand("chown", ["-R", `${runUser}:${runGroup}`, runtimeHome]);
 
-  const mainPath = path.join(SYSTEMD_DIR, MAIN_SERVICE_NAME);
-  const adminPath = path.join(SYSTEMD_DIR, ADMIN_SERVICE_NAME);
-  const restartSudoersPath = path.join(SUDOERS_DIR, RESTART_SUDOERS_FILE);
+  const mainPath = path.join(SYSTEMD_DIR, serviceNames.mainServiceName);
+  const adminPath = path.join(SYSTEMD_DIR, serviceNames.adminServiceName);
+  const restartSudoersPath = path.join(SUDOERS_DIR, serviceNames.restartSudoersFile);
 
   const unitOptions: UnitBuildOptions = {
     runUser,
     runtimeHome,
     nodeBinPath: options.nodeBinPath,
     cliScriptPath: options.cliScriptPath,
+    instanceName: serviceNames.instanceName,
+    mainServiceName: serviceNames.mainServiceName,
+    adminServiceName: serviceNames.adminServiceName,
   };
 
   fs.writeFileSync(mainPath, buildMainServiceUnit(unitOptions), "utf8");
@@ -207,6 +286,8 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
       const policy = buildRestartSudoersPolicy({
         runUser,
         systemctlPath: resolveSystemctlPath(),
+        mainServiceName: serviceNames.mainServiceName,
+        adminServiceName: serviceNames.adminServiceName,
       });
       fs.mkdirSync(SUDOERS_DIR, { recursive: true });
       fs.writeFileSync(restartSudoersPath, policy, "utf8");
@@ -217,14 +298,14 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
   runSystemctl(["daemon-reload"]);
 
   if (options.startNow) {
-    runSystemctl(["enable", "--now", MAIN_SERVICE_NAME]);
+    runSystemctl(["enable", "--now", serviceNames.mainServiceName]);
     if (options.installAdmin) {
-      runSystemctl(["enable", "--now", ADMIN_SERVICE_NAME]);
+      runSystemctl(["enable", "--now", serviceNames.adminServiceName]);
     }
   } else {
-    runSystemctl(["enable", MAIN_SERVICE_NAME]);
+    runSystemctl(["enable", serviceNames.mainServiceName]);
     if (options.installAdmin) {
-      runSystemctl(["enable", ADMIN_SERVICE_NAME]);
+      runSystemctl(["enable", serviceNames.adminServiceName]);
     }
   }
 
@@ -235,7 +316,7 @@ export function installSystemdServices(options: InstallSystemdServicesOptions): 
       output.write(`Installed sudoers policy: ${restartSudoersPath}\n`);
     }
   }
-  output.write("Done. Check status with: systemctl status codeharbor --no-pager\n");
+  output.write(`Done. Check status with: systemctl status ${serviceNames.mainServiceName} --no-pager\n`);
 }
 
 export function uninstallSystemdServices(options: UninstallSystemdServicesOptions): void {
@@ -243,17 +324,18 @@ export function uninstallSystemdServices(options: UninstallSystemdServicesOption
   assertRootPrivileges();
 
   const output = options.output ?? process.stdout;
-  const mainPath = path.join(SYSTEMD_DIR, MAIN_SERVICE_NAME);
-  const adminPath = path.join(SYSTEMD_DIR, ADMIN_SERVICE_NAME);
-  const restartSudoersPath = path.join(SUDOERS_DIR, RESTART_SUDOERS_FILE);
+  const serviceNames = resolveSystemdServiceUnitNames(options.instanceName ?? null);
+  const mainPath = path.join(SYSTEMD_DIR, serviceNames.mainServiceName);
+  const adminPath = path.join(SYSTEMD_DIR, serviceNames.adminServiceName);
+  const restartSudoersPath = path.join(SUDOERS_DIR, serviceNames.restartSudoersFile);
 
-  stopAndDisableIfPresent(MAIN_SERVICE_NAME);
+  stopAndDisableIfPresent(serviceNames.mainServiceName);
   if (fs.existsSync(mainPath)) {
     fs.unlinkSync(mainPath);
   }
 
   if (options.removeAdmin) {
-    stopAndDisableIfPresent(ADMIN_SERVICE_NAME);
+    stopAndDisableIfPresent(serviceNames.adminServiceName);
     if (fs.existsSync(adminPath)) {
       fs.unlinkSync(adminPath);
     }
@@ -278,15 +360,19 @@ export function restartSystemdServices(options: RestartSystemdServicesOptions): 
 
   const output = options.output ?? process.stdout;
   const runWithSudoFallback = options.allowSudoFallback ?? true;
+  const serviceNames =
+    options.instanceName === undefined
+      ? resolveRuntimeSystemdServiceUnitNames()
+      : resolveSystemdServiceUnitNames(options.instanceName);
   const systemctlRunner =
     hasRootPrivileges() || !runWithSudoFallback ? runSystemctl : runSystemctlWithNonInteractiveSudo;
 
-  systemctlRunner(["restart", MAIN_SERVICE_NAME]);
-  output.write(`Restarted service: ${MAIN_SERVICE_NAME}\n`);
+  systemctlRunner(["restart", serviceNames.mainServiceName]);
+  output.write(`Restarted service: ${serviceNames.mainServiceName}\n`);
 
   if (options.restartAdmin) {
-    systemctlRunner(["restart", ADMIN_SERVICE_NAME]);
-    output.write(`Restarted service: ${ADMIN_SERVICE_NAME}\n`);
+    systemctlRunner(["restart", serviceNames.adminServiceName]);
+    output.write(`Restarted service: ${serviceNames.adminServiceName}\n`);
   }
 
   output.write("Done.\n");
@@ -297,11 +383,15 @@ export function restartAdminSystemdService(options: RestartAdminSystemdServiceOp
 
   const output = options.output ?? process.stdout;
   const runWithSudoFallback = options.allowSudoFallback ?? true;
+  const serviceNames =
+    options.instanceName === undefined
+      ? resolveRuntimeSystemdServiceUnitNames()
+      : resolveSystemdServiceUnitNames(options.instanceName);
   const systemctlRunner =
     hasRootPrivileges() || !runWithSudoFallback ? runSystemctl : runSystemctlWithNonInteractiveSudo;
 
-  systemctlRunner(["restart", ADMIN_SERVICE_NAME]);
-  output.write(`Restarted service: ${ADMIN_SERVICE_NAME}\n`);
+  systemctlRunner(["restart", serviceNames.adminServiceName]);
+  output.write(`Restarted service: ${serviceNames.adminServiceName}\n`);
   output.write("Done.\n");
 }
 
@@ -311,11 +401,15 @@ export function queueAdminSystemdRestart(options: QueueAdminSystemdRestartOption
   const output = options.output ?? process.stdout;
   const runWithSudoFallback = options.allowSudoFallback ?? true;
   const delayMs = Math.max(0, Math.floor(options.delayMs ?? 800));
+  const serviceNames =
+    options.instanceName === undefined
+      ? resolveRuntimeSystemdServiceUnitNames()
+      : resolveSystemdServiceUnitNames(options.instanceName);
   const systemctlPath = resolveSystemctlPath();
   const restartCommand =
     hasRootPrivileges() || !runWithSudoFallback
-      ? `${shellEscape(systemctlPath)} restart ${shellEscape(ADMIN_SERVICE_NAME)}`
-      : `sudo -n ${shellEscape(systemctlPath)} restart ${shellEscape(ADMIN_SERVICE_NAME)}`;
+      ? `${shellEscape(systemctlPath)} restart ${shellEscape(serviceNames.adminServiceName)}`
+      : `sudo -n ${shellEscape(systemctlPath)} restart ${shellEscape(serviceNames.adminServiceName)}`;
   const command = delayMs > 0 ? `sleep ${formatSleepSeconds(delayMs)}; ${restartCommand}` : restartCommand;
 
   try {
@@ -330,7 +424,7 @@ export function queueAdminSystemdRestart(options: QueueAdminSystemdRestartOption
     });
   }
 
-  output.write(`Queued restart for service: ${ADMIN_SERVICE_NAME}\n`);
+  output.write(`Queued restart for service: ${serviceNames.adminServiceName}\n`);
   output.write("Done.\n");
 }
 
@@ -355,6 +449,11 @@ function validateUnitOptions(options: UnitBuildOptions): void {
   validateSimpleValue(options.runtimeHome, "runtimeHome");
   validateSimpleValue(options.nodeBinPath, "nodeBinPath");
   validateSimpleValue(options.cliScriptPath, "cliScriptPath");
+  validateSimpleValue(options.mainServiceName, "mainServiceName");
+  validateSimpleValue(options.adminServiceName, "adminServiceName");
+  if (options.instanceName !== null) {
+    validateSimpleValue(options.instanceName, "instanceName");
+  }
 }
 
 function validateSimpleValue(value: string, key: string): void {
@@ -364,6 +463,55 @@ function validateSimpleValue(value: string, key: string): void {
   if (/[\r\n]/.test(value)) {
     throw new Error(`${key} contains invalid newline characters.`);
   }
+}
+
+function resolveSystemdServiceUnitNamesFromInput(input: {
+  instanceName?: string | null;
+  explicitMainServiceName?: string;
+  explicitAdminServiceName?: string;
+}): SystemdServiceUnitNames {
+  const explicitMain = input.explicitMainServiceName?.trim() ?? "";
+  const explicitAdmin = input.explicitAdminServiceName?.trim() ?? "";
+  if (explicitMain || explicitAdmin) {
+    if (!isValidSystemdUnitName(explicitMain) || !isValidSystemdUnitName(explicitAdmin)) {
+      throw new Error("mainServiceName/adminServiceName must be valid systemd unit names.");
+    }
+    const instanceName = normalizeInstanceNameSafe(input.instanceName);
+    return {
+      instanceName,
+      mainServiceName: explicitMain,
+      adminServiceName: explicitAdmin,
+      restartSudoersFile: instanceName
+        ? `${RESTART_SUDOERS_BASENAME}-${instanceName}`
+        : RESTART_SUDOERS_BASENAME,
+    };
+  }
+  return resolveSystemdServiceUnitNames(input.instanceName ?? null);
+}
+
+function normalizeInstanceName(instanceName?: string | null): string | null {
+  const value = instanceName?.trim() ?? "";
+  if (!value) {
+    return null;
+  }
+  if (!INSTANCE_NAME_PATTERN.test(value)) {
+    throw new Error(
+      "instanceName must match /^[A-Za-z0-9][A-Za-z0-9._-]*$/ (letters/numbers plus . _ -, and cannot start with punctuation).",
+    );
+  }
+  return value;
+}
+
+function normalizeInstanceNameSafe(instanceName?: string | null): string | null {
+  try {
+    return normalizeInstanceName(instanceName);
+  } catch {
+    return null;
+  }
+}
+
+function isValidSystemdUnitName(unitName: string): boolean {
+  return /^[A-Za-z0-9_.@:-]+\.service$/.test(unitName);
 }
 
 function assertLinuxWithSystemd(): void {
