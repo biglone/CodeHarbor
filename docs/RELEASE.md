@@ -36,13 +36,16 @@ Publish runs when one of these is true:
 
 If the version already exists on npm, publish is skipped and workflow logs include a suggested next patch version (`Suggested next version`).
 
-## Failed Publish & Version Gaps
+## Failed Publish Retry Policy (No Version Skip)
 
-If a release commit/tag is pushed but `Release NPM` fails before publish, npm will not have that version.
+If a release run fails before npm publish, do not bump to the next version.
 
-- Example: `v0.1.85` tag exists in git, but npm latest stays `0.1.84`.
-- After fixing CI/workflow blockers, publish the next patch version (for example `0.1.86`) instead of force-rewriting the failed release commit/tag.
-- Keep the failed version trace in git history and mention it in release notes/changelog to avoid confusion.
+- Keep `package.json` + `CHANGELOG.md` at the failed target version.
+- Fix CI/workflow blockers in follow-up commits without changing version.
+- Re-run publish for the same version:
+  - `workflow_dispatch`, or
+  - push a commit with `[publish-npm]`.
+- The `Release NPM` workflow now enforces no skipped version progression by default.
 
 ## npm Publish Auth Modes
 

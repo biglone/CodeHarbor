@@ -253,6 +253,9 @@ Release checklist (recommended):
 npm view codeharbor version
 ```
 
+If release CI fails before npm publish, keep the same version and retry publish after fixing CI.
+Do not skip to the next version number.
+
 Run e2e locally:
 
 ```bash
