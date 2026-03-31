@@ -1997,7 +1997,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               var title = entry.title ? " - " + String(entry.title) : "";
               lines.push(String(entry.id) + " (" + String(entry.source || "unknown") + ")" + title);
             }
-            catalogNode.value = lines.join("\n");
+            catalogNode.value = lines.join("\\n");
 
             var missingAssignments = catalog.missingAssignments || {};
             var roleLabels = { planner: "planner", executor: "executor", reviewer: "reviewer" };

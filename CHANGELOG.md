@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - (none yet)
 
+## [0.1.89] - 2026-03-31
+
+- admin UI parser fix: escape newline in SKILL catalog textarea rendering (`lines.join("\\n")`) to prevent inline-script syntax errors on page load.
+- release stability: restore Admin UI boot sequence so global/rooms/health/audit pages initialize and e2e pipeline can proceed.
+
 ## [0.1.88] - 2026-03-31
 
 - admin console route bootstrap: run `handleRoute()` immediately after initial hash normalization so first-load view/data initialization does not rely on `hashchange` timing.
