@@ -159,7 +159,7 @@ interface BotProfilesSnapshot {
 interface BotProfilesApplyItemResult {
   id: string;
   enabled: boolean;
-  action: "install" | "uninstall" | "skip";
+  action: "install" | "uninstall" | "skip" | "retire-default";
   status: "planned" | "succeeded" | "failed" | "skipped";
   command: string | null;
   message: string;
@@ -168,6 +168,7 @@ interface BotProfilesApplyItemResult {
 interface BotProfilesApplyResult {
   dryRun: boolean;
   includeDisabled: boolean;
+  retireDefaultSingleInstance: boolean;
   summary: {
     total: number;
     planned: number;
@@ -182,6 +183,7 @@ interface BotProfilesApplyInput {
   profiles: BotInstanceProfileRecord[];
   dryRun: boolean;
   includeDisabled: boolean;
+  retireDefaultSingleInstance: boolean;
 }
 
 interface ConfigImportResult {
@@ -784,6 +786,7 @@ export class AdminServer {
         const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "bot profiles apply payload");
         const dryRun = normalizeBoolean(body.dryRun, false);
         const includeDisabled = normalizeBoolean(body.includeDisabled, true);
+        const retireDefaultSingleInstance = normalizeBoolean(body.retireDefaultSingleInstance, false);
         const requestedIds = parseOptionalBotProfileIdList(body.instanceIds, "instanceIds");
         const snapshot = this.loadBotProfilesSnapshot();
         const selectedProfiles = requestedIds
@@ -802,6 +805,7 @@ export class AdminServer {
           profiles: selectedProfiles,
           dryRun,
           includeDisabled,
+          retireDefaultSingleInstance,
         });
 
         this.stateStore.appendConfigRevision(
@@ -811,6 +815,7 @@ export class AdminServer {
             type: "bot_profiles_apply",
             dryRun,
             includeDisabled,
+            retireDefaultSingleInstance,
             requestedIds,
             summary: applyResult.summary,
             items: applyResult.items,
@@ -825,6 +830,7 @@ export class AdminServer {
           type: "bot_profiles_apply",
           dryRun,
           includeDisabled,
+          retireDefaultSingleInstance,
           total: applyResult.summary.total,
           planned: applyResult.summary.planned,
           failed: applyResult.summary.failed,
@@ -2401,11 +2407,11 @@ export class AdminServer {
 
   private async executeBotProfilesApply(input: BotProfilesApplyInput): Promise<BotProfilesApplyResult> {
     const items: BotProfilesApplyItemResult[] = [];
-    const enabledProfiles = input.includeDisabled
+    const targetProfiles = input.includeDisabled
       ? input.profiles
       : input.profiles.filter((profile) => profile.enabled);
 
-    for (const profile of enabledProfiles) {
+    for (const profile of targetProfiles) {
       const action: BotProfilesApplyItemResult["action"] = profile.enabled ? "install" : "uninstall";
       const serviceArgs = buildBotServiceCommandArgs(profile, action);
       const command = formatShellCommand(
@@ -2474,6 +2480,80 @@ export class AdminServer {
       }
     }
 
+    if (input.retireDefaultSingleInstance) {
+      const installItems = items.filter((item) => item.action === "install");
+      const retireCommandPreview = this.formatSystemctlCommand([
+        "disable",
+        "--now",
+        "codeharbor.service",
+        "codeharbor-admin.service",
+      ]);
+
+      if (installItems.length === 0) {
+        items.push({
+          id: "default-single-instance",
+          enabled: false,
+          action: "retire-default",
+          status: "skipped",
+          command: null,
+          message: "no enabled profile install action in this apply request; skipped default retire.",
+        });
+      } else if (input.dryRun) {
+        items.push({
+          id: "default-single-instance",
+          enabled: false,
+          action: "retire-default",
+          status: "planned",
+          command: retireCommandPreview,
+          message: "dry-run: retire default single-instance after successful installs.",
+        });
+      } else {
+        const hasInstallFailure = installItems.some((item) => item.status === "failed");
+        const hasInstallSuccess = installItems.some((item) => item.status === "succeeded");
+
+        if (!hasInstallSuccess) {
+          items.push({
+            id: "default-single-instance",
+            enabled: false,
+            action: "retire-default",
+            status: "skipped",
+            command: null,
+            message: "no successful profile install detected; skipped default retire to avoid downtime.",
+          });
+        } else if (hasInstallFailure) {
+          items.push({
+            id: "default-single-instance",
+            enabled: false,
+            action: "retire-default",
+            status: "skipped",
+            command: null,
+            message: "some profile installs failed; skipped default retire for safety.",
+          });
+        } else {
+          try {
+            const retireResult = await this.retireDefaultSingleInstanceServices();
+            items.push({
+              id: "default-single-instance",
+              enabled: false,
+              action: "retire-default",
+              status: retireResult.status,
+              command: retireResult.command,
+              message: retireResult.message,
+            });
+          } catch (error) {
+            items.push({
+              id: "default-single-instance",
+              enabled: false,
+              action: "retire-default",
+              status: "failed",
+              command: retireCommandPreview,
+              message: formatError(error),
+            });
+          }
+        }
+      }
+    }
+
     const summary = {
       total: input.profiles.length,
       planned: items.filter((item) => item.status === "planned").length,
@@ -2485,6 +2565,7 @@ export class AdminServer {
     return {
       dryRun: input.dryRun,
       includeDisabled: input.includeDisabled,
+      retireDefaultSingleInstance: input.retireDefaultSingleInstance,
       summary,
       items,
     };
@@ -2552,6 +2633,87 @@ export class AdminServer {
         cause: error,
       });
     }
+  }
+
+  private formatSystemctlCommand(systemctlArgs: string[]): string {
+    const useSudo = shouldUseSudoForServiceCommand();
+    const command = useSudo ? "sudo" : "systemctl";
+    const args = useSudo ? ["-n", "systemctl", ...systemctlArgs] : systemctlArgs;
+    return formatShellCommand(command, args);
+  }
+
+  private async runSystemctlCommand(systemctlArgs: string[]): Promise<string> {
+    const useSudo = shouldUseSudoForServiceCommand();
+    const command = useSudo ? "sudo" : "systemctl";
+    const args = useSudo ? ["-n", "systemctl", ...systemctlArgs] : systemctlArgs;
+    const renderedCommand = formatShellCommand(command, args);
+
+    try {
+      await execFileAsync(command, args, {
+        maxBuffer: 1024 * 1024,
+      });
+      return renderedCommand;
+    } catch (error) {
+      const detail = formatExecFileError(error);
+      throw new Error(`systemctl command failed (${renderedCommand}): ${detail}`, {
+        cause: error,
+      });
+    }
+  }
+
+  private async hasSystemdUnit(unitName: string): Promise<boolean> {
+    if (process.platform !== "linux") {
+      return false;
+    }
+    try {
+      const result = await execFileAsync("systemctl", ["list-unit-files", unitName, "--no-legend"], {
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+      });
+      const stdout = typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
+      return stdout
+        .split(/\r?\n/)
+        .some((line) => line.trim().startsWith(`${unitName} `));
+    } catch {
+      return false;
+    }
+  }
+
+  private async retireDefaultSingleInstanceServices(): Promise<{
+    status: BotProfilesApplyItemResult["status"];
+    command: string | null;
+    message: string;
+  }> {
+    if (process.platform !== "linux") {
+      return {
+        status: "skipped",
+        command: null,
+        message: "retire default single-instance is supported on Linux/systemd only.",
+      };
+    }
+
+    const defaultUnits = ["codeharbor.service", "codeharbor-admin.service"];
+    const installedUnits: string[] = [];
+    for (const unitName of defaultUnits) {
+      if (await this.hasSystemdUnit(unitName)) {
+        installedUnits.push(unitName);
+      }
+    }
+
+    if (installedUnits.length === 0) {
+      return {
+        status: "skipped",
+        command: null,
+        message: "default single-instance services not detected; nothing to retire.",
+      };
+    }
+
+    const command = await this.runSystemctlCommand(["disable", "--now", ...installedUnits]);
+    return {
+      status: "succeeded",
+      command,
+      message: `retired default single-instance services: ${installedUnits.join(", ")}.`,
+    };
   }
 
   private async runConfigImportFromSnapshot(snapshot: unknown, dryRun: boolean, actor: string | null): Promise<ConfigImportResult> {

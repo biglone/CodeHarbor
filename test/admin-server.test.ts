@@ -1537,7 +1537,13 @@ describe("AdminServer", () => {
     const stateStore = new StateStore(db, legacy, 200, 30, 5000);
     const configService = new ConfigService(stateStore, dir);
     const logger = new Logger("info");
-    const applyCalls: Array<{ dryRun: boolean; includeDisabled: boolean; profileCount: number; hasToken: boolean }> = [];
+    const applyCalls: Array<{
+      dryRun: boolean;
+      includeDisabled: boolean;
+      retireDefaultSingleInstance: boolean;
+      profileCount: number;
+      hasToken: boolean;
+    }> = [];
     const server = new AdminServer(config, logger, stateStore, configService, {
       host: "127.0.0.1",
       port: 0,
@@ -1563,12 +1569,14 @@ describe("AdminServer", () => {
         applyCalls.push({
           dryRun: input.dryRun,
           includeDisabled: input.includeDisabled,
+          retireDefaultSingleInstance: input.retireDefaultSingleInstance,
           profileCount: input.profiles.length,
           hasToken: Boolean(input.profiles[0]?.matrixAccessToken),
         });
         return {
           dryRun: input.dryRun,
           includeDisabled: input.includeDisabled,
+          retireDefaultSingleInstance: input.retireDefaultSingleInstance,
           summary: {
             total: input.profiles.length,
             planned: input.dryRun ? input.profiles.length : 0,
@@ -1687,6 +1695,7 @@ describe("AdminServer", () => {
     expect(applyCalls[0]).toEqual({
       dryRun: true,
       includeDisabled: true,
+      retireDefaultSingleInstance: false,
       profileCount: 1,
       hasToken: true,
     });

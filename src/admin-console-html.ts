@@ -738,6 +738,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           <button id="bots-save-btn" type="button" data-i18n="bots.save">保存实例配置</button>
           <button id="bots-apply-dry-run-btn" type="button" class="secondary" data-i18n="bots.applyDryRun">应用预检（dry-run）</button>
           <button id="bots-apply-btn" type="button" class="secondary" data-i18n="bots.apply">应用实例变更</button>
+          <label class="checkbox" style="margin: 0 0 0 6px;">
+            <input id="bots-retire-default-toggle" type="checkbox" />
+            <span data-i18n="bots.retireDefault">应用后自动退役默认单实例服务（codeharbor.service + codeharbor-admin.service）</span>
+          </label>
         </div>
         <div class="split-grid">
           <div class="panel" style="padding: 12px;">
@@ -1164,6 +1168,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.save": "保存实例配置",
             "bots.applyDryRun": "应用预检（dry-run）",
             "bots.apply": "应用实例变更",
+            "bots.retireDefault": "应用后自动退役默认单实例服务（codeharbor.service + codeharbor-admin.service）",
             "bots.editorTitle": "实例表单",
             "bots.selectedNone": "当前：未选择实例（新建模式）",
             "bots.selectedPrefix": "当前实例：{id}",
@@ -1206,7 +1211,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsJsonInvalid": "实例配置 JSON 解析失败：{error}",
             "notice.botsSaved": "机器人实例配置已保存：{count} 项。",
             "notice.botsSaveFailed": "保存机器人实例配置失败：{error}",
-            "notice.botsApplied": "实例应用结果：成功 {succeeded}，失败 {failed}，跳过 {skipped}。",
+            "notice.botsApplied": "实例应用结果：成功 {succeeded}，失败 {failed}，跳过 {skipped}，退役默认单实例={retire}。",
             "notice.botsApplyFailed": "应用实例配置失败：{error}",
             "notice.botsEmpty": "暂无机器人实例配置。",
             "notice.botsFormInvalid": "实例表单校验失败：{error}",
@@ -1447,6 +1452,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.save": "Save Profiles",
             "bots.applyDryRun": "Apply Dry-Run",
             "bots.apply": "Apply Changes",
+            "bots.retireDefault": "Retire default single-instance services after apply (codeharbor.service + codeharbor-admin.service)",
             "bots.editorTitle": "Profile Form",
             "bots.selectedNone": "Current: none selected (create mode)",
             "bots.selectedPrefix": "Current profile: {id}",
@@ -1489,7 +1495,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsJsonInvalid": "Profiles JSON parse failed: {error}",
             "notice.botsSaved": "Saved bot profiles: {count}.",
             "notice.botsSaveFailed": "Failed to save bot profiles: {error}",
-            "notice.botsApplied": "Apply result: succeeded {succeeded}, failed {failed}, skipped {skipped}.",
+            "notice.botsApplied": "Apply result: succeeded {succeeded}, failed {failed}, skipped {skipped}, retire default={retire}.",
             "notice.botsApplyFailed": "Failed to apply bot profiles: {error}",
             "notice.botsEmpty": "No bot profiles.",
             "notice.botsFormInvalid": "Profile form validation failed: {error}",
@@ -3123,18 +3129,23 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         async function applyBotProfiles(dryRun) {
           try {
+            var retireToggle = document.getElementById("bots-retire-default-toggle");
+            var retireDefaultSingleInstance = Boolean(retireToggle && retireToggle.checked);
             var response = await apiRequest("/api/admin/bot-profiles/apply", "POST", {
               dryRun: Boolean(dryRun),
-              includeDisabled: true
+              includeDisabled: true,
+              retireDefaultSingleInstance: retireDefaultSingleInstance
             });
             var data = response.data || {};
             var summary = data.summary || {};
+            var retireApplied = data.retireDefaultSingleInstance ? "on" : "off";
             showNotice(
               summary.failed > 0 ? "warn" : "ok",
               t("notice.botsApplied", {
                 succeeded: String(summary.succeeded || 0),
                 failed: String(summary.failed || 0),
-                skipped: String(summary.skipped || 0)
+                skipped: String(summary.skipped || 0),
+                retire: retireApplied
               })
             );
             if (Array.isArray(data.items) && data.items.length > 0) {

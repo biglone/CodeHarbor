@@ -306,7 +306,7 @@ codeharbor admin serve
 - DM 发消息，机器人能回复
 - 群聊触发策略符合预期
 - 管理后台 `health` 正常
-- 管理后台 `settings/bots` 可读取/保存机器人实例配置，并可执行 apply dry-run
+- 管理后台 `settings/bots` 可读取/保存机器人实例配置，并可执行 apply dry-run / apply（可选“自动退役默认单实例服务”）
 - `/status` 返回会话状态与运行指标
 - `/version` 返回当前版本与更新提示
 - `/diag version` / `/diag route` / `/diag autodev` / `/diag queue` 可返回诊断信息（如启用队列则校验 queue 明细）

@@ -441,7 +441,7 @@ Main endpoints:
 - `DELETE /api/admin/config/rooms/:roomId`
 - `GET /api/admin/bot-profiles`
 - `PUT /api/admin/bot-profiles`
-- `POST /api/admin/bot-profiles/apply`
+- `POST /api/admin/bot-profiles/apply` (supports `dryRun`, `includeDisabled`, `instanceIds`, `retireDefaultSingleInstance`)
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error&actor=...&source=...&action=...&method=GET&pathPrefix=/api/...&reasonContains=...&createdFrom=...&createdTo=...`
 - `GET /api/admin/sessions?roomId=...&userId=...&from=...&to=...&limit=50&offset=0`
