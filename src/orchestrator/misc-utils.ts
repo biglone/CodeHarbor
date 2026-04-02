@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 
 import {
   classifyRetryDecision,
+  classifyRetryableError,
+  type RetryClassification,
   type RetryDecision,
   type RetryPolicy,
 } from "../reliability/retry-policy";
@@ -85,7 +87,20 @@ export function classifyQueueTaskRetry(policy: RetryPolicy, attempt: number, err
     policy,
     attempt,
     error,
+    classify: classifyQueueTaskError,
   });
+}
+
+function classifyQueueTaskError(error: unknown): RetryClassification {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (message.includes("exhausted your daily quota") || message.includes("quota exceeded for metric")) {
+    return {
+      retryable: false,
+      reason: "quota_exceeded",
+      retryAfterMs: null,
+    };
+  }
+  return classifyRetryableError(error);
 }
 
 function escapeRegex(value: string): string {

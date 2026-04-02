@@ -50,6 +50,7 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
         roleAssignments: undefined,
       },
     },
+    botProfilesAutoRetireDefaultSingleInstance: false,
     stateDbPath: dbPath,
     legacyStateJsonPath: legacyPath,
     maxProcessedEventsPerSession: 200,
@@ -1534,6 +1535,7 @@ describe("AdminServer", () => {
   it("manages bot profiles with masked tokens and apply orchestration", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
+    config.botProfilesAutoRetireDefaultSingleInstance = true;
     const stateStore = new StateStore(db, legacy, 200, 30, 5000);
     const configService = new ConfigService(stateStore, dir);
     const logger = new Logger("info");
@@ -1695,10 +1697,135 @@ describe("AdminServer", () => {
     expect(applyCalls[0]).toEqual({
       dryRun: true,
       includeDisabled: true,
+      retireDefaultSingleInstance: true,
+      profileCount: 1,
+      hasToken: true,
+    });
+
+    const applyOverride = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+        retireDefaultSingleInstance: false,
+      }),
+    });
+    expect(applyOverride.status).toBe(200);
+    expect(applyCalls.length).toBe(2);
+    expect(applyCalls[1]).toEqual({
+      dryRun: true,
+      includeDisabled: true,
       retireDefaultSingleInstance: false,
       profileCount: 1,
       hasToken: true,
     });
+  });
+
+  it("aligns runtime CODEX_BIN with overridden backend provider when bin is omitted", () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    config.aiCliProvider = "gemini";
+    config.codexBin = "/home/test/.npm-global/bin/gemini";
+
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: null,
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "gemini 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+
+    const persistRuntimeEnv = (
+      server as unknown as {
+        persistBotProfileRuntimeEnv: (
+          profile: {
+            id: string;
+            enabled: boolean;
+            runtimeHome: string;
+            runUser: string;
+            withAdmin: boolean;
+            matrixUserId: string;
+            matrixHomeserver: string;
+            matrixAccessToken: string | null;
+            backend: { provider: "codex" | "claude" | "gemini"; model: string | null; bin: string | null } | null;
+            workdir: string | null;
+            notes: string | null;
+          },
+          allBotUserIds?: readonly string[],
+        ) => string;
+      }
+    ).persistBotProfileRuntimeEnv.bind(server as unknown as object);
+
+    const allBotUserIds = ["@bot-codex:example.com", "@bot-gemini:example.com"];
+
+    const codexProfileEnv = persistRuntimeEnv(
+      {
+        id: "bot-codex",
+        enabled: true,
+        runtimeHome: path.join(dir, "runtime-bot-codex"),
+        runUser: "botuser",
+        withAdmin: false,
+        matrixUserId: "@bot-codex:example.com",
+        matrixHomeserver: "https://matrix.example.com",
+        matrixAccessToken: "token-codex",
+        backend: {
+          provider: "codex",
+          model: null,
+          bin: null,
+        },
+        workdir: dir,
+        notes: null,
+      },
+      allBotUserIds,
+    );
+
+    const codexEnvRaw = fs.readFileSync(codexProfileEnv, "utf8");
+    expect(codexEnvRaw).toContain("AI_CLI_PROVIDER=codex");
+    expect(codexEnvRaw).toContain("CODEX_BIN=codex");
+    expect(codexEnvRaw).toContain("MATRIX_BOT_USER_IDS=@bot-gemini:example.com");
+    expect(codexEnvRaw).toContain("STATE_DB_PATH=" + path.join(dir, "runtime-bot-codex", "data", "state.db"));
+    expect(codexEnvRaw).toContain("STATE_PATH=" + path.join(dir, "runtime-bot-codex", "data", "state.json"));
+    expect(codexEnvRaw).toContain("GROUP_DIRECT_MODE_ENABLED=false");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_REPLY=false");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW=false");
+
+    const geminiProfileEnv = persistRuntimeEnv(
+      {
+        id: "bot-gemini",
+        enabled: true,
+        runtimeHome: path.join(dir, "runtime-bot-gemini"),
+        runUser: "botuser",
+        withAdmin: false,
+        matrixUserId: "@bot-gemini:example.com",
+        matrixHomeserver: "https://matrix.example.com",
+        matrixAccessToken: "token-gemini",
+        backend: {
+          provider: "gemini",
+          model: null,
+          bin: null,
+        },
+        workdir: dir,
+        notes: null,
+      },
+      allBotUserIds,
+    );
+
+    const geminiEnvRaw = fs.readFileSync(geminiProfileEnv, "utf8");
+    expect(geminiEnvRaw).toContain("AI_CLI_PROVIDER=gemini");
+    expect(geminiEnvRaw).toContain("CODEX_BIN=/home/test/.npm-global/bin/gemini");
+    expect(geminiEnvRaw).toContain("MATRIX_BOT_USER_IDS=@bot-codex:example.com");
+    expect(geminiEnvRaw).toContain("STATE_DB_PATH=" + path.join(dir, "runtime-bot-gemini", "data", "state.db"));
+    expect(geminiEnvRaw).toContain("STATE_PATH=" + path.join(dir, "runtime-bot-gemini", "data", "state.json"));
+    expect(geminiEnvRaw).toContain("GROUP_DIRECT_MODE_ENABLED=false");
+    expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_REPLY=false");
+    expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW=false");
   });
 
   it("rejects oversized JSON request payloads", async () => {
@@ -1869,6 +1996,7 @@ describe("AdminServer", () => {
           initEnhancementTimeoutMs: 240000,
           initEnhancementMaxChars: 3200,
         },
+        botProfilesAutoRetireDefaultSingleInstance: true,
         cliCompat: {
           imageMaxBytes: 2097152,
           imageMaxCount: 6,
@@ -1953,6 +2081,7 @@ describe("AdminServer", () => {
     expect(envRaw).toContain("AUTODEV_STAGE_OUTPUT_ECHO_ENABLED=false");
     expect(envRaw).toContain("AUTODEV_PREFLIGHT_AUTO_STASH=true");
     expect(envRaw).toContain("AUTODEV_MAX_CONSECUTIVE_FAILURES=5");
+    expect(envRaw).toContain("BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE=true");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_ENABLED=true");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS=240000");
     expect(envRaw).toContain("AUTODEV_INIT_ENHANCEMENT_MAX_CHARS=3200");

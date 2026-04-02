@@ -74,6 +74,7 @@ const BOOLEAN_ENV_OVERRIDE_KEYS = new Set<string>([
   "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
   "AUTODEV_PREFLIGHT_AUTO_STASH",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
+  "BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE",
 ]);
 const OPTIONAL_POSITIVE_INT_ENV_OVERRIDE_KEYS = new Set<string>([
   "AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS",
@@ -786,7 +787,10 @@ export class AdminServer {
         const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "bot profiles apply payload");
         const dryRun = normalizeBoolean(body.dryRun, false);
         const includeDisabled = normalizeBoolean(body.includeDisabled, true);
-        const retireDefaultSingleInstance = normalizeBoolean(body.retireDefaultSingleInstance, false);
+        const retireDefaultSingleInstance =
+          "retireDefaultSingleInstance" in body
+            ? normalizeBoolean(body.retireDefaultSingleInstance, this.config.botProfilesAutoRetireDefaultSingleInstance)
+            : this.config.botProfilesAutoRetireDefaultSingleInstance;
         const requestedIds = parseOptionalBotProfileIdList(body.instanceIds, "instanceIds");
         const snapshot = this.loadBotProfilesSnapshot();
         const selectedProfiles = requestedIds
@@ -1563,6 +1567,16 @@ export class AdminServer {
       }
     }
 
+    if ("botProfilesAutoRetireDefaultSingleInstance" in body) {
+      const value = normalizeBoolean(
+        body.botProfilesAutoRetireDefaultSingleInstance,
+        this.config.botProfilesAutoRetireDefaultSingleInstance,
+      );
+      this.config.botProfilesAutoRetireDefaultSingleInstance = value;
+      envUpdates.BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE = String(value);
+      markUpdatedKey("botProfilesAutoRetireDefaultSingleInstance");
+    }
+
     if ("cliCompat" in body) {
       const compat = asObject(body.cliCompat, "cliCompat");
       if ("enabled" in compat) {
@@ -2117,6 +2131,14 @@ export class AdminServer {
       }
     }
 
+    if ("botProfilesAutoRetireDefaultSingleInstance" in body) {
+      normalizeBoolean(
+        body.botProfilesAutoRetireDefaultSingleInstance,
+        this.config.botProfilesAutoRetireDefaultSingleInstance,
+      );
+      markCheckedKey("botProfilesAutoRetireDefaultSingleInstance");
+    }
+
     if ("cliCompat" in body) {
       const compat = asObject(body.cliCompat, "cliCompat");
       if ("enabled" in compat) {
@@ -2410,6 +2432,14 @@ export class AdminServer {
     const targetProfiles = input.includeDisabled
       ? input.profiles
       : input.profiles.filter((profile) => profile.enabled);
+    const allBotUserIds = Array.from(
+      new Set(
+        this
+          .loadBotProfilesSnapshot()
+          .profiles.map((profile) => profile.matrixUserId.trim())
+          .filter((matrixUserId) => matrixUserId.length > 0),
+      ),
+    );
 
     for (const profile of targetProfiles) {
       const action: BotProfilesApplyItemResult["action"] = profile.enabled ? "install" : "uninstall";
@@ -2433,7 +2463,7 @@ export class AdminServer {
 
       try {
         if (action === "install") {
-          const envPath = this.persistBotProfileRuntimeEnv(profile);
+          const envPath = this.persistBotProfileRuntimeEnv(profile, allBotUserIds);
           await this.runServiceCommand(serviceArgs);
           items.push({
             id: profile.id,
@@ -2571,7 +2601,7 @@ export class AdminServer {
     };
   }
 
-  private persistBotProfileRuntimeEnv(profile: BotInstanceProfileRecord): string {
+  private persistBotProfileRuntimeEnv(profile: BotInstanceProfileRecord, allBotUserIds: readonly string[] = []): string {
     const runtimeHome = path.resolve(profile.runtimeHome);
     fs.mkdirSync(runtimeHome, { recursive: true });
     const envPath = path.join(runtimeHome, ".env");
@@ -2586,12 +2616,32 @@ export class AdminServer {
       MATRIX_USER_ID: profile.matrixUserId,
       MATRIX_ACCESS_TOKEN: profile.matrixAccessToken ?? "",
     };
+    const runtimeStateDir = path.join(runtimeHome, "data");
+    mergedEnv.STATE_DB_PATH = path.join(runtimeStateDir, "state.db");
+    mergedEnv.STATE_PATH = path.join(runtimeStateDir, "state.json");
+    // Multi-instance bots should not auto-trigger on every group message by default.
+    mergedEnv.GROUP_DIRECT_MODE_ENABLED = "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_REPLY = "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW = "false";
+    const peerBotUserIds = Array.from(
+      new Set(
+        allBotUserIds
+          .map((matrixUserId) => matrixUserId.trim())
+          .filter((matrixUserId) => matrixUserId.length > 0 && matrixUserId !== profile.matrixUserId),
+      ),
+    );
+    mergedEnv.MATRIX_BOT_USER_IDS = peerBotUserIds.join(",");
 
     if (profile.backend) {
       mergedEnv.AI_CLI_PROVIDER = profile.backend.provider;
       mergedEnv.CODEX_MODEL = profile.backend.model ?? "";
       if (profile.backend.bin) {
         mergedEnv.CODEX_BIN = profile.backend.bin;
+      } else {
+        const baseProvider = normalizeAiCliProviderString(baseEnv.AI_CLI_PROVIDER);
+        if (baseProvider && baseProvider !== profile.backend.provider) {
+          mergedEnv.CODEX_BIN = defaultCliBinForProvider(profile.backend.provider);
+        }
       }
     }
     if (profile.workdir) {
@@ -3094,6 +3144,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
     initEnhancementTimeoutMs: number;
     initEnhancementMaxChars: number;
   };
+  botProfilesAutoRetireDefaultSingleInstance: boolean;
   agentWorkflow: AppConfig["agentWorkflow"];
 } {
   const agentWorkflow = ensureAgentWorkflowConfig(config);
@@ -3163,6 +3214,7 @@ function buildGlobalConfigSnapshot(config: AppConfig): {
         Number.MAX_SAFE_INTEGER,
       ),
     },
+    botProfilesAutoRetireDefaultSingleInstance: config.botProfilesAutoRetireDefaultSingleInstance,
     agentWorkflow: {
       enabled: agentWorkflow.enabled,
       autoRepairMaxRounds: agentWorkflow.autoRepairMaxRounds,
@@ -3778,6 +3830,24 @@ function normalizeBotBackend(
   };
 }
 
+function normalizeAiCliProviderString(raw: string | undefined): AppConfig["aiCliProvider"] | null {
+  const normalized = raw?.trim().toLowerCase() ?? "";
+  if (normalized === "codex" || normalized === "claude" || normalized === "gemini") {
+    return normalized;
+  }
+  return null;
+}
+
+function defaultCliBinForProvider(provider: AppConfig["aiCliProvider"]): string {
+  if (provider === "claude") {
+    return "claude";
+  }
+  if (provider === "gemini") {
+    return "gemini";
+  }
+  return "codex";
+}
+
 function maskSecret(value: string | null): string | null {
   if (!value) {
     return null;
@@ -3801,7 +3871,6 @@ function buildBotServiceCommandArgs(
       profile.runUser,
       "--runtime-home",
       profile.runtimeHome,
-      "--start",
     ];
     if (profile.withAdmin) {
       args.push("--with-admin");
