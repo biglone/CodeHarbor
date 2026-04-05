@@ -834,6 +834,12 @@ export class AdminServer {
             retireDefaultSingleInstance,
             requestedIds,
             summary: applyResult.summary,
+            selectedProfilePolicies: selectedProfiles.map((profile) => ({
+              id: profile.id,
+              enabled: profile.enabled,
+              isPrimary: profile.isPrimary,
+              triggerPolicy: profile.triggerPolicy,
+            })),
             items: applyResult.items,
           }),
         );
@@ -2455,6 +2461,7 @@ export class AdminServer {
 
     for (const profile of targetProfiles) {
       const action: BotProfilesApplyItemResult["action"] = profile.enabled ? "install" : "uninstall";
+      const triggerPolicySummary = formatTriggerPolicySummary(profile.triggerPolicy);
       const serviceArgs = buildBotServiceCommandArgs(profile, action);
       const command = formatShellCommand(
         shouldUseSudoForServiceCommand() ? "sudo" : process.execPath,
@@ -2468,7 +2475,7 @@ export class AdminServer {
           action,
           status: "planned",
           command,
-          message: "dry-run: command planned.",
+          message: "dry-run: command planned (triggerPolicy: " + triggerPolicySummary + ").",
         });
         continue;
       }
@@ -2483,7 +2490,7 @@ export class AdminServer {
             action,
             status: "succeeded",
             command,
-            message: `updated runtime env: ${envPath}`,
+            message: "updated runtime env: " + envPath + " (triggerPolicy: " + triggerPolicySummary + ")",
           });
         } else {
           await this.runServiceCommand(serviceArgs);
@@ -3923,6 +3930,21 @@ function maskSecret(value: string | null): string | null {
     return "*".repeat(value.length);
   }
   return `${value.slice(0, 3)}***${value.slice(-3)}`;
+}
+
+function formatTriggerPolicySummary(policy: BotProfileTriggerPolicyConfig): string {
+  return (
+    "direct=" +
+    (policy.groupDirectModeEnabled ? "on" : "off") +
+    ", mention=" +
+    (policy.allowMention ? "on" : "off") +
+    ", reply=" +
+    (policy.allowReply ? "on" : "off") +
+    ", activeWindow=" +
+    (policy.allowActiveWindow ? "on" : "off") +
+    ", prefix=" +
+    (policy.allowPrefix ? "on" : "off")
+  );
 }
 
 function buildBotServiceCommandArgs(

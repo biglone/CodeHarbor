@@ -1545,6 +1545,14 @@ describe("AdminServer", () => {
       retireDefaultSingleInstance: boolean;
       profileCount: number;
       hasToken: boolean;
+      firstProfileIsPrimary: boolean;
+      firstProfileTriggerPolicy: {
+        groupDirectModeEnabled: boolean;
+        allowMention: boolean;
+        allowReply: boolean;
+        allowActiveWindow: boolean;
+        allowPrefix: boolean;
+      } | null;
     }> = [];
     const server = new AdminServer(config, logger, stateStore, configService, {
       host: "127.0.0.1",
@@ -1574,6 +1582,8 @@ describe("AdminServer", () => {
           retireDefaultSingleInstance: input.retireDefaultSingleInstance,
           profileCount: input.profiles.length,
           hasToken: Boolean(input.profiles[0]?.matrixAccessToken),
+          firstProfileIsPrimary: Boolean(input.profiles[0]?.isPrimary),
+          firstProfileTriggerPolicy: input.profiles[0]?.triggerPolicy ?? null,
         });
         return {
           dryRun: input.dryRun,
@@ -1733,6 +1743,14 @@ describe("AdminServer", () => {
       retireDefaultSingleInstance: true,
       profileCount: 1,
       hasToken: true,
+      firstProfileIsPrimary: true,
+      firstProfileTriggerPolicy: {
+        groupDirectModeEnabled: true,
+        allowMention: false,
+        allowReply: true,
+        allowActiveWindow: true,
+        allowPrefix: false,
+      },
     });
 
     const applyOverride = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
@@ -1754,6 +1772,14 @@ describe("AdminServer", () => {
       retireDefaultSingleInstance: false,
       profileCount: 1,
       hasToken: true,
+      firstProfileIsPrimary: true,
+      firstProfileTriggerPolicy: {
+        groupDirectModeEnabled: true,
+        allowMention: false,
+        allowReply: true,
+        allowActiveWindow: true,
+        allowPrefix: false,
+      },
     });
   });
 
