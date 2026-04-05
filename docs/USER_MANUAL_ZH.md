@@ -146,6 +146,30 @@ codeharbor admin serve
 
 ---
 
+
+### 4.1 主机器人模式（多实例）推荐配置
+
+推荐在同一个群里使用“1 个主机器人 + N 个执行/评审机器人”模型：
+
+- 主机器人（例如 `main-hub`）：`isPrimary=true`、`enabled=true`。
+- 若希望群聊不需要 @ 就触发，只在主机器人开启 `groupDirectModeEnabled=true`。
+- 执行/评审机器人（例如 `dev-main`、`review-guard`）：`isPrimary=false`，并保持 `groupDirectModeEnabled=false`。
+
+旧版本升级迁移（单实例 -> 主机器人）：
+
+1. 打开 `/settings/bots`。
+2. 点击“迁移预检（单实例）”。
+3. 通过后点击“一键迁移主机器人”。
+4. 点击“保存实例配置”，再执行“应用预检（dry-run）/应用实例变更”。
+5. 如确认已切换完成，可勾选“自动退役默认单实例服务”。
+
+迁移接口：`POST /api/admin/bot-profiles/migrate`（支持 `dryRun`、`force`、`profileId`）。
+
+安全边界（后台会强校验）：
+
+- 非主机器人不允许开启 `groupDirectModeEnabled`。
+- 若没有启用态主机器人（`isPrimary=true` 且 `enabled=true`），不允许启用群聊直通。
+
 ## 5. 常用功能开关说明（实用版）
 
 ### 5.1 群聊触发相关
@@ -271,7 +295,7 @@ codeharbor admin serve
   - 权限优先级：`MATRIX_UPGRADE_ALLOWED_USERS` > `MATRIX_ADMIN_USERS` > 任意私聊用户（两者都为空时）
   - Linux 支持 systemd 信号重启回退；macOS 支持 launchd/手工回退；Windows 默认安全降级为手工回退
   - 会输出结构化升级结果摘要（成功/失败）与回滚/重启命令模板，降低失败恢复成本
-- `/backend codex|claude [model] | /backend auto|status`：会话内切换后端工具（`auto` 恢复自动路由）；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
+- `/backend codex|claude|gemini [model] | /backend auto|status`：会话内切换后端工具（`auto` 恢复自动路由）；切换后下一条请求会自动注入最近本地会话历史作为桥接上下文
 - `/reset`：清空会话上下文，并抑制“下一条请求自动桥接”，用于强制从空上下文开始
 - `/stop`：请求停止当前执行（繁忙时进入待停止），并清理会话上下文/当前会话待处理队列
   - 别名：`/cancel`、`/esc`、`/撤回`、`/撤销`
@@ -306,7 +330,8 @@ codeharbor admin serve
 - DM 发消息，机器人能回复
 - 群聊触发策略符合预期
 - 管理后台 `health` 正常
-- 管理后台 `settings/bots` 可读取/保存机器人实例配置，并可执行 apply dry-run / apply（可选“自动退役默认单实例服务”）
+- 管理后台 `settings/bots` 可读取/保存机器人实例配置，并可执行迁移 dry-run / 迁移 apply / apply dry-run / apply（可选“自动退役默认单实例服务”）
+- 主机器人模式下，确认仅 1 个实例为 `isPrimary=true`，且该实例在需要群聊直通时 `groupDirectModeEnabled=true`
 - `/status` 返回会话状态与运行指标
 - `/version` 返回当前版本与更新提示
 - `/diag version` / `/diag route` / `/diag autodev` / `/diag queue` 可返回诊断信息（如启用队列则校验 queue 明细）
@@ -372,3 +397,24 @@ codeharbor self-update
 ### Q4：为什么管理后台显示无权限？
 
 先在页面填写 `Admin Token` 并点击“保存认证”，再看权限状态是否变为 `ADMIN` 或 `VIEWER`。
+
+### Q5：为什么会报“groupDirectModeEnabled requires an enabled primary profile”？
+
+这是主机器人安全校验触发：你开启了群聊直通，但当前没有启用态主机器人。
+处理方式：将一个实例设置为 `isPrimary=true` 且 `enabled=true`，或关闭 `groupDirectModeEnabled`。
+
+### Q6：为什么迁移时报“existing primary bot profile detected”？
+
+表示当前已存在主机器人。可选方案：
+
+- 保持现状，不再迁移；
+- 迁移到其他 `profileId`；
+- 确认要切主后，调用迁移接口时传 `force=true`。
+
+### Q7：为什么群里 @ 某个机器人，另一个机器人也回复？
+
+重点检查三项：
+
+- 每个实例的 `matrixUserId` 是否唯一；
+- 仅主机器人开启 `groupDirectModeEnabled`；
+- 执行/评审机器人保持 `groupDirectModeEnabled=false`，仅通过 @ 或回复触发。

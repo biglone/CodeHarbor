@@ -441,6 +441,7 @@ Main endpoints:
 - `DELETE /api/admin/config/rooms/:roomId`
 - `GET /api/admin/bot-profiles`
 - `PUT /api/admin/bot-profiles`
+- `POST /api/admin/bot-profiles/migrate` (single-instance -> primary-bot migration, supports `dryRun`, `force`, `profileId`)
 - `POST /api/admin/bot-profiles/apply` (supports `dryRun`, `includeDisabled`, `instanceIds`, `retireDefaultSingleInstance`)
 - `GET /api/admin/health`
 - `GET /api/admin/audit?limit=50&kind=config|operations|all&surface=admin|api|webhook&outcome=allowed|denied|error&actor=...&source=...&action=...&method=GET&pathPrefix=/api/...&reasonContains=...&createdFrom=...&createdTo=...`
@@ -569,6 +570,35 @@ Boundary: hot updates affect new requests only; in-flight requests are not rolle
 6. Open `/settings/rooms`, fill `Room ID + Workdir`, then `Save Room`.
 7. Open `/health` to run connectivity checks (`codex` + Matrix).
 8. Open `/audit` to verify config revisions (actor/summary/payload).
+
+### Primary Bot Governance (Multi-Instance)
+
+Recommended role split in group rooms:
+
+- `main-hub`: primary bot (`isPrimary=true`), can enable `groupDirectModeEnabled=true` for non-@ group messages.
+- `dev-main` / `review-guard`: execution/review bots (`isPrimary=false`), keep group direct mode disabled to avoid cross-talk.
+
+Migration from legacy single-instance:
+
+1. Open `/settings/bots`.
+2. Click `Migration Dry-Run` (`POST /api/admin/bot-profiles/migrate` with `dryRun=true`).
+3. Click `Migrate As Primary`, then `Apply Changes`.
+4. Optional: enable `Retire default single-instance services` to disable `codeharbor.service` / `codeharbor-admin.service`.
+
+Safety boundaries:
+
+- `groupDirectModeEnabled` is rejected on non-primary profiles.
+- Direct mode requires an enabled primary profile (`isPrimary=true` + `enabled=true`).
+- Migration returns actionable errors for conflicting primaries; use `force=true` only when switching ownership intentionally.
+
+Troubleshooting quick checks:
+
+- Error `groupDirectModeEnabled requires an enabled primary profile`:
+Set one profile to `isPrimary=true` and `enabled=true`, or disable direct mode.
+- Migration blocked by existing primary:
+Use another `profileId` or rerun migration with `force=true` after confirming primary ownership switch.
+- Group messages no longer trigger without @:
+Verify primary profile has `groupDirectModeEnabled=true` and profile changes were applied.
 
 ## Standalone Admin Deployment
 
