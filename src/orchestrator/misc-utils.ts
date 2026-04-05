@@ -67,9 +67,21 @@ export function stripLeadingBotMention(text: string, matrixUserId: string): stri
   if (!matrixUserId) {
     return text;
   }
-  const escapedUserId = escapeRegex(matrixUserId);
-  const mentionPattern = new RegExp(`^\\s*(?:<)?${escapedUserId}(?:>)?[\\s,:，：-]*`, "i");
-  return text.replace(mentionPattern, "").trim();
+
+  const mentionPatterns = [new RegExp(`^\\s*(?:<)?${escapeRegex(matrixUserId)}(?:>)?[\\s,:，：-]*`, "i")];
+  const localpart = parseMatrixUserLocalpart(matrixUserId);
+  if (localpart) {
+    mentionPatterns.push(new RegExp(`^\\s*@${escapeRegex(localpart)}[\\s,:，：-]*`, "i"));
+  }
+
+  const trimmed = text.trim();
+  for (const pattern of mentionPatterns) {
+    const next = trimmed.replace(pattern, "").trim();
+    if (next !== trimmed) {
+      return next;
+    }
+  }
+  return trimmed;
 }
 
 export function formatByteSize(sizeBytes: number): string {
@@ -101,6 +113,17 @@ function classifyQueueTaskError(error: unknown): RetryClassification {
     };
   }
   return classifyRetryableError(error);
+}
+
+function parseMatrixUserLocalpart(userId: string): string | null {
+  if (!userId.startsWith("@")) {
+    return null;
+  }
+  const colonIndex = userId.indexOf(":");
+  if (colonIndex <= 1) {
+    return null;
+  }
+  return userId.slice(1, colonIndex);
 }
 
 function escapeRegex(value: string): string {

@@ -625,7 +625,17 @@ function checkMentionsBot(content: Record<string, unknown>, body: string, botUse
       return true;
     }
   }
-  return body.includes(botUserId);
+  if (body.includes(botUserId)) {
+    return true;
+  }
+  const localpart = parseMatrixUserLocalpart(botUserId);
+  if (!localpart) {
+    return false;
+  }
+  const escapedMention = escapeRegex(`@${localpart}`);
+  // Accept plain-text mentions like "@dev-main ...", even when clients do not include m.mentions.user_ids.
+  const mentionPattern = new RegExp(`(?:^|[\\s([{<])${escapedMention}(?=$|[\\s,.:;!?\\])}>])`, "i");
+  return mentionPattern.test(body);
 }
 
 function checkRepliesToBot(content: Record<string, unknown>, room: Room, botUserId: string): boolean {
@@ -713,6 +723,21 @@ function shouldHydrateAttachment(attachment: InboundAttachment, transcribeAudio:
     return true;
   }
   return false;
+}
+
+function parseMatrixUserLocalpart(userId: string): string | null {
+  if (!userId.startsWith("@")) {
+    return null;
+  }
+  const colonIndex = userId.indexOf(":");
+  if (colonIndex <= 1) {
+    return null;
+  }
+  return userId.slice(1, colonIndex);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sanitizeFilename(value: string): string {

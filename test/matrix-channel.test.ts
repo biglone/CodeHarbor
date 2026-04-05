@@ -893,4 +893,47 @@ describe("MatrixChannel", () => {
 
     await channel.stop();
   });
+
+  it("detects plain localpart mention when m.mentions is missing user_ids", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+
+    const channel = new MatrixChannel(config as never, logger as never);
+    const handler = vi.fn(async (_message: unknown) => {});
+    await channel.start(handler);
+
+    const event = {
+      getType: () => "m.room.message",
+      getSender: () => "@alice:example.com",
+      getContent: () => ({
+        msgtype: "m.text",
+        body: "@bot /backend status",
+        "m.mentions": {},
+      }),
+      getId: () => "$event-localpart-mention",
+    };
+
+    const room = {
+      roomId: "!room:example.com",
+      getJoinedMemberCount: () => 3,
+      findEventById: (_eventId: string) => undefined,
+    };
+
+    client.emit("Room.timeline", event, room, false);
+    await Promise.resolve();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toMatchObject({
+      text: "@bot /backend status",
+      mentionsBot: true,
+      repliesToBot: false,
+      isDirectMessage: false,
+    });
+
+    await channel.stop();
+  });
+
 });

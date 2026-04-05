@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyQueueTaskRetry } from "../src/orchestrator/misc-utils";
+import { classifyQueueTaskRetry, stripLeadingBotMention } from "../src/orchestrator/misc-utils";
 import { createRetryPolicy } from "../src/reliability/retry-policy";
 
 describe("classifyQueueTaskRetry", () => {
@@ -31,5 +31,22 @@ describe("classifyQueueTaskRetry", () => {
     expect(decision.retryable).toBe(true);
     expect(decision.shouldRetry).toBe(true);
     expect(decision.retryReason).toBe("transient_error");
+  });
+});
+
+describe("stripLeadingBotMention", () => {
+  it("strips full matrix user id mention", () => {
+    const output = stripLeadingBotMention("@dev-main:matrix.example.com /backend status", "@dev-main:matrix.example.com");
+    expect(output).toBe("/backend status");
+  });
+
+  it("strips localpart mention alias", () => {
+    const output = stripLeadingBotMention("@dev-main /backend status", "@dev-main:matrix.example.com");
+    expect(output).toBe("/backend status");
+  });
+
+  it("keeps text unchanged when no mention prefix", () => {
+    const output = stripLeadingBotMention("hello there", "@dev-main:matrix.example.com");
+    expect(output).toBe("hello there");
   });
 });
