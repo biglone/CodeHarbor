@@ -9,6 +9,10 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
 - regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
 
+## [0.1.92] - 2026-04-06
+
+- matrix multi-bot routing fix: in group direct mode, messages with a leading mention to a peer bot no longer trigger primary-bot fallback replies, preventing duplicate responses from both `main-hub` and `dev-main`.
+
 ## [0.1.91] - 2026-03-31
 
 - e2e assertion fix: read SKILL catalog textarea via `toHaveValue(...)` instead of `toContainText(...)`, matching browser behavior where JS writes to `value` (not text node).
