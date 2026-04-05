@@ -787,6 +787,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 <span data-i18n="bots.field.enabled">启用该实例</span>
               </label>
               <label class="checkbox">
+                <input id="bots-form-is-primary" type="checkbox" />
+                <span data-i18n="bots.field.isPrimary">设为主机器人</span>
+              </label>
+              <label class="checkbox">
                 <input id="bots-form-with-admin" type="checkbox" />
                 <span data-i18n="bots.field.withAdmin">安装 Admin 子服务</span>
               </label>
@@ -844,6 +848,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                   <tr>
                     <th data-i18n="bots.table.id">实例 ID</th>
                     <th data-i18n="bots.table.enabled">启用</th>
+                    <th data-i18n="bots.table.primary">主机器人</th>
                     <th data-i18n="bots.table.matrixUser">Matrix 账号</th>
                     <th data-i18n="bots.table.runtimeHome">运行目录</th>
                     <th data-i18n="bots.table.backend">后端</th>
@@ -861,7 +866,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                   <textarea
                     id="bots-profiles-json"
                     rows="12"
-                    placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
+                    placeholder='[{"id":"bot-a","enabled":true,"isPrimary":false,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
                     data-i18n-placeholder="bots.jsonPlaceholder"
                   ></textarea>
                 </label>
@@ -1195,7 +1200,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.syncJson": "从列表同步 JSON",
             "bots.jsonLabel": "实例配置 JSON（数组）",
             "bots.jsonPlaceholder":
-              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+              '[{"id":"bot-a","enabled":true,"isPrimary":false,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
             "bots.field.id": "实例 ID",
             "bots.field.runUser": "运行用户",
             "bots.field.runtimeHome": "运行目录",
@@ -1204,6 +1209,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.field.matrixAccessToken": "Matrix Access Token",
             "bots.field.matrixAccessTokenPlaceholder": "留空=保持现有 token；填写=覆盖 token",
             "bots.field.enabled": "启用该实例",
+            "bots.field.isPrimary": "设为主机器人",
             "bots.field.withAdmin": "安装 Admin 子服务",
             "bots.field.clearToken": "清空已有 Matrix token（危险）",
             "bots.triggerPolicyTitle": "群聊触发策略（实例级）",
@@ -1222,6 +1228,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.tokenState.empty": "token 状态：未配置",
             "bots.table.id": "实例 ID",
             "bots.table.enabled": "启用",
+            "bots.table.primary": "主机器人",
             "bots.table.matrixUser": "Matrix 账号",
             "bots.table.runtimeHome": "运行目录",
             "bots.table.backend": "后端",
@@ -1486,7 +1493,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.syncJson": "Sync JSON From List",
             "bots.jsonLabel": "Profiles JSON (array)",
             "bots.jsonPlaceholder":
-              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+              '[{"id":"bot-a","enabled":true,"isPrimary":false,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
             "bots.field.id": "Instance ID",
             "bots.field.runUser": "Run User",
             "bots.field.runtimeHome": "Runtime Home",
@@ -1495,6 +1502,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.field.matrixAccessToken": "Matrix Access Token",
             "bots.field.matrixAccessTokenPlaceholder": "Leave empty to keep existing token; fill to replace",
             "bots.field.enabled": "Enable this instance",
+            "bots.field.isPrimary": "Set as primary bot",
             "bots.field.withAdmin": "Install Admin sidecar service",
             "bots.field.clearToken": "Clear existing Matrix token (dangerous)",
             "bots.triggerPolicyTitle": "Group Trigger Policy (per instance)",
@@ -1513,6 +1521,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.tokenState.empty": "Token state: not configured",
             "bots.table.id": "Instance ID",
             "bots.table.enabled": "Enabled",
+            "bots.table.primary": "Primary",
             "bots.table.matrixUser": "Matrix User",
             "bots.table.runtimeHome": "Runtime Home",
             "bots.table.backend": "Backend",
@@ -2769,6 +2778,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           var normalized = {
             id: String(item.id || "").trim(),
             enabled: Boolean(item.enabled),
+            isPrimary: Boolean(item.isPrimary),
             runtimeHome: String(item.runtimeHome || "").trim(),
             runUser: String(item.runUser || "").trim(),
             withAdmin: item.withAdmin === undefined ? true : Boolean(item.withAdmin),
@@ -2822,6 +2832,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             var next = {
               id: item.id,
               enabled: Boolean(item.enabled),
+              isPrimary: Boolean(item.isPrimary),
               runtimeHome: item.runtimeHome,
               runUser: item.runUser,
               withAdmin: Boolean(item.withAdmin),
@@ -2921,6 +2932,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           selectedBotProfileId = null;
           document.getElementById("bots-form-id").value = "";
           document.getElementById("bots-form-enabled").checked = true;
+          document.getElementById("bots-form-is-primary").checked = false;
           document.getElementById("bots-form-runtime-home").value = "";
           document.getElementById("bots-form-run-user").value = "";
           document.getElementById("bots-form-with-admin").checked = true;
@@ -2947,6 +2959,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           var triggerPolicy = profile && profile.triggerPolicy && typeof profile.triggerPolicy === "object" ? profile.triggerPolicy : {};
           document.getElementById("bots-form-id").value = profile.id || "";
           document.getElementById("bots-form-enabled").checked = Boolean(profile.enabled);
+          document.getElementById("bots-form-is-primary").checked = Boolean(profile.isPrimary);
           document.getElementById("bots-form-runtime-home").value = profile.runtimeHome || "";
           document.getElementById("bots-form-run-user").value = profile.runUser || "";
           document.getElementById("bots-form-with-admin").checked = profile.withAdmin === undefined ? true : Boolean(profile.withAdmin);
@@ -3009,6 +3022,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           var profile = {
             id: id,
             enabled: asBool("bots-form-enabled"),
+            isPrimary: asBool("bots-form-is-primary"),
             runtimeHome: runtimeHome,
             runUser: runUser,
             withAdmin: asBool("bots-form-with-admin"),
@@ -3128,7 +3142,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         function renderBotProfileTable(items) {
           botsListBody.innerHTML = "";
           if (!Array.isArray(items) || items.length === 0) {
-            renderEmptyRow(botsListBody, 6, t("notice.botsEmpty"));
+            renderEmptyRow(botsListBody, 7, t("notice.botsEmpty"));
             return;
           }
           for (var i = 0; i < items.length; i += 1) {
@@ -3139,6 +3153,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             }
             appendCell(row, item.id || "");
             appendCell(row, String(Boolean(item.enabled)));
+            appendCell(row, String(Boolean(item.isPrimary)));
             appendCell(row, item.matrixUserId || "");
             appendCell(row, item.runtimeHome || "");
             appendCell(row, buildBackendSummary(item));

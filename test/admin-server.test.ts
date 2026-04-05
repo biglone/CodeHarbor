@@ -1613,6 +1613,7 @@ describe("AdminServer", () => {
           {
             id: "bot-a",
             enabled: true,
+            isPrimary: true,
             runtimeHome: path.join(dir, "runtime-bot-a"),
             runUser: "botuser",
             withAdmin: true,
@@ -1648,7 +1649,7 @@ describe("AdminServer", () => {
     expect(viewerBodyText).toContain('"hasMatrixAccessToken":true');
     expect(viewerBodyText).toContain("sec***n-a");
     expect(viewerBodyText).not.toContain("secret-token-a");
-    const viewerProfiles = (viewerRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown> }> } }).data?.profiles ?? [];
+    const viewerProfiles = (viewerRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown>; isPrimary?: boolean }> } }).data?.profiles ?? [];
     expect(viewerProfiles[0]?.triggerPolicy).toEqual({
       groupDirectModeEnabled: true,
       allowMention: false,
@@ -1656,6 +1657,7 @@ describe("AdminServer", () => {
       allowActiveWindow: true,
       allowPrefix: false,
     });
+    expect(viewerProfiles[0]?.isPrimary).toBe(true);
 
     const putWithoutToken = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
       method: "PUT",
@@ -1691,7 +1693,7 @@ describe("AdminServer", () => {
       },
     });
     expect(afterUpdateRead.status).toBe(200);
-    const afterUpdateProfiles = (afterUpdateRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown> }> } }).data?.profiles ?? [];
+    const afterUpdateProfiles = (afterUpdateRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown>; isPrimary?: boolean }> } }).data?.profiles ?? [];
     expect(afterUpdateProfiles[0]?.triggerPolicy).toEqual({
       groupDirectModeEnabled: true,
       allowMention: false,
@@ -1699,6 +1701,7 @@ describe("AdminServer", () => {
       allowActiveWindow: true,
       allowPrefix: false,
     });
+    expect(afterUpdateProfiles[0]?.isPrimary).toBe(true);
 
     const applyDenied = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
       method: "POST",
@@ -1754,6 +1757,61 @@ describe("AdminServer", () => {
     });
   });
 
+  it("rejects duplicate primary bot profiles", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "admin-token",
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = "http://127.0.0.1:" + String(address?.port ?? "");
+
+    const response = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "bot-a",
+            enabled: true,
+            isPrimary: true,
+            runtimeHome: path.join(dir, "runtime-bot-a"),
+            runUser: "botuser",
+            withAdmin: false,
+            matrixUserId: "@bot-a:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+          },
+          {
+            id: "bot-b",
+            enabled: true,
+            isPrimary: true,
+            runtimeHome: path.join(dir, "runtime-bot-b"),
+            runUser: "botuser",
+            withAdmin: false,
+            matrixUserId: "@bot-b:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(String((response.body as { error?: string }).error || "")).toContain("At most one bot profile may set isPrimary=true");
+  });
+
   it("aligns runtime CODEX_BIN with overridden backend provider when bin is omitted", () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
@@ -1785,6 +1843,7 @@ describe("AdminServer", () => {
             matrixHomeserver: string;
             matrixAccessToken: string | null;
             backend: { provider: "codex" | "claude" | "gemini"; model: string | null; bin: string | null } | null;
+            isPrimary: boolean;
             triggerPolicy: {
               groupDirectModeEnabled: boolean;
               allowMention: boolean;
@@ -1817,6 +1876,7 @@ describe("AdminServer", () => {
           model: null,
           bin: null,
         },
+        isPrimary: true,
         triggerPolicy: {
           groupDirectModeEnabled: true,
           allowMention: false,
@@ -1857,6 +1917,7 @@ describe("AdminServer", () => {
           model: null,
           bin: null,
         },
+        isPrimary: false,
         triggerPolicy: {
           groupDirectModeEnabled: false,
           allowMention: true,

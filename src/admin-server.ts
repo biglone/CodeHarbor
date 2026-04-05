@@ -133,6 +133,7 @@ interface BotProfileTriggerPolicyConfig {
 interface BotInstanceProfileRecord {
   id: string;
   enabled: boolean;
+  isPrimary: boolean;
   runtimeHome: string;
   runUser: string;
   withAdmin: boolean;
@@ -148,6 +149,7 @@ interface BotInstanceProfileRecord {
 interface BotInstanceProfileView {
   id: string;
   enabled: boolean;
+  isPrimary: boolean;
   runtimeHome: string;
   runUser: string;
   withAdmin: boolean;
@@ -3572,6 +3574,7 @@ function parseStoredBotProfilesSnapshot(record: RuntimeConfigSnapshotRecord | nu
       }
       ids.add(profile.id);
     }
+    validatePrimaryBotProfiles(profiles);
 
     const rawUpdatedAt = typeof snapshot.updatedAt === "string" ? snapshot.updatedAt.trim() : "";
     const updatedAt = rawUpdatedAt && Number.isFinite(Date.parse(rawUpdatedAt)) ? rawUpdatedAt : new Date(record.updatedAt).toISOString();
@@ -3622,6 +3625,7 @@ function normalizeBotProfilesPayload(
     const matrixHomeserver = normalizeHomeserverUrl(payload.matrixHomeserver, existing?.matrixHomeserver ?? "", `${label}.matrixHomeserver`);
     const runUser = normalizeRunUser(payload.runUser, existing?.runUser ?? resolveDefaultRunUser(), `${label}.runUser`);
     const enabled = normalizeBoolean(payload.enabled, existing?.enabled ?? true);
+    const isPrimary = normalizeBoolean(payload.isPrimary, existing?.isPrimary ?? false);
     const withAdmin = normalizeBoolean(payload.withAdmin, existing?.withAdmin ?? true);
     const backend = normalizeBotBackend(payload.backend, existing?.backend ?? null, `${label}.backend`);
     const triggerPolicy = normalizeBotTriggerPolicy(payload, existing?.triggerPolicy ?? null);
@@ -3636,6 +3640,7 @@ function normalizeBotProfilesPayload(
     nextProfiles.push({
       id,
       enabled,
+      isPrimary,
       runtimeHome: path.resolve(runtimeHomeRaw),
       runUser,
       withAdmin,
@@ -3649,6 +3654,7 @@ function normalizeBotProfilesPayload(
     });
   }
 
+  validatePrimaryBotProfiles(nextProfiles);
   return nextProfiles;
 }
 
@@ -3662,6 +3668,7 @@ function normalizeStoredBotProfile(value: unknown, label: string): BotInstancePr
   return {
     id,
     enabled: normalizeBoolean(payload.enabled, true),
+    isPrimary: normalizeBoolean(payload.isPrimary, false),
     runtimeHome: path.resolve(runtimeHomeRaw),
     runUser: normalizeRunUser(payload.runUser, resolveDefaultRunUser(), `${label}.runUser`),
     withAdmin: normalizeBoolean(payload.withAdmin, true),
@@ -3679,6 +3686,7 @@ function sanitizeBotProfileForView(profile: BotInstanceProfileRecord): BotInstan
   return {
     id: profile.id,
     enabled: profile.enabled,
+    isPrimary: profile.isPrimary,
     runtimeHome: profile.runtimeHome,
     runUser: profile.runUser,
     withAdmin: profile.withAdmin,
@@ -3691,6 +3699,15 @@ function sanitizeBotProfileForView(profile: BotInstanceProfileRecord): BotInstan
     workdir: profile.workdir,
     notes: profile.notes,
   };
+}
+
+function validatePrimaryBotProfiles(profiles: readonly BotInstanceProfileRecord[]): void {
+  const primaryProfiles = profiles.filter((profile) => profile.isPrimary);
+  if (primaryProfiles.length <= 1) {
+    return;
+  }
+  const ids = primaryProfiles.map((profile) => profile.id).join(", ");
+  throw new HttpError(400, "At most one bot profile may set isPrimary=true; found: " + ids + ".");
 }
 
 function parseOptionalBotProfileIdList(value: unknown, fieldName: string): string[] | null {
