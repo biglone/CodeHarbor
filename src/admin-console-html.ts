@@ -3063,7 +3063,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           };
 
           if (profile.triggerPolicy.groupDirectModeEnabled && !profile.isPrimary) {
-            throw new Error("groupDirectModeEnabled requires isPrimary");
+            throw new Error("groupDirectModeEnabled requires isPrimary=true");
           }
 
           var tokenInputValue = asText("bots-form-matrix-token");

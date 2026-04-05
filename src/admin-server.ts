@@ -3952,11 +3952,33 @@ function validateBotTriggerRoutingConstraints(profiles: readonly BotInstanceProf
   const directModeOnNonPrimary = profiles.filter(
     (profile) => profile.triggerPolicy.groupDirectModeEnabled && !profile.isPrimary,
   );
-  if (directModeOnNonPrimary.length === 0) {
+  if (directModeOnNonPrimary.length > 0) {
+    const ids = directModeOnNonPrimary.map((profile) => profile.id).join(", ");
+    throw new HttpError(
+      400,
+      "groupDirectModeEnabled requires isPrimary=true for profile(s): " +
+        ids +
+        ". Set one profile as primary (isPrimary=true) and keep it enabled, or disable groupDirectModeEnabled.",
+    );
+  }
+
+  const directModeEnabledProfiles = profiles.filter((profile) => profile.triggerPolicy.groupDirectModeEnabled);
+  if (directModeEnabledProfiles.length === 0) {
     return;
   }
-  const ids = directModeOnNonPrimary.map((profile) => profile.id).join(", ");
-  throw new HttpError(400, "groupDirectModeEnabled requires isPrimary=true for profile(s): " + ids + ".");
+
+  const hasEnabledPrimary = profiles.some((profile) => profile.isPrimary && profile.enabled);
+  if (hasEnabledPrimary) {
+    return;
+  }
+
+  const ids = directModeEnabledProfiles.map((profile) => profile.id).join(", ");
+  throw new HttpError(
+    400,
+    "groupDirectModeEnabled requires an enabled primary profile. Set one profile with isPrimary=true and enabled=true, or disable groupDirectModeEnabled for profile(s): " +
+      ids +
+      ".",
+  );
 }
 
 function parseOptionalBotProfileIdList(value: unknown, fieldName: string): string[] | null {

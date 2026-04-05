@@ -1890,6 +1890,61 @@ describe("AdminServer", () => {
     expect(String((response.body as { error?: string }).error || "")).toContain("groupDirectModeEnabled requires isPrimary=true");
   });
 
+  it("rejects group direct mode when no enabled primary profile exists", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "admin-token",
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = "http://127.0.0.1:" + String(address?.port ?? "");
+
+    const response = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "main-hub",
+            enabled: false,
+            isPrimary: true,
+            runtimeHome: path.join(dir, "runtime-main"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@main-hub:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            triggerPolicy: {
+              groupDirectModeEnabled: true,
+              allowMention: true,
+              allowReply: false,
+              allowActiveWindow: false,
+              allowPrefix: true,
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(String((response.body as { error?: string }).error || "")).toContain(
+      "groupDirectModeEnabled requires an enabled primary profile",
+    );
+    expect(String((response.body as { error?: string }).error || "")).toContain("enabled=true");
+  });
+
   it("migrates single-instance config to a primary bot profile via dry-run and apply", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
