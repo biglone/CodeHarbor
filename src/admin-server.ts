@@ -3582,6 +3582,7 @@ function parseStoredBotProfilesSnapshot(record: RuntimeConfigSnapshotRecord | nu
       ids.add(profile.id);
     }
     validatePrimaryBotProfiles(profiles);
+    validateBotTriggerRoutingConstraints(profiles);
 
     const rawUpdatedAt = typeof snapshot.updatedAt === "string" ? snapshot.updatedAt.trim() : "";
     const updatedAt = rawUpdatedAt && Number.isFinite(Date.parse(rawUpdatedAt)) ? rawUpdatedAt : new Date(record.updatedAt).toISOString();
@@ -3662,6 +3663,7 @@ function normalizeBotProfilesPayload(
   }
 
   validatePrimaryBotProfiles(nextProfiles);
+  validateBotTriggerRoutingConstraints(nextProfiles);
   return nextProfiles;
 }
 
@@ -3715,6 +3717,17 @@ function validatePrimaryBotProfiles(profiles: readonly BotInstanceProfileRecord[
   }
   const ids = primaryProfiles.map((profile) => profile.id).join(", ");
   throw new HttpError(400, "At most one bot profile may set isPrimary=true; found: " + ids + ".");
+}
+
+function validateBotTriggerRoutingConstraints(profiles: readonly BotInstanceProfileRecord[]): void {
+  const directModeOnNonPrimary = profiles.filter(
+    (profile) => profile.triggerPolicy.groupDirectModeEnabled && !profile.isPrimary,
+  );
+  if (directModeOnNonPrimary.length === 0) {
+    return;
+  }
+  const ids = directModeOnNonPrimary.map((profile) => profile.id).join(", ");
+  throw new HttpError(400, "groupDirectModeEnabled requires isPrimary=true for profile(s): " + ids + ".");
 }
 
 function parseOptionalBotProfileIdList(value: unknown, fieldName: string): string[] | null {

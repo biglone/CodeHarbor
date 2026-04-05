@@ -3046,6 +3046,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             notes: normalizeOptionalTextValue(asText("bots-form-notes")),
           };
 
+          if (profile.triggerPolicy.groupDirectModeEnabled && !profile.isPrimary) {
+            throw new Error("groupDirectModeEnabled requires isPrimary");
+          }
+
           var tokenInputValue = asText("bots-form-matrix-token");
           var clearToken = asBool("bots-form-clear-token");
           if (clearToken) {

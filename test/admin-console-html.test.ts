@@ -86,5 +86,6 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('retireDefaultSingleInstance');
     expectHtmlContains('triggerPolicy');
     expectHtmlContains('isPrimary');
+    expectHtmlContains('groupDirectModeEnabled requires isPrimary');
   });
 });
