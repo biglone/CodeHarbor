@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyQueueTaskRetry, stripLeadingBotMention } from "../src/orchestrator/misc-utils";
+import {
+  classifyQueueTaskRetry,
+  hasLeadingMentionForOtherUser,
+  stripLeadingBotMention,
+} from "../src/orchestrator/misc-utils";
 import { createRetryPolicy } from "../src/reliability/retry-policy";
 
 describe("classifyQueueTaskRetry", () => {
@@ -48,5 +52,22 @@ describe("stripLeadingBotMention", () => {
   it("keeps text unchanged when no mention prefix", () => {
     const output = stripLeadingBotMention("hello there", "@dev-main:matrix.example.com");
     expect(output).toBe("hello there");
+  });
+});
+
+describe("hasLeadingMentionForOtherUser", () => {
+  it("returns true when leading mention targets peer user", () => {
+    const result = hasLeadingMentionForOtherUser("@dev-main 请处理", "@main-hub:matrix.example.com");
+    expect(result).toBe(true);
+  });
+
+  it("returns false when leading mention targets self localpart", () => {
+    const result = hasLeadingMentionForOtherUser("@main-hub 你好", "@main-hub:matrix.example.com");
+    expect(result).toBe(false);
+  });
+
+  it("returns false when leading mention targets full self mxid", () => {
+    const result = hasLeadingMentionForOtherUser("@main-hub:matrix.example.com 你好", "@main-hub:matrix.example.com");
+    expect(result).toBe(false);
   });
 });

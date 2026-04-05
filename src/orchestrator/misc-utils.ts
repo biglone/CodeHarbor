@@ -84,6 +84,35 @@ export function stripLeadingBotMention(text: string, matrixUserId: string): stri
   return trimmed;
 }
 
+export function hasLeadingMentionForOtherUser(text: string, matrixUserId: string): boolean {
+  if (!matrixUserId) {
+    return false;
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const leadingMention = extractLeadingMatrixMention(trimmed);
+  if (!leadingMention) {
+    return false;
+  }
+
+  const normalizedMention = leadingMention.toLowerCase();
+  const normalizedSelfUserId = matrixUserId.toLowerCase();
+  if (normalizedMention === normalizedSelfUserId) {
+    return false;
+  }
+
+  const localpart = parseMatrixUserLocalpart(matrixUserId);
+  if (localpart && normalizedMention === `@${localpart.toLowerCase()}`) {
+    return false;
+  }
+
+  return true;
+}
+
 export function formatByteSize(sizeBytes: number): string {
   if (sizeBytes < 1024) {
     return `${sizeBytes}B`;
@@ -124,6 +153,14 @@ function parseMatrixUserLocalpart(userId: string): string | null {
     return null;
   }
   return userId.slice(1, colonIndex);
+}
+
+function extractLeadingMatrixMention(text: string): string | null {
+  const match = text.match(/^(?:<)?(@[A-Za-z0-9._=/-]+(?::[A-Za-z0-9._=:/-]+)?)(?:>)?(?=$|[\s,.:;!?，。：；])/);
+  if (!match) {
+    return null;
+  }
+  return match[1] ?? null;
 }
 
 function escapeRegex(value: string): string {

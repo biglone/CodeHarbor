@@ -737,6 +737,29 @@ describe("Orchestrator", () => {
     expect(channel.sent[0]?.text).toBe("ok:直接处理这条群消息");
   });
 
+  it("does not process group direct message when leading mention targets another user", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@main-hub:example.com",
+      groupDirectModeEnabled: true,
+      progressUpdatesEnabled: false,
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        text: "@dev-main 帮我看下",
+        mentionsBot: false,
+        repliesToBot: false,
+      }),
+    );
+
+    expect(executor.callCount).toBe(0);
+    expect(channel.sent).toHaveLength(0);
+  });
+
   it("routes backend/model using configured rules for chat requests", async () => {
     const channel = new FakeChannel();
     const codexExecutor = new TaggedExecutor("codex");

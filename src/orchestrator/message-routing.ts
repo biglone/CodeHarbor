@@ -3,7 +3,7 @@ import type { InboundMessage } from "../types";
 import { extractCommandText } from "../utils/message";
 import { parseAutoDevCommand } from "../workflow/autodev";
 import { parseControlCommand, type ControlCommand } from "./command-routing";
-import { stripLeadingBotMention } from "./misc-utils";
+import { hasLeadingMentionForOtherUser, stripLeadingBotMention } from "./misc-utils";
 
 export type RouteDecision =
   | { kind: "ignore" }
@@ -69,6 +69,12 @@ export function routeMessage(
   const prefixTriggered = prefixAllowed && deps.commandPrefix.length > 0;
   const prefixedText = prefixTriggered ? extractCommandText(incomingTrimmed, deps.commandPrefix) : null;
 
+  const suppressGroupDirectForPeerMention =
+    !input.message.isDirectMessage &&
+    deps.groupDirectModeEnabled &&
+    prefixedText === null &&
+    hasLeadingMentionForOtherUser(incomingTrimmed, deps.matrixUserId);
+
   const activeSession =
     input.message.isDirectMessage || groupPolicy?.allowActiveWindow
       ? deps.isSessionActive(input.sessionKey)
@@ -76,7 +82,7 @@ export function routeMessage(
 
   const conversationalTrigger =
     input.message.isDirectMessage ||
-    deps.groupDirectModeEnabled ||
+    (deps.groupDirectModeEnabled && !suppressGroupDirectForPeerMention) ||
     (Boolean(groupPolicy?.allowMention) && input.message.mentionsBot) ||
     (Boolean(groupPolicy?.allowReply) && input.message.repliesToBot) ||
     activeSession;
