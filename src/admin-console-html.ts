@@ -531,6 +531,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             <input id="global-autodev-auto-release-push" type="checkbox" />
             <span data-i18n="global.autodevAutoReleasePush">AutoDev 自动推送发布提交</span>
           </label>
+          <label class="checkbox">
+            <input id="global-bot-profiles-auto-retire-default" type="checkbox" />
+            <span data-i18n="global.botProfilesAutoRetireDefault">机器人实例 apply 默认自动退役单实例服务</span>
+          </label>
           <label class="field">
             <span class="field-label" data-i18n="global.autodevMaxConsecutiveFailures">AutoDev 最大连续失败次数</span>
             <input id="global-autodev-max-consecutive-failures" type="number" min="1" />
@@ -1073,6 +1077,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.autodevAutoCommit": "AutoDev 自动提交",
             "global.autodevAutoReleaseEnabled": "AutoDev 自动发布",
             "global.autodevAutoReleasePush": "AutoDev 自动推送发布提交",
+            "global.botProfilesAutoRetireDefault": "机器人实例 apply 默认自动退役单实例服务（codeharbor.service + codeharbor-admin.service）",
             "global.autodevMaxConsecutiveFailures": "AutoDev 最大连续失败次数",
             "global.autodevInitEnhancementEnabled": "启用 /autodev init Stage-B 增强",
             "global.autodevInitEnhancementTimeout": "Stage-B 增强超时（毫秒）",
@@ -1356,6 +1361,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global.autodevAutoCommit": "AutoDev auto commit",
             "global.autodevAutoReleaseEnabled": "AutoDev auto release",
             "global.autodevAutoReleasePush": "AutoDev auto push release commits",
+            "global.botProfilesAutoRetireDefault": "Bot apply default: auto-retire single-instance services (codeharbor.service + codeharbor-admin.service)",
             "global.autodevMaxConsecutiveFailures": "AutoDev max consecutive failures",
             "global.autodevInitEnhancementEnabled": "Enable /autodev init Stage-B enhancement",
             "global.autodevInitEnhancementTimeout": "Stage-B enhancement timeout (ms)",
@@ -1642,6 +1648,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "global-autodev-auto-commit",
             "global-autodev-auto-release-enabled",
             "global-autodev-auto-release-push",
+            "global-bot-profiles-auto-retire-default",
             "global-autodev-max-consecutive-failures",
             "global-autodev-init-enhancement-enabled",
             "global-autodev-init-enhancement-timeout",
@@ -2369,6 +2376,18 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               autoDev.autoReleaseEnabled === undefined ? true : Boolean(autoDev.autoReleaseEnabled);
             document.getElementById("global-autodev-auto-release-push").checked =
               autoDev.autoReleasePush === undefined ? false : Boolean(autoDev.autoReleasePush);
+            document.getElementById("global-bot-profiles-auto-retire-default").checked =
+              data.botProfilesAutoRetireDefaultSingleInstance === undefined
+                ? false
+                : Boolean(data.botProfilesAutoRetireDefaultSingleInstance);
+            var retireToggle = document.getElementById("bots-retire-default-toggle");
+            if (retireToggle) {
+              retireToggle.checked =
+                data.botProfilesAutoRetireDefaultSingleInstance === undefined
+                  ? false
+                  : Boolean(data.botProfilesAutoRetireDefaultSingleInstance);
+              retireToggle.dataset.syncState = "synced";
+            }
             document.getElementById("global-autodev-max-consecutive-failures").value = String(
               autoDev.maxConsecutiveFailures || 3
             );
@@ -2474,6 +2493,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               initEnhancementTimeoutMs: asNumber("global-autodev-init-enhancement-timeout", 480000),
               initEnhancementMaxChars: asNumber("global-autodev-init-enhancement-max-chars", 4000)
             },
+            botProfilesAutoRetireDefaultSingleInstance: asBool("global-bot-profiles-auto-retire-default"),
             groupDirectModeEnabled: asBool("global-direct-mode"),
             rateLimiter: {
               windowMs: asNumber("global-rate-window", 60000),
@@ -3080,6 +3100,25 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         async function loadBotProfiles() {
           try {
+            try {
+              var globalResponse = await apiRequest("/api/admin/config/global", "GET");
+              var globalData = globalResponse.data || {};
+              var retireDefault =
+                globalData.botProfilesAutoRetireDefaultSingleInstance === undefined
+                  ? false
+                  : Boolean(globalData.botProfilesAutoRetireDefaultSingleInstance);
+              var retireToggle = document.getElementById("bots-retire-default-toggle");
+              if (retireToggle) {
+                retireToggle.checked = retireDefault;
+                retireToggle.dataset.syncState = "synced";
+              }
+            } catch (error) {
+              var retireToggleFallback = document.getElementById("bots-retire-default-toggle");
+              if (retireToggleFallback) {
+                retireToggleFallback.dataset.syncState = "unsynced";
+              }
+              console.warn("[bot-profiles] failed to sync retire-default toggle", error);
+            }
             var response = await apiRequest("/api/admin/bot-profiles", "GET");
             var data = response.data || {};
             var profiles = Array.isArray(data.profiles) ? data.profiles : [];
@@ -3130,12 +3169,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         async function applyBotProfiles(dryRun) {
           try {
             var retireToggle = document.getElementById("bots-retire-default-toggle");
-            var retireDefaultSingleInstance = Boolean(retireToggle && retireToggle.checked);
-            var response = await apiRequest("/api/admin/bot-profiles/apply", "POST", {
+            var payload = {
               dryRun: Boolean(dryRun),
-              includeDisabled: true,
-              retireDefaultSingleInstance: retireDefaultSingleInstance
-            });
+              includeDisabled: true
+            };
+            if (retireToggle && retireToggle.dataset.syncState !== "unsynced") {
+              payload.retireDefaultSingleInstance = Boolean(retireToggle.checked);
+            }
+            var response = await apiRequest("/api/admin/bot-profiles/apply", "POST", payload);
             var data = response.data || {};
             var summary = data.summary || {};
             var retireApplied = data.retireDefaultSingleInstance ? "on" : "off";

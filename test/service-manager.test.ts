@@ -74,6 +74,8 @@ describe("service-manager unit templates", () => {
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/codeharbor/dist/cli.js admin serve");
     expect(unit).toContain("NoNewPrivileges=false");
     expect(unit).toContain("ProtectHome=false");
+    expect(unit).toContain("ReadWritePaths=/etc/systemd/system");
+    expect(unit).toContain("ReadWritePaths=/etc/sudoers.d");
   });
 
   it("builds restart sudoers policy with non-interactive systemctl rules", () => {

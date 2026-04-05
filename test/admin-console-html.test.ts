@@ -69,6 +69,7 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('id="bots-load-btn"');
     expectHtmlContains('id="bots-save-btn"');
     expectHtmlContains('id="bots-apply-btn"');
+    expectHtmlContains('id="global-bot-profiles-auto-retire-default"');
     expectHtmlContains('id="bots-retire-default-toggle"');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "GET")');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "PUT"');

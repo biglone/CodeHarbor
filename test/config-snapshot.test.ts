@@ -104,6 +104,7 @@ describe("config snapshot commands", () => {
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_ENABLED");
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS");
     expect(parsed.env).toHaveProperty("AUTODEV_INIT_ENHANCEMENT_MAX_CHARS");
+    expect(parsed.env).toHaveProperty("BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE");
     expect(parsed.env).toHaveProperty("AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS");
     expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_MAIN_LABEL");
     expect(parsed.env).toHaveProperty("CODEHARBOR_LAUNCHD_ADMIN_LABEL");

@@ -114,6 +114,10 @@ const configSchema = z
     AGENT_WORKFLOW_ROLE_SKILLS_MAX_CHARS: z.string().default(""),
     AGENT_WORKFLOW_ROLE_SKILLS_ROOTS: z.string().default(""),
     AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON: z.string().default(""),
+    BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE: z
+      .string()
+      .default("false")
+      .transform((v) => v.toLowerCase() === "true"),
     STATE_DB_PATH: z.string().default("data/state.db"),
     STATE_PATH: z.string().default("data/state.json"),
     MAX_PROCESSED_EVENTS_PER_SESSION: z
@@ -398,6 +402,7 @@ const configSchema = z
         roleAssignments: parseRoleSkillAssignments(v.AGENT_WORKFLOW_ROLE_SKILLS_ASSIGNMENTS_JSON),
       },
     },
+    botProfilesAutoRetireDefaultSingleInstance: v.BOT_PROFILES_AUTO_RETIRE_DEFAULT_SINGLE_INSTANCE,
     stateDbPath: path.resolve(v.STATE_DB_PATH),
     legacyStateJsonPath: v.STATE_PATH.trim() ? path.resolve(v.STATE_PATH) : null,
     maxProcessedEventsPerSession: v.MAX_PROCESSED_EVENTS_PER_SESSION,

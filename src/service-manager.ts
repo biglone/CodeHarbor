@@ -214,6 +214,8 @@ export function buildAdminServiceUnit(options: UnitBuildOptions): string {
     "ProtectSystem=full",
     "ProtectHome=false",
     `ReadWritePaths=${runtimeHome}`,
+    "ReadWritePaths=/etc/systemd/system",
+    "ReadWritePaths=/etc/sudoers.d",
     "",
     "[Install]",
     "WantedBy=multi-user.target",

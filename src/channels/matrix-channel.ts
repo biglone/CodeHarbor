@@ -57,6 +57,7 @@ export class MatrixChannel implements Channel {
   private readonly fetchMedia: boolean;
   private readonly transcribeAudio: boolean;
   private readonly client: MatrixClient;
+  private readonly ignoredBotSenderIds: ReadonlySet<string>;
   private handler: InboundHandler | null = null;
   private started = false;
 
@@ -73,6 +74,7 @@ export class MatrixChannel implements Channel {
       accessToken: config.matrixAccessToken,
       userId: config.matrixUserId,
     });
+    this.ignoredBotSenderIds = parseMatrixBotSenderIds(process.env.MATRIX_BOT_USER_IDS, config.matrixUserId);
   }
 
   async start(handler: InboundHandler): Promise<void> {
@@ -199,6 +201,13 @@ export class MatrixChannel implements Channel {
     }
     const senderId = event.getSender();
     if (!senderId) {
+      return;
+    }
+    if (this.ignoredBotSenderIds.has(senderId)) {
+      this.logger.debug("Ignored inbound message from configured bot sender", {
+        senderId,
+        roomId: room.roomId,
+      });
       return;
     }
     if (senderId === this.config.matrixUserId && isLikelyLocalEcho(event)) {
@@ -570,6 +579,26 @@ function formatError(error: unknown): string {
 function buildRequestId(eventId: string): string {
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${eventId}:${suffix}`;
+}
+
+function parseMatrixBotSenderIds(raw: string | undefined, selfUserId: string): ReadonlySet<string> {
+  const normalizedSelf = selfUserId.trim();
+  const values = (raw ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  const output = new Set<string>();
+  for (const value of values) {
+    if (value === normalizedSelf) {
+      continue;
+    }
+    if (!/^@[^:\s]+:.+/.test(value)) {
+      continue;
+    }
+    output.add(value);
+  }
+  return output;
 }
 
 function isLikelyLocalEcho(event: MatrixEvent): boolean {

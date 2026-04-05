@@ -226,6 +226,68 @@ describe("MatrixChannel", () => {
     await channel.stop();
   });
 
+  it("ignores inbound messages from configured bot sender ids", async () => {
+    const previous = process.env.MATRIX_BOT_USER_IDS;
+    process.env.MATRIX_BOT_USER_IDS = "@review-guard:example.com,@bot:example.com";
+
+    try {
+      const client = new FakeMatrixClient();
+      client.startClient.mockImplementation(() => {
+        client.emit("sync", "PREPARED");
+      });
+      createClientMock.mockReturnValue(client);
+
+      const channel = new MatrixChannel(config as never, logger as never);
+      const handler = vi.fn(async (_message: unknown) => {});
+      await channel.start(handler);
+
+      const ignoredEvent = {
+        getType: () => "m.room.message",
+        getSender: () => "@review-guard:example.com",
+        getContent: () => ({
+          msgtype: "m.text",
+          body: "@bot:example.com ping",
+          "m.mentions": { user_ids: ["@bot:example.com"] },
+        }),
+        getId: () => "$event-ignore-bot",
+      };
+
+      const acceptedEvent = {
+        getType: () => "m.room.message",
+        getSender: () => "@alice:example.com",
+        getContent: () => ({
+          msgtype: "m.text",
+          body: "@bot:example.com 正常消息",
+          "m.mentions": { user_ids: ["@bot:example.com"] },
+        }),
+        getId: () => "$event-accept-human",
+      };
+
+      const room = {
+        roomId: "!room:example.com",
+        getJoinedMemberCount: () => 3,
+        findEventById: (_eventId: string) => undefined,
+      };
+
+      client.emit("Room.timeline", ignoredEvent, room, false);
+      client.emit("Room.timeline", acceptedEvent, room, false);
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler.mock.calls[0][0]).toMatchObject({
+        senderId: "@alice:example.com",
+      });
+
+      await channel.stop();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MATRIX_BOT_USER_IDS;
+      } else {
+        process.env.MATRIX_BOT_USER_IDS = previous;
+      }
+    }
+  });
+
   it("forwards attachment metadata for media messages", async () => {
     const client = new FakeMatrixClient();
     client.startClient.mockImplementation(() => {
