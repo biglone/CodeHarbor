@@ -1783,6 +1783,101 @@ describe("AdminServer", () => {
     });
   });
 
+  it("records selected profile policies in bot apply config audit payload", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "admin-token",
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+      applyBotProfiles: async (input) => ({
+        dryRun: input.dryRun,
+        includeDisabled: input.includeDisabled,
+        retireDefaultSingleInstance: input.retireDefaultSingleInstance,
+        summary: {
+          total: input.profiles.length,
+          planned: input.profiles.length,
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+        },
+        items: input.profiles.map((profile) => ({
+          id: profile.id,
+          enabled: profile.enabled,
+          action: profile.enabled ? "install" : "uninstall",
+          status: "planned",
+          command: "dry-run",
+          message: "dry-run",
+        })),
+      }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = "http://127.0.0.1:" + String(address?.port ?? "");
+
+    const put = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "main-hub",
+            enabled: true,
+            isPrimary: true,
+            runtimeHome: path.join(dir, "runtime-main"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@main-hub:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            triggerPolicy: {
+              groupDirectModeEnabled: true,
+              allowMention: false,
+              allowReply: true,
+              allowActiveWindow: true,
+              allowPrefix: false,
+            },
+          },
+        ],
+      }),
+    });
+    expect(put.status).toBe(200);
+
+    const apply = await fetchJson(baseUrl + "/api/admin/bot-profiles/apply", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+      }),
+    });
+    expect(apply.status).toBe(200);
+
+    const audit = await fetchJson(baseUrl + "/api/admin/audit?kind=config&limit=10", {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(audit.status).toBe(200);
+    const auditText = JSON.stringify(audit.body);
+    expect(auditText).toContain('"type":"bot_profiles_apply"');
+    expect(auditText).toContain('"selectedProfilePolicies"');
+    expect(auditText).toContain('"isPrimary":true');
+    expect(auditText).toContain('"groupDirectModeEnabled":true');
+    expect(auditText).toContain('"allowMention":false');
+  });
+
   it("rejects duplicate primary bot profiles", async () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
