@@ -71,9 +71,16 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('id="bots-apply-btn"');
     expectHtmlContains('id="global-bot-profiles-auto-retire-default"');
     expectHtmlContains('id="bots-retire-default-toggle"');
+    expectHtmlContains('id="bots-form-trigger-group-direct"');
+    expectHtmlContains('id="bots-form-trigger-mention"');
+    expectHtmlContains('id="bots-form-trigger-reply"');
+    expectHtmlContains('id="bots-form-trigger-window"');
+    expectHtmlContains('id="bots-form-trigger-prefix"');
+    expectHtmlContains('"bots.triggerPolicyTitle"');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "GET")');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "PUT"');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles/apply", "POST"');
     expectHtmlContains('retireDefaultSingleInstance');
+    expectHtmlContains('triggerPolicy');
   });
 });

@@ -1619,6 +1619,13 @@ describe("AdminServer", () => {
             matrixUserId: "@bot-a:example.com",
             matrixHomeserver: "https://matrix.example.com",
             matrixAccessToken: "secret-token-a",
+            triggerPolicy: {
+              groupDirectModeEnabled: true,
+              allowMention: false,
+              allowReply: true,
+              allowActiveWindow: true,
+              allowPrefix: false,
+            },
             backend: {
               provider: "codex",
               model: "gpt-5.4",
@@ -1641,6 +1648,14 @@ describe("AdminServer", () => {
     expect(viewerBodyText).toContain('"hasMatrixAccessToken":true');
     expect(viewerBodyText).toContain("sec***n-a");
     expect(viewerBodyText).not.toContain("secret-token-a");
+    const viewerProfiles = (viewerRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown> }> } }).data?.profiles ?? [];
+    expect(viewerProfiles[0]?.triggerPolicy).toEqual({
+      groupDirectModeEnabled: true,
+      allowMention: false,
+      allowReply: true,
+      allowActiveWindow: true,
+      allowPrefix: false,
+    });
 
     const putWithoutToken = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
       method: "PUT",
@@ -1669,6 +1684,21 @@ describe("AdminServer", () => {
       }),
     });
     expect(putWithoutToken.status).toBe(200);
+
+    const afterUpdateRead = await fetchJson(`${baseUrl}/api/admin/bot-profiles`, {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(afterUpdateRead.status).toBe(200);
+    const afterUpdateProfiles = (afterUpdateRead.body as { data?: { profiles?: Array<{ triggerPolicy: Record<string, unknown> }> } }).data?.profiles ?? [];
+    expect(afterUpdateProfiles[0]?.triggerPolicy).toEqual({
+      groupDirectModeEnabled: true,
+      allowMention: false,
+      allowReply: true,
+      allowActiveWindow: true,
+      allowPrefix: false,
+    });
 
     const applyDenied = await fetchJson(`${baseUrl}/api/admin/bot-profiles/apply`, {
       method: "POST",
@@ -1755,6 +1785,13 @@ describe("AdminServer", () => {
             matrixHomeserver: string;
             matrixAccessToken: string | null;
             backend: { provider: "codex" | "claude" | "gemini"; model: string | null; bin: string | null } | null;
+            triggerPolicy: {
+              groupDirectModeEnabled: boolean;
+              allowMention: boolean;
+              allowReply: boolean;
+              allowActiveWindow: boolean;
+              allowPrefix: boolean;
+            };
             workdir: string | null;
             notes: string | null;
           },
@@ -1780,6 +1817,13 @@ describe("AdminServer", () => {
           model: null,
           bin: null,
         },
+        triggerPolicy: {
+          groupDirectModeEnabled: true,
+          allowMention: false,
+          allowReply: true,
+          allowActiveWindow: true,
+          allowPrefix: false,
+        },
         workdir: dir,
         notes: null,
       },
@@ -1792,9 +1836,11 @@ describe("AdminServer", () => {
     expect(codexEnvRaw).toContain("MATRIX_BOT_USER_IDS=@bot-gemini:example.com");
     expect(codexEnvRaw).toContain("STATE_DB_PATH=" + path.join(dir, "runtime-bot-codex", "data", "state.db"));
     expect(codexEnvRaw).toContain("STATE_PATH=" + path.join(dir, "runtime-bot-codex", "data", "state.json"));
-    expect(codexEnvRaw).toContain("GROUP_DIRECT_MODE_ENABLED=false");
-    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_REPLY=false");
-    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW=false");
+    expect(codexEnvRaw).toContain("GROUP_DIRECT_MODE_ENABLED=true");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_MENTION=false");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_REPLY=true");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW=true");
+    expect(codexEnvRaw).toContain("GROUP_TRIGGER_ALLOW_PREFIX=false");
 
     const geminiProfileEnv = persistRuntimeEnv(
       {
@@ -1811,6 +1857,13 @@ describe("AdminServer", () => {
           model: null,
           bin: null,
         },
+        triggerPolicy: {
+          groupDirectModeEnabled: false,
+          allowMention: true,
+          allowReply: false,
+          allowActiveWindow: false,
+          allowPrefix: true,
+        },
         workdir: dir,
         notes: null,
       },
@@ -1824,8 +1877,10 @@ describe("AdminServer", () => {
     expect(geminiEnvRaw).toContain("STATE_DB_PATH=" + path.join(dir, "runtime-bot-gemini", "data", "state.db"));
     expect(geminiEnvRaw).toContain("STATE_PATH=" + path.join(dir, "runtime-bot-gemini", "data", "state.json"));
     expect(geminiEnvRaw).toContain("GROUP_DIRECT_MODE_ENABLED=false");
+    expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_MENTION=true");
     expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_REPLY=false");
     expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW=false");
+    expect(geminiEnvRaw).toContain("GROUP_TRIGGER_ALLOW_PREFIX=true");
   });
 
   it("rejects oversized JSON request payloads", async () => {

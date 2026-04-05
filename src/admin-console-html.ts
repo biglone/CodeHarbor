@@ -794,6 +794,16 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                 <input id="bots-form-clear-token" type="checkbox" />
                 <span data-i18n="bots.field.clearToken">清空已有 Matrix token（危险）</span>
               </label>
+              <label class="field full">
+                <span class="field-label" data-i18n="bots.triggerPolicyTitle">群聊触发策略（实例级）</span>
+                <div class="grid" style="margin-top: 6px;">
+                  <label class="checkbox"><input id="bots-form-trigger-group-direct" type="checkbox" /><span data-i18n="bots.field.groupDirectModeEnabled">群聊直通模式（无需触发）</span></label>
+                  <label class="checkbox"><input id="bots-form-trigger-mention" type="checkbox" /><span data-i18n="bots.field.allowMention">触发：提及机器人</span></label>
+                  <label class="checkbox"><input id="bots-form-trigger-reply" type="checkbox" /><span data-i18n="bots.field.allowReply">触发：回复机器人</span></label>
+                  <label class="checkbox"><input id="bots-form-trigger-window" type="checkbox" /><span data-i18n="bots.field.allowActiveWindow">触发：活跃窗口</span></label>
+                  <label class="checkbox"><input id="bots-form-trigger-prefix" type="checkbox" /><span data-i18n="bots.field.allowPrefix">触发：命令前缀</span></label>
+                </div>
+              </label>
               <label class="field">
                 <span class="field-label" data-i18n="bots.field.backendProvider">后端提供方</span>
                 <select id="bots-form-backend-provider">
@@ -851,7 +861,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                   <textarea
                     id="bots-profiles-json"
                     rows="12"
-                    placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
+                    placeholder='[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]'
                     data-i18n-placeholder="bots.jsonPlaceholder"
                   ></textarea>
                 </label>
@@ -1185,7 +1195,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.syncJson": "从列表同步 JSON",
             "bots.jsonLabel": "实例配置 JSON（数组）",
             "bots.jsonPlaceholder":
-              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
             "bots.field.id": "实例 ID",
             "bots.field.runUser": "运行用户",
             "bots.field.runtimeHome": "运行目录",
@@ -1196,6 +1206,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.field.enabled": "启用该实例",
             "bots.field.withAdmin": "安装 Admin 子服务",
             "bots.field.clearToken": "清空已有 Matrix token（危险）",
+            "bots.triggerPolicyTitle": "群聊触发策略（实例级）",
+            "bots.field.groupDirectModeEnabled": "群聊直通模式（无需触发）",
+            "bots.field.allowMention": "触发：提及机器人",
+            "bots.field.allowReply": "触发：回复机器人",
+            "bots.field.allowActiveWindow": "触发：活跃窗口",
+            "bots.field.allowPrefix": "触发：命令前缀",
             "bots.field.backendProvider": "后端提供方",
             "bots.field.backendModel": "后端模型（可选）",
             "bots.field.backendBin": "后端命令路径（可选）",
@@ -1470,7 +1486,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.syncJson": "Sync JSON From List",
             "bots.jsonLabel": "Profiles JSON (array)",
             "bots.jsonPlaceholder":
-              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
+              '[{"id":"bot-a","enabled":true,"runtimeHome":"/home/bot-a/.codeharbor","runUser":"bot-a","withAdmin":true,"matrixUserId":"@bot-a:example.com","matrixHomeserver":"https://matrix.example.com","triggerPolicy":{"groupDirectModeEnabled":false,"allowMention":true,"allowReply":false,"allowActiveWindow":false,"allowPrefix":true},"backend":{"provider":"codex","model":"gpt-5.4"},"workdir":"/srv/project-a","notes":"project-a bot"}]',
             "bots.field.id": "Instance ID",
             "bots.field.runUser": "Run User",
             "bots.field.runtimeHome": "Runtime Home",
@@ -1481,6 +1497,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.field.enabled": "Enable this instance",
             "bots.field.withAdmin": "Install Admin sidecar service",
             "bots.field.clearToken": "Clear existing Matrix token (dangerous)",
+            "bots.triggerPolicyTitle": "Group Trigger Policy (per instance)",
+            "bots.field.groupDirectModeEnabled": "Group direct mode (no trigger required)",
+            "bots.field.allowMention": "Trigger: mention",
+            "bots.field.allowReply": "Trigger: reply",
+            "bots.field.allowActiveWindow": "Trigger: active window",
+            "bots.field.allowPrefix": "Trigger: command prefix",
             "bots.field.backendProvider": "Backend Provider",
             "bots.field.backendModel": "Backend Model (optional)",
             "bots.field.backendBin": "Backend Binary Path (optional)",
@@ -2740,6 +2762,10 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
 
         function normalizeBotProfileForState(input) {
           var item = input || {};
+          var triggerSource = item;
+          if (item.triggerPolicy && typeof item.triggerPolicy === "object" && !Array.isArray(item.triggerPolicy)) {
+            triggerSource = item.triggerPolicy;
+          }
           var normalized = {
             id: String(item.id || "").trim(),
             enabled: Boolean(item.enabled),
@@ -2753,6 +2779,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             workdir: normalizeOptionalTextValue(item.workdir),
             notes: normalizeOptionalTextValue(item.notes),
             backend: null,
+            triggerPolicy: {
+              groupDirectModeEnabled:
+                triggerSource.groupDirectModeEnabled === undefined ? false : Boolean(triggerSource.groupDirectModeEnabled),
+              allowMention: triggerSource.allowMention === undefined ? true : Boolean(triggerSource.allowMention),
+              allowReply: triggerSource.allowReply === undefined ? false : Boolean(triggerSource.allowReply),
+              allowActiveWindow: triggerSource.allowActiveWindow === undefined ? false : Boolean(triggerSource.allowActiveWindow),
+              allowPrefix: triggerSource.allowPrefix === undefined ? true : Boolean(triggerSource.allowPrefix),
+            },
           };
 
           if (item.backend && typeof item.backend === "object" && !Array.isArray(item.backend)) {
@@ -2784,6 +2818,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           var output = [];
           for (var i = 0; i < items.length; i += 1) {
             var item = items[i];
+            var triggerPolicy = item.triggerPolicy && typeof item.triggerPolicy === "object" ? item.triggerPolicy : {};
             var next = {
               id: item.id,
               enabled: Boolean(item.enabled),
@@ -2792,6 +2827,14 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               withAdmin: Boolean(item.withAdmin),
               matrixUserId: item.matrixUserId,
               matrixHomeserver: item.matrixHomeserver,
+              triggerPolicy: {
+                groupDirectModeEnabled:
+                  triggerPolicy.groupDirectModeEnabled === undefined ? false : Boolean(triggerPolicy.groupDirectModeEnabled),
+                allowMention: triggerPolicy.allowMention === undefined ? true : Boolean(triggerPolicy.allowMention),
+                allowReply: triggerPolicy.allowReply === undefined ? false : Boolean(triggerPolicy.allowReply),
+                allowActiveWindow: triggerPolicy.allowActiveWindow === undefined ? false : Boolean(triggerPolicy.allowActiveWindow),
+                allowPrefix: triggerPolicy.allowPrefix === undefined ? true : Boolean(triggerPolicy.allowPrefix),
+              },
               backend: null,
               workdir: item.workdir || null,
               notes: item.notes || null,
@@ -2885,6 +2928,11 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           document.getElementById("bots-form-matrix-homeserver").value = "";
           document.getElementById("bots-form-matrix-token").value = "";
           document.getElementById("bots-form-clear-token").checked = false;
+          document.getElementById("bots-form-trigger-group-direct").checked = false;
+          document.getElementById("bots-form-trigger-mention").checked = true;
+          document.getElementById("bots-form-trigger-reply").checked = false;
+          document.getElementById("bots-form-trigger-window").checked = false;
+          document.getElementById("bots-form-trigger-prefix").checked = true;
           document.getElementById("bots-form-backend-provider").value = "";
           document.getElementById("bots-form-backend-model").value = "";
           document.getElementById("bots-form-backend-bin").value = "";
@@ -2896,6 +2944,7 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         }
 
         function fillBotProfileForm(profile) {
+          var triggerPolicy = profile && profile.triggerPolicy && typeof profile.triggerPolicy === "object" ? profile.triggerPolicy : {};
           document.getElementById("bots-form-id").value = profile.id || "";
           document.getElementById("bots-form-enabled").checked = Boolean(profile.enabled);
           document.getElementById("bots-form-runtime-home").value = profile.runtimeHome || "";
@@ -2905,6 +2954,16 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
           document.getElementById("bots-form-matrix-homeserver").value = profile.matrixHomeserver || "";
           document.getElementById("bots-form-matrix-token").value = "";
           document.getElementById("bots-form-clear-token").checked = false;
+          document.getElementById("bots-form-trigger-group-direct").checked =
+            triggerPolicy.groupDirectModeEnabled === undefined ? false : Boolean(triggerPolicy.groupDirectModeEnabled);
+          document.getElementById("bots-form-trigger-mention").checked =
+            triggerPolicy.allowMention === undefined ? true : Boolean(triggerPolicy.allowMention);
+          document.getElementById("bots-form-trigger-reply").checked =
+            triggerPolicy.allowReply === undefined ? false : Boolean(triggerPolicy.allowReply);
+          document.getElementById("bots-form-trigger-window").checked =
+            triggerPolicy.allowActiveWindow === undefined ? false : Boolean(triggerPolicy.allowActiveWindow);
+          document.getElementById("bots-form-trigger-prefix").checked =
+            triggerPolicy.allowPrefix === undefined ? true : Boolean(triggerPolicy.allowPrefix);
           document.getElementById("bots-form-backend-provider").value = profile.backend && profile.backend.provider ? profile.backend.provider : "";
           document.getElementById("bots-form-backend-model").value = profile.backend && profile.backend.model ? profile.backend.model : "";
           document.getElementById("bots-form-backend-bin").value = profile.backend && profile.backend.bin ? profile.backend.bin : "";
@@ -2962,6 +3021,13 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
                   bin: backendBin,
                 }
               : null,
+            triggerPolicy: {
+              groupDirectModeEnabled: asBool("bots-form-trigger-group-direct"),
+              allowMention: asBool("bots-form-trigger-mention"),
+              allowReply: asBool("bots-form-trigger-reply"),
+              allowActiveWindow: asBool("bots-form-trigger-window"),
+              allowPrefix: asBool("bots-form-trigger-prefix"),
+            },
             workdir: normalizeOptionalTextValue(asText("bots-form-workdir")),
             notes: normalizeOptionalTextValue(asText("bots-form-notes")),
           };

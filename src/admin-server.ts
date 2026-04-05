@@ -122,6 +122,14 @@ interface BotProfileBackendConfig {
   bin: string | null;
 }
 
+interface BotProfileTriggerPolicyConfig {
+  groupDirectModeEnabled: boolean;
+  allowMention: boolean;
+  allowReply: boolean;
+  allowActiveWindow: boolean;
+  allowPrefix: boolean;
+}
+
 interface BotInstanceProfileRecord {
   id: string;
   enabled: boolean;
@@ -132,6 +140,7 @@ interface BotInstanceProfileRecord {
   matrixHomeserver: string;
   matrixAccessToken: string | null;
   backend: BotProfileBackendConfig | null;
+  triggerPolicy: BotProfileTriggerPolicyConfig;
   workdir: string | null;
   notes: string | null;
 }
@@ -147,6 +156,7 @@ interface BotInstanceProfileView {
   hasMatrixAccessToken: boolean;
   matrixAccessTokenMasked: string | null;
   backend: BotProfileBackendConfig | null;
+  triggerPolicy: BotProfileTriggerPolicyConfig;
   workdir: string | null;
   notes: string | null;
 }
@@ -2619,10 +2629,11 @@ export class AdminServer {
     const runtimeStateDir = path.join(runtimeHome, "data");
     mergedEnv.STATE_DB_PATH = path.join(runtimeStateDir, "state.db");
     mergedEnv.STATE_PATH = path.join(runtimeStateDir, "state.json");
-    // Multi-instance bots should not auto-trigger on every group message by default.
-    mergedEnv.GROUP_DIRECT_MODE_ENABLED = "false";
-    mergedEnv.GROUP_TRIGGER_ALLOW_REPLY = "false";
-    mergedEnv.GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW = "false";
+    mergedEnv.GROUP_DIRECT_MODE_ENABLED = profile.triggerPolicy.groupDirectModeEnabled ? "true" : "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_MENTION = profile.triggerPolicy.allowMention ? "true" : "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_REPLY = profile.triggerPolicy.allowReply ? "true" : "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_ACTIVE_WINDOW = profile.triggerPolicy.allowActiveWindow ? "true" : "false";
+    mergedEnv.GROUP_TRIGGER_ALLOW_PREFIX = profile.triggerPolicy.allowPrefix ? "true" : "false";
     const peerBotUserIds = Array.from(
       new Set(
         allBotUserIds
@@ -3613,6 +3624,7 @@ function normalizeBotProfilesPayload(
     const enabled = normalizeBoolean(payload.enabled, existing?.enabled ?? true);
     const withAdmin = normalizeBoolean(payload.withAdmin, existing?.withAdmin ?? true);
     const backend = normalizeBotBackend(payload.backend, existing?.backend ?? null, `${label}.backend`);
+    const triggerPolicy = normalizeBotTriggerPolicy(payload, existing?.triggerPolicy ?? null);
     const workdir = normalizeOptionalResolvedPath(payload.workdir, existing?.workdir ?? null, `${label}.workdir`);
     const notes = normalizeOptionalNote(payload.notes, existing?.notes ?? null, `${label}.notes`);
 
@@ -3631,6 +3643,7 @@ function normalizeBotProfilesPayload(
       matrixHomeserver,
       matrixAccessToken,
       backend,
+      triggerPolicy,
       workdir,
       notes,
     });
@@ -3656,6 +3669,7 @@ function normalizeStoredBotProfile(value: unknown, label: string): BotInstancePr
     matrixHomeserver: normalizeHomeserverUrl(payload.matrixHomeserver, "", `${label}.matrixHomeserver`),
     matrixAccessToken: normalizeOptionalToken(payload.matrixAccessToken, `${label}.matrixAccessToken`),
     backend: normalizeBotBackend(payload.backend, null, `${label}.backend`),
+    triggerPolicy: normalizeBotTriggerPolicy(payload, null),
     workdir: normalizeOptionalResolvedPath(payload.workdir, null, `${label}.workdir`),
     notes: normalizeOptionalNote(payload.notes, null, `${label}.notes`),
   };
@@ -3673,6 +3687,7 @@ function sanitizeBotProfileForView(profile: BotInstanceProfileRecord): BotInstan
     hasMatrixAccessToken: Boolean(profile.matrixAccessToken),
     matrixAccessTokenMasked: maskSecret(profile.matrixAccessToken),
     backend: profile.backend ? { ...profile.backend } : null,
+    triggerPolicy: { ...profile.triggerPolicy },
     workdir: profile.workdir,
     notes: profile.notes,
   };
@@ -3793,6 +3808,41 @@ function normalizeOptionalNote(value: unknown, fallback: string | null, fieldNam
     throw new HttpError(400, `${fieldName} must not exceed 400 characters.`);
   }
   return normalized;
+}
+
+function defaultBotProfileTriggerPolicy(): BotProfileTriggerPolicyConfig {
+  return {
+    groupDirectModeEnabled: false,
+    allowMention: true,
+    allowReply: false,
+    allowActiveWindow: false,
+    allowPrefix: true,
+  };
+}
+
+function normalizeBotTriggerPolicy(
+  profilePayload: Record<string, unknown>,
+  fallback: BotProfileTriggerPolicyConfig | null,
+): BotProfileTriggerPolicyConfig {
+  const base = fallback ?? defaultBotProfileTriggerPolicy();
+  let source = profilePayload;
+  if (Object.prototype.hasOwnProperty.call(profilePayload, "triggerPolicy")) {
+    const rawPolicy = profilePayload.triggerPolicy;
+    if (rawPolicy === null) {
+      source = {};
+    } else if (typeof rawPolicy === "object" && !Array.isArray(rawPolicy)) {
+      source = rawPolicy as Record<string, unknown>;
+    } else if (rawPolicy !== undefined) {
+      throw new HttpError(400, "triggerPolicy must be an object.");
+    }
+  }
+  return {
+    groupDirectModeEnabled: normalizeBoolean(source.groupDirectModeEnabled, base.groupDirectModeEnabled),
+    allowMention: normalizeBoolean(source.allowMention, base.allowMention),
+    allowReply: normalizeBoolean(source.allowReply, base.allowReply),
+    allowActiveWindow: normalizeBoolean(source.allowActiveWindow, base.allowActiveWindow),
+    allowPrefix: normalizeBoolean(source.allowPrefix, base.allowPrefix),
+  };
 }
 
 function normalizeBotBackend(
