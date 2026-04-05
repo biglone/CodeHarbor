@@ -740,6 +740,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         <div class="actions">
           <button id="bots-load-btn" type="button" class="secondary" data-i18n="bots.load">加载实例配置</button>
           <button id="bots-save-btn" type="button" data-i18n="bots.save">保存实例配置</button>
+          <button id="bots-migrate-dry-run-btn" type="button" class="secondary" data-i18n="bots.migrateDryRun">迁移预检（单实例）</button>
+          <button id="bots-migrate-apply-btn" type="button" class="secondary" data-i18n="bots.migrateApply">一键迁移主机器人</button>
           <button id="bots-apply-dry-run-btn" type="button" class="secondary" data-i18n="bots.applyDryRun">应用预检（dry-run）</button>
           <button id="bots-apply-btn" type="button" class="secondary" data-i18n="bots.apply">应用实例变更</button>
           <label class="checkbox" style="margin: 0 0 0 6px;">
@@ -1186,6 +1188,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "bots.description": "在同一管理后台维护多实例配置：每个实例对应独立 Matrix 账号、运行目录和可选后端模型。",
             "bots.load": "加载实例配置",
             "bots.save": "保存实例配置",
+            "bots.migrateDryRun": "迁移预检（单实例）",
+            "bots.migrateApply": "一键迁移主机器人",
             "bots.applyDryRun": "应用预检（dry-run）",
             "bots.apply": "应用实例变更",
             "bots.retireDefault": "应用后自动退役默认单实例服务（codeharbor.service + codeharbor-admin.service）",
@@ -1239,6 +1243,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsJsonInvalid": "实例配置 JSON 解析失败：{error}",
             "notice.botsSaved": "机器人实例配置已保存：{count} 项。",
             "notice.botsSaveFailed": "保存机器人实例配置失败：{error}",
+            "notice.botsMigrated": "迁移结果：{message}（dryRun={dryRun}）。",
+            "notice.botsMigrateFailed": "迁移失败：{error}",
             "notice.botsApplied": "实例应用结果：成功 {succeeded}，失败 {failed}，跳过 {skipped}，退役默认单实例={retire}。",
             "notice.botsApplyFailed": "应用实例配置失败：{error}",
             "notice.botsEmpty": "暂无机器人实例配置。",
@@ -1479,6 +1485,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
               "Manage multiple bot instances from one control plane. Each profile can define Matrix identity, runtime home, and backend model overrides.",
             "bots.load": "Load Profiles",
             "bots.save": "Save Profiles",
+            "bots.migrateDryRun": "Migration Dry-Run",
+            "bots.migrateApply": "Migrate As Primary",
             "bots.applyDryRun": "Apply Dry-Run",
             "bots.apply": "Apply Changes",
             "bots.retireDefault": "Retire default single-instance services after apply (codeharbor.service + codeharbor-admin.service)",
@@ -1532,6 +1540,8 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             "notice.botsJsonInvalid": "Profiles JSON parse failed: {error}",
             "notice.botsSaved": "Saved bot profiles: {count}.",
             "notice.botsSaveFailed": "Failed to save bot profiles: {error}",
+            "notice.botsMigrated": "Migration result: {message} (dryRun={dryRun}).",
+            "notice.botsMigrateFailed": "Failed to migrate single-instance profile: {error}",
             "notice.botsApplied": "Apply result: succeeded {succeeded}, failed {failed}, skipped {skipped}, retire default={retire}.",
             "notice.botsApplyFailed": "Failed to apply bot profiles: {error}",
             "notice.botsEmpty": "No bot profiles.",
@@ -1792,6 +1802,12 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
         });
         document.getElementById("bots-load-btn").addEventListener("click", loadBotProfiles);
         document.getElementById("bots-save-btn").addEventListener("click", saveBotProfiles);
+        document.getElementById("bots-migrate-dry-run-btn").addEventListener("click", function () {
+          migrateSingleInstanceProfile(true);
+        });
+        document.getElementById("bots-migrate-apply-btn").addEventListener("click", function () {
+          migrateSingleInstanceProfile(false);
+        });
         document.getElementById("bots-new-btn").addEventListener("click", startCreateBotProfile);
         document.getElementById("bots-upsert-btn").addEventListener("click", upsertBotProfileLocal);
         document.getElementById("bots-delete-btn").addEventListener("click", removeSelectedBotProfileLocal);
@@ -3248,6 +3264,29 @@ export const ADMIN_CONSOLE_HTML = `<!doctype html>
             await loadAudit();
           } catch (error) {
             showNotice("error", t("notice.botsSaveFailed", { error: error.message }));
+          }
+        }
+
+        async function migrateSingleInstanceProfile(dryRun) {
+          try {
+            var response = await apiRequest("/api/admin/bot-profiles/migrate", "POST", {
+              dryRun: Boolean(dryRun)
+            });
+            var data = response.data || {};
+            showNotice(
+              data.performed ? "ok" : "warn",
+              t("notice.botsMigrated", {
+                message: data.message || "",
+                dryRun: data.dryRun ? "true" : "false"
+              })
+            );
+            if (data.profile && data.profile.id) {
+              await loadBotProfiles();
+              setSelectedBotProfileById(data.profile.id);
+            }
+            await loadAudit();
+          } catch (error) {
+            showNotice("error", t("notice.botsMigrateFailed", { error: error.message }));
           }
         }
 

@@ -68,6 +68,8 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('id="bots-profiles-json"');
     expectHtmlContains('id="bots-load-btn"');
     expectHtmlContains('id="bots-save-btn"');
+    expectHtmlContains('id="bots-migrate-dry-run-btn"');
+    expectHtmlContains('id="bots-migrate-apply-btn"');
     expectHtmlContains('id="bots-apply-btn"');
     expectHtmlContains('id="global-bot-profiles-auto-retire-default"');
     expectHtmlContains('id="bots-retire-default-toggle"');
@@ -82,10 +84,13 @@ describe("admin console paged navigation", () => {
     expectHtmlContains('"bots.table.primary"');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "GET")');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles", "PUT"');
+    expectHtmlContains('apiRequest("/api/admin/bot-profiles/migrate", "POST"');
     expectHtmlContains('apiRequest("/api/admin/bot-profiles/apply", "POST"');
     expectHtmlContains('retireDefaultSingleInstance');
     expectHtmlContains('triggerPolicy');
     expectHtmlContains('isPrimary');
     expectHtmlContains('groupDirectModeEnabled requires isPrimary');
+    expectHtmlContains('"notice.botsMigrated"');
+    expectHtmlContains('"bots.migrateDryRun"');
   });
 });

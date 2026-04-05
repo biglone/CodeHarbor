@@ -187,7 +187,7 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   {
     surface: "admin",
     method: "POST|PUT|DELETE",
-    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/rooms/:roomId|/api/admin/bot-profiles",
+    path: "/api/admin/config/global|/api/admin/config/validate|/api/admin/config/rooms/:roomId|/api/admin/bot-profiles|/api/admin/bot-profiles/migrate",
     action: TOKEN_SCOPES.ADMIN_WRITE_CONFIG,
     requiredScopes: [TOKEN_SCOPES.ADMIN_WRITE_CONFIG],
   },
@@ -315,6 +315,9 @@ export function resolveAdminScopeRequirement(method: string | undefined, pathnam
   }
   if (pathname === "/api/admin/bot-profiles") {
     return isReadMethod ? ADMIN_READ_CONFIG_REQUIREMENT : ADMIN_WRITE_CONFIG_REQUIREMENT;
+  }
+  if (pathname === "/api/admin/bot-profiles/migrate") {
+    return ADMIN_WRITE_CONFIG_REQUIREMENT;
   }
   if (pathname === "/api/admin/bot-profiles/apply") {
     return ADMIN_WRITE_SERVICE_REQUIREMENT;

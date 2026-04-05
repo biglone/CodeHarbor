@@ -199,6 +199,17 @@ interface BotProfilesApplyInput {
   retireDefaultSingleInstance: boolean;
 }
 
+interface BotProfilesMigrateLegacyResult {
+  dryRun: boolean;
+  performed: boolean;
+  reasonCode: "created" | "updated" | "noop";
+  message: string;
+  profile: BotInstanceProfileView;
+  beforeCount: number;
+  afterCount: number;
+  runtimeConfigVersion: number | null;
+}
+
 interface ConfigImportResult {
   dryRun: boolean;
   outputLines: string[];
@@ -790,6 +801,27 @@ export class AdminServer {
           type: "bot_profiles_update",
           profileCount: result.profiles.length,
           runtimeConfigVersion: result.runtimeConfigVersion,
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/admin/bot-profiles/migrate") {
+        const actor = resolveAuditActor(req, authIdentity);
+        const body = asObject(await readJsonBody(req, ADMIN_MAX_JSON_BODY_BYTES), "bot profiles migrate payload");
+        const result = this.migrateLegacySingleInstanceBotProfile(body, actor);
+        this.sendJson(res, 200, {
+          ok: true,
+          data: result,
+        });
+        appendResolvedOperationAudit("allowed", 200, null, {
+          type: "bot_profiles_migrate",
+          dryRun: result.dryRun,
+          performed: result.performed,
+          reasonCode: result.reasonCode,
+          beforeCount: result.beforeCount,
+          afterCount: result.afterCount,
+          runtimeConfigVersion: result.runtimeConfigVersion,
+          profileId: result.profile.id,
         });
         return;
       }
@@ -2445,6 +2477,127 @@ export class AdminServer {
     };
   }
 
+  private migrateLegacySingleInstanceBotProfile(
+    rawBody: Record<string, unknown>,
+    actor: string | null,
+  ): BotProfilesMigrateLegacyResult {
+    const dryRun = normalizeBoolean(rawBody.dryRun, true);
+    const force = normalizeBoolean(rawBody.force, false);
+    const suggestedProfileId = deriveDefaultPrimaryBotProfileId(this.config.matrixUserId);
+    const requestedProfileId = normalizeString(rawBody.profileId, suggestedProfileId, "profileId");
+    const profileId = normalizeBotProfileId(requestedProfileId || suggestedProfileId, "profileId");
+
+    const current = this.loadBotProfilesSnapshot();
+    const targetProfile = buildLegacyPrimaryBotProfileFromGlobalConfig(this.config, this.cwd, profileId);
+    const nextProfiles = current.profiles.map((profile) => cloneBotProfileRecord(profile));
+    const conflictingPrimaryIds = nextProfiles
+      .filter((profile) => profile.isPrimary && profile.id !== profileId)
+      .map((profile) => profile.id);
+
+    if (conflictingPrimaryIds.length > 0 && !force) {
+      throw new HttpError(
+        400,
+        "Migration blocked: existing primary bot profile detected (" +
+          conflictingPrimaryIds.join(", ") +
+          "). Pass force=true to switch primary, or migrate with another profileId.",
+      );
+    }
+
+    let reasonCode: BotProfilesMigrateLegacyResult["reasonCode"] = "created";
+    const existingIndex = nextProfiles.findIndex((profile) => profile.id === profileId);
+    if (existingIndex >= 0) {
+      const existing = nextProfiles[existingIndex];
+      if (existing.isPrimary && existing.enabled && !force) {
+        reasonCode = "noop";
+      } else if (!force) {
+        throw new HttpError(
+          400,
+          "Migration blocked: profile id " +
+            profileId +
+            " already exists. Pass force=true to update this profile, or use another profileId.",
+        );
+      } else {
+        nextProfiles[existingIndex] = targetProfile;
+        reasonCode = areBotProfilesEqual(existing, targetProfile) ? "noop" : "updated";
+      }
+    } else {
+      nextProfiles.push(targetProfile);
+      reasonCode = "created";
+    }
+
+    if (force) {
+      for (const profile of nextProfiles) {
+        if (profile.id !== profileId && profile.isPrimary) {
+          profile.isPrimary = false;
+          if (reasonCode === "noop") {
+            reasonCode = "updated";
+          }
+        }
+      }
+
+      const targetIndex = nextProfiles.findIndex((profile) => profile.id === profileId);
+      if (targetIndex >= 0) {
+        if (!nextProfiles[targetIndex].isPrimary || !nextProfiles[targetIndex].enabled) {
+          nextProfiles[targetIndex].isPrimary = true;
+          nextProfiles[targetIndex].enabled = true;
+          if (reasonCode === "noop") {
+            reasonCode = "updated";
+          }
+        }
+      }
+    }
+
+    validatePrimaryBotProfiles(nextProfiles);
+    validateBotTriggerRoutingConstraints(nextProfiles);
+
+    const performed = reasonCode !== "noop";
+    const afterCount = nextProfiles.length;
+    let runtimeConfigVersion = current.runtimeConfigVersion;
+
+    if (!dryRun && performed) {
+      const nextSnapshot: BotProfilesSnapshot = {
+        schemaVersion: BOT_INSTANCE_PROFILE_SCHEMA_VERSION,
+        profiles: nextProfiles,
+        updatedAt: new Date().toISOString(),
+      };
+      const runtimeSnapshot = this.stateStore.upsertRuntimeConfigSnapshot(
+        BOT_INSTANCE_PROFILES_SNAPSHOT_KEY,
+        JSON.stringify(nextSnapshot),
+      );
+      runtimeConfigVersion = runtimeSnapshot.version;
+
+      this.stateStore.appendConfigRevision(
+        actor,
+        "migrate single-instance to primary bot (" + reasonCode + "): " + profileId,
+        JSON.stringify({
+          type: "bot_profiles_migrate",
+          dryRun: false,
+          force,
+          reasonCode,
+          profileId,
+          beforeCount: current.profiles.length,
+          afterCount,
+          runtimeConfigVersion: runtimeSnapshot.version,
+        }),
+      );
+    }
+
+    const profileForView = nextProfiles.find((profile) => profile.id === profileId) ?? targetProfile;
+    const message = dryRun
+      ? "dry-run: " + describeBotProfileMigrationReason(reasonCode, profileId)
+      : describeBotProfileMigrationReason(reasonCode, profileId);
+
+    return {
+      dryRun,
+      performed,
+      reasonCode,
+      message,
+      profile: sanitizeBotProfileForView(profileForView),
+      beforeCount: current.profiles.length,
+      afterCount,
+      runtimeConfigVersion,
+    };
+  }
   private async executeBotProfilesApply(input: BotProfilesApplyInput): Promise<BotProfilesApplyResult> {
     const items: BotProfilesApplyItemResult[] = [];
     const targetProfiles = input.includeDisabled
@@ -3551,6 +3704,82 @@ function formatHistoryCleanupRunEntry(entry: HistoryCleanupRunRecord): {
   };
 }
 
+function cloneBotProfileRecord(profile: BotInstanceProfileRecord): BotInstanceProfileRecord {
+  return {
+    ...profile,
+    backend: profile.backend ? { ...profile.backend } : null,
+    triggerPolicy: { ...profile.triggerPolicy },
+  };
+}
+
+function areBotProfilesEqual(left: BotInstanceProfileRecord, right: BotInstanceProfileRecord): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function deriveDefaultPrimaryBotProfileId(matrixUserId: string): string {
+  const trimmed = matrixUserId.trim();
+  const localPart = trimmed.startsWith("@") ? trimmed.slice(1).split(":")[0] ?? "" : trimmed;
+  const normalized = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+/, "")
+    .replace(/[._-]+$/g, "");
+  if (normalized && BOT_INSTANCE_ID_PATTERN.test(normalized)) {
+    return normalized;
+  }
+  return "main-hub";
+}
+
+function buildLegacyPrimaryBotProfileFromGlobalConfig(
+  config: AppConfig,
+  runtimeHomeBase: string,
+  profileId: string,
+): BotInstanceProfileRecord {
+  const provider = config.aiCliProvider;
+  const defaultBin = defaultCliBinForProvider(provider);
+  const normalizedBin = config.codexBin.trim();
+  const backendBin = normalizedBin && normalizedBin !== defaultBin ? normalizedBin : null;
+  const backend: BotProfileBackendConfig = {
+    provider,
+    model: config.codexModel,
+    bin: backendBin,
+  };
+
+  return {
+    id: profileId,
+    enabled: true,
+    isPrimary: true,
+    runtimeHome: path.resolve(runtimeHomeBase),
+    runUser: resolveDefaultRunUser(),
+    withAdmin: true,
+    matrixUserId: config.matrixUserId,
+    matrixHomeserver: config.matrixHomeserver,
+    matrixAccessToken: config.matrixAccessToken,
+    backend,
+    triggerPolicy: {
+      groupDirectModeEnabled: config.groupDirectModeEnabled,
+      allowMention: config.defaultGroupTriggerPolicy.allowMention,
+      allowReply: config.defaultGroupTriggerPolicy.allowReply,
+      allowActiveWindow: config.defaultGroupTriggerPolicy.allowActiveWindow,
+      allowPrefix: config.defaultGroupTriggerPolicy.allowPrefix,
+    },
+    workdir: config.codexWorkdir,
+    notes: "migrated from single-instance configuration",
+  };
+}
+
+function describeBotProfileMigrationReason(
+  reasonCode: BotProfilesMigrateLegacyResult["reasonCode"],
+  profileId: string,
+): string {
+  if (reasonCode === "created") {
+    return "created primary profile " + profileId + " from single-instance settings.";
+  }
+  if (reasonCode === "updated") {
+    return "updated profile " + profileId + " and set it as primary.";
+  }
+  return "profile " + profileId + " is already an enabled primary; no changes required.";
+}
 function parseStoredBotProfilesSnapshot(record: RuntimeConfigSnapshotRecord | null): BotProfilesSnapshot {
   if (!record) {
     return {

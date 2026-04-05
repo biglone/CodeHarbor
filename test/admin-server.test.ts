@@ -1890,6 +1890,208 @@ describe("AdminServer", () => {
     expect(String((response.body as { error?: string }).error || "")).toContain("groupDirectModeEnabled requires isPrimary=true");
   });
 
+  it("migrates single-instance config to a primary bot profile via dry-run and apply", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+    config.groupDirectModeEnabled = true;
+    config.defaultGroupTriggerPolicy = {
+      allowMention: true,
+      allowReply: false,
+      allowActiveWindow: false,
+      allowPrefix: true,
+    };
+
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "admin-token",
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = "http://127.0.0.1:" + String(address?.port ?? "");
+
+    const dryRun = await fetchJson(baseUrl + "/api/admin/bot-profiles/migrate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: true,
+      }),
+    });
+    expect(dryRun.status).toBe(200);
+    const dryData = (dryRun.body as { data?: Record<string, unknown> }).data ?? {};
+    expect(dryData.dryRun).toBe(true);
+    expect(dryData.performed).toBe(true);
+    expect(dryData.reasonCode).toBe("created");
+
+    const beforeApply = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    const beforeApplyProfiles =
+      (beforeApply.body as { data?: { profiles?: Array<Record<string, unknown>> } }).data?.profiles ?? [];
+    expect(beforeApplyProfiles.length).toBe(0);
+
+    const apply = await fetchJson(baseUrl + "/api/admin/bot-profiles/migrate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+      }),
+    });
+    expect(apply.status).toBe(200);
+    const applyData = (apply.body as { data?: Record<string, unknown> }).data ?? {};
+    expect(applyData.performed).toBe(true);
+    expect(applyData.reasonCode).toBe("created");
+
+    const afterApply = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(afterApply.status).toBe(200);
+    const afterProfiles =
+      (afterApply.body as { data?: { profiles?: Array<Record<string, unknown>> } }).data?.profiles ?? [];
+    expect(afterProfiles.length).toBe(1);
+    expect(afterProfiles[0]?.id).toBe("bot");
+    expect(afterProfiles[0]?.isPrimary).toBe(true);
+    expect(afterProfiles[0]?.enabled).toBe(true);
+    expect(afterProfiles[0]?.matrixUserId).toBe("@bot:example.com");
+    expect(afterProfiles[0]?.triggerPolicy).toEqual({
+      groupDirectModeEnabled: true,
+      allowMention: true,
+      allowReply: false,
+      allowActiveWindow: false,
+      allowPrefix: true,
+    });
+
+    const noop = await fetchJson(baseUrl + "/api/admin/bot-profiles/migrate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+      }),
+    });
+    expect(noop.status).toBe(200);
+    const noopData = (noop.body as { data?: Record<string, unknown> }).data ?? {};
+    expect(noopData.performed).toBe(false);
+    expect(noopData.reasonCode).toBe("noop");
+  });
+
+  it("supports forced migration to switch primary profile", async () => {
+    const { dir, db, legacy } = createPaths();
+    const config = createBaseConfig(dir, db, legacy);
+
+    const stateStore = new StateStore(db, legacy, 200, 30, 5000);
+    const configService = new ConfigService(stateStore, dir);
+    const logger = new Logger("info");
+    const server = new AdminServer(config, logger, stateStore, configService, {
+      host: "127.0.0.1",
+      port: 0,
+      adminToken: "admin-token",
+      cwd: dir,
+      checkCodex: async () => ({ ok: true, version: "codex 1.0", error: null }),
+      checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1"], error: null }),
+    });
+    startedServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const baseUrl = "http://127.0.0.1:" + String(address?.port ?? "");
+
+    const seed = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        profiles: [
+          {
+            id: "bot",
+            enabled: true,
+            isPrimary: false,
+            runtimeHome: path.join(dir, "runtime-bot"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@bot:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            matrixAccessToken: "seed-token",
+          },
+          {
+            id: "review-guard",
+            enabled: true,
+            isPrimary: true,
+            runtimeHome: path.join(dir, "runtime-review"),
+            runUser: "botuser",
+            withAdmin: true,
+            matrixUserId: "@review:example.com",
+            matrixHomeserver: "https://matrix.example.com",
+            matrixAccessToken: "review-token",
+          },
+        ],
+      }),
+    });
+    expect(seed.status).toBe(200);
+
+    const blocked = await fetchJson(baseUrl + "/api/admin/bot-profiles/migrate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+      }),
+    });
+    expect(blocked.status).toBe(400);
+    expect(String((blocked.body as { error?: string }).error || "")).toContain("existing primary bot profile detected");
+
+    const forced = await fetchJson(baseUrl + "/api/admin/bot-profiles/migrate", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+        force: true,
+      }),
+    });
+    expect(forced.status).toBe(200);
+    const forcedData = (forced.body as { data?: Record<string, unknown> }).data ?? {};
+    expect(forcedData.performed).toBe(true);
+    expect(forcedData.reasonCode).toBe("updated");
+
+    const after = await fetchJson(baseUrl + "/api/admin/bot-profiles", {
+      headers: {
+        authorization: "Bearer admin-token",
+      },
+    });
+    expect(after.status).toBe(200);
+    const profiles =
+      (after.body as { data?: { profiles?: Array<Record<string, unknown>> } }).data?.profiles ?? [];
+    const bot = profiles.find((item) => item.id === "bot");
+    const review = profiles.find((item) => item.id === "review-guard");
+    expect(bot?.isPrimary).toBe(true);
+    expect(review?.isPrimary).toBe(false);
+  });
+
   it("aligns runtime CODEX_BIN with overridden backend provider when bin is omitted", () => {
     const { dir, db, legacy } = createPaths();
     const config = createBaseConfig(dir, db, legacy);
