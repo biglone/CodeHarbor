@@ -92,10 +92,10 @@
 
 
 
-### 阶段 10：AutoDev 架构可维护性重构（待开始）
+### 阶段 10：AutoDev 架构可维护性重构（进行中）
 | 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |
 |--------|----------|----------|--------|------|------|
-| T10.1 | 基线固化：补齐 `autodev-runner` 与 `autodev-control` 的行为快照（run/status/stop/progress/content）作为重构前对照 | 3h | P0 | - | ⬜ |
+| T10.1 | 基线固化：补齐 `autodev-runner` 与 `autodev-control` 的行为快照（run/status/stop/progress/content）作为重构前对照 | 3h | P0 | - | ✅ |
 | T10.2 | 设计拆分蓝图：定义 `autodev-runner.ts` 的目标模块边界（loop engine、stage executor、result reporter）与迁移顺序 | 2h | P0 | T10.1 | ⬜ |
 | T10.3 | Runner 解耦 I：抽取 loop engine（轮次推进、deadline、stop/abort、重试状态）为独立模块并保持行为不变 | 5h | P0 | T10.2 | ⬜ |
 | T10.4 | Runner 解耦 II：抽取 stage executor（preflight/执行/review/repair/release）与统一 stage result 协议 | 5h | P0 | T10.3 | ⬜ |

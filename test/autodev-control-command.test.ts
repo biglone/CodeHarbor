@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 
 import type { OutputLanguage } from "../src/config";
 import {
+  handleAutoDevContentCommand,
   handleAutoDevInitCommand,
+  handleAutoDevLoopStopCommand,
+  handleAutoDevProgressCommand,
   handleAutoDevWorkdirCommand,
   type AutoDevControlCommandDeps,
 } from "../src/orchestrator/autodev-control-command";
@@ -33,16 +36,22 @@ function createDeps(options?: {
 }) {
   const notices: string[] = [];
   const overrides = new Map<string, string>();
+  const detailedProgress = new Map<string, boolean>();
+  const stageOutputEcho = new Map<string, boolean>();
   const deps: AutoDevControlCommandDeps = {
     autoDevDetailedProgressDefaultEnabled: true,
     autoDevStageOutputEchoDefaultEnabled: true,
     outputLanguage: options?.outputLanguage ?? "en",
     pendingAutoDevLoopStopRequests: new Set<string>(),
     activeAutoDevLoopSessions: new Set<string>(),
-    isAutoDevDetailedProgressEnabled: () => true,
-    setAutoDevDetailedProgressEnabled: () => {},
-    isAutoDevStageOutputEchoEnabled: () => true,
-    setAutoDevStageOutputEchoEnabled: () => {},
+    isAutoDevDetailedProgressEnabled: (sessionKey) => detailedProgress.get(sessionKey) ?? true,
+    setAutoDevDetailedProgressEnabled: (sessionKey, enabled) => {
+      detailedProgress.set(sessionKey, enabled);
+    },
+    isAutoDevStageOutputEchoEnabled: (sessionKey) => stageOutputEcho.get(sessionKey) ?? true,
+    setAutoDevStageOutputEchoEnabled: (sessionKey, enabled) => {
+      stageOutputEcho.set(sessionKey, enabled);
+    },
     setWorkflowRoleSkillPolicyOverride: () => {},
     buildWorkflowRoleSkillStatus: () => ({
       enabled: true,
@@ -69,6 +78,88 @@ function createDeps(options?: {
 }
 
 describe("AutoDev control command helpers", () => {
+  it("captures baseline notices for progress/content/stop commands", async () => {
+    const { deps, notices } = createDeps();
+
+    await handleAutoDevProgressCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev progress status"),
+      mode: "status",
+    });
+    await handleAutoDevProgressCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev progress off"),
+      mode: "off",
+    });
+    await handleAutoDevProgressCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev progress on"),
+      mode: "on",
+    });
+
+    await handleAutoDevContentCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev content status"),
+      mode: "status",
+    });
+    await handleAutoDevContentCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev content off"),
+      mode: "off",
+    });
+    await handleAutoDevContentCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev content on"),
+      mode: "on",
+    });
+
+    await handleAutoDevLoopStopCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev stop"),
+    });
+    deps.activeAutoDevLoopSessions.add("session-baseline");
+    await handleAutoDevLoopStopCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev stop"),
+    });
+    await handleAutoDevLoopStopCommand(deps, {
+      sessionKey: "session-baseline",
+      message: createMessage("/autodev stop"),
+    });
+
+    expect(notices).toMatchInlineSnapshot(`
+      [
+        "[CodeHarbor] AutoDev progress echo settings
+      - detailedProgress: on
+      - default: on
+      - usage: /autodev progress on|off|status",
+        "[CodeHarbor] AutoDev progress echo updated
+      - detailedProgress: off
+      - default: on
+      - session: session-baseline",
+        "[CodeHarbor] AutoDev progress echo updated
+      - detailedProgress: on
+      - default: on
+      - session: session-baseline",
+        "[CodeHarbor] AutoDev stage output echo settings
+      - stageOutputEcho: on
+      - default: on
+      - usage: /autodev content on|off|status",
+        "[CodeHarbor] AutoDev stage output echo updated
+      - stageOutputEcho: off
+      - default: on
+      - session: session-baseline",
+        "[CodeHarbor] AutoDev stage output echo updated
+      - stageOutputEcho: on
+      - default: on
+      - session: session-baseline",
+        "[CodeHarbor] No running AutoDev loop task.",
+        "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.",
+        "[CodeHarbor] Stop request already received: loop will stop after current task and will not start next task.",
+      ]
+    `);
+  });
+
   it("initializes task compass files and sets workdir override", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-init-"));
     const { deps, notices, overrides } = createDeps();

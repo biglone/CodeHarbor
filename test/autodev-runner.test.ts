@@ -118,6 +118,11 @@ describe("AutoDev runner", () => {
       expect(healSpy).not.toHaveBeenCalled();
       expect(notices.some((text) => text.includes("Task T20.1 is already completed (✅)."))).toBe(true);
       expect(notices.some((text) => text.includes("status self-heal applied"))).toBe(false);
+      expect(notices).toMatchInlineSnapshot(`
+        [
+          "[CodeHarbor] Task T20.1 is already completed (✅).",
+        ]
+      `);
     } finally {
       healSpy.mockRestore();
       await fs.rm(tempRoot, { recursive: true, force: true });
