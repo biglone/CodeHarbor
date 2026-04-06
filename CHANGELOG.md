@@ -9,6 +9,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
 - regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
 
+## [0.1.94] - 2026-04-06
+
+- postinstall restart: Linux global install now restarts active `codeharbor*.service` units (including multi-instance services like `codeharbor-main-hub.service`, `codeharbor-dev-main.service`, `codeharbor-review-guard.service`).
+- restart sequencing: systemd restart order is stabilized as main units first, admin units later, with clearer failed-unit fallback commands.
+- docs: update upgrade notes in README and manuals to explicitly state multi-instance auto-restart behavior after `npm install -g codeharbor@latest`.
+
 ## [0.1.93] - 2026-04-06
 
 - autodev multi-bot flow: add configurable secondary-review handoff after task completion, with gate-aware trigger control (`AUTODEV_SECONDARY_REVIEW_ENABLED`, `AUTODEV_SECONDARY_REVIEW_TARGET`, `AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED`).
