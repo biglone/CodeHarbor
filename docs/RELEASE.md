@@ -130,6 +130,11 @@ Current roadmap-based release milestones (updated on 2026-03-22):
 
 After pushing to `main`, `Release NPM` workflow is triggered by `[publish-npm]`.
 
+## AutoDev Phase-10 Rollout Checklist
+
+- For phased enablement by module boundary (control/policy/integration), use `docs/AUTODEV_ROLLOUT_ROLLBACK_CHECKLIST_ZH.md`.
+- Includes first rehearsal record dated 2026-04-06 and rollback decision gates.
+
 ## Rollback Playbook
 
 If release regression impacts runtime behavior:
