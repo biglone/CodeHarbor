@@ -5,6 +5,10 @@ import {
   buildAutoDevTaskResultDiagMessage,
   buildAutoDevTaskResultNotice,
 } from "../src/orchestrator/autodev-result-reporter";
+import {
+  AUTODEV_SECONDARY_REVIEW_RECEIPT_CLOSE_TAG,
+  AUTODEV_SECONDARY_REVIEW_RECEIPT_OPEN_TAG,
+} from "../src/orchestrator/autodev-secondary-review-receipt";
 
 describe("AutoDev result reporter", () => {
   it("builds task result notice and diag message", () => {
@@ -73,6 +77,7 @@ describe("AutoDev result reporter", () => {
       releaseSummary: "skipped",
       requestId: "request-1",
       workflowDiagRunId: "run-1",
+      workdir: "/tmp/codeharbor",
     });
     expect(disabled).toBeNull();
 
@@ -97,6 +102,7 @@ describe("AutoDev result reporter", () => {
       releaseSummary: "skipped",
       requestId: "request-2",
       workflowDiagRunId: "run-2",
+      workdir: "/tmp/codeharbor",
     });
     expect(gateFailed).toBeNull();
   });
@@ -123,11 +129,17 @@ describe("AutoDev result reporter", () => {
       releaseSummary: "skipped",
       requestId: "request-3",
       workflowDiagRunId: "run-3",
+      workdir: "/workspace/codeharbor",
     });
 
     expect(handoff).not.toBeNull();
     expect(handoff?.notice).toContain("AutoDev secondary review handoff");
     expect(handoff?.notice).toContain("target: @review-guard");
+    expect(handoff?.notice).toContain("protocol: AUTODEV_SECONDARY_REVIEW_RECEIPT/v1");
+    expect(handoff?.notice).toContain(AUTODEV_SECONDARY_REVIEW_RECEIPT_OPEN_TAG);
+    expect(handoff?.notice).toContain(AUTODEV_SECONDARY_REVIEW_RECEIPT_CLOSE_TAG);
+    expect(handoff?.notice).toContain("- workdir: /workspace/codeharbor");
     expect(handoff?.diagMessage).toContain("secondaryReview target=@review-guard");
+    expect(handoff?.diagMessage).toContain("protocol=receipt_v1");
   });
 });
