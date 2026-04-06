@@ -9,6 +9,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
 - regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
 
+## [0.1.93] - 2026-04-06
+
+- autodev multi-bot flow: add configurable secondary-review handoff after task completion, with gate-aware trigger control (`AUTODEV_SECONDARY_REVIEW_ENABLED`, `AUTODEV_SECONDARY_REVIEW_TARGET`, `AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED`).
+- status visibility: `/autodev status` now reports secondary-review settings (`secondaryReview`, `secondaryReviewTarget`, `secondaryReviewRequireGatePassed`) for easier runtime verification.
+- tests/docs: add runtime-config + runner regression coverage for handoff behavior and document new env keys in `.env.example`.
+
 ## [0.1.92] - 2026-04-06
 
 - matrix multi-bot routing fix: in group direct mode, messages with a leading mention to a peer bot no longer trigger primary-bot fallback replies, preventing duplicate responses from both `main-hub` and `dev-main`.
