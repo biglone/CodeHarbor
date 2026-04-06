@@ -391,6 +391,9 @@ export class Orchestrator {
   private readonly autoDevRunArchiveEnabled: boolean;
   private readonly autoDevRunArchiveDir: string;
   private readonly autoDevValidationStrict: boolean;
+  private readonly autoDevSecondaryReviewEnabled: boolean;
+  private readonly autoDevSecondaryReviewTarget: string;
+  private readonly autoDevSecondaryReviewRequireGatePassed: boolean;
   private readonly autoDevDetailedProgressDefaultEnabled: boolean;
   private readonly autoDevStageOutputEchoDefaultEnabled: boolean;
   private readonly autoDevInitEnhancementEnabled: boolean;
@@ -478,6 +481,9 @@ export class Orchestrator {
     this.autoDevRunArchiveEnabled = autoDevRuntimeConfig.autoDevRunArchiveEnabled;
     this.autoDevRunArchiveDir = autoDevRuntimeConfig.autoDevRunArchiveDir;
     this.autoDevValidationStrict = autoDevRuntimeConfig.autoDevValidationStrict;
+    this.autoDevSecondaryReviewEnabled = autoDevRuntimeConfig.autoDevSecondaryReviewEnabled;
+    this.autoDevSecondaryReviewTarget = autoDevRuntimeConfig.autoDevSecondaryReviewTarget;
+    this.autoDevSecondaryReviewRequireGatePassed = autoDevRuntimeConfig.autoDevSecondaryReviewRequireGatePassed;
     this.autoDevDetailedProgressDefaultEnabled = autoDevRuntimeConfig.autoDevDetailedProgressDefaultEnabled;
     this.autoDevStageOutputEchoDefaultEnabled = autoDevRuntimeConfig.autoDevStageOutputEchoDefaultEnabled;
     this.autoDevInitEnhancementEnabled = autoDevRuntimeConfig.autoDevInitEnhancementEnabled;
@@ -1005,6 +1011,9 @@ export class Orchestrator {
         autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
         autoDevRunArchiveDir: this.autoDevRunArchiveDir,
         autoDevValidationStrict: this.autoDevValidationStrict,
+        autoDevSecondaryReviewEnabled: this.autoDevSecondaryReviewEnabled,
+        autoDevSecondaryReviewTarget: this.autoDevSecondaryReviewTarget,
+        autoDevSecondaryReviewRequireGatePassed: this.autoDevSecondaryReviewRequireGatePassed,
         autoDevInitEnhancementEnabled: this.autoDevInitEnhancementEnabled,
         autoDevInitEnhancementTimeoutMs: this.autoDevInitEnhancementTimeoutMs,
         autoDevInitEnhancementMaxChars: this.autoDevInitEnhancementMaxChars,
@@ -1374,6 +1383,9 @@ export class Orchestrator {
         autoDevRunArchiveEnabled: this.autoDevRunArchiveEnabled,
         autoDevRunArchiveDir: this.autoDevRunArchiveDir,
         autoDevValidationStrict: this.autoDevValidationStrict,
+        autoDevSecondaryReviewEnabled: this.autoDevSecondaryReviewEnabled,
+        autoDevSecondaryReviewTarget: this.autoDevSecondaryReviewTarget,
+        autoDevSecondaryReviewRequireGatePassed: this.autoDevSecondaryReviewRequireGatePassed,
         outputLanguage: this.outputLanguage,
       },
       state: {

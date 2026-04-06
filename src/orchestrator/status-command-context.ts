@@ -36,6 +36,9 @@ interface StatusCommandContextInput {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -121,6 +124,9 @@ interface StatusCommandRuntimeConfigInput {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -187,6 +193,9 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevRunArchiveEnabled: input.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.autoDevRunArchiveDir,
     autoDevValidationStrict: input.autoDevValidationStrict,
+    autoDevSecondaryReviewEnabled: input.autoDevSecondaryReviewEnabled,
+    autoDevSecondaryReviewTarget: input.autoDevSecondaryReviewTarget,
+    autoDevSecondaryReviewRequireGatePassed: input.autoDevSecondaryReviewRequireGatePassed,
     autoDevInitEnhancementEnabled: input.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.autoDevInitEnhancementMaxChars,
@@ -244,6 +253,9 @@ export function buildStatusCommandDispatchContextFromRuntime(
     autoDevRunArchiveEnabled: input.config.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.config.autoDevRunArchiveDir,
     autoDevValidationStrict: input.config.autoDevValidationStrict,
+    autoDevSecondaryReviewEnabled: input.config.autoDevSecondaryReviewEnabled,
+    autoDevSecondaryReviewTarget: input.config.autoDevSecondaryReviewTarget,
+    autoDevSecondaryReviewRequireGatePassed: input.config.autoDevSecondaryReviewRequireGatePassed,
     autoDevInitEnhancementEnabled: input.config.autoDevInitEnhancementEnabled,
     autoDevInitEnhancementTimeoutMs: input.config.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.config.autoDevInitEnhancementMaxChars,

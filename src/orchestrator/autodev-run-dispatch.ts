@@ -46,6 +46,9 @@ interface HandleAutoDevRunCommandDeps {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   autoDevFailureStreaks: Map<string, number>;
@@ -127,6 +130,9 @@ export async function handleAutoDevRunCommand(
       autoDevRunArchiveEnabled: deps.autoDevRunArchiveEnabled,
       autoDevRunArchiveDir: deps.autoDevRunArchiveDir,
       autoDevValidationStrict: deps.autoDevValidationStrict,
+      autoDevSecondaryReviewEnabled: deps.autoDevSecondaryReviewEnabled,
+      autoDevSecondaryReviewTarget: deps.autoDevSecondaryReviewTarget,
+      autoDevSecondaryReviewRequireGatePassed: deps.autoDevSecondaryReviewRequireGatePassed,
       pendingAutoDevLoopStopRequests: deps.pendingAutoDevLoopStopRequests,
       activeAutoDevLoopSessions: deps.activeAutoDevLoopSessions,
       consumePendingStopRequest: (sessionKey) => deps.consumePendingStopRequest(sessionKey),

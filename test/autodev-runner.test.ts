@@ -39,6 +39,9 @@ function createRunnerDeps(notices: string[]): RunnerDeps {
     autoDevRunArchiveEnabled: false,
     autoDevRunArchiveDir: "",
     autoDevValidationStrict: false,
+    autoDevSecondaryReviewEnabled: false,
+    autoDevSecondaryReviewTarget: "@review-guard",
+    autoDevSecondaryReviewRequireGatePassed: true,
     pendingAutoDevLoopStopRequests: new Set<string>(),
     activeAutoDevLoopSessions: new Set<string>(),
     consumePendingStopRequest: () => false,
@@ -117,6 +120,57 @@ describe("AutoDev runner", () => {
       expect(notices.some((text) => text.includes("status self-heal applied"))).toBe(false);
     } finally {
       healSpy.mockRestore();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("sends secondary review handoff notice after successful completion", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-runner-secondary-review-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T30.1 | secondary review handoff | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const notices: string[] = [];
+    const deps = createRunnerDeps(notices);
+    deps.autoDevAutoCommit = false;
+    deps.autoDevSecondaryReviewEnabled = true;
+    deps.autoDevSecondaryReviewTarget = "@review-guard";
+    deps.autoDevSecondaryReviewRequireGatePassed = true;
+    deps.runWorkflowCommand = async () => ({
+      objective: "finish T30.1",
+      plan: "plan",
+      output: "validation_status: passed",
+      review: "APPROVED",
+      approved: true,
+      repairRounds: 0,
+      durationMs: 12,
+    });
+
+    try {
+      await runAutoDevCommand(deps, {
+        taskId: "T30.1",
+        sessionKey: "sess-autodev-runner-secondary-review",
+        message: makeInbound({
+          text: "/autodev run T30.1",
+          eventId: "$autodev-runner-secondary-review",
+        }),
+        requestId: "req-autodev-runner-secondary-review",
+        workdir: tempRoot,
+      });
+
+      expect(
+        notices.some(
+          (text) => text.includes("AutoDev secondary review handoff") && text.includes("@review-guard"),
+        ),
+      ).toBe(true);
+    } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });

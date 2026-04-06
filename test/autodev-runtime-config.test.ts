@@ -11,6 +11,9 @@ const ENV_KEYS = [
   "AUTODEV_RUN_ARCHIVE_ENABLED",
   "AUTODEV_RUN_ARCHIVE_DIR",
   "AUTODEV_VALIDATION_STRICT",
+  "AUTODEV_SECONDARY_REVIEW_ENABLED",
+  "AUTODEV_SECONDARY_REVIEW_TARGET",
+  "AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED",
   "AUTODEV_STAGE_OUTPUT_ECHO_ENABLED",
   "AUTODEV_MAX_CONSECUTIVE_FAILURES",
   "AUTODEV_INIT_ENHANCEMENT_ENABLED",
@@ -92,18 +95,49 @@ describe("resolveAutoDevRuntimeConfig", () => {
     expect(config.autoDevValidationStrict).toBe(true);
   });
 
+  it("uses secondary review defaults", () => {
+    delete process.env.AUTODEV_SECONDARY_REVIEW_ENABLED;
+    delete process.env.AUTODEV_SECONDARY_REVIEW_TARGET;
+    delete process.env.AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED;
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevSecondaryReviewEnabled).toBe(false);
+    expect(config.autoDevSecondaryReviewTarget).toBe("@review-guard");
+    expect(config.autoDevSecondaryReviewRequireGatePassed).toBe(true);
+  });
+
+  it("reads secondary review settings from env", () => {
+    process.env.AUTODEV_SECONDARY_REVIEW_ENABLED = "true";
+    process.env.AUTODEV_SECONDARY_REVIEW_TARGET = "@qa-guard";
+    process.env.AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED = "false";
+
+    const config = resolveAutoDevRuntimeConfig();
+    expect(config.autoDevSecondaryReviewEnabled).toBe(true);
+    expect(config.autoDevSecondaryReviewTarget).toBe("@qa-guard");
+    expect(config.autoDevSecondaryReviewRequireGatePassed).toBe(false);
+  });
+
   it("lets orchestrator options override env for init enhancement budget", () => {
     process.env.AUTODEV_INIT_ENHANCEMENT_ENABLED = "true";
     process.env.AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS = "480000";
     process.env.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS = "4000";
+    process.env.AUTODEV_SECONDARY_REVIEW_ENABLED = "false";
+    process.env.AUTODEV_SECONDARY_REVIEW_TARGET = "@review-guard";
+    process.env.AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED = "true";
 
     const config = resolveAutoDevRuntimeConfig({
       autoDevInitEnhancementEnabled: false,
       autoDevInitEnhancementTimeoutMs: 60000,
       autoDevInitEnhancementMaxChars: 900,
+      autoDevSecondaryReviewEnabled: true,
+      autoDevSecondaryReviewTarget: "@review-bot",
+      autoDevSecondaryReviewRequireGatePassed: false,
     });
     expect(config.autoDevInitEnhancementEnabled).toBe(false);
     expect(config.autoDevInitEnhancementTimeoutMs).toBe(60000);
     expect(config.autoDevInitEnhancementMaxChars).toBe(900);
+    expect(config.autoDevSecondaryReviewEnabled).toBe(true);
+    expect(config.autoDevSecondaryReviewTarget).toBe("@review-bot");
+    expect(config.autoDevSecondaryReviewRequireGatePassed).toBe(false);
   });
 });

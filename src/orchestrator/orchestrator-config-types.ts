@@ -79,5 +79,8 @@ export interface OrchestratorOptions {
   autoDevInitEnhancementEnabled?: boolean;
   autoDevInitEnhancementTimeoutMs?: number;
   autoDevInitEnhancementMaxChars?: number;
+  autoDevSecondaryReviewEnabled?: boolean;
+  autoDevSecondaryReviewTarget?: string;
+  autoDevSecondaryReviewRequireGatePassed?: boolean;
   onApiTaskLifecycleEvent?: (event: ApiTaskLifecycleEvent) => void;
 }

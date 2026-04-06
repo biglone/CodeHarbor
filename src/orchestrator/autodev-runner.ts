@@ -131,6 +131,79 @@ interface AutoDevGitPreflightCheckInput {
   loopDeadlineAtIso: string | null;
 }
 
+interface AutoDevSecondaryReviewHandoffInput {
+  outputLanguage: OutputLanguage;
+  enabled: boolean;
+  target: string;
+  requireGatePassed: boolean;
+  completionGatePassed: boolean;
+  task: AutoDevTask;
+  reviewerApproved: boolean;
+  validation: AutoDevValidationInference;
+  validationAt: string;
+  gitCommitSummary: string;
+  gitChangedFiles: string;
+  releaseSummary: string;
+  requestId: string;
+  workflowDiagRunId: string;
+}
+
+interface AutoDevSecondaryReviewHandoffResult {
+  notice: string;
+  diagMessage: string;
+}
+
+function buildAutoDevSecondaryReviewHandoffNotice(
+  input: AutoDevSecondaryReviewHandoffInput,
+): AutoDevSecondaryReviewHandoffResult | null {
+  const target = input.target.trim();
+  if (!input.enabled || !target) {
+    return null;
+  }
+  if (input.requireGatePassed && !input.completionGatePassed) {
+    return null;
+  }
+
+  const localize = (zh: string, en: string): string => byOutputLanguage(input.outputLanguage, zh, en);
+  const notice = localize(
+    `[CodeHarbor] AutoDev 二次评审交接
+- target: ${target}
+- task: ${input.task.id}
+- reviewer approved: ${input.reviewerApproved ? "yes" : "no"}
+- completionGate: ${input.completionGatePassed ? "passed" : "failed"}
+- validationFailureClass: ${input.validation.failureClass ?? "none"}
+- validationEvidenceSource: ${input.validation.evidenceSource}
+- validationAt: ${input.validationAt}
+- git commit: ${input.gitCommitSummary}
+- git changed files: ${input.gitChangedFiles}
+- release: ${input.releaseSummary}
+- requestId: ${input.requestId}
+- workflowDiagRunId: ${input.workflowDiagRunId}
+${target} 请执行二次评审：重点检查回归风险、安全风险、测试覆盖缺口；若发现问题，请输出可执行修复建议。`,
+    `[CodeHarbor] AutoDev secondary review handoff
+- target: ${target}
+- task: ${input.task.id}
+- reviewer approved: ${input.reviewerApproved ? "yes" : "no"}
+- completionGate: ${input.completionGatePassed ? "passed" : "failed"}
+- validationFailureClass: ${input.validation.failureClass ?? "none"}
+- validationEvidenceSource: ${input.validation.evidenceSource}
+- validationAt: ${input.validationAt}
+- git commit: ${input.gitCommitSummary}
+- git changed files: ${input.gitChangedFiles}
+- release: ${input.releaseSummary}
+- requestId: ${input.requestId}
+- workflowDiagRunId: ${input.workflowDiagRunId}
+${target} please run a second-pass review focused on regression risk, security risk, and test gaps. If you find issues, provide actionable fixes.`,
+  );
+
+  return {
+    notice,
+    diagMessage: `secondaryReview target=${target} task=${input.task.id} completionGate=${
+      input.completionGatePassed ? "passed" : "failed"
+    } requestId=${input.requestId} runId=${input.workflowDiagRunId}`,
+  };
+}
+
 async function sendAutoDevNoticeBestEffort(
   deps: Pick<AutoDevRunnerDeps, "channelSendNotice" | "logger">,
   conversationId: string,
@@ -183,6 +256,9 @@ interface AutoDevRunnerDeps {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   pendingAutoDevLoopStopRequests: Set<string>;
   activeAutoDevLoopSessions: Set<string>;
   consumePendingStopRequest: (sessionKey: string) => boolean;
@@ -923,6 +999,33 @@ export async function runAutoDevCommand(
       lastReleaseAt: releaseResult.kind === "released" ? new Date().toISOString() : null,
     });
     deps.autoDevMetrics.recordRunOutcome("succeeded");
+
+    const secondaryReviewHandoff = buildAutoDevSecondaryReviewHandoffNotice({
+      outputLanguage: deps.outputLanguage,
+      enabled: deps.autoDevSecondaryReviewEnabled,
+      target: deps.autoDevSecondaryReviewTarget,
+      requireGatePassed: deps.autoDevSecondaryReviewRequireGatePassed,
+      completionGatePassed: completionGate.passed,
+      task: finalTask,
+      reviewerApproved: result.approved,
+      validation,
+      validationAt: endedAtIso,
+      gitCommitSummary: formatAutoDevGitCommitResult(gitCommit),
+      gitChangedFiles: formatAutoDevGitChangedFiles(gitCommit),
+      releaseSummary: formatAutoDevReleaseResult(releaseResult),
+      requestId: input.requestId,
+      workflowDiagRunId,
+    });
+    if (secondaryReviewHandoff) {
+      deps.appendWorkflowDiagEvent(
+        workflowDiagRunId,
+        "autodev",
+        "secondary_review_handoff",
+        0,
+        secondaryReviewHandoff.diagMessage,
+      );
+      await sendAutoDevNoticeBestEffort(deps, input.message.conversationId, secondaryReviewHandoff.notice);
+    }
 
     const refreshed = await loadAutoDevContext(input.workdir);
     const nextTask = selectAutoDevTask(refreshed.tasks);

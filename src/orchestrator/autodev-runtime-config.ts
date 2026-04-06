@@ -5,6 +5,9 @@ import {
   DEFAULT_AUTODEV_INIT_ENHANCEMENT_ENABLED,
   DEFAULT_AUTODEV_INIT_ENHANCEMENT_MAX_CHARS,
   DEFAULT_AUTODEV_INIT_ENHANCEMENT_TIMEOUT_MS,
+  DEFAULT_AUTODEV_SECONDARY_REVIEW_ENABLED,
+  DEFAULT_AUTODEV_SECONDARY_REVIEW_TARGET,
+  DEFAULT_AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED,
   DEFAULT_AUTODEV_LOOP_MAX_MINUTES,
   DEFAULT_AUTODEV_LOOP_MAX_RUNS,
   DEFAULT_AUTODEV_MAX_CONSECUTIVE_FAILURES,
@@ -31,6 +34,9 @@ export interface AutoDevRuntimeConfig {
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
 }
 
 export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): AutoDevRuntimeConfig {
@@ -87,7 +93,24 @@ export function resolveAutoDevRuntimeConfig(options?: OrchestratorOptions): Auto
       options?.autoDevInitEnhancementMaxChars ??
         parseEnvPositiveInt(process.env.AUTODEV_INIT_ENHANCEMENT_MAX_CHARS, DEFAULT_AUTODEV_INIT_ENHANCEMENT_MAX_CHARS),
     ),
+    autoDevSecondaryReviewEnabled:
+      options?.autoDevSecondaryReviewEnabled ??
+      parseEnvBoolean(process.env.AUTODEV_SECONDARY_REVIEW_ENABLED, DEFAULT_AUTODEV_SECONDARY_REVIEW_ENABLED),
+    autoDevSecondaryReviewTarget:
+      options?.autoDevSecondaryReviewTarget ??
+      parseSecondaryReviewTarget(process.env.AUTODEV_SECONDARY_REVIEW_TARGET, DEFAULT_AUTODEV_SECONDARY_REVIEW_TARGET),
+    autoDevSecondaryReviewRequireGatePassed:
+      options?.autoDevSecondaryReviewRequireGatePassed ??
+      parseEnvBoolean(
+        process.env.AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED,
+        DEFAULT_AUTODEV_SECONDARY_REVIEW_REQUIRE_GATE_PASSED,
+      ),
   };
+}
+
+function parseSecondaryReviewTarget(raw: string | undefined, fallback: string): string {
+  const normalized = raw?.trim();
+  return normalized ? normalized : fallback;
 }
 
 function parseArchiveDirEnv(raw: string | undefined, fallback: string): string {

@@ -104,6 +104,9 @@ interface AutoDevStatusContext extends StatusCommandDispatchContext {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   autoDevInitEnhancementEnabled: boolean;
   autoDevInitEnhancementTimeoutMs: number;
   autoDevInitEnhancementMaxChars: number;
@@ -208,6 +211,9 @@ export async function sendAutoDevStatusCommand(
     | "autoDevRunArchiveEnabled"
     | "autoDevRunArchiveDir"
     | "autoDevValidationStrict"
+    | "autoDevSecondaryReviewEnabled"
+    | "autoDevSecondaryReviewTarget"
+    | "autoDevSecondaryReviewRequireGatePassed"
     | "autoDevInitEnhancementEnabled"
     | "autoDevInitEnhancementTimeoutMs"
     | "autoDevInitEnhancementMaxChars"
@@ -238,6 +244,9 @@ export async function sendAutoDevStatusCommand(
       autoDevRunArchiveEnabled: context.autoDevRunArchiveEnabled,
       autoDevRunArchiveDir: context.autoDevRunArchiveDir,
       autoDevValidationStrict: context.autoDevValidationStrict,
+      autoDevSecondaryReviewEnabled: context.autoDevSecondaryReviewEnabled,
+      autoDevSecondaryReviewTarget: context.autoDevSecondaryReviewTarget,
+      autoDevSecondaryReviewRequireGatePassed: context.autoDevSecondaryReviewRequireGatePassed,
       autoDevInitEnhancementEnabled: context.autoDevInitEnhancementEnabled,
       autoDevInitEnhancementTimeoutMs: context.autoDevInitEnhancementTimeoutMs,
       autoDevInitEnhancementMaxChars: context.autoDevInitEnhancementMaxChars,

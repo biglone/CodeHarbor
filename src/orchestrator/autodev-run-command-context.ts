@@ -14,6 +14,9 @@ interface AutoDevRunCommandContextInput {
   autoDevRunArchiveEnabled: boolean;
   autoDevRunArchiveDir: string;
   autoDevValidationStrict: boolean;
+  autoDevSecondaryReviewEnabled: boolean;
+  autoDevSecondaryReviewTarget: string;
+  autoDevSecondaryReviewRequireGatePassed: boolean;
   pendingAutoDevLoopStopRequests: AutoDevRunCommandDispatchContext["pendingAutoDevLoopStopRequests"];
   activeAutoDevLoopSessions: AutoDevRunCommandDispatchContext["activeAutoDevLoopSessions"];
   autoDevFailureStreaks: AutoDevRunCommandDispatchContext["autoDevFailureStreaks"];
@@ -43,6 +46,9 @@ interface AutoDevRunCommandRuntimeContextInput {
     autoDevRunArchiveEnabled: boolean;
     autoDevRunArchiveDir: string;
     autoDevValidationStrict: boolean;
+    autoDevSecondaryReviewEnabled: boolean;
+    autoDevSecondaryReviewTarget: string;
+    autoDevSecondaryReviewRequireGatePassed: boolean;
     outputLanguage: AutoDevRunCommandDispatchContext["outputLanguage"];
   };
   state: {
@@ -81,6 +87,9 @@ export function buildAutoDevRunCommandDispatchContext(
     autoDevRunArchiveEnabled: input.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.autoDevRunArchiveDir,
     autoDevValidationStrict: input.autoDevValidationStrict,
+    autoDevSecondaryReviewEnabled: input.autoDevSecondaryReviewEnabled,
+    autoDevSecondaryReviewTarget: input.autoDevSecondaryReviewTarget,
+    autoDevSecondaryReviewRequireGatePassed: input.autoDevSecondaryReviewRequireGatePassed,
     pendingAutoDevLoopStopRequests: input.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.activeAutoDevLoopSessions,
     autoDevFailureStreaks: input.autoDevFailureStreaks,
@@ -114,6 +123,9 @@ export function buildAutoDevRunCommandDispatchContextFromRuntime(
     autoDevRunArchiveEnabled: input.config.autoDevRunArchiveEnabled,
     autoDevRunArchiveDir: input.config.autoDevRunArchiveDir,
     autoDevValidationStrict: input.config.autoDevValidationStrict,
+    autoDevSecondaryReviewEnabled: input.config.autoDevSecondaryReviewEnabled,
+    autoDevSecondaryReviewTarget: input.config.autoDevSecondaryReviewTarget,
+    autoDevSecondaryReviewRequireGatePassed: input.config.autoDevSecondaryReviewRequireGatePassed,
     pendingAutoDevLoopStopRequests: input.state.pendingAutoDevLoopStopRequests,
     activeAutoDevLoopSessions: input.state.activeAutoDevLoopSessions,
     autoDevFailureStreaks: input.state.autoDevFailureStreaks,
