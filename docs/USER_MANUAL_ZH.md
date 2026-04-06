@@ -212,6 +212,7 @@ codeharbor admin serve
 
 ### 5.5 多智能体工作流
 
+- AutoDev 架构、控制命令链路与排障手册：`docs/AUTODEV_OPERATIONS_ZH.md`
 - `AGENT_WORKFLOW_ENABLED=true`：开启 `/agents`、`/autodev`
 - `AGENT_WORKFLOW_AUTO_REPAIR_MAX_ROUNDS`：自动修复轮次上限
 - `AGENT_WORKFLOW_PLAN_CONTEXT_MAX_CHARS`：可选，Planner 计划上下文最大字符数（默认不限）

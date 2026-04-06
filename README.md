@@ -780,6 +780,7 @@ Backend/model rule routing:
 
 AutoDev (`/autodev`) conventions:
 
+- Architecture, control-chain, and troubleshooting handbook: `docs/AUTODEV_OPERATIONS_ZH.md`.
 - Workspace must contain `REQUIREMENTS.md` and `TASK_LIST.md`.
 - `/autodev init|i [path] [--from file]` scaffolds missing AutoDev files and binds workdir override for current session.
   - when `--from` is omitted, CodeHarbor auto-discovers design/spec docs and uses them to generate initial REQUIREMENTS/TASK_LIST templates.
