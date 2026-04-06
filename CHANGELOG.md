@@ -6,8 +6,15 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 ## [Unreleased]
 
+- none.
+
+## [0.1.96] - 2026-04-06
+
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
 - regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
+- autodev integration coverage: add runner regression that exercises multi-instance secondary-review handoff and release gating in one `/autodev run`.
+- autodev documentation: add operations/troubleshooting handbook (`docs/AUTODEV_OPERATIONS_ZH.md`) and phased rollout/rollback checklist with first rehearsal record (`docs/AUTODEV_ROLLOUT_ROLLBACK_CHECKLIST_ZH.md`).
+- type safety: narrow `AutoDevLoopBoundaryDecision` into a discriminated union so stop paths always carry non-null reason, fixing `tsc` failure in `autodev-runner`.
 
 ## [0.1.95] - 2026-04-06
 
