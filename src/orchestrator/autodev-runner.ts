@@ -40,6 +40,7 @@ import {
   evaluateAutoDevLoopBoundary,
   handleAutoDevLoopStopIfRequested,
 } from "./autodev-loop-engine";
+import { executeAutoDevWorkflowStageWithTaskListGuard } from "./autodev-stage-executor";
 import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
@@ -756,49 +757,32 @@ export async function runAutoDevCommand(
   );
 
   try {
-    const taskListBeforeWorkflow = await fs.readFile(context.taskListPath, "utf8");
-    let taskListMutationObservedDuringWorkflow = false;
-    const result = await deps.runWorkflowCommand({
+    const workflowStage = await executeAutoDevWorkflowStageWithTaskListGuard({
+      outputLanguage: deps.outputLanguage,
       objective,
       sessionKey: input.sessionKey,
       message: input.message,
       requestId: input.requestId,
       workdir: input.workdir,
-      diagRunId: workflowDiagRunId,
-      resolveReviewerTaskListPolicyContext: async (policyInput) => {
-        const reviewerGuard = await guardAutoDevTaskListOwnership({
-          taskListPath: context.taskListPath,
-          baselineContent: taskListBeforeWorkflow,
-        });
-        if (reviewerGuard.changed) {
-          taskListMutationObservedDuringWorkflow = true;
-        }
-        return buildReviewerTaskListPolicyContextSummary({
-          outputLanguage: deps.outputLanguage,
+      workflowDiagRunId,
+      taskListPath: context.taskListPath,
+      runWorkflowCommand: (workflowInput) => deps.runWorkflowCommand(workflowInput),
+      guardTaskListOwnership: (guardInput) => guardAutoDevTaskListOwnership(guardInput),
+      buildReviewerTaskListPolicyContextSummary: (policyInput) =>
+        buildReviewerTaskListPolicyContextSummary({
+          outputLanguage: policyInput.outputLanguage,
           round: policyInput.round,
-          guard: reviewerGuard,
-        });
-      },
+          guard: policyInput.guard,
+        }),
+      appendWorkflowDiagEvent: (runId, kind, stage, round, message) =>
+        deps.appendWorkflowDiagEvent(runId, kind, stage, round, message),
+      sendNotice: (conversationId, text) => sendAutoDevNoticeBestEffort(deps, conversationId, text),
     });
-    if (!result) {
+    if (!workflowStage) {
       return;
     }
-
-    const taskListGuard = await guardAutoDevTaskListOwnership({
-      taskListPath: context.taskListPath,
-      baselineContent: taskListBeforeWorkflow,
-    });
-    if (taskListGuard.changed || taskListMutationObservedDuringWorkflow) {
-      const taskListGuardMessage = localize(
-        `[CodeHarbor] AutoDev 策略保护：检测到 workflow 修改了 TASK_LIST.md，已自动回滚（仅系统可维护任务状态）。`,
-        `[CodeHarbor] AutoDev policy guard: workflow modified TASK_LIST.md and was auto-rolled back (task status is system-managed only).`,
-      );
-      deps.appendWorkflowDiagEvent(workflowDiagRunId, "autodev", "task_list_guard", 0, taskListGuardMessage);
-      await sendAutoDevNoticeBestEffort(deps, input.message.conversationId, taskListGuardMessage);
-      if (!taskListGuard.restored) {
-        throw new Error(taskListGuard.error ?? "failed to restore TASK_LIST.md after forbidden workflow mutation");
-      }
-    }
+    const result = workflowStage.workflowResult;
+    const taskListPolicyPassed = workflowStage.taskListPolicyPassed;
 
     let finalTask = activeTask;
     let gitCommit: AutoDevGitCommitResult = {
@@ -811,7 +795,6 @@ export async function runAutoDevCommand(
     };
     const validation = inferAutoDevValidation(result, deps.autoDevValidationStrict);
     const validationPassed = validation.passed;
-    const taskListPolicyPassed = taskListGuard.restored && taskListGuard.finalClean;
     const reviewerApprovedForGate = result.approved && taskListPolicyPassed;
     if (!result.approved) {
       gitCommit = {
