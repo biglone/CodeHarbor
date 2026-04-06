@@ -104,7 +104,7 @@
 | T10.7 | Control 解耦 II：建立 command handler registry（run/status/stop/progress/content）并消除分支式耦合 | 5h | P0 | T10.6 | ✅ |
 | T10.8 | Control 解耦 III：统一控制命令响应模型（成功/失败/校验错误）并补齐错误码与用户可操作提示 | 3h | P1 | T10.7 | ✅ |
 | T10.9 | 策略抽离 I：提炼 completion gate policy（通过条件、失败分类、证据来源）为纯函数模块 | 4h | P0 | T10.4 | ✅ |
-| T10.10 | 策略抽离 II：提炼 validation inference + status healing 规则（状态修复、冲突判定、来源优先级）为纯函数模块 | 4h | P0 | T10.9 | ⬜ |
+| T10.10 | 策略抽离 II：提炼 validation inference + status healing 规则（状态修复、冲突判定、来源优先级）为纯函数模块 | 4h | P0 | T10.9 | ✅ |
 | T10.11 | 契约测试：新增 loop/gate/validation/status-heal 的契约测试矩阵，确保重构前后输出一致 | 5h | P0 | T10.5,T10.8,T10.10 | ⬜ |
 | T10.12 | 集成回归：覆盖多实例 + secondary review handoff + release gating 的端到端回归并纳入 CI | 5h | P0 | T10.11 | ⬜ |
 | T10.13 | 文档同步：更新 AutoDev 架构图、控制命令说明、故障定位手册（含模块边界与排障路径） | 3h | P1 | T10.12 | ⬜ |
