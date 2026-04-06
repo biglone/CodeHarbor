@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,6 +12,7 @@ import * as statusHeal from "../src/orchestrator/autodev-status-heal";
 import type { InboundMessage } from "../src/types";
 
 type RunnerDeps = Parameters<typeof runAutoDevCommand>[0];
+const execFileAsync = promisify(execFile);
 
 function makeInbound(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
@@ -179,4 +182,109 @@ describe("AutoDev runner", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("covers secondary review handoff with release gating in one autodev run", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-runner-int-release-review-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Requirements\n- implement T30.2\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T30.2 | integration regression for release+handoff | ⬜ |",
+        "",
+        "## 大功能 -> 发布映射（执行约定）",
+        "| 大功能任务 | 完成后目标版本 | 发布提交示例 |",
+        "|------------|----------------|--------------|",
+        "| T30.2 | v0.1.52 | `release: v0.1.52 [publish-npm]` |",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tempRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "codeharbor-runner-integration-test",
+          version: "0.1.51",
+          private: true,
+          scripts: {
+            "test:coverage": "node -e \"process.exit(0)\"",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tempRoot, "package-lock.json"),
+      JSON.stringify(
+        {
+          name: "codeharbor-runner-integration-test",
+          version: "0.1.51",
+          lockfileVersion: 3,
+          requires: true,
+          packages: {
+            "": {
+              name: "codeharbor-runner-integration-test",
+              version: "0.1.51",
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.writeFile(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\n- none\n", "utf8");
+
+    await execFileAsync("git", ["init"], { cwd: tempRoot });
+    await execFileAsync("git", ["add", "-A"], { cwd: tempRoot });
+    await execFileAsync(
+      "git",
+      ["-c", "user.name=Test Bot", "-c", "user.email=test@example.com", "commit", "-m", "chore: init integration test"],
+      { cwd: tempRoot },
+    );
+
+    const notices: string[] = [];
+    const deps = createRunnerDeps(notices);
+    deps.autoDevAutoReleaseEnabled = true;
+    deps.autoDevAutoReleasePush = false;
+    deps.autoDevSecondaryReviewEnabled = true;
+    deps.autoDevSecondaryReviewTarget = "@review-guard";
+    deps.autoDevSecondaryReviewRequireGatePassed = true;
+    deps.runWorkflowCommand = async () => ({
+      objective: "finish T30.2",
+      plan: "plan",
+      output: "validation_status: passed",
+      review: "APPROVED",
+      approved: true,
+      repairRounds: 0,
+      durationMs: 20,
+    });
+
+    try {
+      await runAutoDevCommand(deps, {
+        taskId: "T30.2",
+        sessionKey: "sess-autodev-runner-integration-release-review",
+        message: makeInbound({
+          text: "/autodev run T30.2",
+          eventId: "$autodev-runner-int-release-review",
+        }),
+        requestId: "req-autodev-runner-int-release-review",
+        workdir: tempRoot,
+      });
+
+      expect(notices.some((text) => text.includes("AutoDev secondary review handoff") && text.includes("@review-guard"))).toBe(true);
+      expect(notices.some((text) => text.includes("release: released v0.1.52"))).toBe(true);
+
+      const latest = await execFileAsync("git", ["log", "--oneline", "-n", "1"], { cwd: tempRoot });
+      expect(latest.stdout).toContain("release: v0.1.52 [publish-npm]");
+      const packageJson = JSON.parse(await fs.readFile(path.join(tempRoot, "package.json"), "utf8")) as { version: string };
+      expect(packageJson.version).toBe("0.1.52");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
 });
