@@ -43,6 +43,10 @@ import {
 import { executeAutoDevWorkflowStageWithTaskListGuard } from "./autodev-stage-executor";
 import { buildAutoDevSecondaryReviewHandoffNotice } from "./autodev-result-reporter";
 import {
+  acquireAutoDevTaskLock,
+  releaseAutoDevTaskLock,
+} from "./autodev-task-lock";
+import {
   evaluateAutoDevCompletionGate,
   formatAutoDevCompletionGateReasons,
 } from "./autodev-completion-gate-policy";
@@ -109,6 +113,20 @@ interface AutoDevGitPreflightCheckInput {
   loopCompletedRuns: number;
   loopMaxRuns: number;
   loopDeadlineAtIso: string | null;
+}
+
+class AutoDevTaskLockBusyError extends Error {
+  readonly taskId: string;
+  readonly lockFilePath: string;
+  readonly holderSummary: string;
+
+  constructor(taskId: string, lockFilePath: string, holderSummary: string) {
+    super(`autodev task lock busy: ${taskId}`);
+    this.name = "AutoDevTaskLockBusyError";
+    this.taskId = taskId;
+    this.lockFilePath = lockFilePath;
+    this.holderSummary = holderSummary;
+  }
 }
 
 async function sendAutoDevNoticeBestEffort(
@@ -481,17 +499,56 @@ export async function runAutoDevCommand(
 
         const taskListBeforeRun = loopContext.taskListContent ?? "";
         attemptedRuns += 1;
-        await runAutoDevCommand(deps, {
-          ...input,
-          taskId: loopTask.id,
-          taskLineIndex: loopTask.lineIndex,
-          runContext: buildAutoDevNestedLoopRunContext({
-            attemptedRuns,
-            completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAtIso,
-          }),
-        });
+        try {
+          await runAutoDevCommand(deps, {
+            ...input,
+            taskId: loopTask.id,
+            taskLineIndex: loopTask.lineIndex,
+            runContext: buildAutoDevNestedLoopRunContext({
+              attemptedRuns,
+              completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAtIso,
+            }),
+          });
+        } catch (error) {
+          if (error instanceof AutoDevTaskLockBusyError) {
+            deps.autoDevMetrics.recordLoopStop("task_incomplete");
+            const endedAtIso = new Date().toISOString();
+            deps.setAutoDevSnapshot(input.sessionKey, {
+              state: "succeeded",
+              startedAt: new Date(loopStartedAt).toISOString(),
+              endedAt: endedAtIso,
+              taskId: loopTask.id,
+              taskDescription: loopTask.description,
+              approved: null,
+              repairRounds: 0,
+              error: null,
+              mode: "loop",
+              loopRound: attemptedRuns,
+              loopCompletedRuns: completedRuns,
+              loopMaxRuns: activeContext.loopMaxRuns,
+              loopDeadlineAt: loopDeadlineAtIso,
+              lastGitCommitSummary: null,
+              lastGitCommitAt: null,
+            });
+            await sendAutoDevNoticeBestEffort(deps,
+              input.message.conversationId,
+              localize(
+                `[CodeHarbor] AutoDev 循环执行暂停：任务 ${error.taskId} 正在被其他实例处理（task lock busy）。
+- holder: ${error.holderSummary}
+- lockFile: ${error.lockFilePath}
+- continue: 当前任务完成后再执行 /autodev run`,
+                `[CodeHarbor] AutoDev loop paused: task ${error.taskId} is locked by another instance (task lock busy).
+- holder: ${error.holderSummary}
+- lockFile: ${error.lockFilePath}
+- continue: rerun /autodev run after the holder completes.`,
+              ),
+            );
+            return;
+          }
+          throw error;
+        }
 
         const refreshed = await loadAutoDevContext(input.workdir);
         const taskListAfterRun = refreshed.taskListContent ?? "";
@@ -597,31 +654,61 @@ export async function runAutoDevCommand(
       activeContext.mode === "loop" ? Math.max(0, activeContext.loopMaxRuns) : Math.max(1, activeContext.loopMaxRuns),
     loopDeadlineAt: activeContext.loopDeadlineAt,
   };
-  if (effectiveContext.mode !== "loop") {
-    const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
-      sessionKey: input.sessionKey,
-      conversationId: input.message.conversationId,
-      workdir: input.workdir,
-      task: selectedTask,
-      mode: "single",
-      startedAtIso: new Date().toISOString(),
-      loopRound: effectiveContext.loopRound,
-      loopCompletedRuns: effectiveContext.loopCompletedRuns,
-      loopMaxRuns: effectiveContext.loopMaxRuns,
-      loopDeadlineAtIso: effectiveContext.loopDeadlineAt,
-    });
-    if (preflightFailed) {
-      return;
-    }
-  }
-  const gitBaseline = await captureAutoDevGitBaseline({
-    workdir: input.workdir,
-    logger: deps.logger,
-  });
-  let activeTask = selectedTask;
 
-  const startedAtIso = new Date().toISOString();
-  deps.setAutoDevSnapshot(input.sessionKey, {
+  const taskLockResult = await acquireAutoDevTaskLock({
+    workdir: input.workdir,
+    taskId: selectedTask.id,
+    sessionKey: input.sessionKey,
+    requestId: input.requestId,
+    conversationId: input.message.conversationId,
+  });
+  if (!taskLockResult.acquired) {
+    if (effectiveContext.mode === "loop") {
+      throw new AutoDevTaskLockBusyError(selectedTask.id, taskLockResult.lockFilePath, taskLockResult.holderSummary);
+    }
+    await sendAutoDevNoticeBestEffort(deps,
+      input.message.conversationId,
+      localize(
+        `[CodeHarbor] AutoDev 任务锁冲突：任务 ${selectedTask.id} 正在被其他实例处理（task lock busy）。
+- holder: ${taskLockResult.holderSummary}
+- lockFile: ${taskLockResult.lockFilePath}
+- next: 等待当前执行完成后重试 /autodev run ${selectedTask.id}`,
+        `[CodeHarbor] AutoDev task lock conflict: task ${selectedTask.id} is currently handled by another instance (task lock busy).
+- holder: ${taskLockResult.holderSummary}
+- lockFile: ${taskLockResult.lockFilePath}
+- next: retry /autodev run ${selectedTask.id} after holder completion.`,
+      ),
+    );
+    return;
+  }
+
+  const acquiredTaskLock = taskLockResult.lock;
+  try {
+    if (effectiveContext.mode !== "loop") {
+      const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
+        sessionKey: input.sessionKey,
+        conversationId: input.message.conversationId,
+        workdir: input.workdir,
+        task: selectedTask,
+        mode: "single",
+        startedAtIso: new Date().toISOString(),
+        loopRound: effectiveContext.loopRound,
+        loopCompletedRuns: effectiveContext.loopCompletedRuns,
+        loopMaxRuns: effectiveContext.loopMaxRuns,
+        loopDeadlineAtIso: effectiveContext.loopDeadlineAt,
+      });
+      if (preflightFailed) {
+        return;
+      }
+    }
+    const gitBaseline = await captureAutoDevGitBaseline({
+      workdir: input.workdir,
+      logger: deps.logger,
+    });
+    let activeTask = selectedTask;
+
+    const startedAtIso = new Date().toISOString();
+    deps.setAutoDevSnapshot(input.sessionKey, {
     state: "running",
     startedAt: startedAtIso,
     endedAt: null,
@@ -891,6 +978,7 @@ export async function runAutoDevCommand(
       releaseSummary: formatAutoDevReleaseResult(releaseResult),
       requestId: input.requestId,
       workflowDiagRunId,
+      workdir: input.workdir,
     });
     if (secondaryReviewHandoff) {
       deps.appendWorkflowDiagEvent(
@@ -1111,6 +1199,9 @@ export async function runAutoDevCommand(
       workflowResult: null,
     });
     throw error;
+  }
+  } finally {
+    await releaseAutoDevTaskLock(acquiredTaskLock);
   }
 }
 
