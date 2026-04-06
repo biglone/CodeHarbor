@@ -1,6 +1,10 @@
 import type { InboundMessage } from "../types";
 import { parseWorkflowCommand } from "../workflow/multi-agent-workflow";
 import { parseAutoDevCommand } from "../workflow/autodev";
+import {
+  dispatchAutoDevCommandWithRegistry,
+  type AutoDevCommandHandlerRegistry,
+} from "./autodev-command-handler-registry";
 
 type RouteDecisionLike =
   | { kind: "ignore" }
@@ -86,73 +90,63 @@ export async function handleLockedRouteCommand(
 
   const workflowCommand = input.route.kind === "execute" && deps.workflowEnabled ? parseWorkflowCommand(input.route.prompt) : null;
   const autoDevCommand = input.route.kind === "execute" && deps.workflowEnabled ? parseAutoDevCommand(input.route.prompt) : null;
+
   if (workflowCommand?.kind === "status") {
     await deps.handleWorkflowStatusCommand(input.sessionKey, input.message);
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }
-  if (autoDevCommand?.kind === "status") {
-    await deps.handleAutoDevStatusCommand(input.sessionKey, input.message, input.workdir);
+
+  const autoDevRegistry: AutoDevCommandHandlerRegistry = {
+    status: async (_command, context) => {
+      await deps.handleAutoDevStatusCommand(context.sessionKey, context.message, context.workdir);
+    },
+    progress: async (command, context) => {
+      await deps.handleAutoDevProgressCommand(context.sessionKey, context.message, command.mode);
+    },
+    content: async (command, context) => {
+      await deps.handleAutoDevContentCommand(context.sessionKey, context.message, command.mode);
+    },
+    skills: async (command, context) => {
+      await deps.handleAutoDevSkillsCommand(context.sessionKey, context.message, command.mode);
+    },
+    stop: async (_command, context) => {
+      await deps.handleAutoDevLoopStopCommand(context.sessionKey, context.message);
+    },
+    reconcile: async (_command, context) => {
+      await deps.handleAutoDevReconcileCommand(context.sessionKey, context.message, context.workdir);
+    },
+    workdir: async (command, context) => {
+      await deps.handleAutoDevWorkdirCommand(context.sessionKey, context.message, command.mode, command.path, context.workdir);
+    },
+    init: async (command, context) => {
+      await deps.handleAutoDevInitCommand(
+        context.sessionKey,
+        context.message,
+        command.path,
+        command.from,
+        command.dryRun,
+        command.force,
+        context.workdir,
+      );
+    },
+    invalid: async (command, context) => {
+      await deps.sendNotice(
+        context.message.conversationId,
+        buildAutoDevInvalidCommandNotice(command.action, command.option),
+      );
+    },
+  };
+  const dispatched = await dispatchAutoDevCommandWithRegistry(autoDevCommand, autoDevRegistry, {
+    sessionKey: input.sessionKey,
+    message: input.message,
+    workdir: input.workdir,
+  });
+  if (dispatched.handled) {
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand, autoDevCommand };
   }
-  if (autoDevCommand?.kind === "progress") {
-    await deps.handleAutoDevProgressCommand(input.sessionKey, input.message, autoDevCommand.mode);
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "content") {
-    await deps.handleAutoDevContentCommand(input.sessionKey, input.message, autoDevCommand.mode);
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "skills") {
-    await deps.handleAutoDevSkillsCommand(input.sessionKey, input.message, autoDevCommand.mode);
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "stop") {
-    await deps.handleAutoDevLoopStopCommand(input.sessionKey, input.message);
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "reconcile") {
-    await deps.handleAutoDevReconcileCommand(input.sessionKey, input.message, input.workdir);
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "workdir") {
-    await deps.handleAutoDevWorkdirCommand(
-      input.sessionKey,
-      input.message,
-      autoDevCommand.mode,
-      autoDevCommand.path,
-      input.workdir,
-    );
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "init") {
-    await deps.handleAutoDevInitCommand(
-      input.sessionKey,
-      input.message,
-      autoDevCommand.path,
-      autoDevCommand.from,
-      autoDevCommand.dryRun,
-      autoDevCommand.force,
-      input.workdir,
-    );
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
-  if (autoDevCommand?.kind === "invalid") {
-    await deps.sendNotice(
-      input.message.conversationId,
-      buildAutoDevInvalidCommandNotice(autoDevCommand.action, autoDevCommand.option),
-    );
-    deps.markEventProcessed(input.sessionKey, input.message.eventId);
-    return { handled: true, workflowCommand, autoDevCommand };
-  }
+
   return { handled: false, workflowCommand, autoDevCommand };
 }
 

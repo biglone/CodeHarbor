@@ -3,6 +3,10 @@ import type { RequestOutcomeMetric } from "../metrics";
 import type { InboundMessage } from "../types";
 import { parseWorkflowCommand } from "../workflow/multi-agent-workflow";
 import { parseAutoDevCommand } from "../workflow/autodev";
+import {
+  dispatchAutoDevCommandWithRegistry,
+  type AutoDevCommandHandlerRegistry,
+} from "./autodev-command-handler-registry";
 
 type RouteDecisionLike =
   | { kind: "ignore" }
@@ -69,23 +73,30 @@ export async function tryHandleNonBlockingStatusRoute(
   const workflowCommand = route.kind === "execute" && deps.workflowEnabled ? parseWorkflowCommand(route.prompt) : null;
   const autoDevCommand = route.kind === "execute" && deps.workflowEnabled ? parseAutoDevCommand(route.prompt) : null;
   const isWorkflowStatus = workflowCommand?.kind === "status";
-  const isAutoDevStatus = autoDevCommand?.kind === "status";
-  const isAutoDevProgress = autoDevCommand?.kind === "progress";
-  const isAutoDevContent = autoDevCommand?.kind === "content";
-  const isAutoDevSkills = autoDevCommand?.kind === "skills";
-  const isAutoDevStop = autoDevCommand?.kind === "stop";
-  const isAutoDevReconcile = autoDevCommand?.kind === "reconcile";
 
-  if (
-    !isReadOnlyControlCommand &&
-    !isWorkflowStatus &&
-    !isAutoDevStatus &&
-    !isAutoDevProgress &&
-    !isAutoDevContent &&
-    !isAutoDevSkills &&
-    !isAutoDevStop &&
-    !isAutoDevReconcile
-  ) {
+  const autoDevRegistry: AutoDevCommandHandlerRegistry = {
+    status: async (_command, context) => {
+      await deps.handleAutoDevStatusCommand(context.sessionKey, context.message, context.workdir);
+    },
+    progress: async (command, context) => {
+      await deps.handleAutoDevProgressCommand(context.sessionKey, context.message, command.mode);
+    },
+    content: async (command, context) => {
+      await deps.handleAutoDevContentCommand(context.sessionKey, context.message, command.mode);
+    },
+    skills: async (command, context) => {
+      await deps.handleAutoDevSkillsCommand(context.sessionKey, context.message, command.mode);
+    },
+    stop: async (_command, context) => {
+      await deps.handleAutoDevLoopStopCommand(context.sessionKey, context.message);
+    },
+    reconcile: async (_command, context) => {
+      await deps.handleAutoDevReconcileCommand(context.sessionKey, context.message, context.workdir);
+    },
+  };
+  const hasNonBlockingAutoDevHandler = autoDevCommand ? Boolean(autoDevRegistry[autoDevCommand.kind]) : false;
+
+  if (!isReadOnlyControlCommand && !isWorkflowStatus && !hasNonBlockingAutoDevHandler) {
     return false;
   }
 
@@ -100,44 +111,31 @@ export async function tryHandleNonBlockingStatusRoute(
     return true;
   }
 
+  let handledRoute = "autodev.unknown";
   if (isReadOnlyControlCommand) {
     await deps.handleControlCommand(route.command, sessionKey, message, requestId);
+    handledRoute = route.command;
   } else if (isWorkflowStatus) {
     await deps.handleWorkflowStatusCommand(sessionKey, message);
-  } else if (isAutoDevProgress) {
-    await deps.handleAutoDevProgressCommand(sessionKey, message, autoDevCommand.mode);
-  } else if (isAutoDevContent) {
-    await deps.handleAutoDevContentCommand(sessionKey, message, autoDevCommand.mode);
-  } else if (isAutoDevSkills) {
-    await deps.handleAutoDevSkillsCommand(sessionKey, message, autoDevCommand.mode);
-  } else if (isAutoDevStop) {
-    await deps.handleAutoDevLoopStopCommand(sessionKey, message);
-  } else if (isAutoDevReconcile) {
-    await deps.handleAutoDevReconcileCommand(sessionKey, message, workdir);
+    handledRoute = "workflow.status";
   } else {
-    await deps.handleAutoDevStatusCommand(sessionKey, message, workdir);
+    const dispatched = await dispatchAutoDevCommandWithRegistry(autoDevCommand, autoDevRegistry, {
+      sessionKey,
+      message,
+      workdir,
+    });
+    if (!dispatched.handled) {
+      return false;
+    }
+    handledRoute = dispatched.routeLabel ?? handledRoute;
   }
+
   deps.markEventProcessed(sessionKey, message.eventId);
   deps.logger.debug("Handled non-blocking status command without waiting for session lock", {
     requestId,
     eventId: message.eventId,
     sessionKey,
-    route:
-      route.kind === "command"
-        ? route.command
-        : isWorkflowStatus
-          ? "workflow.status"
-          : isAutoDevProgress
-            ? "autodev.progress"
-            : isAutoDevContent
-              ? "autodev.content"
-            : isAutoDevSkills
-              ? "autodev.skills"
-              : isAutoDevStop
-                ? "autodev.stop"
-                : isAutoDevReconcile
-                  ? "autodev.reconcile"
-                : "autodev.status",
+    route: handledRoute,
     queueWaitMs,
   });
   return true;

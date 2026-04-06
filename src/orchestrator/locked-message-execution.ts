@@ -8,6 +8,7 @@ import type { CodexSessionRuntime } from "../executor/codex-session-runtime";
 import type { TriggerPolicy } from "../config";
 import { buildRateLimitNotice } from "./workflow-status";
 import { handleLockedRouteCommand, type AutoDevCommandLike, type WorkflowCommandLike } from "./locked-route-command";
+import { dispatchAutoDevCommandWithRegistry, type AutoDevCommandHandlerRegistry } from "./autodev-command-handler-registry";
 import { tryEnqueueQueuedInboundRequest } from "./queue-enqueue";
 
 type RouteDecisionLike =
@@ -318,20 +319,29 @@ export async function executeLockedMessage(
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
   }
 
-  if (autoDevCommand?.kind === "run") {
-    await deps.executeAutoDevRun({
-      taskId: autoDevCommand.taskId,
-      sessionKey: input.sessionKey,
-      message: input.message,
-      requestId: input.requestId,
-      queueWaitMs,
-      workdir: roomConfig.workdir,
-      deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
-      executor: backendRuntime.executor,
-      releaseRateLimit: () => {
-        rateDecision.release?.();
-      },
-    });
+  const autoDevExecutionRegistry: AutoDevCommandHandlerRegistry = {
+    run: async (command, context) => {
+      await deps.executeAutoDevRun({
+        taskId: command.taskId,
+        sessionKey: context.sessionKey,
+        message: context.message,
+        requestId: input.requestId,
+        queueWaitMs,
+        workdir: context.workdir,
+        deferFailureHandlingToQueue: input.deferFailureHandlingToQueue,
+        executor: backendRuntime.executor,
+        releaseRateLimit: () => {
+          rateDecision.release?.();
+        },
+      });
+    },
+  };
+  const autoDevExecutionDispatch = await dispatchAutoDevCommandWithRegistry(autoDevCommand, autoDevExecutionRegistry, {
+    sessionKey: input.sessionKey,
+    message: input.message,
+    workdir: roomConfig.workdir,
+  });
+  if (autoDevExecutionDispatch.handled) {
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
   }
 
