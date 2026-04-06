@@ -55,6 +55,12 @@ import {
   type WorkflowRunSnapshot,
 } from "./workflow/multi-agent-workflow";
 import {
+  loadAutoDevContext,
+  selectAutoDevTask,
+  statusToSymbol,
+  updateAutoDevTaskStatus,
+} from "./workflow/autodev";
+import {
   WorkflowRoleSkillCatalog,
   type WorkflowRoleSkillDisclosureMode,
   type WorkflowRoleSkillPolicyOverride,
@@ -178,6 +184,12 @@ import {
   type AutoDevInitEnhancementInput,
   type AutoDevInitEnhancementResult,
 } from "./orchestrator/autodev-control-command";
+import { withAutoDevControlEnvelope } from "./orchestrator/autodev-control-response";
+import {
+  mapSecondaryReviewDecisionToTaskStatus,
+  matchesSecondaryReviewSender,
+  parseAutoDevSecondaryReviewReceipt,
+} from "./orchestrator/autodev-secondary-review-receipt";
 import { executeLockedMessage } from "./orchestrator/locked-message-execution";
 import { sendWorkflowRunRequest as runSendWorkflowRunRequest } from "./orchestrator/workflow-run-dispatch";
 import { sendStopCommand as runSendStopCommand } from "./orchestrator/stop-command-dispatch";
@@ -675,6 +687,7 @@ export class Orchestrator {
         handleAutoDevReconcileCommand: this.handleAutoDevReconcileCommand.bind(this),
         handleAutoDevWorkdirCommand: this.handleAutoDevWorkdirCommand.bind(this),
         handleAutoDevInitCommand: this.handleAutoDevInitCommand.bind(this),
+        tryHandleAutoDevSecondaryReviewReceipt: this.tryHandleAutoDevSecondaryReviewReceipt.bind(this),
       },
       getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
       rateLimiter: this.rateLimiter,
@@ -1162,6 +1175,133 @@ export class Orchestrator {
         roomWorkdir,
       },
     );
+  }
+
+  private async tryHandleAutoDevSecondaryReviewReceipt(
+    sessionKey: string,
+    message: InboundMessage,
+    prompt: string,
+    roomWorkdir: string,
+  ): Promise<boolean> {
+    if (!this.autoDevSecondaryReviewEnabled) {
+      return false;
+    }
+    const configuredTarget = this.autoDevSecondaryReviewTarget.trim();
+    if (!configuredTarget) {
+      return false;
+    }
+
+    const receipt =
+      parseAutoDevSecondaryReviewReceipt(prompt) ??
+      parseAutoDevSecondaryReviewReceipt(message.text);
+    if (!receipt) {
+      return false;
+    }
+
+    if (!matchesSecondaryReviewSender(message.senderId, configuredTarget)) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        withAutoDevControlEnvelope({
+          kind: "validation_error",
+          code: "AUTODEV_SECONDARY_REVIEW_RECEIPT_SENDER_MISMATCH",
+          text: `[CodeHarbor] 忽略二次评审回执：sender ${message.senderId} 与配置目标 ${configuredTarget} 不匹配。
+- task: ${receipt.taskId}
+- decision: ${receipt.decision}`,
+          next: "Use the configured secondary-review bot account to send receipt blocks.",
+        }),
+      );
+      return true;
+    }
+
+    const effectiveWorkdir =
+      receipt.workdir?.trim() ||
+      this.resolveAutoDevWorkdir(sessionKey, roomWorkdir);
+    try {
+      const context = await loadAutoDevContext(effectiveWorkdir);
+      if (!context.taskListContent) {
+        await this.channel.sendNotice(
+          message.conversationId,
+          withAutoDevControlEnvelope({
+            kind: "error",
+            code: "AUTODEV_SECONDARY_REVIEW_RECEIPT_TASK_LIST_MISSING",
+            text: `[CodeHarbor] 二次评审回执回写失败：未找到 TASK_LIST.md。
+- workdir: ${effectiveWorkdir}`,
+            next: "Initialize AutoDev files first (for example: /autodev init <path>).",
+          }),
+        );
+        return true;
+      }
+
+      const task = selectAutoDevTask(context.tasks, receipt.taskId);
+      if (!task) {
+        await this.channel.sendNotice(
+          message.conversationId,
+          withAutoDevControlEnvelope({
+            kind: "validation_error",
+            code: "AUTODEV_SECONDARY_REVIEW_RECEIPT_TASK_NOT_FOUND",
+            text: `[CodeHarbor] 二次评审回执回写失败：未找到任务 ${receipt.taskId}。
+- workdir: ${effectiveWorkdir}`,
+            next: "Verify task id in receipt and retry.",
+          }),
+        );
+        return true;
+      }
+
+      const nextStatus = mapSecondaryReviewDecisionToTaskStatus(receipt.decision);
+      const updatedTask =
+        task.status === nextStatus
+          ? task
+          : await updateAutoDevTaskStatus(context.taskListPath, task, nextStatus);
+      const changed = task.status !== updatedTask.status;
+      const fromStatusSymbol = statusToSymbol(task.status);
+      const toStatusSymbol = statusToSymbol(updatedTask.status);
+      const relatedRequestId = receipt.requestId ?? message.requestId;
+      const diagRunId = receipt.workflowDiagRunId;
+
+      if (diagRunId) {
+        this.appendWorkflowDiagEvent(
+          diagRunId,
+          "autodev",
+          "secondary_review_receipt",
+          0,
+          `secondaryReview receipt applied task=${updatedTask.id} decision=${receipt.decision} status=${fromStatusSymbol}->${toStatusSymbol} sender=${message.senderId} requestId=${relatedRequestId}`,
+        );
+      }
+
+      await this.channel.sendNotice(
+        message.conversationId,
+        withAutoDevControlEnvelope({
+          kind: "success",
+          code: "AUTODEV_SECONDARY_REVIEW_RECEIPT_APPLIED",
+          text: `[CodeHarbor] 二次评审回执已回写
+- sender: ${message.senderId}
+- task: ${updatedTask.id}
+- decision: ${receipt.decision}
+- status: ${fromStatusSymbol} -> ${toStatusSymbol}
+- changed: ${changed ? "yes" : "no"}
+- requestId: ${relatedRequestId}
+- workflowDiagRunId: ${diagRunId ?? "N/A"}
+- summary: ${receipt.summary ?? "none"}
+- risks: ${receipt.risks ?? "none"}
+- next: ${receipt.nextAction ?? "none"}`,
+          next: changed ? "Run /autodev status to verify updated task state." : null,
+        }),
+      );
+      return true;
+    } catch (error) {
+      await this.channel.sendNotice(
+        message.conversationId,
+        withAutoDevControlEnvelope({
+          kind: "error",
+          code: "AUTODEV_SECONDARY_REVIEW_RECEIPT_APPLY_FAILED",
+          text: `[CodeHarbor] 二次评审回执回写失败: ${formatError(error)}
+- task: ${receipt.taskId}
+- decision: ${receipt.decision}`,
+          next: "Check workdir/TASK_LIST.md accessibility and retry.",
+        }),
+      );
+      return true;
+    }
   }
 
   private buildAutoDevControlCommandDeps(): AutoDevControlCommandDeps {

@@ -20,6 +20,7 @@ interface LockedMessageContextInput {
   handleAutoDevReconcileCommand: LockedMessageDispatchContext["handleAutoDevReconcileCommand"];
   handleAutoDevWorkdirCommand: LockedMessageDispatchContext["handleAutoDevWorkdirCommand"];
   handleAutoDevInitCommand: LockedMessageDispatchContext["handleAutoDevInitCommand"];
+  tryHandleAutoDevSecondaryReviewReceipt: LockedMessageDispatchContext["tryHandleAutoDevSecondaryReviewReceipt"];
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   tryAcquireRateLimit: LockedMessageDispatchContext["tryAcquireRateLimit"];
   sendNotice: LockedMessageDispatchContext["sendNotice"];
@@ -54,6 +55,7 @@ export function buildLockedMessageDispatchContext(
     handleAutoDevReconcileCommand: input.handleAutoDevReconcileCommand,
     handleAutoDevWorkdirCommand: input.handleAutoDevWorkdirCommand,
     handleAutoDevInitCommand: input.handleAutoDevInitCommand,
+    tryHandleAutoDevSecondaryReviewReceipt: input.tryHandleAutoDevSecondaryReviewReceipt,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: input.tryAcquireRateLimit,
     sendNotice: input.sendNotice,
@@ -90,6 +92,7 @@ interface LockedMessageRuntimeContextInput {
     | "handleAutoDevReconcileCommand"
     | "handleAutoDevWorkdirCommand"
     | "handleAutoDevInitCommand"
+    | "tryHandleAutoDevSecondaryReviewReceipt"
   >;
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   rateLimiter: {
@@ -131,6 +134,7 @@ export function buildLockedMessageDispatchContextFromRuntime(
     handleAutoDevReconcileCommand: input.controlHandlers.handleAutoDevReconcileCommand,
     handleAutoDevWorkdirCommand: input.controlHandlers.handleAutoDevWorkdirCommand,
     handleAutoDevInitCommand: input.controlHandlers.handleAutoDevInitCommand,
+    tryHandleAutoDevSecondaryReviewReceipt: input.controlHandlers.tryHandleAutoDevSecondaryReviewReceipt,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: (request) => input.rateLimiter.tryAcquire(request),
     sendNotice: input.sendNotice,

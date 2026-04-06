@@ -79,6 +79,12 @@ interface ExecuteLockedMessageDeps {
     force: boolean,
     roomWorkdir: string,
   ) => Promise<void>;
+  tryHandleAutoDevSecondaryReviewReceipt: (
+    sessionKey: string,
+    message: InboundMessage,
+    prompt: string,
+    workdir: string,
+  ) => Promise<boolean>;
   getTaskQueueStateStore: () => {
     enqueueTask: (input: {
       sessionKey: string;
@@ -218,6 +224,8 @@ export async function executeLockedMessage(
         deps.handleAutoDevWorkdirCommand(sessionKey, message, mode, commandPath, roomWorkdir),
       handleAutoDevInitCommand: (sessionKey, message, commandPath, from, dryRun, force, roomWorkdir) =>
         deps.handleAutoDevInitCommand(sessionKey, message, commandPath, from, dryRun, force, roomWorkdir),
+      tryHandleAutoDevSecondaryReviewReceipt: (sessionKey, message, prompt, workdir) =>
+        deps.tryHandleAutoDevSecondaryReviewReceipt(sessionKey, message, prompt, workdir),
     },
     {
       route,

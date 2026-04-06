@@ -63,6 +63,12 @@ interface HandleLockedRouteCommandDeps {
     force: boolean,
     roomWorkdir: string,
   ) => Promise<void>;
+  tryHandleAutoDevSecondaryReviewReceipt: (
+    sessionKey: string,
+    message: InboundMessage,
+    prompt: string,
+    workdir: string,
+  ) => Promise<boolean>;
 }
 
 interface HandleLockedRouteCommandInput {
@@ -87,6 +93,19 @@ export async function handleLockedRouteCommand(
     await deps.handleControlCommand(input.route.command, input.sessionKey, input.message, input.requestId);
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     return { handled: true, workflowCommand: null, autoDevCommand: null };
+  }
+
+  if (input.route.kind === "execute" && deps.workflowEnabled) {
+    const secondaryReviewHandled = await deps.tryHandleAutoDevSecondaryReviewReceipt(
+      input.sessionKey,
+      input.message,
+      input.route.prompt,
+      input.workdir,
+    );
+    if (secondaryReviewHandled) {
+      deps.markEventProcessed(input.sessionKey, input.message.eventId);
+      return { handled: true, workflowCommand: null, autoDevCommand: null };
+    }
   }
 
   const workflowCommand = input.route.kind === "execute" && deps.workflowEnabled ? parseWorkflowCommand(input.route.prompt) : null;
