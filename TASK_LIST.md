@@ -99,7 +99,7 @@
 | T10.2 | 设计拆分蓝图：定义 `autodev-runner.ts` 的目标模块边界（loop engine、stage executor、result reporter）与迁移顺序 | 2h | P0 | T10.1 | ✅ |
 | T10.3 | Runner 解耦 I：抽取 loop engine（轮次推进、deadline、stop/abort、重试状态）为独立模块并保持行为不变 | 5h | P0 | T10.2 | ✅ |
 | T10.4 | Runner 解耦 II：抽取 stage executor（preflight/执行/review/repair/release）与统一 stage result 协议 | 5h | P0 | T10.3 | ✅ |
-| T10.5 | Runner 解耦 III：抽取 result reporter（Matrix 回显、结构化摘要、归档摘要）并统一输出模板 | 4h | P1 | T10.4 | ⬜ |
+| T10.5 | Runner 解耦 III：抽取 result reporter（Matrix 回显、结构化摘要、归档摘要）并统一输出模板 | 4h | P1 | T10.4 | ✅ |
 | T10.6 | Control 解耦 I：拆分 `autodev-control-command.ts` 的命令解析、参数标准化、权限校验为独立 parser 层 | 4h | P0 | T10.1 | ⬜ |
 | T10.7 | Control 解耦 II：建立 command handler registry（run/status/stop/progress/content）并消除分支式耦合 | 5h | P0 | T10.6 | ⬜ |
 | T10.8 | Control 解耦 III：统一控制命令响应模型（成功/失败/校验错误）并补齐错误码与用户可操作提示 | 3h | P1 | T10.7 | ⬜ |
