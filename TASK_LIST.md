@@ -91,6 +91,24 @@
 | T9.8 | 文档更新：补充“主机器人架构/配置步骤/升级迁移/故障排查”到 README 与用户手册 | 3h | P1 | T9.7 | ✅ |
 
 
+
+### 阶段 10：AutoDev 架构可维护性重构（待开始）
+| 任务ID | 任务描述 | 预估时间 | 优先级 | 依赖 | 状态 |
+|--------|----------|----------|--------|------|------|
+| T10.1 | 基线固化：补齐 `autodev-runner` 与 `autodev-control` 的行为快照（run/status/stop/progress/content）作为重构前对照 | 3h | P0 | - | ⬜ |
+| T10.2 | 设计拆分蓝图：定义 `autodev-runner.ts` 的目标模块边界（loop engine、stage executor、result reporter）与迁移顺序 | 2h | P0 | T10.1 | ⬜ |
+| T10.3 | Runner 解耦 I：抽取 loop engine（轮次推进、deadline、stop/abort、重试状态）为独立模块并保持行为不变 | 5h | P0 | T10.2 | ⬜ |
+| T10.4 | Runner 解耦 II：抽取 stage executor（preflight/执行/review/repair/release）与统一 stage result 协议 | 5h | P0 | T10.3 | ⬜ |
+| T10.5 | Runner 解耦 III：抽取 result reporter（Matrix 回显、结构化摘要、归档摘要）并统一输出模板 | 4h | P1 | T10.4 | ⬜ |
+| T10.6 | Control 解耦 I：拆分 `autodev-control-command.ts` 的命令解析、参数标准化、权限校验为独立 parser 层 | 4h | P0 | T10.1 | ⬜ |
+| T10.7 | Control 解耦 II：建立 command handler registry（run/status/stop/progress/content）并消除分支式耦合 | 5h | P0 | T10.6 | ⬜ |
+| T10.8 | Control 解耦 III：统一控制命令响应模型（成功/失败/校验错误）并补齐错误码与用户可操作提示 | 3h | P1 | T10.7 | ⬜ |
+| T10.9 | 策略抽离 I：提炼 completion gate policy（通过条件、失败分类、证据来源）为纯函数模块 | 4h | P0 | T10.4 | ⬜ |
+| T10.10 | 策略抽离 II：提炼 validation inference + status healing 规则（状态修复、冲突判定、来源优先级）为纯函数模块 | 4h | P0 | T10.9 | ⬜ |
+| T10.11 | 契约测试：新增 loop/gate/validation/status-heal 的契约测试矩阵，确保重构前后输出一致 | 5h | P0 | T10.5,T10.8,T10.10 | ⬜ |
+| T10.12 | 集成回归：覆盖多实例 + secondary review handoff + release gating 的端到端回归并纳入 CI | 5h | P0 | T10.11 | ⬜ |
+| T10.13 | 文档同步：更新 AutoDev 架构图、控制命令说明、故障定位手册（含模块边界与排障路径） | 3h | P1 | T10.12 | ⬜ |
+| T10.14 | 发布与回滚：制定灰度发布与回滚检查清单（按模块分批启用）并完成首版发布演练 | 3h | P1 | T10.13 | ⬜ |
 ## 社区优先级 -> 可执行里程碑（T8.7 输出）
 | 社区优先级主题 | 可执行里程碑 | 任务集合 | 目标版本区间 | 发布顺序 | 回滚点 |
 |----------------|--------------|----------|--------------|----------|--------|
@@ -115,8 +133,8 @@
 
 ## 任务依赖关系图
 ```text
-[文档对齐] -> [需求设计] -> [开发实现] -> [测试发布] -> [工程化补全] -> [平台集成] -> [产品增强] -> [多实例主机器人治理]
-  T1.x         T2.x         T3.x         T4.x         T5.x           T6.x         T7.x         T9.x
+[文档对齐] -> [需求设计] -> [开发实现] -> [测试发布] -> [工程化补全] -> [平台集成] -> [产品增强] -> [多实例主机器人治理] -> [AutoDev可维护性重构]
+  T1.x         T2.x         T3.x         T4.x         T5.x           T6.x         T7.x         T9.x           T10.x
 ```
 
 ## 优先级说明
