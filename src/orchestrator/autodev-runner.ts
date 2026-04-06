@@ -35,6 +35,11 @@ import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError, parseEnvBoolean } from "./helpers";
 import { classifyExecutionOutcome } from "./workflow-status";
 import { byOutputLanguage } from "./output-language";
+import {
+  buildAutoDevNestedLoopRunContext,
+  evaluateAutoDevLoopBoundary,
+  handleAutoDevLoopStopIfRequested,
+} from "./autodev-loop-engine";
 import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
@@ -106,16 +111,6 @@ interface TaskListMutationGuardResult {
   restored: boolean;
   finalClean: boolean;
   error: string | null;
-}
-
-interface AutoDevLoopStopCheckInput {
-  sessionKey: string;
-  conversationId: string;
-  loopStartedAt: number;
-  attemptedRuns: number;
-  completedRuns: number;
-  loopMaxRuns: number;
-  loopDeadlineAtIso: string | null;
 }
 
 interface AutoDevGitPreflightCheckInput {
@@ -388,7 +383,6 @@ export async function runAutoDevCommand(
   if (!requestedTaskId) {
     const loopStartedAt = Date.now();
     const loopDeadlineAtIso = activeContext.loopDeadlineAt;
-    const loopDeadlineAtMs = loopDeadlineAtIso ? Date.parse(loopDeadlineAtIso) : null;
     let completedRuns = 0;
     let attemptedRuns = 0;
     deps.pendingAutoDevLoopStopRequests.delete(input.sessionKey);
@@ -424,8 +418,13 @@ export async function runAutoDevCommand(
         if (shouldStopLoop) {
           return;
         }
-        if (activeContext.loopMaxRuns > 0 && attemptedRuns >= activeContext.loopMaxRuns) {
-          deps.autoDevMetrics.recordLoopStop("max_runs");
+        const loopBoundaryDecision = evaluateAutoDevLoopBoundary({
+          attemptedRuns,
+          loopMaxRuns: activeContext.loopMaxRuns,
+          loopDeadlineAtIso,
+        });
+        if (loopBoundaryDecision.shouldStop) {
+          deps.autoDevMetrics.recordLoopStop(loopBoundaryDecision.reason);
           const pausedContext = await loadAutoDevContext(input.workdir);
           const remaining = summarizeAutoDevTasks(pausedContext.tasks);
           const endedAtIso = new Date().toISOString();
@@ -446,64 +445,43 @@ export async function runAutoDevCommand(
             lastGitCommitSummary: null,
             lastGitCommitAt: null,
           });
-          await sendAutoDevNoticeBestEffort(deps, 
-            input.message.conversationId,
-            localize(
-              `[CodeHarbor] AutoDev 循环执行已达到轮次上限，已暂停。
+          if (loopBoundaryDecision.reason === "max_runs") {
+            await sendAutoDevNoticeBestEffort(deps, 
+              input.message.conversationId,
+              localize(
+                `[CodeHarbor] AutoDev 循环执行已达到轮次上限，已暂停。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopMaxRuns: ${activeContext.loopMaxRuns}
 - remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
 - 继续执行: /autodev run`,
-              `[CodeHarbor] AutoDev loop paused at run limit.
+                `[CodeHarbor] AutoDev loop paused at run limit.
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopMaxRuns: ${activeContext.loopMaxRuns}
 - remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
 - continue: /autodev run`,
-            ),
-          );
-          return;
-        }
-        if (loopDeadlineAtMs !== null && Date.now() >= loopDeadlineAtMs) {
-          deps.autoDevMetrics.recordLoopStop("deadline");
-          const pausedContext = await loadAutoDevContext(input.workdir);
-          const remaining = summarizeAutoDevTasks(pausedContext.tasks);
-          const endedAtIso = new Date().toISOString();
-          deps.setAutoDevSnapshot(input.sessionKey, {
-            state: "succeeded",
-            startedAt: new Date(loopStartedAt).toISOString(),
-            endedAt: endedAtIso,
-            taskId: null,
-            taskDescription: null,
-            approved: null,
-            repairRounds: 0,
-            error: null,
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
-            loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-            lastGitCommitSummary: null,
-            lastGitCommitAt: null,
-          });
-          await sendAutoDevNoticeBestEffort(deps, 
-            input.message.conversationId,
-            localize(
-              `[CodeHarbor] AutoDev 循环执行已达到时间上限，已暂停。
+              ),
+            );
+          } else {
+            await sendAutoDevNoticeBestEffort(deps, 
+              input.message.conversationId,
+              localize(
+                `[CodeHarbor] AutoDev 循环执行已达到时间上限，已暂停。
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopDeadlineAt: ${loopDeadlineAtIso}
 - remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
 - 继续执行: /autodev run`,
-              `[CodeHarbor] AutoDev loop paused at time limit.
+                `[CodeHarbor] AutoDev loop paused at time limit.
 - attemptedRuns: ${attemptedRuns}
 - completedRuns: ${completedRuns}
 - loopDeadlineAt: ${loopDeadlineAtIso}
 - remaining: pending=${remaining.pending}, in_progress=${remaining.inProgress}, blocked=${remaining.blocked}, cancelled=${remaining.cancelled}
 - continue: /autodev run`,
-            ),
-          );
+              ),
+            );
+          }
           return;
         }
         let loopContext = await loadAutoDevContext(input.workdir);
@@ -595,13 +573,12 @@ export async function runAutoDevCommand(
           ...input,
           taskId: loopTask.id,
           taskLineIndex: loopTask.lineIndex,
-          runContext: {
-            mode: "loop",
-            loopRound: attemptedRuns,
-            loopCompletedRuns: completedRuns,
+          runContext: buildAutoDevNestedLoopRunContext({
+            attemptedRuns,
+            completedRuns,
             loopMaxRuns: activeContext.loopMaxRuns,
-            loopDeadlineAt: loopDeadlineAtIso,
-          },
+            loopDeadlineAtIso,
+          }),
         });
 
         const refreshed = await loadAutoDevContext(input.workdir);
@@ -1817,78 +1794,4 @@ async function failAutoDevOnGitPreflightError(
     ),
   );
   return true;
-}
-
-async function handleAutoDevLoopStopIfRequested(
-  deps: AutoDevRunnerDeps,
-  input: AutoDevLoopStopCheckInput,
-): Promise<boolean> {
-  const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
-  if (deps.consumePendingStopRequest(input.sessionKey)) {
-    deps.autoDevMetrics.recordLoopStop("stop_requested");
-    const endedAtIso = new Date().toISOString();
-    deps.setAutoDevSnapshot(input.sessionKey, {
-      state: "idle",
-      startedAt: new Date(input.loopStartedAt).toISOString(),
-      endedAt: endedAtIso,
-      taskId: null,
-      taskDescription: null,
-      approved: null,
-      repairRounds: 0,
-      error: "stopped by /stop",
-      mode: "loop",
-      loopRound: input.attemptedRuns,
-      loopCompletedRuns: input.completedRuns,
-      loopMaxRuns: input.loopMaxRuns,
-      loopDeadlineAt: input.loopDeadlineAtIso,
-      lastGitCommitSummary: null,
-      lastGitCommitAt: null,
-    });
-    await sendAutoDevNoticeBestEffort(deps, 
-      input.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 循环执行已停止。
-- completedRuns: ${input.completedRuns}`,
-        `[CodeHarbor] AutoDev loop stopped.
-- completedRuns: ${input.completedRuns}`,
-      ),
-    );
-    return true;
-  }
-
-  if (deps.consumePendingAutoDevLoopStopRequest(input.sessionKey)) {
-    deps.autoDevMetrics.recordLoopStop("stop_requested");
-    const endedAtIso = new Date().toISOString();
-    deps.setAutoDevSnapshot(input.sessionKey, {
-      state: "succeeded",
-      startedAt: new Date(input.loopStartedAt).toISOString(),
-      endedAt: endedAtIso,
-      taskId: null,
-      taskDescription: null,
-      approved: null,
-      repairRounds: 0,
-      error: null,
-      mode: "loop",
-      loopRound: input.attemptedRuns,
-      loopCompletedRuns: input.completedRuns,
-      loopMaxRuns: input.loopMaxRuns,
-      loopDeadlineAt: input.loopDeadlineAtIso,
-      lastGitCommitSummary: null,
-      lastGitCommitAt: null,
-    });
-    await sendAutoDevNoticeBestEffort(deps, 
-      input.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 循环执行已按请求停止（当前任务已完成）。
-- attemptedRuns: ${input.attemptedRuns}
-- completedRuns: ${input.completedRuns}`,
-        `[CodeHarbor] AutoDev loop stopped as requested (current task is complete).
-- attemptedRuns: ${input.attemptedRuns}
-- completedRuns: ${input.completedRuns}`,
-      ),
-    );
-    return true;
-  }
-
-  return false;
 }
