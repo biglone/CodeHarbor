@@ -9,6 +9,11 @@ import { loadAutoDevContext, statusToSymbol, summarizeAutoDevTasks } from "../wo
 import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError } from "./helpers";
 import { byOutputLanguage } from "./output-language";
+import {
+  assertAutoDevTargetDirectory,
+  evaluateAutoDevLoopStopPermission,
+  resolveAutoDevTargetPath,
+} from "./autodev-control-parser";
 import type { WorkflowDiagRunRecord } from "./workflow-diag";
 
 interface RoleSkillStatusLike {
@@ -209,14 +214,19 @@ export async function handleAutoDevLoopStopCommand(
   input: AutoDevControlCommandInput,
 ): Promise<void> {
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
-  if (!deps.activeAutoDevLoopSessions.has(input.sessionKey)) {
+  const stopPermission = evaluateAutoDevLoopStopPermission({
+    activeAutoDevLoopSessions: deps.activeAutoDevLoopSessions,
+    pendingAutoDevLoopStopRequests: deps.pendingAutoDevLoopStopRequests,
+    sessionKey: input.sessionKey,
+  });
+  if (stopPermission === "no_active_loop") {
     await deps.sendNotice(
       input.message.conversationId,
       localize("[CodeHarbor] 当前没有运行中的 AutoDev 循环任务。", "[CodeHarbor] No running AutoDev loop task."),
     );
     return;
   }
-  if (deps.pendingAutoDevLoopStopRequests.has(input.sessionKey)) {
+  if (stopPermission === "already_requested") {
     await deps.sendNotice(
       input.message.conversationId,
       localize(
@@ -337,9 +347,9 @@ export async function handleAutoDevWorkdirCommand(
     return;
   }
 
-  const resolved = resolveTargetPath(input.path, input.roomWorkdir);
+  const resolved = resolveAutoDevTargetPath(input.path, input.roomWorkdir);
   try {
-    await assertDirectoryExists(resolved);
+    await assertAutoDevTargetDirectory(resolved);
   } catch (error) {
     await deps.sendNotice(
       input.message.conversationId,
@@ -373,9 +383,9 @@ export async function handleAutoDevInitCommand(
   const noneText = localize("无", "none");
   const modeText = input.dryRun ? localize("dry-run", "dry-run") : localize("apply", "apply");
   const baseWorkdir = deps.getAutoDevWorkdirOverride(input.sessionKey) ?? input.roomWorkdir;
-  const targetWorkdir = resolveTargetPath(input.path, baseWorkdir);
+  const targetWorkdir = resolveAutoDevTargetPath(input.path, baseWorkdir);
   try {
-    await assertDirectoryExists(targetWorkdir);
+    await assertAutoDevTargetDirectory(targetWorkdir);
     if (!input.dryRun) {
       deps.setAutoDevWorkdirOverride(input.sessionKey, targetWorkdir);
     }
@@ -589,41 +599,6 @@ function compactNullableText(value: string | null | undefined): string | null {
     return null;
   }
   return compacted.length > 180 ? `${compacted.slice(0, 177)}...` : compacted;
-}
-
-async function assertDirectoryExists(targetPath: string): Promise<void> {
-  const stats = await fs.stat(targetPath);
-  if (!stats.isDirectory()) {
-    throw new Error(`target is not a directory: ${targetPath}`);
-  }
-}
-
-function resolveTargetPath(rawPath: string | null, baseWorkdir: string): string {
-  const normalized = (rawPath ?? "").trim();
-  if (!normalized) {
-    return path.resolve(baseWorkdir);
-  }
-  if (normalized === "~") {
-    return os.homedir();
-  }
-  if (normalized.startsWith("~/")) {
-    return path.join(os.homedir(), normalized.slice(2));
-  }
-  if (path.isAbsolute(normalized)) {
-    return path.resolve(normalized);
-  }
-  const resolvedInBase = path.resolve(baseWorkdir, normalized);
-  if (looksLikeProjectName(normalized)) {
-    const resolvedSibling = path.resolve(baseWorkdir, "..", normalized);
-    if (!existsSync(resolvedInBase) && existsSync(resolvedSibling)) {
-      return resolvedSibling;
-    }
-  }
-  return resolvedInBase;
-}
-
-function looksLikeProjectName(value: string): boolean {
-  return value.length > 0 && !value.includes("/") && !value.includes("\\");
 }
 
 interface InitSourceDoc {
