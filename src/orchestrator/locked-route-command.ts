@@ -5,6 +5,7 @@ import {
   dispatchAutoDevCommandWithRegistry,
   type AutoDevCommandHandlerRegistry,
 } from "./autodev-command-handler-registry";
+import { withAutoDevControlEnvelope } from "./autodev-control-response";
 
 type RouteDecisionLike =
   | { kind: "ignore" }
@@ -154,8 +155,13 @@ function buildAutoDevInvalidCommandNotice(action: string | null, option: string 
   const actionLabel = action?.trim() || "(empty)";
   const optionLabel = option?.trim();
   const detail = optionLabel ? `${actionLabel} ${optionLabel}` : actionLabel;
-  return `[CodeHarbor] 无效的 /autodev 子命令（invalid /autodev subcommand）: ${detail}
+  return withAutoDevControlEnvelope({
+    kind: "validation_error",
+    code: "AUTODEV_CONTROL_INVALID_SUBCOMMAND",
+    text: `[CodeHarbor] 无效的 /autodev 子命令（invalid /autodev subcommand）: ${detail}
 - usage: /autodev status | /autodev run [taskId] | /autodev stop | /autodev reconcile
 - usage: /autodev workdir [path]|status|clear | /autodev init [path] [--from file] [--dry-run] [--force]
-- usage: /autodev progress [on|off|status] | /autodev content [on|off|status] | /autodev skills [on|off|summary|progressive|full|status]`;
+- usage: /autodev progress [on|off|status] | /autodev content [on|off|status] | /autodev skills [on|off|summary|progressive|full|status]`,
+    next: "Use /autodev status to inspect runtime state, then retry with a valid subcommand.",
+  });
 }

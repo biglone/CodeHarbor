@@ -130,32 +130,57 @@ describe("AutoDev control command helpers", () => {
     expect(notices).toMatchInlineSnapshot(`
       [
         "[CodeHarbor] AutoDev progress echo settings
+      - status: success
+      - code: AUTODEV_CONTROL_PROGRESS_STATUS
       - detailedProgress: on
       - default: on
       - usage: /autodev progress on|off|status",
         "[CodeHarbor] AutoDev progress echo updated
+      - status: success
+      - code: AUTODEV_CONTROL_PROGRESS_SET
       - detailedProgress: off
       - default: on
-      - session: session-baseline",
+      - session: session-baseline
+      - next: Run /autodev status to verify current runtime and echo settings.",
         "[CodeHarbor] AutoDev progress echo updated
+      - status: success
+      - code: AUTODEV_CONTROL_PROGRESS_SET
       - detailedProgress: on
       - default: on
-      - session: session-baseline",
+      - session: session-baseline
+      - next: Run /autodev status to verify current runtime and echo settings.",
         "[CodeHarbor] AutoDev stage output echo settings
+      - status: success
+      - code: AUTODEV_CONTROL_CONTENT_STATUS
       - stageOutputEcho: on
       - default: on
       - usage: /autodev content on|off|status",
         "[CodeHarbor] AutoDev stage output echo updated
+      - status: success
+      - code: AUTODEV_CONTROL_CONTENT_SET
       - stageOutputEcho: off
       - default: on
-      - session: session-baseline",
+      - session: session-baseline
+      - next: Run /autodev status to verify current runtime and stage output echo settings.",
         "[CodeHarbor] AutoDev stage output echo updated
+      - status: success
+      - code: AUTODEV_CONTROL_CONTENT_SET
       - stageOutputEcho: on
       - default: on
-      - session: session-baseline",
-        "[CodeHarbor] No running AutoDev loop task.",
-        "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.",
-        "[CodeHarbor] Stop request already received: loop will stop after current task and will not start next task.",
+      - session: session-baseline
+      - next: Run /autodev status to verify current runtime and stage output echo settings.",
+        "[CodeHarbor] No running AutoDev loop task.
+      - status: validation_error
+      - code: AUTODEV_CONTROL_STOP_NO_ACTIVE_LOOP
+      - next: Run /autodev run first, then send /autodev stop when needed.",
+        "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.
+      - status: success
+      - code: AUTODEV_CONTROL_STOP_ACCEPTED
+      - next: Run /autodev status to track stop-progress updates.",
+        "[CodeHarbor] Stop request already received: loop will stop after current task and will not start next task.
+      - status: validation_error
+      - code: AUTODEV_CONTROL_STOP_ALREADY_REQUESTED
+      - next: Run /autodev status to inspect loop state and remaining tasks.",
       ]
     `);
   });

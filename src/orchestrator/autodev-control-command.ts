@@ -9,6 +9,7 @@ import { loadAutoDevContext, statusToSymbol, summarizeAutoDevTasks } from "../wo
 import { healAutoDevTaskStatuses } from "./autodev-status-heal";
 import { formatError } from "./helpers";
 import { byOutputLanguage } from "./output-language";
+import { withAutoDevControlEnvelope } from "./autodev-control-response";
 import {
   assertAutoDevTargetDirectory,
   evaluateAutoDevLoopStopPermission,
@@ -91,16 +92,20 @@ export async function handleAutoDevProgressCommand(
   if (input.mode === "status") {
     await deps.sendNotice(
       input.message.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 过程回显设置
+      withAutoDevControlEnvelope({
+        kind: "success",
+        code: "AUTODEV_CONTROL_PROGRESS_STATUS",
+        text: localize(
+          `[CodeHarbor] AutoDev 过程回显设置
 - detailedProgress: ${current}
 - default: ${defaultMode}
 - usage: /autodev progress on|off|status`,
-        `[CodeHarbor] AutoDev progress echo settings
+          `[CodeHarbor] AutoDev progress echo settings
 - detailedProgress: ${current}
 - default: ${defaultMode}
 - usage: /autodev progress on|off|status`,
-      ),
+        ),
+      }),
     );
     return;
   }
@@ -109,16 +114,21 @@ export async function handleAutoDevProgressCommand(
   deps.setAutoDevDetailedProgressEnabled(input.sessionKey, enabled);
   await deps.sendNotice(
     input.message.conversationId,
-    localize(
-      `[CodeHarbor] AutoDev 过程回显已更新
+    withAutoDevControlEnvelope({
+      kind: "success",
+      code: "AUTODEV_CONTROL_PROGRESS_SET",
+      text: localize(
+        `[CodeHarbor] AutoDev 过程回显已更新
 - detailedProgress: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${input.sessionKey}`,
-      `[CodeHarbor] AutoDev progress echo updated
+        `[CodeHarbor] AutoDev progress echo updated
 - detailedProgress: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${input.sessionKey}`,
-    ),
+      ),
+      next: localize("执行 /autodev status 查看当前运行与回显设置。", "Run /autodev status to verify current runtime and echo settings."),
+    }),
   );
 }
 
@@ -132,16 +142,20 @@ export async function handleAutoDevContentCommand(
   if (input.mode === "status") {
     await deps.sendNotice(
       input.message.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 阶段内容回显设置
+      withAutoDevControlEnvelope({
+        kind: "success",
+        code: "AUTODEV_CONTROL_CONTENT_STATUS",
+        text: localize(
+          `[CodeHarbor] AutoDev 阶段内容回显设置
 - stageOutputEcho: ${current}
 - default: ${defaultMode}
 - usage: /autodev content on|off|status`,
-        `[CodeHarbor] AutoDev stage output echo settings
+          `[CodeHarbor] AutoDev stage output echo settings
 - stageOutputEcho: ${current}
 - default: ${defaultMode}
 - usage: /autodev content on|off|status`,
-      ),
+        ),
+      }),
     );
     return;
   }
@@ -150,16 +164,21 @@ export async function handleAutoDevContentCommand(
   deps.setAutoDevStageOutputEchoEnabled(input.sessionKey, enabled);
   await deps.sendNotice(
     input.message.conversationId,
-    localize(
-      `[CodeHarbor] AutoDev 阶段内容回显已更新
+    withAutoDevControlEnvelope({
+      kind: "success",
+      code: "AUTODEV_CONTROL_CONTENT_SET",
+      text: localize(
+        `[CodeHarbor] AutoDev 阶段内容回显已更新
 - stageOutputEcho: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${input.sessionKey}`,
-      `[CodeHarbor] AutoDev stage output echo updated
+        `[CodeHarbor] AutoDev stage output echo updated
 - stageOutputEcho: ${enabled ? "on" : "off"}
 - default: ${defaultMode}
 - session: ${input.sessionKey}`,
-    ),
+      ),
+      next: localize("执行 /autodev status 查看当前运行与阶段内容回显设置。", "Run /autodev status to verify current runtime and stage output echo settings."),
+    }),
   );
 }
 
@@ -222,17 +241,27 @@ export async function handleAutoDevLoopStopCommand(
   if (stopPermission === "no_active_loop") {
     await deps.sendNotice(
       input.message.conversationId,
-      localize("[CodeHarbor] 当前没有运行中的 AutoDev 循环任务。", "[CodeHarbor] No running AutoDev loop task."),
+      withAutoDevControlEnvelope({
+        kind: "validation_error",
+        code: "AUTODEV_CONTROL_STOP_NO_ACTIVE_LOOP",
+        text: localize("[CodeHarbor] 当前没有运行中的 AutoDev 循环任务。", "[CodeHarbor] No running AutoDev loop task."),
+        next: localize("先执行 /autodev run 启动任务后再发送 /autodev stop。", "Run /autodev run first, then send /autodev stop when needed."),
+      }),
     );
     return;
   }
   if (stopPermission === "already_requested") {
     await deps.sendNotice(
       input.message.conversationId,
-      localize(
-        "[CodeHarbor] 已收到停止请求：当前任务完成后会停止循环，不会启动下一任务。",
-        "[CodeHarbor] Stop request already received: loop will stop after current task and will not start next task.",
-      ),
+      withAutoDevControlEnvelope({
+        kind: "validation_error",
+        code: "AUTODEV_CONTROL_STOP_ALREADY_REQUESTED",
+        text: localize(
+          "[CodeHarbor] 已收到停止请求：当前任务完成后会停止循环，不会启动下一任务。",
+          "[CodeHarbor] Stop request already received: loop will stop after current task and will not start next task.",
+        ),
+        next: localize("执行 /autodev status 查看当前循环状态与剩余任务。", "Run /autodev status to inspect loop state and remaining tasks."),
+      }),
     );
     return;
   }
@@ -240,10 +269,15 @@ export async function handleAutoDevLoopStopCommand(
   deps.pendingAutoDevLoopStopRequests.add(input.sessionKey);
   await deps.sendNotice(
     input.message.conversationId,
-    localize(
-      "[CodeHarbor] 已收到停止请求：将等待当前任务执行完成后停止 AutoDev 循环。",
-      "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.",
-    ),
+    withAutoDevControlEnvelope({
+      kind: "success",
+      code: "AUTODEV_CONTROL_STOP_ACCEPTED",
+      text: localize(
+        "[CodeHarbor] 已收到停止请求：将等待当前任务执行完成后停止 AutoDev 循环。",
+        "[CodeHarbor] Stop request received: AutoDev loop will stop after current task completes.",
+      ),
+      next: localize("执行 /autodev status 可持续查看停止生效进度。", "Run /autodev status to track stop-progress updates."),
+    }),
   );
 }
 
@@ -265,16 +299,20 @@ export async function handleAutoDevReconcileCommand(
     if (healedStatuses.length === 0) {
       await deps.sendNotice(
         input.message.conversationId,
-        localize(
-          `[CodeHarbor] AutoDev 状态对账完成
+        withAutoDevControlEnvelope({
+          kind: "success",
+          code: "AUTODEV_CONTROL_RECONCILE_NO_CHANGE",
+          text: localize(
+            `[CodeHarbor] AutoDev 状态对账完成
 - changed: 0
 - result: no drift detected
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-          `[CodeHarbor] AutoDev reconcile completed
+            `[CodeHarbor] AutoDev reconcile completed
 - changed: 0
 - result: no drift detected
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-        ),
+          ),
+        }),
       );
       return;
     }
@@ -284,24 +322,33 @@ export async function handleAutoDevReconcileCommand(
       .join(", ");
     await deps.sendNotice(
       input.message.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 状态对账完成
+      withAutoDevControlEnvelope({
+        kind: "success",
+        code: "AUTODEV_CONTROL_RECONCILE_CHANGED",
+        text: localize(
+          `[CodeHarbor] AutoDev 状态对账完成
 - changed: ${healedStatuses.length}
 - changes: ${changedSummary}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-        `[CodeHarbor] AutoDev reconcile completed
+          `[CodeHarbor] AutoDev reconcile completed
 - changed: ${healedStatuses.length}
 - changes: ${changedSummary}
 - tasks: total=${summary.total}, pending=${summary.pending}, in_progress=${summary.inProgress}, completed=${summary.completed}, blocked=${summary.blocked}, cancelled=${summary.cancelled}`,
-      ),
+        ),
+      }),
     );
   } catch (error) {
     await deps.sendNotice(
       input.message.conversationId,
-      localize(
-        `[CodeHarbor] AutoDev 状态对账失败: ${formatError(error)}`,
-        `[CodeHarbor] AutoDev reconcile failed: ${formatError(error)}`,
-      ),
+      withAutoDevControlEnvelope({
+        kind: "error",
+        code: "AUTODEV_CONTROL_RECONCILE_FAILED",
+        text: localize(
+          `[CodeHarbor] AutoDev 状态对账失败: ${formatError(error)}`,
+          `[CodeHarbor] AutoDev reconcile failed: ${formatError(error)}`,
+        ),
+        next: localize("检查 TASK_LIST.md 与工作目录可访问性后重试 /autodev reconcile。", "Verify TASK_LIST.md and workdir accessibility, then retry /autodev reconcile."),
+      }),
     );
   }
 }
