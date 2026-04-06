@@ -350,7 +350,7 @@ codeharbor --version
 
 全局安装场景下，升级后会按平台尽力自动重启服务以让新版本立即生效：
 
-- Linux：重启活动的 `codeharbor(.service)` systemd 单元
+- Linux：重启活动的 `codeharbor*.service` systemd 单元（包含多实例单元）
 - macOS：尝试重启配置的 launchd jobs（默认 `com.codeharbor.main` / `com.codeharbor.admin`）
 - Windows：默认不自动重启，输出可复制的 PowerShell 手工重启命令
 

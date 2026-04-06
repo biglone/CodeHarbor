@@ -169,7 +169,7 @@ Install scheduled backup timer:
 npm install -g codeharbor@latest
 ```
 
-On Linux global install, postinstall performs best-effort service restart so upgrade can take effect immediately.
+On Linux global install, postinstall performs best-effort restart for active `codeharbor*.service` units (including multi-instance units) so upgrade can take effect immediately.
 
 ---
 

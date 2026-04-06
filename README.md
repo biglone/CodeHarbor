@@ -133,7 +133,7 @@ Notes:
 - `codeharbor service install --with-admin` and `install-linux-easy.sh --enable-admin-service` now install
   `/etc/sudoers.d/codeharbor-restart` for non-root service users, so Admin UI restart actions work out-of-box.
 - `npm install -g codeharbor@latest` now performs best-effort restart per platform:
-  - Linux: active `codeharbor(.service)` systemd units
+  - Linux: active `codeharbor*.service` systemd units (including multi-instance units)
   - macOS: configured launchd labels (`CODEHARBOR_LAUNCHD_MAIN_LABEL`, `CODEHARBOR_LAUNCHD_ADMIN_LABEL`)
   - Windows: safe fallback (prints manual PowerShell restart commands)
   - set `CODEHARBOR_SKIP_POSTINSTALL_RESTART=1` to disable postinstall restart attempts.

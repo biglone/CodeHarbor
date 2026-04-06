@@ -6,6 +6,7 @@ const { execFileSync } = require("node:child_process");
 const LOG_PREFIX = "[codeharbor postinstall]";
 const MAIN_SERVICE = "codeharbor.service";
 const ADMIN_SERVICE = "codeharbor-admin.service";
+const CODEHARBOR_SYSTEMD_UNIT_PATTERN = /^codeharbor(?:-admin)?(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?\.service$/;
 const DEFAULT_LAUNCHD_MAIN_LABEL = "com.codeharbor.main";
 const DEFAULT_LAUNCHD_ADMIN_LABEL = "com.codeharbor.admin";
 const SAFE_LAUNCHD_LABEL_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -46,12 +47,48 @@ function runCommand(file, args, options) {
   });
 }
 
-function listUnitFiles(unitName) {
+function listUnitFiles(unitNamePattern) {
   try {
-    return runCommand("systemctl", ["list-unit-files", unitName, "--no-legend", "--no-pager"]);
+    return runCommand("systemctl", ["list-unit-files", unitNamePattern, "--no-legend", "--no-pager"]);
   } catch {
     return "";
   }
+}
+
+function parseListedUnitName(line) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const [unitName] = trimmed.split(/\s+/);
+  return unitName || null;
+}
+
+function isCodeHarborSystemdUnitName(unitName) {
+  return CODEHARBOR_SYSTEMD_UNIT_PATTERN.test(unitName);
+}
+
+function listCodeHarborSystemdUnitCandidates() {
+  const names = new Set();
+  const output = listUnitFiles("codeharbor*.service").trim();
+  if (output) {
+    for (const line of output.split(/\r?\n/)) {
+      const unitName = parseListedUnitName(line);
+      if (!unitName || !isCodeHarborSystemdUnitName(unitName)) {
+        continue;
+      }
+      names.add(unitName);
+    }
+  }
+
+  // Keep legacy defaults as an explicit fallback for environments that do not expand wildcard patterns.
+  for (const legacyUnitName of [MAIN_SERVICE, ADMIN_SERVICE]) {
+    if (isUnitInstalled(legacyUnitName)) {
+      names.add(legacyUnitName);
+    }
+  }
+
+  return Array.from(names);
 }
 
 function isUnitInstalled(unitName) {
@@ -78,6 +115,15 @@ function restartUnit(unitName) {
   }
 
   runCommand("sudo", ["-n", "systemctl", "restart", unitName], {});
+}
+
+function compareSystemdUnitRestartOrder(left, right) {
+  const leftIsAdmin = left.startsWith("codeharbor-admin") ? 1 : 0;
+  const rightIsAdmin = right.startsWith("codeharbor-admin") ? 1 : 0;
+  if (leftIsAdmin !== rightIsAdmin) {
+    return leftIsAdmin - rightIsAdmin;
+  }
+  return left.localeCompare(right);
 }
 
 function sanitizeLaunchdLabel(value, fallback) {
@@ -125,8 +171,8 @@ function runLinuxRestart() {
     return;
   }
 
-  const candidates = [MAIN_SERVICE, ADMIN_SERVICE].filter((unitName) => isUnitInstalled(unitName));
-  const activeUnits = candidates.filter((unitName) => isUnitActive(unitName));
+  const candidates = listCodeHarborSystemdUnitCandidates();
+  const activeUnits = candidates.filter((unitName) => isUnitActive(unitName)).sort(compareSystemdUnitRestartOrder);
   if (activeUnits.length === 0) {
     return;
   }
@@ -151,7 +197,10 @@ function runLinuxRestart() {
       const message = failure.error instanceof Error ? failure.error.message : String(failure.error);
       console.warn(`${LOG_PREFIX} failed to restart ${failure.unitName}: ${message}`);
     }
-    console.warn(`${LOG_PREFIX} run "codeharbor service restart --with-admin" manually if needed.`);
+    const failedUnits = failed.map((failure) => failure.unitName).join(" ");
+    console.warn(
+      `${LOG_PREFIX} run "codeharbor service restart --with-admin" or "sudo -n systemctl restart ${failedUnits}" manually if needed.`,
+    );
   }
 }
 
