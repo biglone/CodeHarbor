@@ -6,10 +6,15 @@ import { byOutputLanguage } from "./output-language";
 
 export type AutoDevLoopBoundaryStopReason = "max_runs" | "deadline";
 
-export interface AutoDevLoopBoundaryDecision {
-  shouldStop: boolean;
-  reason: AutoDevLoopBoundaryStopReason | null;
-}
+export type AutoDevLoopBoundaryDecision =
+  | {
+      shouldStop: true;
+      reason: AutoDevLoopBoundaryStopReason;
+    }
+  | {
+      shouldStop: false;
+      reason: null;
+    };
 
 export interface AutoDevLoopBoundaryInput {
   attemptedRuns: number;
