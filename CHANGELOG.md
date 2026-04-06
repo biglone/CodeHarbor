@@ -9,6 +9,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
 - regression coverage: add script-level test for version progression guard (`latest=0.1.10` rejects target `0.1.12`).
 
+## [0.1.95] - 2026-04-06
+
+- postinstall reliability: add regression tests for Linux postinstall restart script to verify multi-instance `codeharbor*.service` discovery/filtering and deterministic restart ordering.
+- guard behavior: add no-active-unit test case to ensure postinstall restart remains no-op when no CodeHarbor services are active.
+
 ## [0.1.94] - 2026-04-06
 
 - postinstall restart: Linux global install now restarts active `codeharbor*.service` units (including multi-instance services like `codeharbor-main-hub.service`, `codeharbor-dev-main.service`, `codeharbor-review-guard.service`).
