@@ -42,6 +42,10 @@ import {
 } from "./autodev-loop-engine";
 import { executeAutoDevWorkflowStageWithTaskListGuard } from "./autodev-stage-executor";
 import { buildAutoDevSecondaryReviewHandoffNotice } from "./autodev-result-reporter";
+import {
+  evaluateAutoDevCompletionGate,
+  formatAutoDevCompletionGateReasons,
+} from "./autodev-completion-gate-policy";
 import type { WorkflowDiagEventRecord, WorkflowDiagRunRecord } from "./workflow-diag";
 
 export interface AutoDevRunSnapshot {
@@ -82,12 +86,6 @@ interface AutoDevFailurePolicyResult {
   task: AutoDevTask;
 }
 
-type AutoDevCompletionGateReason =
-  | "reviewer_not_approved"
-  | "validation_not_passed"
-  | "task_list_policy_violated"
-  | "auto_commit_not_committed";
-
 type AutoDevValidationFailureClass =
   | "strict_missing_structured_evidence"
   | "exit_codes_non_zero_unexpected"
@@ -101,11 +99,6 @@ interface AutoDevValidationInference {
   passed: boolean;
   failureClass: AutoDevValidationFailureClass | null;
   evidenceSource: AutoDevValidationEvidenceSource;
-}
-
-interface AutoDevCompletionGateResult {
-  passed: boolean;
-  reasons: AutoDevCompletionGateReason[];
 }
 
 interface TaskListMutationGuardResult {
@@ -1315,32 +1308,6 @@ function buildReviewerTaskListPolicyContextSummary(input: {
   ].join("\n");
 }
 
-function evaluateAutoDevCompletionGate(input: {
-  reviewerApproved: boolean;
-  validationPassed: boolean;
-  taskListPolicyPassed: boolean;
-  commitRequired: boolean;
-  gitCommit: AutoDevGitCommitResult;
-}): AutoDevCompletionGateResult {
-  const reasons: AutoDevCompletionGateReason[] = [];
-  if (!input.reviewerApproved) {
-    reasons.push("reviewer_not_approved");
-  }
-  if (!input.validationPassed) {
-    reasons.push("validation_not_passed");
-  }
-  if (!input.taskListPolicyPassed) {
-    reasons.push("task_list_policy_violated");
-  }
-  if (input.commitRequired && input.gitCommit.kind !== "committed") {
-    reasons.push("auto_commit_not_committed");
-  }
-  return {
-    passed: reasons.length === 0,
-    reasons,
-  };
-}
-
 function inferAutoDevValidation(result: MultiAgentWorkflowRunResult, strictMode: boolean): AutoDevValidationInference {
   const combined = `${result.output}\n${result.review}`;
   const structuredValidationStatus = parseStructuredValidationStatus(combined);
@@ -1571,28 +1538,6 @@ function hasExpectedNonZeroExitEvidence(text: string, nonZeroCodes: number[]): b
     return false;
   }
   return new Set(nonZeroCodes).size === 1;
-}
-
-function formatAutoDevCompletionGateReasons(
-  reasons: AutoDevCompletionGateReason[],
-  outputLanguage: OutputLanguage,
-): string {
-  if (reasons.length === 0) {
-    return "N/A";
-  }
-  const labels = reasons.map((reason) => {
-    if (reason === "reviewer_not_approved") {
-      return outputLanguage === "en" ? "reviewer-not-approved" : "reviewer未批准";
-    }
-    if (reason === "validation_not_passed") {
-      return outputLanguage === "en" ? "validation-not-passed" : "验证未通过";
-    }
-    if (reason === "task_list_policy_violated") {
-      return outputLanguage === "en" ? "task-list-policy-violated" : "TASK_LIST写入策略违反";
-    }
-    return outputLanguage === "en" ? "auto-commit-not-committed" : "自动提交未成功";
-  });
-  return labels.join(", ");
 }
 
 function resolveAutoDevTask(
