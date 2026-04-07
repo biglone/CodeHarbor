@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.97] - 2026-04-07
+
+- autodev protocol: add structured secondary-review receipt contract `AUTODEV_SECONDARY_REVIEW_RECEIPT/v1`, including template generation/parsing and decision-to-task-state mapping.
+- orchestration writeback: route secondary-review receipts before normal workflow commands, validate sender target, and auto-write task status back to `TASK_LIST.md` with diagnostic trace events.
+- multi-instance safety: add cross-instance AutoDev task lock with stale-lock reclaim and loop pause notices when a task is already held by another instance.
+
 ## [0.1.96] - 2026-04-06
 
 - release policy hardening: enforce no-skip version progression in `Release NPM` and require failed pre-publish releases to retry the same version.
