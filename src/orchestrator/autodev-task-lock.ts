@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 const DEFAULT_STALE_MS = 6 * 60 * 60 * 1000;
-const DEFAULT_LOCK_ROOT_RELATIVE = ".codeharbor/autodev-task-locks";
+const DEFAULT_LOCK_ROOT_HOME_RELATIVE = ".codeharbor/autodev-task-locks";
 
 interface AutoDevTaskLockPayload {
   taskId: string;
@@ -50,7 +50,7 @@ export type AcquireAutoDevTaskLockResult =
 export async function acquireAutoDevTaskLock(
   input: AcquireAutoDevTaskLockInput,
 ): Promise<AcquireAutoDevTaskLockResult> {
-  const lockFilePath = buildAutoDevTaskLockFilePath(input.workdir, input.taskId);
+  const lockFilePath = await buildAutoDevTaskLockFilePath(input.workdir, input.taskId);
   const nowMs = normalizeNowMs(input.nowMs);
   const staleMs = normalizeStaleMs(input.staleMs);
 
@@ -136,12 +136,12 @@ export async function releaseAutoDevTaskLock(lock: AutoDevTaskLockHandle): Promi
   }
 }
 
-function buildAutoDevTaskLockFilePath(workdir: string, taskId: string): string {
+async function buildAutoDevTaskLockFilePath(workdir: string, taskId: string): Promise<string> {
+  const normalizedWorkdir = await resolveCanonicalWorkdir(workdir);
   const normalizedId = taskId.trim().toLowerCase();
   const safeFileName = normalizedId.replace(/[^a-z0-9._-]/g, "_") || "task";
-  const normalizedWorkdir = path.resolve(workdir).toLowerCase();
-  const workdirHash = createHash("sha256").update(normalizedWorkdir).digest("hex").slice(0, 16);
-  const rootDir = resolveAutoDevTaskLockRootDir(workdir);
+  const workdirHash = createHash("sha256").update(normalizedWorkdir.toLowerCase()).digest("hex").slice(0, 16);
+  const rootDir = resolveAutoDevTaskLockRootDir(normalizedWorkdir);
   return path.join(rootDir, workdirHash, `${safeFileName}.lock.json`);
 }
 
@@ -151,7 +151,16 @@ function resolveAutoDevTaskLockRootDir(workdir: string): string {
   if (envValue.length > 0) {
     return path.isAbsolute(envValue) ? envValue : path.resolve(workdir, envValue);
   }
-  return path.resolve(workdir, DEFAULT_LOCK_ROOT_RELATIVE);
+  return path.resolve(os.homedir(), DEFAULT_LOCK_ROOT_HOME_RELATIVE);
+}
+
+async function resolveCanonicalWorkdir(workdir: string): Promise<string> {
+  const resolved = path.resolve(workdir);
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 async function tryCreateLockFile(

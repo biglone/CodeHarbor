@@ -513,6 +513,17 @@ export async function runAutoDevCommand(
           });
         } catch (error) {
           if (error instanceof AutoDevTaskLockBusyError) {
+            deps.logger.info("AutoDev loop paused by task lock conflict", {
+              taskId: error.taskId,
+              workdir: input.workdir,
+              sessionKey: input.sessionKey,
+              requestId: input.requestId,
+              conversationId: input.message.conversationId,
+              lockFilePath: error.lockFilePath,
+              holderSummary: error.holderSummary,
+              attemptedRuns,
+              completedRuns,
+            });
             deps.autoDevMetrics.recordLoopStop("task_incomplete");
             const endedAtIso = new Date().toISOString();
             deps.setAutoDevSnapshot(input.sessionKey, {
@@ -655,6 +666,17 @@ export async function runAutoDevCommand(
     loopDeadlineAt: activeContext.loopDeadlineAt,
   };
 
+  deps.logger.info("AutoDev task lock acquire begin", {
+    taskId: selectedTask.id,
+    workdir: input.workdir,
+    sessionKey: input.sessionKey,
+    requestId: input.requestId,
+    conversationId: input.message.conversationId,
+    mode: effectiveContext.mode,
+    loopRound: effectiveContext.loopRound,
+    loopCompletedRuns: effectiveContext.loopCompletedRuns,
+  });
+
   const taskLockResult = await acquireAutoDevTaskLock({
     workdir: input.workdir,
     taskId: selectedTask.id,
@@ -663,6 +685,16 @@ export async function runAutoDevCommand(
     conversationId: input.message.conversationId,
   });
   if (!taskLockResult.acquired) {
+    deps.logger.warn("AutoDev task lock conflict", {
+      taskId: selectedTask.id,
+      workdir: input.workdir,
+      sessionKey: input.sessionKey,
+      requestId: input.requestId,
+      conversationId: input.message.conversationId,
+      mode: effectiveContext.mode,
+      lockFilePath: taskLockResult.lockFilePath,
+      holderSummary: taskLockResult.holderSummary,
+    });
     if (effectiveContext.mode === "loop") {
       throw new AutoDevTaskLockBusyError(selectedTask.id, taskLockResult.lockFilePath, taskLockResult.holderSummary);
     }
@@ -683,6 +715,15 @@ export async function runAutoDevCommand(
   }
 
   const acquiredTaskLock = taskLockResult.lock;
+  deps.logger.info("AutoDev task lock acquired", {
+    taskId: selectedTask.id,
+    workdir: input.workdir,
+    sessionKey: input.sessionKey,
+    requestId: input.requestId,
+    conversationId: input.message.conversationId,
+    mode: effectiveContext.mode,
+    lockFilePath: acquiredTaskLock.filePath,
+  });
   try {
     if (effectiveContext.mode !== "loop") {
       const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
@@ -1201,7 +1242,36 @@ export async function runAutoDevCommand(
     throw error;
   }
   } finally {
-    await releaseAutoDevTaskLock(acquiredTaskLock);
+    deps.logger.info("AutoDev task lock release begin", {
+      taskId: acquiredTaskLock.taskId,
+      workdir: input.workdir,
+      sessionKey: input.sessionKey,
+      requestId: input.requestId,
+      conversationId: input.message.conversationId,
+      lockFilePath: acquiredTaskLock.filePath,
+    });
+    try {
+      await releaseAutoDevTaskLock(acquiredTaskLock);
+      deps.logger.info("AutoDev task lock released", {
+        taskId: acquiredTaskLock.taskId,
+        workdir: input.workdir,
+        sessionKey: input.sessionKey,
+        requestId: input.requestId,
+        conversationId: input.message.conversationId,
+        lockFilePath: acquiredTaskLock.filePath,
+      });
+    } catch (error) {
+      deps.logger.warn("AutoDev task lock release failed", {
+        taskId: acquiredTaskLock.taskId,
+        workdir: input.workdir,
+        sessionKey: input.sessionKey,
+        requestId: input.requestId,
+        conversationId: input.message.conversationId,
+        lockFilePath: acquiredTaskLock.filePath,
+        error: formatError(error),
+      });
+      throw error;
+    }
   }
 }
 

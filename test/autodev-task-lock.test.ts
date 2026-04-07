@@ -85,7 +85,7 @@ describe("autodev task lock", () => {
     }
   });
 
-  it("stores lock file under workdir by default", async () => {
+  it("stores lock file under runtime home by default", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-task-lock-root-"));
     try {
       const previous = process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
@@ -100,7 +100,7 @@ describe("autodev task lock", () => {
         });
         expect(acquired.acquired).toBe(true);
         if (acquired.acquired) {
-          const expectedRoot = path.resolve(workdir, ".codeharbor/autodev-task-locks");
+          const expectedRoot = path.resolve(os.homedir(), ".codeharbor/autodev-task-locks");
           expect(acquired.lockFilePath.startsWith(`${expectedRoot}${path.sep}`)).toBe(true);
           await releaseAutoDevTaskLock(acquired.lock);
         }
@@ -145,6 +145,53 @@ describe("autodev task lock", () => {
     } finally {
       await fs.rm(workdir, { recursive: true, force: true });
       await fs.rm(customRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses canonical workdir path so symlink aliases share same lock", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-task-lock-realpath-"));
+    const realWorkdir = path.join(tempRoot, "workspace-real");
+    const aliasWorkdir = path.join(tempRoot, "workspace-alias");
+    await fs.mkdir(realWorkdir, { recursive: true });
+    await fs.symlink(realWorkdir, aliasWorkdir, "dir");
+
+    try {
+      const first = await acquireAutoDevTaskLock({
+        workdir: realWorkdir,
+        taskId: "T9.5",
+        sessionKey: "sess-real",
+        requestId: "req-real",
+        conversationId: "!room:example.com",
+      });
+      expect(first.acquired).toBe(true);
+
+      const second = await acquireAutoDevTaskLock({
+        workdir: aliasWorkdir,
+        taskId: "T9.5",
+        sessionKey: "sess-alias",
+        requestId: "req-alias",
+        conversationId: "!room:example.com",
+      });
+      expect(second.acquired).toBe(false);
+      expect(second.holderSummary).toContain("session=sess-real");
+
+      if (first.acquired) {
+        await releaseAutoDevTaskLock(first.lock);
+      }
+
+      const third = await acquireAutoDevTaskLock({
+        workdir: aliasWorkdir,
+        taskId: "T9.5",
+        sessionKey: "sess-alias-after-release",
+        requestId: "req-alias-after-release",
+        conversationId: "!room:example.com",
+      });
+      expect(third.acquired).toBe(true);
+      if (third.acquired) {
+        await releaseAutoDevTaskLock(third.lock);
+      }
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
 

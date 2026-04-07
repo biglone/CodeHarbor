@@ -81,6 +81,17 @@ function createRunnerDeps(notices: string[]): RunnerDeps {
   };
 }
 
+async function waitForNoticeIncludes(notices: string[], pattern: string, timeoutMs = 2_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (notices.some((entry) => entry.includes(pattern))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timeout waiting for notice: ${pattern}`);
+}
+
 describe("AutoDev runner", () => {
   it("skips status self-heal for nested loop task invocation", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-runner-self-heal-"));
@@ -283,6 +294,93 @@ describe("AutoDev runner", () => {
       const packageJson = JSON.parse(await fs.readFile(path.join(tempRoot, "package.json"), "utf8")) as { version: string };
       expect(packageJson.version).toBe("0.1.52");
     } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports lock conflict when the same task is started concurrently", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-runner-lock-conflict-"));
+    await fs.writeFile(path.join(tempRoot, "REQUIREMENTS.md"), "# Req\n", "utf8");
+    await fs.writeFile(
+      path.join(tempRoot, "TASK_LIST.md"),
+      [
+        "| 任务ID | 任务描述 | 状态 |",
+        "|--------|----------|------|",
+        "| T40.1 | concurrent lock conflict regression | ⬜ |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const noticesA: string[] = [];
+    const noticesB: string[] = [];
+    const depsA = createRunnerDeps(noticesA);
+    const depsB = createRunnerDeps(noticesB);
+
+    depsA.autoDevAutoCommit = false;
+    depsB.autoDevAutoCommit = false;
+
+    let secondWorkflowCalls = 0;
+    let releaseFirstRun: (() => void) | null = null;
+    const firstRunGate = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve;
+    });
+
+    depsA.runWorkflowCommand = async () => {
+      await firstRunGate;
+      return {
+        objective: "finish T40.1",
+        plan: "plan",
+        output: "validation_status: passed",
+        review: "APPROVED",
+        approved: true,
+        repairRounds: 0,
+        durationMs: 30,
+      };
+    };
+    depsB.runWorkflowCommand = async () => {
+      secondWorkflowCalls += 1;
+      return {
+        objective: "finish T40.1",
+        plan: "plan",
+        output: "validation_status: passed",
+        review: "APPROVED",
+        approved: true,
+        repairRounds: 0,
+        durationMs: 30,
+      };
+    };
+
+    const firstRunPromise = runAutoDevCommand(depsA, {
+      taskId: "T40.1",
+      sessionKey: "sess-lock-a",
+      message: makeInbound({
+        text: "/autodev run T40.1",
+        eventId: "$autodev-lock-a",
+      }),
+      requestId: "req-autodev-lock-a",
+      workdir: tempRoot,
+    });
+
+    try {
+      await waitForNoticeIncludes(noticesA, "AutoDev started task T40.1");
+
+      await runAutoDevCommand(depsB, {
+        taskId: "T40.1",
+        sessionKey: "sess-lock-b",
+        message: makeInbound({
+          text: "/autodev run T40.1",
+          eventId: "$autodev-lock-b",
+        }),
+        requestId: "req-autodev-lock-b",
+        workdir: tempRoot,
+      });
+
+      expect(noticesB.some((text) => text.includes("AutoDev task lock conflict"))).toBe(true);
+      expect(noticesB.some((text) => text.includes("AutoDev started task T40.1"))).toBe(false);
+      expect(secondWorkflowCalls).toBe(0);
+    } finally {
+      releaseFirstRun?.();
+      await firstRunPromise;
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });

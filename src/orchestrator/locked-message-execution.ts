@@ -353,6 +353,24 @@ export async function executeLockedMessage(
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
   }
 
+  if (autoDevCommand) {
+    deps.logger.warn("AutoDev command dispatch fell through; suppressing chat fallback", {
+      requestId: input.requestId,
+      eventId: input.message.eventId,
+      sessionKey: input.sessionKey,
+      commandKind: autoDevCommand.kind,
+      routePrompt: route.prompt,
+      queueWaitMs,
+    });
+    await deps.sendNotice(
+      input.message.conversationId,
+      `[CodeHarbor] AutoDev command routing mismatch (kind=${autoDevCommand.kind}); chat fallback is blocked.
+- next: retry with /autodev status or /autodev run`,
+    );
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+  }
+
   await deps.executeChatRun({
     message: input.message,
     receivedAt: input.receivedAt,
