@@ -724,6 +724,7 @@ export async function runAutoDevCommand(
     mode: effectiveContext.mode,
     lockFilePath: acquiredTaskLock.filePath,
   });
+  let taskLockReleaseError: unknown = null;
   try {
     if (effectiveContext.mode !== "loop") {
       const preflightFailed = await failAutoDevOnGitPreflightError(deps, {
@@ -1270,8 +1271,12 @@ export async function runAutoDevCommand(
         lockFilePath: acquiredTaskLock.filePath,
         error: formatError(error),
       });
-      throw error;
+      taskLockReleaseError = error;
     }
+  }
+
+  if (taskLockReleaseError != null) {
+    throw taskLockReleaseError;
   }
 }
 
