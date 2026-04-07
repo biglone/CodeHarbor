@@ -8,6 +8,11 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.98] - 2026-04-07
+
+- release cadence: publish follow-up patch release without version skipping, keeping npm/tag progression continuous after `0.1.97`.
+- verification: revalidated cross-instance AutoDev task lock behavior in live Matrix multi-instance flow (`acquired`/`conflict`/`released` telemetry path).
+
 ## [0.1.97] - 2026-04-07
 
 - autodev protocol: add structured secondary-review receipt contract `AUTODEV_SECONDARY_REVIEW_RECEIPT/v1`, including template generation/parsing and decision-to-task-state mapping.
