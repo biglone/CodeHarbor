@@ -320,13 +320,12 @@ describe("AutoDev runner", () => {
     depsB.autoDevAutoCommit = false;
 
     let secondWorkflowCalls = 0;
-    let releaseFirstRun: (() => void) | null = null;
-    const firstRunGate = new Promise<void>((resolve) => {
-      releaseFirstRun = resolve;
-    });
+    const firstRunGate = { released: false };
 
     depsA.runWorkflowCommand = async () => {
-      await firstRunGate;
+      while (!firstRunGate.released) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
       return {
         objective: "finish T40.1",
         plan: "plan",
@@ -379,7 +378,7 @@ describe("AutoDev runner", () => {
       expect(noticesB.some((text) => text.includes("AutoDev started task T40.1"))).toBe(false);
       expect(secondWorkflowCalls).toBe(0);
     } finally {
-      releaseFirstRun?.();
+      firstRunGate.released = true;
       await firstRunPromise;
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
