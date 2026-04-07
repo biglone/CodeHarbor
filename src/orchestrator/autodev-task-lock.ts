@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 const DEFAULT_STALE_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_LOCK_ROOT_RELATIVE = ".codeharbor/autodev-task-locks";
 
 interface AutoDevTaskLockPayload {
   taskId: string;
@@ -140,7 +141,17 @@ function buildAutoDevTaskLockFilePath(workdir: string, taskId: string): string {
   const safeFileName = normalizedId.replace(/[^a-z0-9._-]/g, "_") || "task";
   const normalizedWorkdir = path.resolve(workdir).toLowerCase();
   const workdirHash = createHash("sha256").update(normalizedWorkdir).digest("hex").slice(0, 16);
-  return path.join(os.tmpdir(), "codeharbor-autodev-task-locks", workdirHash, `${safeFileName}.lock.json`);
+  const rootDir = resolveAutoDevTaskLockRootDir(workdir);
+  return path.join(rootDir, workdirHash, `${safeFileName}.lock.json`);
+}
+
+function resolveAutoDevTaskLockRootDir(workdir: string): string {
+  const envRaw = process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+  const envValue = typeof envRaw === "string" ? envRaw.trim() : "";
+  if (envValue.length > 0) {
+    return path.isAbsolute(envValue) ? envValue : path.resolve(workdir, envValue);
+  }
+  return path.resolve(workdir, DEFAULT_LOCK_ROOT_RELATIVE);
 }
 
 async function tryCreateLockFile(

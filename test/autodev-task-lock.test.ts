@@ -84,4 +84,68 @@ describe("autodev task lock", () => {
       await fs.rm(workdir, { recursive: true, force: true });
     }
   });
+
+  it("stores lock file under workdir by default", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-task-lock-root-"));
+    try {
+      const previous = process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+      delete process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+      try {
+        const acquired = await acquireAutoDevTaskLock({
+          workdir,
+          taskId: "T9.3",
+          sessionKey: "sess-root-default",
+          requestId: "req-root-default",
+          conversationId: "!room:example.com",
+        });
+        expect(acquired.acquired).toBe(true);
+        if (acquired.acquired) {
+          const expectedRoot = path.resolve(workdir, ".codeharbor/autodev-task-locks");
+          expect(acquired.lockFilePath.startsWith(`${expectedRoot}${path.sep}`)).toBe(true);
+          await releaseAutoDevTaskLock(acquired.lock);
+        }
+      } finally {
+        if (typeof previous === "string") {
+          process.env.AUTODEV_TASK_LOCK_ROOT_DIR = previous;
+        } else {
+          delete process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+        }
+      }
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports AUTODEV_TASK_LOCK_ROOT_DIR override", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-task-lock-env-"));
+    const customRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-autodev-task-lock-custom-root-"));
+    try {
+      const previous = process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+      process.env.AUTODEV_TASK_LOCK_ROOT_DIR = customRoot;
+      try {
+        const acquired = await acquireAutoDevTaskLock({
+          workdir,
+          taskId: "T9.4",
+          sessionKey: "sess-root-env",
+          requestId: "req-root-env",
+          conversationId: "!room:example.com",
+        });
+        expect(acquired.acquired).toBe(true);
+        if (acquired.acquired) {
+          expect(acquired.lockFilePath.startsWith(`${customRoot}${path.sep}`)).toBe(true);
+          await releaseAutoDevTaskLock(acquired.lock);
+        }
+      } finally {
+        if (typeof previous === "string") {
+          process.env.AUTODEV_TASK_LOCK_ROOT_DIR = previous;
+        } else {
+          delete process.env.AUTODEV_TASK_LOCK_ROOT_DIR;
+        }
+      }
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+      await fs.rm(customRoot, { recursive: true, force: true });
+    }
+  });
+
 });
