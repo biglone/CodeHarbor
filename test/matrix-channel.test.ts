@@ -135,6 +135,15 @@ function createMediaResponse(body = "media-payload"): Response {
   } as unknown as Response;
 }
 
+function createUploadResponse(contentUri = "mxc://example.com/uploaded"): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({ content_uri: contentUri }),
+  } as unknown as Response;
+}
+
 describe("MatrixChannel", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -608,6 +617,45 @@ describe("MatrixChannel", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toContain("/send/m.room.message/");
 
     await channel.stop();
+  });
+
+  it("uploads local file then sends Matrix file event", async () => {
+    const client = new FakeMatrixClient();
+    client.startClient.mockImplementation(() => {
+      client.emit("sync", "PREPARED");
+    });
+    createClientMock.mockReturnValue(client);
+    fetchMock
+      .mockResolvedValueOnce(createUploadResponse("mxc://example.com/file-123"))
+      .mockResolvedValueOnce(createSendResponse("$file-event"));
+
+    const tempDir = await fs.mkdtemp(`${process.cwd()}/tmp-matrix-send-file-`);
+    const localFile = `${tempDir}/artifact.txt`;
+    await fs.writeFile(localFile, "artifact-content", "utf8");
+
+    try {
+      const channel = new MatrixChannel(config as never, logger as never);
+      await channel.start(async (_message: unknown) => {});
+
+      await channel.sendFile("!room:example.com", localFile);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/_matrix/media/v3/upload");
+      const sendPayload = JSON.parse(
+        String((fetchMock.mock.calls[1] as [string, RequestInit])[1]?.body ?? "{}"),
+      ) as Record<string, unknown>;
+      expect(sendPayload).toMatchObject({
+        msgtype: "m.file",
+        body: "artifact.txt",
+        filename: "artifact.txt",
+        url: "mxc://example.com/file-123",
+      });
+      expect((sendPayload.info as Record<string, unknown>)?.size).toBe(16);
+
+      await channel.stop();
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("treats HTTP 530 as retryable for Matrix sends", async () => {

@@ -692,6 +692,7 @@ export class Orchestrator {
       getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
       rateLimiter: this.rateLimiter,
       sendNotice: this.channel.sendNotice.bind(this.channel),
+      sendFile: this.channel.sendFile ? this.channel.sendFile.bind(this.channel) : null,
       backendHandlers: {
         classifyBackendTaskType,
         resolveSessionBackendDecision: this.resolveSessionBackendDecision.bind(this),

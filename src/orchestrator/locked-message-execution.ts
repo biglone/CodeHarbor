@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { Logger } from "../logger";
 import type { RequestOutcomeMetric } from "../metrics";
 import type { RateLimitDecision } from "../rate-limiter";
@@ -10,6 +12,9 @@ import { buildRateLimitNotice } from "./workflow-status";
 import { handleLockedRouteCommand, type AutoDevCommandLike, type WorkflowCommandLike } from "./locked-route-command";
 import { dispatchAutoDevCommandWithRegistry, type AutoDevCommandHandlerRegistry } from "./autodev-command-handler-registry";
 import { tryEnqueueQueuedInboundRequest } from "./queue-enqueue";
+import { formatError } from "./helpers";
+import { formatByteSize } from "./misc-utils";
+import { parseFileSendIntent, resolveRequestedFile } from "./file-send-intent";
 
 type RouteDecisionLike =
   | { kind: "ignore" }
@@ -95,6 +100,7 @@ interface ExecuteLockedMessageDeps {
   } | null;
   tryAcquireRateLimit: (input: { userId: string; roomId: string }) => RateLimitDecision;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
+  sendFile: ((conversationId: string, filePath: string, options?: { fileName?: string; mimeType?: string | null }) => Promise<void>) | null;
   classifyBackendTaskType: (
     workflowCommand: WorkflowCommandLike,
     autoDevCommand: AutoDevCommandLike,
@@ -240,6 +246,21 @@ export async function executeLockedMessage(
   }
   if (route.kind !== "execute") {
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+  }
+
+  const fileSendIntent = parseFileSendIntent(route.prompt);
+  if (fileSendIntent) {
+    return await executeSemanticFileSendRequest(
+      deps,
+      {
+        message: input.message,
+        requestId: input.requestId,
+        sessionKey: input.sessionKey,
+        queueWaitMs,
+        workdir: roomConfig.workdir,
+        intent: fileSendIntent,
+      },
+    );
   }
 
   const queueEnqueueResult = tryEnqueueQueuedInboundRequest(
@@ -391,4 +412,130 @@ export async function executeLockedMessage(
     },
   });
   return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+}
+
+async function executeSemanticFileSendRequest(
+  deps: ExecuteLockedMessageDeps,
+  input: {
+    message: InboundMessage;
+    requestId: string;
+    sessionKey: string;
+    queueWaitMs: number;
+    workdir: string;
+    intent: FileSendIntentLike;
+  },
+): Promise<ExecuteLockedMessageResult> {
+  const rateDecision = deps.tryAcquireRateLimit({
+    userId: input.message.senderId,
+    roomId: input.message.conversationId,
+  });
+  if (!rateDecision.allowed) {
+    deps.recordRequestMetrics("rate_limited", input.queueWaitMs, 0, 0);
+    await deps.sendNotice(input.message.conversationId, buildRateLimitNotice(rateDecision));
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    deps.logger.warn("File send request rejected by rate limiter", {
+      requestId: input.requestId,
+      sessionKey: input.sessionKey,
+      reason: rateDecision.reason,
+      retryAfterMs: rateDecision.retryAfterMs ?? null,
+      queueWaitMs: input.queueWaitMs,
+      requestedName: input.intent.requestedName,
+    });
+    return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+  }
+
+  const executionStartedAt = Date.now();
+  let sendDurationMs = 0;
+  try {
+    if (!deps.sendFile) {
+      await deps.sendNotice(
+        input.message.conversationId,
+        "[CodeHarbor] 已识别“发送文件”请求，但当前通道未启用文件附件发送能力。",
+      );
+      deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
+      deps.markEventProcessed(input.sessionKey, input.message.eventId);
+      return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+    }
+
+    const resolved = await resolveRequestedFile({
+      workdir: input.workdir,
+      requestedName: input.intent.requestedName,
+    });
+    if (resolved.status === "workdir_missing") {
+      await deps.sendNotice(
+        input.message.conversationId,
+        `[CodeHarbor] 当前工作目录不可用，无法发送文件。\n- workdir: ${input.workdir}`,
+      );
+      deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
+      deps.markEventProcessed(input.sessionKey, input.message.eventId);
+      return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+    }
+    if (resolved.status === "not_found" || !resolved.file) {
+      const target = resolved.requestedName ?? "（未指定文件名）";
+      await deps.sendNotice(
+        input.message.conversationId,
+        `[CodeHarbor] 未找到可发送的文件。\n- target: ${target}\n- workdir: ${input.workdir}`,
+      );
+      deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
+      deps.markEventProcessed(input.sessionKey, input.message.eventId);
+      return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+    }
+    if (resolved.status === "too_large") {
+      await deps.sendNotice(
+        input.message.conversationId,
+        `[CodeHarbor] 文件过大，已拒绝发送。\n- file: ${resolved.file.relativePath}\n- size: ${formatByteSize(resolved.file.sizeBytes)}\n- limit: ${formatByteSize(resolved.maxBytes)}`,
+      );
+      deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
+      deps.markEventProcessed(input.sessionKey, input.message.eventId);
+      return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+    }
+
+    const sendStartedAt = Date.now();
+    await deps.sendFile(
+      input.message.conversationId,
+      resolved.file.absolutePath,
+      {
+        fileName: path.basename(resolved.file.absolutePath),
+      },
+    );
+    sendDurationMs = Date.now() - sendStartedAt;
+    await deps.sendNotice(
+      input.message.conversationId,
+      `[CodeHarbor] 文件已发送。\n- file: ${resolved.file.relativePath}\n- size: ${formatByteSize(resolved.file.sizeBytes)}`,
+    );
+    deps.recordRequestMetrics("success", input.queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    deps.logger.info("Semantic file send request completed", {
+      requestId: input.requestId,
+      sessionKey: input.sessionKey,
+      queueWaitMs: input.queueWaitMs,
+      sendDurationMs,
+      requestedName: input.intent.requestedName,
+      resolvedFile: resolved.file.relativePath,
+      resolvedSizeBytes: resolved.file.sizeBytes,
+      workdir: input.workdir,
+    });
+    return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+  } catch (error) {
+    await deps.sendNotice(
+      input.message.conversationId,
+      `[CodeHarbor] 文件发送失败: ${formatError(error)}`,
+    );
+    deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
+    deps.markEventProcessed(input.sessionKey, input.message.eventId);
+    deps.logger.error("Semantic file send request failed", {
+      requestId: input.requestId,
+      sessionKey: input.sessionKey,
+      requestedName: input.intent.requestedName,
+      workdir: input.workdir,
+      error: formatError(error),
+    });
+    return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
+  } finally {
+    rateDecision.release?.();
+  }
+}
+
+interface FileSendIntentLike {
+  requestedName: string | null;
 }

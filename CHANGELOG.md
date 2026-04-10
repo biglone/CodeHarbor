@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.99] - 2026-04-10
+
+- matrix semantic delivery: add natural-language intent handling for file-return requests (for example `把生成的 result.mp4 文件发送给我`) in locked message routing.
+- matrix media response: add channel-side local file upload + `m.file`/media event sending so bot can return matched local artifacts directly into the room.
+- file resolution safety: add bounded workdir scanning with path-scope guardrails, hidden/system directory skips, recency fallback for generic requests, and size-limit rejection notices.
+- tests/docs: add regression coverage for intent parsing + locked-route file send + Matrix file-event payload, and document the new conversational file-delivery behavior in README.
+
 ## [0.1.98] - 2026-04-07
 
 - release cadence: publish follow-up patch release without version skipping, keeping npm/tag progression continuous after `0.1.97`.

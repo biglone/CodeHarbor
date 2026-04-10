@@ -24,6 +24,7 @@ interface LockedMessageContextInput {
   getTaskQueueStateStore: LockedMessageDispatchContext["getTaskQueueStateStore"];
   tryAcquireRateLimit: LockedMessageDispatchContext["tryAcquireRateLimit"];
   sendNotice: LockedMessageDispatchContext["sendNotice"];
+  sendFile: LockedMessageDispatchContext["sendFile"];
   classifyBackendTaskType: LockedMessageDispatchContext["classifyBackendTaskType"];
   resolveSessionBackendDecision: LockedMessageDispatchContext["resolveSessionBackendDecision"];
   prepareBackendRuntimeForSession: LockedMessageDispatchContext["prepareBackendRuntimeForSession"];
@@ -59,6 +60,7 @@ export function buildLockedMessageDispatchContext(
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: input.tryAcquireRateLimit,
     sendNotice: input.sendNotice,
+    sendFile: input.sendFile,
     classifyBackendTaskType: input.classifyBackendTaskType,
     resolveSessionBackendDecision: input.resolveSessionBackendDecision,
     prepareBackendRuntimeForSession: input.prepareBackendRuntimeForSession,
@@ -99,6 +101,7 @@ interface LockedMessageRuntimeContextInput {
     tryAcquire: LockedMessageDispatchContext["tryAcquireRateLimit"];
   };
   sendNotice: LockedMessageDispatchContext["sendNotice"];
+  sendFile: LockedMessageDispatchContext["sendFile"];
   backendHandlers: Pick<
     LockedMessageDispatchContext,
     | "classifyBackendTaskType"
@@ -138,6 +141,7 @@ export function buildLockedMessageDispatchContextFromRuntime(
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     tryAcquireRateLimit: (request) => input.rateLimiter.tryAcquire(request),
     sendNotice: input.sendNotice,
+    sendFile: input.sendFile,
     classifyBackendTaskType: input.backendHandlers.classifyBackendTaskType,
     resolveSessionBackendDecision: input.backendHandlers.resolveSessionBackendDecision,
     prepareBackendRuntimeForSession: input.backendHandlers.prepareBackendRuntimeForSession,

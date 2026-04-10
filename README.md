@@ -33,6 +33,7 @@ Quick feedback:
 - CLI-compat mode (`cli_compat_mode`) for minimal prompt rewriting + raw event passthrough
 - Image attachment metadata passthrough from Matrix events into prompt context
 - Voice attachment transcription (local Whisper/OpenAI fallback)
+- Semantic file-delivery intent (for example: “把生成的 xxx 文件发送给我”)
 - Request observability (request_id, queue/exec/send durations, status counters)
 - NPM-distributed CLI (`codeharbor`)
 
@@ -668,6 +669,10 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
     - short mobile-friendly flow: `//autodev init StrawBerry` -> `//autodev run`
     - omit `--from` to auto-discover design/spec docs in project; use `--from` to force one source file
   - `/autodev skills [on|off|summary|progressive|full|status]` control role-skill injection and disclosure mode per session
+- Natural-language file delivery
+  - supports intent-style requests such as `把生成的 result.mp4 文件发送给我`
+  - bot resolves matching local file under current room workdir and sends it back as Matrix file message
+  - if no file name is specified (for example `把生成的文件发送给我`), bot picks the most recently updated file in workdir (with size guardrail)
 
 Version update check controls:
 

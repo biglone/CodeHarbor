@@ -31,6 +31,7 @@ import {
   type InboundHandler,
   type OutboundMultimodalAudioSummary,
   type OutboundMultimodalSummary,
+  type SendFileOptions,
   type SendMessageOptions,
 } from "./channel";
 
@@ -107,6 +108,38 @@ export class MatrixChannel implements Channel {
         index === chunks.length - 1 ? requestId : null,
       );
     }
+  }
+
+  async sendFile(conversationId: string, filePath: string, options?: SendFileOptions): Promise<void> {
+    if (!this.started) {
+      throw new Error("Matrix channel not started.");
+    }
+
+    const normalizedPath = filePath.trim();
+    if (!normalizedPath) {
+      throw new Error("File path cannot be empty.");
+    }
+    const stats = await fs.stat(normalizedPath);
+    if (!stats.isFile()) {
+      throw new Error(`File does not exist: ${normalizedPath}`);
+    }
+
+    const fileName = normalizeOutboundFileName(options?.fileName, normalizedPath);
+    const mimeType = normalizeMimeType(options?.mimeType ?? inferMimeTypeFromFileName(fileName));
+    const payload = await fs.readFile(normalizedPath);
+    const contentUri = await this.uploadFilePayload(payload, fileName, mimeType);
+    const msgtype = resolveOutboundFileMsgtype(mimeType);
+    const content: Record<string, unknown> = {
+      msgtype,
+      body: fileName,
+      filename: fileName,
+      url: contentUri,
+      info: {
+        size: stats.size,
+        ...(mimeType ? { mimetype: mimeType } : {}),
+      },
+    };
+    await this.sendRawEvent(conversationId, content);
   }
 
   async sendNotice(conversationId: string, text: string): Promise<void> {
@@ -390,6 +423,45 @@ export class MatrixChannel implements Channel {
       throw new Error("Matrix send failed (missing event_id)");
     }
     return { event_id: payload.event_id };
+  }
+
+  private async uploadFilePayload(payload: Buffer, fileName: string, mimeType: string | null): Promise<string> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.config.matrixAccessToken}`,
+      "Content-Type": mimeType ?? "application/octet-stream",
+    };
+    const encodedName = encodeURIComponent(fileName);
+    const mediaUrls = [
+      `${this.config.matrixHomeserver}/_matrix/media/v3/upload?filename=${encodedName}`,
+      `${this.config.matrixHomeserver}/_matrix/media/r0/upload?filename=${encodedName}`,
+    ];
+    const failedStatuses: number[] = [];
+    for (const url of mediaUrls) {
+      const response = await fetchWithRetry(
+        url,
+        {
+          method: "POST",
+          headers,
+          body: new Uint8Array(payload),
+        },
+        {
+          timeoutMs: MATRIX_HTTP_TIMEOUT_MS,
+          policy: MATRIX_HTTP_RETRY_POLICY,
+          retryableStatuses: MATRIX_RETRYABLE_HTTP_STATUSES,
+        },
+      );
+      if (!response.ok) {
+        failedStatuses.push(response.status);
+        continue;
+      }
+      const body = (await response.json()) as { content_uri?: unknown };
+      if (typeof body.content_uri === "string" && body.content_uri.startsWith("mxc://")) {
+        return body.content_uri;
+      }
+      throw new Error("Matrix upload failed (missing content_uri).");
+    }
+    const suffix = failedStatuses.length > 0 ? ` (statuses: ${failedStatuses.join(",")})` : "";
+    throw new Error(`Matrix upload failed for ${fileName}${suffix}`);
   }
 
   private async hydrateAttachments(
@@ -784,6 +856,77 @@ function resolveFileExtension(fileName: string, mimeType: string | null): string
     return ".txt";
   }
   return ".bin";
+}
+
+function normalizeOutboundFileName(inputName: string | undefined, fallbackPath: string): string {
+  const candidate = (inputName ?? "").trim() || path.basename(fallbackPath).trim();
+  if (!candidate) {
+    return "attachment.bin";
+  }
+  return candidate.replace(/[\\/\0]/g, "_");
+}
+
+function resolveOutboundFileMsgtype(mimeType: string | null): "m.file" | "m.image" | "m.audio" | "m.video" {
+  if (!mimeType) {
+    return "m.file";
+  }
+  if (mimeType.startsWith("image/")) {
+    return "m.image";
+  }
+  if (mimeType.startsWith("audio/")) {
+    return "m.audio";
+  }
+  if (mimeType.startsWith("video/")) {
+    return "m.video";
+  }
+  return "m.file";
+}
+
+function inferMimeTypeFromFileName(fileName: string): string | null {
+  const ext = path.extname(fileName).toLowerCase();
+  switch (ext) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    case ".gif":
+      return "image/gif";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".m4a":
+      return "audio/mp4";
+    case ".wav":
+      return "audio/wav";
+    case ".ogg":
+      return "audio/ogg";
+    case ".flac":
+      return "audio/flac";
+    case ".mp4":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".webm":
+      return "video/webm";
+    case ".mkv":
+      return "video/x-matroska";
+    case ".pdf":
+      return "application/pdf";
+    case ".json":
+      return "application/json";
+    case ".txt":
+      return "text/plain";
+    case ".md":
+      return "text/markdown";
+    case ".csv":
+      return "text/csv";
+    case ".zip":
+      return "application/zip";
+    default:
+      return null;
+  }
 }
 
 function normalizeMimeType(value: string | null): string | null {
