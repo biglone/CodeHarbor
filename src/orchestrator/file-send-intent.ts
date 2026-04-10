@@ -11,6 +11,57 @@ const SEND_VERB_PATTERN = /(?:发送|发给|发我|send)/i;
 const SEND_TARGET_PATTERN = /(?:给我|发我|to me|到(?:当前|这个)?(?:对话|房间|窗口|会话|这里))/i;
 const FILE_HINT_PATTERN =
   /(?:文件|附件|视频|音频|图片|文档|file|attachment|video|audio|image|document|[A-Za-z0-9._/-]+\.[A-Za-z0-9]{1,12})/i;
+const FILE_GENERIC_HINT_PATTERN = /(?:文件|附件|file|attachment)/i;
+const VIDEO_HINT_PATTERN = /(?:视频|video|\.mp4|\.mov|\.mkv|\.webm|\.avi|\.m4v|\.flv|\.wmv)/i;
+const AUDIO_HINT_PATTERN = /(?:音频|语音|audio|\.mp3|\.wav|\.m4a|\.aac|\.flac|\.ogg|\.opus)/i;
+const IMAGE_HINT_PATTERN = /(?:图片|图像|截图|照片|image|photo|\.png|\.jpe?g|\.gif|\.webp|\.bmp|\.svg)/i;
+const DOCUMENT_HINT_PATTERN = /(?:文档|文稿|报告|document|\.pdf|\.docx?|\.xlsx?|\.pptx?|\.txt|\.md|\.csv|\.log|\.json)/i;
+
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".flv", ".wmv"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"]);
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
+const DOCUMENT_EXTENSIONS = new Set([
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".ppt",
+  ".pptx",
+  ".xls",
+  ".xlsx",
+  ".txt",
+  ".md",
+  ".csv",
+  ".json",
+  ".log",
+  ".rtf",
+]);
+
+const GENERIC_REQUESTED_NAME_SET = new Set([
+  "生成的",
+  "生成好的",
+  "刚生成的",
+  "刚生成好的",
+  "刚刚生成的",
+  "刚刚生成好的",
+  "最新的",
+  "最新生成的",
+  "最新生成好的",
+  "新生成的",
+  "最近生成的",
+  "当前生成的",
+  "输出的",
+  "导出的",
+  "产出的",
+  "这个",
+  "那个",
+  "这份",
+  "那份",
+  "对应的",
+  "相关的",
+  "下一节的",
+  "上一节的",
+  "本节的",
+]);
 
 interface ScannedFile {
   absolutePath: string;
@@ -21,8 +72,11 @@ interface ScannedFile {
   sizeBytes: number;
 }
 
+export type RequestedFileKind = "file" | "video" | "audio" | "image" | "document";
+
 export interface FileSendIntent {
   requestedName: string | null;
+  requestedKind: RequestedFileKind | null;
 }
 
 export interface ResolvedFileCandidate {
@@ -34,6 +88,7 @@ export interface ResolvedFileCandidate {
 export interface ResolveFileRequestResult {
   status: "ok" | "workdir_missing" | "not_found" | "too_large";
   requestedName: string | null;
+  requestedKind: RequestedFileKind | null;
   file: ResolvedFileCandidate | null;
   maxBytes: number;
 }
@@ -47,23 +102,28 @@ export function parseFileSendIntent(text: string): FileSendIntent | null {
     return null;
   }
 
-  const requestedName =
+  const requestedName = normalizeRequestedName(
     extractQuotedCandidate(raw) ??
-    extractByPattern(raw, /(?:把|将)\s*([^，。！？!?\n]{1,180}?)\s*(?:文件|附件|视频|音频|图片|文档)\s*(?:发送|发)/i) ??
+    extractByPattern(raw, /(?:把|将)\s*([^，。！？!?\n]{1,180}?)\s*(?:文件|附件|视频|音频|图片|文档)\s*(?:直接|马上|尽快|先)?\s*(?:发送|发)/i) ??
     extractByPattern(raw, /(?:发送|发)\s*([^，。！？!?\n]{1,180}?)\s*(?:文件|附件|视频|音频|图片|文档)/i) ??
-    extractLikelyFileToken(raw);
+    extractLikelyFileToken(raw),
+  );
+  const requestedKind = detectRequestedKind(raw) ?? inferRequestedKindFromName(requestedName);
 
   return {
-    requestedName: normalizeRequestedName(requestedName),
+    requestedName,
+    requestedKind,
   };
 }
 
 export async function resolveRequestedFile(input: {
   workdir: string;
   requestedName: string | null;
+  requestedKind?: RequestedFileKind | null;
   maxBytes?: number;
 }): Promise<ResolveFileRequestResult> {
   const maxBytes = Math.max(1, Math.floor(input.maxBytes ?? DEFAULT_MAX_SEND_BYTES));
+  const requestedKind = normalizeRequestedKind(input.requestedKind);
   const root = path.resolve(input.workdir);
   let rootStats: Stats | null = null;
   try {
@@ -75,6 +135,7 @@ export async function resolveRequestedFile(input: {
     return {
       status: "workdir_missing",
       requestedName: input.requestedName,
+      requestedKind,
       file: null,
       maxBytes,
     };
@@ -88,6 +149,7 @@ export async function resolveRequestedFile(input: {
         return {
           status: "too_large",
           requestedName: normalizedQuery,
+          requestedKind,
           file: direct,
           maxBytes,
         };
@@ -95,6 +157,7 @@ export async function resolveRequestedFile(input: {
       return {
         status: "ok",
         requestedName: normalizedQuery,
+        requestedKind,
         file: direct,
         maxBytes,
       };
@@ -102,20 +165,23 @@ export async function resolveRequestedFile(input: {
   }
 
   const files = await scanFiles(root);
-  if (files.length === 0) {
+  const scopedFiles = filterFilesByRequestedKind(files, requestedKind);
+  if (scopedFiles.length === 0) {
     return {
       status: "not_found",
       requestedName: normalizedQuery,
+      requestedKind,
       file: null,
       maxBytes,
     };
   }
 
-  const matched = pickBestCandidate(files, normalizedQuery);
+  const matched = pickBestCandidate(scopedFiles, normalizedQuery);
   if (matched.length === 0) {
     return {
       status: "not_found",
       requestedName: normalizedQuery,
+      requestedKind,
       file: null,
       maxBytes,
     };
@@ -127,6 +193,7 @@ export async function resolveRequestedFile(input: {
     return {
       status: "too_large",
       requestedName: normalizedQuery,
+      requestedKind,
       file: largestCandidate
         ? {
             absolutePath: largestCandidate.absolutePath,
@@ -141,6 +208,7 @@ export async function resolveRequestedFile(input: {
   return {
     status: "ok",
     requestedName: normalizedQuery,
+    requestedKind,
     file: {
       absolutePath: sizeAllowed.absolutePath,
       relativePath: sizeAllowed.relativePath,
@@ -192,13 +260,19 @@ function normalizeRequestedName(value: string | null | undefined): string | null
 
   normalized = normalized.replace(/^[`"'“”‘’【】《》]+/, "");
   normalized = normalized.replace(/[`"'“”‘’【】《》]+$/, "");
-  normalized = normalized.replace(/^(?:生成的|刚生成的|最新生成的|最新的|这个|那个|对应的|相关的)\s*/i, "");
+  normalized = normalized.replace(
+    /^(?:生成的|生成好的|刚生成的|刚生成好的|刚刚生成的|刚刚生成好的|最新生成的|最新生成好的|新生成的|最近生成的|当前生成的|输出的|导出的|产出的|最新的|这个|那个|这份|那份|对应的|相关的)\s*/i,
+    "",
+  );
   normalized = normalized.replace(/\s*(?:文件|附件|视频|音频|图片|文档)\s*$/i, "");
   normalized = normalized.trim();
   if (!normalized) {
     return null;
   }
   if (normalized === "文件" || normalized === "附件") {
+    return null;
+  }
+  if (isLikelyDescriptorRequestedName(normalized)) {
     return null;
   }
   return normalized;
@@ -329,6 +403,108 @@ function hasHiddenSegment(relativePath: string): boolean {
 
 function normalizeRelativePath(relativePath: string): string {
   return relativePath.replace(/\\/g, "/");
+}
+
+function normalizeRequestedKind(value: RequestedFileKind | null | undefined): RequestedFileKind | null {
+  if (!value) {
+    return null;
+  }
+  if (value === "file" || value === "video" || value === "audio" || value === "image" || value === "document") {
+    return value;
+  }
+  return null;
+}
+
+function detectRequestedKind(text: string): RequestedFileKind | null {
+  if (VIDEO_HINT_PATTERN.test(text)) {
+    return "video";
+  }
+  if (AUDIO_HINT_PATTERN.test(text)) {
+    return "audio";
+  }
+  if (IMAGE_HINT_PATTERN.test(text)) {
+    return "image";
+  }
+  if (DOCUMENT_HINT_PATTERN.test(text)) {
+    return "document";
+  }
+  if (FILE_GENERIC_HINT_PATTERN.test(text)) {
+    return "file";
+  }
+  return null;
+}
+
+function inferRequestedKindFromName(name: string | null): RequestedFileKind | null {
+  if (!name) {
+    return null;
+  }
+  const ext = path.extname(name).toLowerCase();
+  if (!ext) {
+    return null;
+  }
+  if (VIDEO_EXTENSIONS.has(ext)) {
+    return "video";
+  }
+  if (AUDIO_EXTENSIONS.has(ext)) {
+    return "audio";
+  }
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    return "image";
+  }
+  if (DOCUMENT_EXTENSIONS.has(ext)) {
+    return "document";
+  }
+  return null;
+}
+
+function filterFilesByRequestedKind(files: ScannedFile[], requestedKind: RequestedFileKind | null): ScannedFile[] {
+  if (!requestedKind || requestedKind === "file") {
+    return files;
+  }
+  return files.filter((file) => matchesRequestedKind(file, requestedKind));
+}
+
+function matchesRequestedKind(file: ScannedFile, requestedKind: RequestedFileKind): boolean {
+  const extension = path.extname(file.baseNameLower).toLowerCase();
+  if (!extension) {
+    return false;
+  }
+  if (requestedKind === "video") {
+    return VIDEO_EXTENSIONS.has(extension);
+  }
+  if (requestedKind === "audio") {
+    return AUDIO_EXTENSIONS.has(extension);
+  }
+  if (requestedKind === "image") {
+    return IMAGE_EXTENSIONS.has(extension);
+  }
+  if (requestedKind === "document") {
+    return DOCUMENT_EXTENSIONS.has(extension);
+  }
+  return true;
+}
+
+function isLikelyDescriptorRequestedName(value: string): boolean {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  if (!compact) {
+    return true;
+  }
+  if (GENERIC_REQUESTED_NAME_SET.has(compact)) {
+    return true;
+  }
+  if (/^(?:this|that|latest|newest|generated|output|artifact|file|video|audio|image|document)$/.test(compact)) {
+    return true;
+  }
+  if (/^(?:第[一二三四五六七八九十0-9]+[章节段部分]?的?)$/.test(compact)) {
+    return true;
+  }
+  if (/^(?:刚|刚刚|最新|最近|当前|本次|这次)?(?:生成|产出|输出|导出)(?:好|完成)?的?$/.test(compact)) {
+    return true;
+  }
+  if (/^[\u4e00-\u9fa5]{1,12}的$/.test(compact)) {
+    return /(?:生成|最新|当前|下一|上一|本次|这次|对应|相关|这个|那个)/.test(compact);
+  }
+  return false;
 }
 
 function pickBestCandidate(files: ScannedFile[], requestedName: string | null): ScannedFile[] {

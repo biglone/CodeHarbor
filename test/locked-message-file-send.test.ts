@@ -155,6 +155,35 @@ describe("executeLockedMessage semantic file send", () => {
     expect(spies.recordRequestMetrics).toHaveBeenCalledWith("success", expect.any(Number), expect.any(Number), expect.any(Number));
   });
 
+  it("sends latest video for generic video request instead of newer non-video log", async () => {
+    const workdir = await createTempWorkdir();
+    const video = path.join(workdir, "dist", "lesson-5.mp4");
+    const log = path.join(workdir, "data", "003967.log");
+    await fs.mkdir(path.dirname(video), { recursive: true });
+    await fs.mkdir(path.dirname(log), { recursive: true });
+    await fs.writeFile(video, "video-bytes");
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    await fs.writeFile(log, "log-bytes");
+
+    const message = createMessage("接着完成下一节的视频，并把生成好的视频直接发给我");
+    const { deps, spies } = createDeps(workdir);
+
+    await executeLockedMessage(deps as never, {
+      message,
+      requestId: message.requestId,
+      sessionKey: "matrix:!room:example.com:@alice:example.com",
+      receivedAt: Date.now() - 20,
+      bypassQueue: false,
+      forcedPrompt: null,
+      deferFailureHandlingToQueue: false,
+    });
+
+    expect(spies.sendFile).toHaveBeenCalledTimes(1);
+    expect(spies.sendFile.mock.calls[0]?.[1]).toBe(video);
+    expect(spies.executeChatRun).not.toHaveBeenCalled();
+    expect(spies.markEventProcessed).toHaveBeenCalledTimes(1);
+  });
+
   it("sends not-found notice when requested file is missing", async () => {
     const workdir = await createTempWorkdir();
     const message = createMessage("把生成的 missing.mp4 文件发送给我");

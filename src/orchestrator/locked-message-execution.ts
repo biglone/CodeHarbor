@@ -460,6 +460,7 @@ async function executeSemanticFileSendRequest(
     const resolved = await resolveRequestedFile({
       workdir: input.workdir,
       requestedName: input.intent.requestedName,
+      requestedKind: input.intent.requestedKind,
     });
     if (resolved.status === "workdir_missing") {
       await deps.sendNotice(
@@ -472,9 +473,10 @@ async function executeSemanticFileSendRequest(
     }
     if (resolved.status === "not_found" || !resolved.file) {
       const target = resolved.requestedName ?? "（未指定文件名）";
+      const requestedType = resolved.requestedKind ? `\n- type: ${resolved.requestedKind}` : "";
       await deps.sendNotice(
         input.message.conversationId,
-        `[CodeHarbor] 未找到可发送的文件。\n- target: ${target}\n- workdir: ${input.workdir}`,
+        `[CodeHarbor] 未找到可发送的文件。\n- target: ${target}${requestedType}\n- workdir: ${input.workdir}`,
       );
       deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
       deps.markEventProcessed(input.sessionKey, input.message.eventId);
@@ -511,6 +513,7 @@ async function executeSemanticFileSendRequest(
       queueWaitMs: input.queueWaitMs,
       sendDurationMs,
       requestedName: input.intent.requestedName,
+      requestedKind: input.intent.requestedKind,
       resolvedFile: resolved.file.relativePath,
       resolvedSizeBytes: resolved.file.sizeBytes,
       workdir: input.workdir,
@@ -527,6 +530,7 @@ async function executeSemanticFileSendRequest(
       requestId: input.requestId,
       sessionKey: input.sessionKey,
       requestedName: input.intent.requestedName,
+      requestedKind: input.intent.requestedKind,
       workdir: input.workdir,
       error: formatError(error),
     });
@@ -538,4 +542,5 @@ async function executeSemanticFileSendRequest(
 
 interface FileSendIntentLike {
   requestedName: string | null;
+  requestedKind: "file" | "video" | "audio" | "image" | "document" | null;
 }

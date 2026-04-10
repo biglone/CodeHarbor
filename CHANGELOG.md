@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.100] - 2026-04-11
+
+- matrix semantic file-send fix: avoid mis-parsing generic phrases like `生成好的视频` as literal filenames; keep them as generic media requests.
+- type-aware artifact resolution: when user asks for video/audio/image/document without exact filename, prioritize candidates by requested media type instead of blindly picking the newest file (for example avoiding `.log` mis-send on video requests).
+- locked-route diagnostics: include requested media type in not-found feedback and structured logs for faster troubleshooting.
+- tests: add regression coverage for generic video request parsing and end-to-end locked-route behavior that should send video rather than newer non-video files.
+
 ## [0.1.99] - 2026-04-10
 
 - matrix semantic delivery: add natural-language intent handling for file-return requests (for example `把生成的 result.mp4 文件发送给我`) in locked message routing.

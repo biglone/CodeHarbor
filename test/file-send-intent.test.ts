@@ -28,6 +28,7 @@ describe("parseFileSendIntent", () => {
     const intent = parseFileSendIntent("把生成的 result.mp4 文件发送给我");
     expect(intent).toEqual({
       requestedName: "result.mp4",
+      requestedKind: "video",
     });
   });
 
@@ -35,12 +36,21 @@ describe("parseFileSendIntent", () => {
     const intent = parseFileSendIntent("把生成的文件发送给我");
     expect(intent).toEqual({
       requestedName: null,
+      requestedKind: "file",
     });
   });
 
   it("ignores non-delivery messages", () => {
     const intent = parseFileSendIntent("这个功能怎么实现文件发送？");
     expect(intent).toBeNull();
+  });
+
+  it("treats '生成好的视频' as generic media request instead of file name token", () => {
+    const intent = parseFileSendIntent("把生成好的视频直接发给我");
+    expect(intent).toEqual({
+      requestedName: null,
+      requestedKind: "video",
+    });
   });
 });
 
@@ -96,5 +106,25 @@ describe("resolveRequestedFile", () => {
     expect(result.status).toBe("too_large");
     expect(result.file?.relativePath).toBe("dist/artifact.zip");
     expect(result.maxBytes).toBe(1024);
+  });
+
+  it("prefers latest video when request asks for video without explicit file name", async () => {
+    const workdir = await createTempProject();
+    const video = path.join(workdir, "out", "lesson-5.mp4");
+    const log = path.join(workdir, "logs", "latest.log");
+    await fs.mkdir(path.dirname(video), { recursive: true });
+    await fs.mkdir(path.dirname(log), { recursive: true });
+    await fs.writeFile(video, "video");
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    await fs.writeFile(log, "log");
+
+    const result = await resolveRequestedFile({
+      workdir,
+      requestedName: null,
+      requestedKind: "video",
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.file?.relativePath).toBe("out/lesson-5.mp4");
   });
 });
