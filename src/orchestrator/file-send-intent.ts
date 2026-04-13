@@ -6,6 +6,10 @@ const MAX_SCAN_DEPTH = 8;
 const MAX_SCAN_FILES = 4_000;
 const DEFAULT_MAX_SEND_BYTES = 100 * 1024 * 1024;
 const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", "__pycache__", ".cache", ".codeharbor"]);
+const COUNTED_FILE_HINT_PATTERN =
+  /(?:^|[\s，。！？!?,、])(?:把|将)?\s*(?!第)(?:这|那|共|总共|一共|共计)?\s*([0-9]+|[零〇一二两三四五六七八九十百千]+)\s*(?:个|份|条|段|部)?\s*(?:文件|附件|视频|音频|图片|文档|files?|attachments?|videos?|audio|images?|documents?)/i;
+const SEND_ALL_PATTERN =
+  /(?:全部|所有|全都|统统|一并|一起|一次性|都(?=\s*(?:发|发送|给我|发给我|发我|send)))/i;
 
 const SEND_VERB_PATTERN = /(?:发送|发给|发我|send)/i;
 const SEND_TARGET_PATTERN = /(?:给我|发我|to me|到(?:当前|这个)?(?:对话|房间|窗口|会话|这里))/i;
@@ -77,6 +81,8 @@ export type RequestedFileKind = "file" | "video" | "audio" | "image" | "document
 export interface FileSendIntent {
   requestedName: string | null;
   requestedKind: RequestedFileKind | null;
+  requestedCount: number | null;
+  requestAll: boolean;
 }
 
 export interface ResolvedFileCandidate {
@@ -85,12 +91,30 @@ export interface ResolvedFileCandidate {
   sizeBytes: number;
 }
 
+export interface RecentArtifactFile extends ResolvedFileCandidate {
+  mtimeMs: number;
+}
+
+export interface RecentArtifactBatch {
+  requestId: string;
+  workdir: string;
+  createdAt: number;
+  files: RecentArtifactFile[];
+}
+
+export interface WorkspaceFileRecord extends RecentArtifactFile {
+  requestedKind: RequestedFileKind | null;
+}
+
 export interface ResolveFileRequestResult {
   status: "ok" | "workdir_missing" | "not_found" | "too_large";
   requestedName: string | null;
   requestedKind: RequestedFileKind | null;
   file: ResolvedFileCandidate | null;
+  files: ResolvedFileCandidate[];
+  skippedTooLarge: ResolvedFileCandidate[];
   maxBytes: number;
+  matchedCount: number;
 }
 
 export function parseFileSendIntent(text: string): FileSendIntent | null {
@@ -109,10 +133,14 @@ export function parseFileSendIntent(text: string): FileSendIntent | null {
     extractLikelyFileToken(raw),
   );
   const requestedKind = detectRequestedKind(raw) ?? inferRequestedKindFromName(requestedName);
+  const requestedCount = extractRequestedCount(raw);
+  const requestAll = requestedCount === null && detectRequestAll(raw);
 
   return {
     requestedName,
     requestedKind,
+    requestedCount,
+    requestAll,
   };
 }
 
@@ -120,6 +148,9 @@ export async function resolveRequestedFile(input: {
   workdir: string;
   requestedName: string | null;
   requestedKind?: RequestedFileKind | null;
+  requestedCount?: number | null;
+  requestAll?: boolean;
+  recentArtifactBatches?: RecentArtifactBatch[] | null;
   maxBytes?: number;
 }): Promise<ResolveFileRequestResult> {
   const maxBytes = Math.max(1, Math.floor(input.maxBytes ?? DEFAULT_MAX_SEND_BYTES));
@@ -137,11 +168,15 @@ export async function resolveRequestedFile(input: {
       requestedName: input.requestedName,
       requestedKind,
       file: null,
+      files: [],
+      skippedTooLarge: [],
       maxBytes,
+      matchedCount: 0,
     };
   }
 
   const normalizedQuery = normalizeRequestedName(input.requestedName);
+  const desiredCount = resolveDesiredCount(input.requestedCount, input.requestAll);
   if (normalizedQuery) {
     const direct = await tryResolveDirectFile(root, normalizedQuery);
     if (direct) {
@@ -151,7 +186,10 @@ export async function resolveRequestedFile(input: {
           requestedName: normalizedQuery,
           requestedKind,
           file: direct,
+          files: [],
+          skippedTooLarge: [direct],
           maxBytes,
+          matchedCount: 1,
         };
       }
       return {
@@ -159,9 +197,23 @@ export async function resolveRequestedFile(input: {
         requestedName: normalizedQuery,
         requestedKind,
         file: direct,
+        files: [direct],
+        skippedTooLarge: [],
         maxBytes,
+        matchedCount: 1,
       };
     }
+  }
+
+  const recentArtifactResolved = resolveFromRecentArtifactBatches({
+    batches: input.recentArtifactBatches ?? [],
+    requestedName: normalizedQuery,
+    requestedKind,
+    desiredCount,
+    maxBytes,
+  });
+  if (recentArtifactResolved) {
+    return recentArtifactResolved;
   }
 
   const files = await scanFiles(root);
@@ -172,7 +224,10 @@ export async function resolveRequestedFile(input: {
       requestedName: normalizedQuery,
       requestedKind,
       file: null,
+      files: [],
+      skippedTooLarge: [],
       maxBytes,
+      matchedCount: 0,
     };
   }
 
@@ -183,39 +238,20 @@ export async function resolveRequestedFile(input: {
       requestedName: normalizedQuery,
       requestedKind,
       file: null,
+      files: [],
+      skippedTooLarge: [],
       maxBytes,
+      matchedCount: 0,
     };
   }
 
-  const sizeAllowed = matched.find((item) => item.sizeBytes <= maxBytes) ?? null;
-  if (!sizeAllowed) {
-    const largestCandidate = matched[0] ?? null;
-    return {
-      status: "too_large",
-      requestedName: normalizedQuery,
-      requestedKind,
-      file: largestCandidate
-        ? {
-            absolutePath: largestCandidate.absolutePath,
-            relativePath: largestCandidate.relativePath,
-            sizeBytes: largestCandidate.sizeBytes,
-          }
-        : null,
-      maxBytes,
-    };
-  }
-
-  return {
-    status: "ok",
+  return buildResolutionFromMatchedCandidates({
+    matched,
     requestedName: normalizedQuery,
     requestedKind,
-    file: {
-      absolutePath: sizeAllowed.absolutePath,
-      relativePath: sizeAllowed.relativePath,
-      sizeBytes: sizeAllowed.sizeBytes,
-    },
+    desiredCount,
     maxBytes,
-  };
+  });
 }
 
 function extractQuotedCandidate(text: string): string | null {
@@ -264,6 +300,7 @@ function normalizeRequestedName(value: string | null | undefined): string | null
     /^(?:生成的|生成好的|刚生成的|刚生成好的|刚刚生成的|刚刚生成好的|最新生成的|最新生成好的|新生成的|最近生成的|当前生成的|输出的|导出的|产出的|最新的|这个|那个|这份|那份|对应的|相关的)\s*/i,
     "",
   );
+  normalized = normalized.replace(/^(?:这|那)?(?:[0-9]+|[零〇一二两三四五六七八九十百千]+)(?:个|份|条|段|部)\s*/i, "");
   normalized = normalized.replace(/\s*(?:文件|附件|视频|音频|图片|文档)\s*$/i, "");
   normalized = normalized.trim();
   if (!normalized) {
@@ -389,6 +426,17 @@ async function scanFiles(root: string): Promise<ScannedFile[]> {
   return files;
 }
 
+export async function scanWorkspaceFiles(root: string): Promise<WorkspaceFileRecord[]> {
+  const scanned = await scanFiles(path.resolve(root));
+  return scanned.map((file) => ({
+    absolutePath: file.absolutePath,
+    relativePath: file.relativePath,
+    sizeBytes: file.sizeBytes,
+    mtimeMs: file.mtimeMs,
+    requestedKind: inferRequestedKindFromPath(file.relativePath),
+  }));
+}
+
 function shouldSkipDirectory(name: string): boolean {
   if (name.startsWith(".")) {
     return true;
@@ -403,6 +451,20 @@ function hasHiddenSegment(relativePath: string): boolean {
 
 function normalizeRelativePath(relativePath: string): string {
   return relativePath.replace(/\\/g, "/");
+}
+
+export function normalizeRelativeFilePath(relativePath: string | null | undefined): string | null {
+  if (typeof relativePath !== "string") {
+    return null;
+  }
+  const normalized = normalizeRelativePath(relativePath).trim().replace(/^\.?\//, "");
+  if (!normalized || normalized.startsWith("../") || path.isAbsolute(normalized)) {
+    return null;
+  }
+  if (hasHiddenSegment(normalized)) {
+    return null;
+  }
+  return normalized;
 }
 
 function normalizeRequestedKind(value: RequestedFileKind | null | undefined): RequestedFileKind | null {
@@ -434,6 +496,81 @@ function detectRequestedKind(text: string): RequestedFileKind | null {
   return null;
 }
 
+export function inferRequestedKindFromPath(filePath: string): RequestedFileKind | null {
+  return inferRequestedKindFromName(path.basename(filePath));
+}
+
+function extractRequestedCount(text: string): number | null {
+  const match = text.match(COUNTED_FILE_HINT_PATTERN);
+  if (!match) {
+    return null;
+  }
+  return parseRequestedCountToken(match[1] ?? null);
+}
+
+function detectRequestAll(text: string): boolean {
+  return SEND_ALL_PATTERN.test(text);
+}
+
+function parseRequestedCountToken(value: string | null | undefined): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (/^\d+$/.test(normalized)) {
+    const count = Number.parseInt(normalized, 10);
+    return Number.isFinite(count) && count > 0 ? count : null;
+  }
+  return parseChineseInteger(normalized);
+}
+
+function parseChineseInteger(value: string): number | null {
+  const normalized = value.replace(/两/g, "二").replace(/〇/g, "零");
+  if (!/^[零一二三四五六七八九十百千]+$/.test(normalized)) {
+    return null;
+  }
+
+  const digitMap = new Map<string, number>([
+    ["零", 0],
+    ["一", 1],
+    ["二", 2],
+    ["三", 3],
+    ["四", 4],
+    ["五", 5],
+    ["六", 6],
+    ["七", 7],
+    ["八", 8],
+    ["九", 9],
+  ]);
+  const unitMap = new Map<string, number>([
+    ["十", 10],
+    ["百", 100],
+    ["千", 1000],
+  ]);
+
+  let total = 0;
+  let currentNumber = 0;
+  for (const char of normalized) {
+    const digit = digitMap.get(char);
+    if (digit !== undefined) {
+      currentNumber = digit;
+      continue;
+    }
+    const unit = unitMap.get(char);
+    if (!unit) {
+      return null;
+    }
+    total += (currentNumber || 1) * unit;
+    currentNumber = 0;
+  }
+
+  const resolved = total + currentNumber;
+  return resolved > 0 ? resolved : null;
+}
+
 function inferRequestedKindFromName(name: string | null): RequestedFileKind | null {
   if (!name) {
     return null;
@@ -457,11 +594,121 @@ function inferRequestedKindFromName(name: string | null): RequestedFileKind | nu
   return null;
 }
 
+function resolveDesiredCount(requestedCount: number | null | undefined, requestAll: boolean | null | undefined): number {
+  if (requestAll) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (!Number.isFinite(requestedCount) || !requestedCount || requestedCount < 1) {
+    return 1;
+  }
+  return Math.floor(requestedCount);
+}
+
 function filterFilesByRequestedKind(files: ScannedFile[], requestedKind: RequestedFileKind | null): ScannedFile[] {
   if (!requestedKind || requestedKind === "file") {
     return files;
   }
   return files.filter((file) => matchesRequestedKind(file, requestedKind));
+}
+
+function resolveFromRecentArtifactBatches(input: {
+  batches: RecentArtifactBatch[];
+  requestedName: string | null;
+  requestedKind: RequestedFileKind | null;
+  desiredCount: number;
+  maxBytes: number;
+}): ResolveFileRequestResult | null {
+  const sortedBatches = [...input.batches]
+    .filter((batch) => Array.isArray(batch.files) && batch.files.length > 0)
+    .sort((left, right) => right.createdAt - left.createdAt);
+  for (const batch of sortedBatches) {
+    const scopedFiles = filterFilesByRequestedKind(
+      batch.files.map((file) => convertRecentArtifactFileToScannedFile(file)),
+      input.requestedKind,
+    );
+    if (scopedFiles.length === 0) {
+      continue;
+    }
+
+    const matched = input.requestedName
+      ? pickBestCandidate(scopedFiles, input.requestedName)
+      : [...scopedFiles].sort((left, right) => right.mtimeMs - left.mtimeMs);
+    if (matched.length === 0) {
+      continue;
+    }
+
+    return buildResolutionFromMatchedCandidates({
+      matched,
+      requestedName: input.requestedName,
+      requestedKind: input.requestedKind,
+      desiredCount: input.desiredCount,
+      maxBytes: input.maxBytes,
+    });
+  }
+
+  return null;
+}
+
+function convertRecentArtifactFileToScannedFile(file: RecentArtifactFile): ScannedFile {
+  const relativePath = normalizeRelativePath(file.relativePath);
+  const baseName = path.basename(relativePath);
+  return {
+    absolutePath: file.absolutePath,
+    relativePath,
+    baseNameLower: baseName.toLowerCase(),
+    relativeLower: relativePath.toLowerCase(),
+    mtimeMs: file.mtimeMs,
+    sizeBytes: file.sizeBytes,
+  };
+}
+
+function buildResolutionFromMatchedCandidates(input: {
+  matched: ScannedFile[];
+  requestedName: string | null;
+  requestedKind: RequestedFileKind | null;
+  desiredCount: number;
+  maxBytes: number;
+}): ResolveFileRequestResult {
+  const selectedFiles = input.matched
+    .filter((item) => item.sizeBytes <= input.maxBytes)
+    .slice(0, input.desiredCount)
+    .map((item) => ({
+      absolutePath: item.absolutePath,
+      relativePath: item.relativePath,
+      sizeBytes: item.sizeBytes,
+    }));
+  const skippedTooLarge = input.matched
+    .filter((item) => item.sizeBytes > input.maxBytes)
+    .map((item) => ({
+      absolutePath: item.absolutePath,
+      relativePath: item.relativePath,
+      sizeBytes: item.sizeBytes,
+    }));
+
+  if (selectedFiles.length === 0) {
+    const largestCandidate = skippedTooLarge[0] ?? null;
+    return {
+      status: "too_large",
+      requestedName: input.requestedName,
+      requestedKind: input.requestedKind,
+      file: largestCandidate,
+      files: [],
+      skippedTooLarge,
+      maxBytes: input.maxBytes,
+      matchedCount: input.matched.length,
+    };
+  }
+
+  return {
+    status: "ok",
+    requestedName: input.requestedName,
+    requestedKind: input.requestedKind,
+    file: selectedFiles[0] ?? null,
+    files: selectedFiles,
+    skippedTooLarge,
+    maxBytes: input.maxBytes,
+    matchedCount: input.matched.length,
+  };
 }
 
 function matchesRequestedKind(file: ScannedFile, requestedKind: RequestedFileKind): boolean {
@@ -493,6 +740,12 @@ function isLikelyDescriptorRequestedName(value: string): boolean {
     return true;
   }
   if (/^(?:this|that|latest|newest|generated|output|artifact|file|video|audio|image|document)$/.test(compact)) {
+    return true;
+  }
+  if (/^(?:全部|所有|全都|统统)$/.test(compact)) {
+    return true;
+  }
+  if (/^(?:这|那)?(?:[0-9]+|[零〇一二两三四五六七八九十百千]+)(?:个|份|条|段|部)?$/.test(compact)) {
     return true;
   }
   if (/^(?:第[一二三四五六七八九十0-9]+[章节段部分]?的?)$/.test(compact)) {

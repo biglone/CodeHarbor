@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { executeLockedMessage } from "../src/orchestrator/locked-message-execution";
+import type { RecentArtifactBatch } from "../src/orchestrator/file-send-intent";
 import type { InboundMessage } from "../src/types";
 
 const tempDirs: string[] = [];
@@ -39,7 +40,7 @@ function createMessage(text: string): InboundMessage {
   };
 }
 
-function createDeps(workdir: string) {
+function createDeps(workdir: string, recentArtifactBatches: RecentArtifactBatch[] = []) {
   const sendFile = vi.fn<
     (conversationId: string, filePath: string, options?: { fileName?: string; mimeType?: string | null }) => Promise<void>
   >(async () => {});
@@ -93,6 +94,7 @@ function createDeps(workdir: string) {
     })),
     sendNotice,
     sendFile,
+    listRecentArtifactBatches: vi.fn(() => recentArtifactBatches),
     classifyBackendTaskType: vi.fn(() => "chat"),
     resolveSessionBackendDecision: vi.fn(() => ({
       profile: { provider: "codex" as const, model: null },
@@ -183,6 +185,84 @@ describe("executeLockedMessage semantic file send", () => {
     expect(spies.executeChatRun).not.toHaveBeenCalled();
     expect(spies.markEventProcessed).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps explicit filename requests on direct fallback path even when recent artifact batches exist", async () => {
+    const workdir = await createTempWorkdir();
+    const artifact = path.join(workdir, "dist", "result.mp4");
+    await fs.mkdir(path.dirname(artifact), { recursive: true });
+    await fs.writeFile(artifact, "video-bytes");
+
+    const message = createMessage("把生成的 result.mp4 文件发送给我");
+    const { deps, spies } = createDeps(workdir, [
+      {
+        requestId: "req-batch",
+        workdir,
+        createdAt: Date.now(),
+        files: [
+          {
+            absolutePath: artifact,
+            relativePath: "dist/result.mp4",
+            sizeBytes: 11,
+            mtimeMs: Date.now(),
+          },
+        ],
+      },
+    ]);
+
+    await executeLockedMessage(deps as never, {
+      message,
+      requestId: message.requestId,
+      sessionKey: "matrix:!room:example.com:@alice:example.com",
+      receivedAt: Date.now() - 20,
+      bypassQueue: false,
+      forcedPrompt: null,
+      deferFailureHandlingToQueue: false,
+    });
+
+    expect(spies.sendFile).toHaveBeenCalledTimes(1);
+    expect(spies.executeChatRun).not.toHaveBeenCalled();
+  });
+
+  it("sends multiple matched videos when user asks for four video files", async () => {
+    const workdir = await createTempWorkdir();
+    const files = [
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode7-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode8-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode9-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode10-v1-no-rightbars.mp4"),
+    ];
+    await fs.mkdir(path.dirname(files[0]!), { recursive: true });
+    for (const file of files) {
+      await fs.writeFile(file, path.basename(file));
+      await new Promise((resolve) => setTimeout(resolve, 12));
+    }
+
+    const message = createMessage("这四个视频文件以消息的形式发给我");
+    const { deps, spies } = createDeps(workdir);
+
+    await executeLockedMessage(deps as never, {
+      message,
+      requestId: message.requestId,
+      sessionKey: "matrix:!room:example.com:@alice:example.com",
+      receivedAt: Date.now() - 20,
+      bypassQueue: false,
+      forcedPrompt: null,
+      deferFailureHandlingToQueue: false,
+    });
+
+    expect(spies.sendFile).toHaveBeenCalledTimes(4);
+    expect(spies.sendFile.mock.calls.map((call) => call[1])).toEqual([
+      files[3],
+      files[2],
+      files[1],
+      files[0],
+    ]);
+    expect(spies.executeChatRun).not.toHaveBeenCalled();
+    expect(spies.markEventProcessed).toHaveBeenCalledTimes(1);
+    expect(String(spies.sendNotice.mock.calls.at(-1)?.[1] ?? "")).toContain("已发送 4 个文件");
+  });
+
+
 
   it("sends not-found notice when requested file is missing", async () => {
     const workdir = await createTempWorkdir();

@@ -10,6 +10,15 @@ import type { CodexSessionRuntime } from "../executor/codex-session-runtime";
 import type { OutputLanguage } from "../config";
 import { formatDurationMs, formatError, summarizeSingleLine } from "./helpers";
 import { shouldRetryClaudeImageFailure } from "./media-progress";
+import { buildArtifactBatchFromSnapshots, type WorkspaceArtifactSnapshot } from "./session-artifact-registry";
+import {
+  buildRecentArtifactDeliveryContext,
+  buildModelFileDeliveryHistoryEntry,
+  buildModelFileDeliverySummary,
+  parseModelFileDeliveryAction,
+  resolveModelFileDeliveryAction,
+} from "./model-file-delivery-action";
+import type { RecentArtifactBatch } from "./file-send-intent";
 import { buildFailureProgressSummary, classifyExecutionOutcome } from "./workflow-status";
 import { byOutputLanguage } from "./output-language";
 
@@ -75,6 +84,9 @@ interface ExecuteChatRequestDeps {
   consumePendingStopRequest: (sessionKey: string) => boolean;
   persistRuntimeMetricsSnapshot: () => void;
   recordRequestMetrics: (outcome: RequestOutcomeMetric, queueMs: number, execMs: number, sendMs: number) => void;
+  captureArtifactSnapshot: (workdir: string) => Promise<WorkspaceArtifactSnapshot | null>;
+  recordArtifactBatch: (sessionKey: string, batch: ReturnType<typeof buildArtifactBatchFromSnapshots>) => void;
+  listRecentArtifactBatches: (sessionKey: string, workdir: string) => RecentArtifactBatch[];
   recordCliCompatPrompt: (entry: {
     requestId: string;
     sessionKey: string;
@@ -106,6 +118,7 @@ interface ExecuteChatRequestDeps {
     documents: DocumentContextItem[],
     bridgeContext: string | null,
     autoDevRuntimeContext: string | null,
+    artifactDeliveryContext: string | null,
   ) => string;
   resolveAutoDevRuntimeContext: (sessionKey: string, workdir: string) => Promise<string | null>;
   recordRequestTraceStart: (input: {
@@ -127,6 +140,7 @@ interface ExecuteChatRequestDeps {
   ) => void;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string, options?: SendMessageOptions) => Promise<void>;
+  sendFile: ((conversationId: string, filePath: string, options?: { fileName?: string; mimeType?: string | null }) => Promise<void>) | null;
   startTypingHeartbeat: (conversationId: string) => () => Promise<void>;
   handleProgress: (
     conversationId: string,
@@ -196,6 +210,7 @@ export async function executeChatRequest(
   if (documentSummary.notice) {
     await deps.sendNotice(input.message.conversationId, documentSummary.notice);
   }
+  const recentArtifactBatches = deps.listRecentArtifactBatches(input.sessionKey, input.roomWorkdir);
   const executionPrompt = deps.buildExecutionPrompt(
     input.routePrompt,
     input.message,
@@ -203,6 +218,7 @@ export async function executeChatRequest(
     documentSummary.documents,
     bridgeContext,
     autoDevRuntimeContext,
+    buildRecentArtifactDeliveryContext(recentArtifactBatches),
   );
   const imagePaths = imageSelection.imagePaths;
   let lastProgressAt = 0;
@@ -213,6 +229,7 @@ export async function executeChatRequest(
   let executionDurationMs = 0;
   let sendDurationMs = 0;
   const requestStartedAt = Date.now();
+  const artifactSnapshotBeforeRun = await deps.captureArtifactSnapshot(input.roomWorkdir);
   let cancelRequested = deps.consumePendingStopRequest(input.sessionKey);
 
   deps.runningExecutions.set(input.sessionKey, {
@@ -368,13 +385,64 @@ export async function executeChatRequest(
     executionDurationMs = Date.now() - executionStartedAt;
     await progressChain;
 
+    const parsedAction = parseModelFileDeliveryAction(result.reply);
     const sendStartedAt = Date.now();
     const messageOptions: SendMessageOptions = {
       multimodalSummary: buildMultimodalSummary(input.message, successfulImagePaths, audioTranscripts),
       requestId: input.requestId,
     };
-    await deps.sendMessage(input.message.conversationId, result.reply, messageOptions);
-    deps.stateStore.appendConversationMessage(input.sessionKey, "assistant", input.backendProfile.provider, result.reply);
+    if (parsedAction.cleanReply) {
+      await deps.sendMessage(input.message.conversationId, parsedAction.cleanReply, messageOptions);
+    }
+
+    let deliveredActionSummary: string | null = null;
+    const resolvedAction = parsedAction.action
+      ? resolveModelFileDeliveryAction({
+          action: parsedAction.action,
+          recentArtifactBatches,
+        })
+      : null;
+    if (parsedAction.action) {
+      if (!deps.sendFile) {
+        await deps.sendNotice(
+          input.message.conversationId,
+          "[CodeHarbor] 已解析到模型文件发送动作，但当前通道未启用文件附件发送能力。",
+        );
+      } else {
+        for (const file of resolvedAction?.files ?? []) {
+          await deps.sendFile(input.message.conversationId, file.absolutePath, {
+            fileName: file.relativePath.split("/").at(-1) ?? file.relativePath,
+          });
+        }
+        if ((resolvedAction?.files.length ?? 0) > 0 && !parsedAction.cleanReply) {
+          deliveredActionSummary = buildModelFileDeliverySummary(resolvedAction!);
+          await deps.sendNotice(input.message.conversationId, deliveredActionSummary);
+        } else if ((resolvedAction?.files.length ?? 0) === 0) {
+          await deps.sendNotice(input.message.conversationId, buildModelFileDeliverySummary(resolvedAction!));
+        }
+      }
+    }
+
+    deps.stateStore.appendConversationMessage(
+      input.sessionKey,
+      "assistant",
+      input.backendProfile.provider,
+      buildModelFileDeliveryHistoryEntry({
+        cleanReply: parsedAction.cleanReply || deliveredActionSummary || "",
+        sentFiles: resolvedAction?.files ?? [],
+      }),
+    );
+    const artifactSnapshotAfterRun = await deps.captureArtifactSnapshot(input.roomWorkdir);
+    deps.recordArtifactBatch(
+      input.sessionKey,
+      buildArtifactBatchFromSnapshots({
+        requestId: input.requestId,
+        workdir: input.roomWorkdir,
+        before: artifactSnapshotBeforeRun,
+        after: artifactSnapshotAfterRun,
+        replyText: result.reply,
+      }),
+    );
     await deps.finishProgress(
       {
         conversationId: input.message.conversationId,

@@ -14,7 +14,7 @@ import { dispatchAutoDevCommandWithRegistry, type AutoDevCommandHandlerRegistry 
 import { tryEnqueueQueuedInboundRequest } from "./queue-enqueue";
 import { formatError } from "./helpers";
 import { formatByteSize } from "./misc-utils";
-import { parseFileSendIntent, resolveRequestedFile } from "./file-send-intent";
+import { parseFileSendIntent, resolveRequestedFile, type RecentArtifactBatch } from "./file-send-intent";
 
 type RouteDecisionLike =
   | { kind: "ignore" }
@@ -101,6 +101,7 @@ interface ExecuteLockedMessageDeps {
   tryAcquireRateLimit: (input: { userId: string; roomId: string }) => RateLimitDecision;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   sendFile: ((conversationId: string, filePath: string, options?: { fileName?: string; mimeType?: string | null }) => Promise<void>) | null;
+  listRecentArtifactBatches: (sessionKey: string, workdir: string) => RecentArtifactBatch[];
   classifyBackendTaskType: (
     workflowCommand: WorkflowCommandLike,
     autoDevCommand: AutoDevCommandLike,
@@ -461,6 +462,9 @@ async function executeSemanticFileSendRequest(
       workdir: input.workdir,
       requestedName: input.intent.requestedName,
       requestedKind: input.intent.requestedKind,
+      requestedCount: input.intent.requestedCount,
+      requestAll: input.intent.requestAll,
+      recentArtifactBatches: deps.listRecentArtifactBatches(input.sessionKey, input.workdir),
     });
     if (resolved.status === "workdir_missing") {
       await deps.sendNotice(
@@ -483,9 +487,13 @@ async function executeSemanticFileSendRequest(
       return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
     }
     if (resolved.status === "too_large") {
+      const tooLargeSummary =
+        resolved.skippedTooLarge.length > 1
+          ? `\n- skippedTooLarge: ${resolved.skippedTooLarge.length}`
+          : "";
       await deps.sendNotice(
         input.message.conversationId,
-        `[CodeHarbor] 文件过大，已拒绝发送。\n- file: ${resolved.file.relativePath}\n- size: ${formatByteSize(resolved.file.sizeBytes)}\n- limit: ${formatByteSize(resolved.maxBytes)}`,
+        `[CodeHarbor] 文件过大，已拒绝发送。\n- file: ${resolved.file.relativePath}\n- size: ${formatByteSize(resolved.file.sizeBytes)}\n- limit: ${formatByteSize(resolved.maxBytes)}${tooLargeSummary}`,
       );
       deps.recordRequestMetrics("failed", input.queueWaitMs, Date.now() - executionStartedAt, 0);
       deps.markEventProcessed(input.sessionKey, input.message.eventId);
@@ -493,18 +501,17 @@ async function executeSemanticFileSendRequest(
     }
 
     const sendStartedAt = Date.now();
-    await deps.sendFile(
-      input.message.conversationId,
-      resolved.file.absolutePath,
-      {
-        fileName: path.basename(resolved.file.absolutePath),
-      },
-    );
+    for (const file of resolved.files) {
+      await deps.sendFile(
+        input.message.conversationId,
+        file.absolutePath,
+        {
+          fileName: path.basename(file.absolutePath),
+        },
+      );
+    }
     sendDurationMs = Date.now() - sendStartedAt;
-    await deps.sendNotice(
-      input.message.conversationId,
-      `[CodeHarbor] 文件已发送。\n- file: ${resolved.file.relativePath}\n- size: ${formatByteSize(resolved.file.sizeBytes)}`,
-    );
+    await deps.sendNotice(input.message.conversationId, buildSemanticFileSendSuccessNotice(resolved, input.intent));
     deps.recordRequestMetrics("success", input.queueWaitMs, Date.now() - executionStartedAt, sendDurationMs);
     deps.markEventProcessed(input.sessionKey, input.message.eventId);
     deps.logger.info("Semantic file send request completed", {
@@ -514,8 +521,13 @@ async function executeSemanticFileSendRequest(
       sendDurationMs,
       requestedName: input.intent.requestedName,
       requestedKind: input.intent.requestedKind,
-      resolvedFile: resolved.file.relativePath,
-      resolvedSizeBytes: resolved.file.sizeBytes,
+      requestedCount: input.intent.requestedCount,
+      requestAll: input.intent.requestAll,
+      resolvedFiles: resolved.files.map((file) => ({
+        relativePath: file.relativePath,
+        sizeBytes: file.sizeBytes,
+      })),
+      skippedTooLarge: resolved.skippedTooLarge.length,
       workdir: input.workdir,
     });
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
@@ -543,4 +555,33 @@ async function executeSemanticFileSendRequest(
 interface FileSendIntentLike {
   requestedName: string | null;
   requestedKind: "file" | "video" | "audio" | "image" | "document" | null;
+  requestedCount: number | null;
+  requestAll: boolean;
+}
+
+function buildSemanticFileSendSuccessNotice(
+  resolved: {
+    files: Array<{ relativePath: string; sizeBytes: number }>;
+    matchedCount: number;
+    skippedTooLarge: Array<{ relativePath: string }>;
+  },
+  intent: FileSendIntentLike,
+): string {
+  if (resolved.files.length === 1) {
+    const file = resolved.files[0];
+    return `[CodeHarbor] 文件已发送。\n- file: ${file.relativePath}\n- size: ${formatByteSize(file.sizeBytes)}`;
+  }
+
+  const lines = [`[CodeHarbor] 已发送 ${resolved.files.length} 个文件。`];
+  for (const file of resolved.files) {
+    lines.push(`- file: ${file.relativePath} (${formatByteSize(file.sizeBytes)})`);
+  }
+  if (intent.requestedCount && resolved.files.length < intent.requestedCount) {
+    lines.push(`- requested: ${intent.requestedCount}`);
+    lines.push(`- matched: ${resolved.matchedCount}`);
+  }
+  if (resolved.skippedTooLarge.length > 0) {
+    lines.push(`- skippedTooLarge: ${resolved.skippedTooLarge.length}`);
+  }
+  return lines.join("\n");
 }

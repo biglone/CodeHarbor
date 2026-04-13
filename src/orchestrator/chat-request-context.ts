@@ -6,6 +6,12 @@ import { buildAutoDevChatRuntimeContext as runBuildAutoDevChatRuntimeContext } f
 import { recordCliCompatPrompt as runRecordCliCompatPrompt } from "./cli-compat-prompt-recorder";
 import { buildConversationBridgeContext as runBuildConversationBridgeContext } from "./conversation-bridge";
 import { buildExecutionPrompt as runBuildExecutionPrompt } from "./execution-prompt";
+import {
+  captureWorkspaceArtifactSnapshot as runCaptureWorkspaceArtifactSnapshot,
+  listRecentSessionArtifactBatches as runListRecentSessionArtifactBatches,
+  recordSessionArtifactBatch as runRecordSessionArtifactBatch,
+  type RecentArtifactBatch,
+} from "./session-artifact-registry";
 
 type ChatRequestDispatchContext = Parameters<typeof executeChatRequest>[0];
 
@@ -21,6 +27,9 @@ interface ChatRequestContextInput {
   consumePendingStopRequest: ChatRequestDispatchContext["consumePendingStopRequest"];
   persistRuntimeMetricsSnapshot: ChatRequestDispatchContext["persistRuntimeMetricsSnapshot"];
   recordRequestMetrics: ChatRequestDispatchContext["recordRequestMetrics"];
+  captureArtifactSnapshot: ChatRequestDispatchContext["captureArtifactSnapshot"];
+  recordArtifactBatch: ChatRequestDispatchContext["recordArtifactBatch"];
+  listRecentArtifactBatches: ChatRequestDispatchContext["listRecentArtifactBatches"];
   recordCliCompatPrompt: ChatRequestDispatchContext["recordCliCompatPrompt"];
   buildConversationBridgeContext: ChatRequestDispatchContext["buildConversationBridgeContext"];
   transcribeAudioAttachments: ChatRequestDispatchContext["transcribeAudioAttachments"];
@@ -33,6 +42,7 @@ interface ChatRequestContextInput {
   recordRequestTraceFinish: ChatRequestDispatchContext["recordRequestTraceFinish"];
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
+  sendFile: ChatRequestDispatchContext["sendFile"];
   startTypingHeartbeat: ChatRequestDispatchContext["startTypingHeartbeat"];
   handleProgress: ChatRequestDispatchContext["handleProgress"];
   finishProgress: ChatRequestDispatchContext["finishProgress"];
@@ -52,6 +62,9 @@ export function buildChatRequestDispatchContext(input: ChatRequestContextInput):
     consumePendingStopRequest: input.consumePendingStopRequest,
     persistRuntimeMetricsSnapshot: input.persistRuntimeMetricsSnapshot,
     recordRequestMetrics: input.recordRequestMetrics,
+    captureArtifactSnapshot: input.captureArtifactSnapshot,
+    recordArtifactBatch: input.recordArtifactBatch,
+    listRecentArtifactBatches: input.listRecentArtifactBatches,
     recordCliCompatPrompt: input.recordCliCompatPrompt,
     buildConversationBridgeContext: input.buildConversationBridgeContext,
     transcribeAudioAttachments: input.transcribeAudioAttachments,
@@ -64,6 +77,7 @@ export function buildChatRequestDispatchContext(input: ChatRequestContextInput):
     recordRequestTraceFinish: input.recordRequestTraceFinish,
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,
+    sendFile: input.sendFile,
     startTypingHeartbeat: input.startTypingHeartbeat,
     handleProgress: input.handleProgress,
     finishProgress: input.finishProgress,
@@ -90,6 +104,7 @@ interface ChatRequestRuntimeContextInput {
   consumePendingStopRequest: ChatRequestDispatchContext["consumePendingStopRequest"];
   persistRuntimeMetricsSnapshot: ChatRequestDispatchContext["persistRuntimeMetricsSnapshot"];
   recordRequestMetrics: ChatRequestDispatchContext["recordRequestMetrics"];
+  sessionArtifactBatches: Map<string, RecentArtifactBatch[]>;
   cliCompatRecorder: CliCompatRecorder | null;
   contextBridgeHistoryLimit: number;
   contextBridgeMaxChars: number;
@@ -102,6 +117,7 @@ interface ChatRequestRuntimeContextInput {
   recordRequestTraceFinish: ChatRequestDispatchContext["recordRequestTraceFinish"];
   sendNotice: ChatRequestDispatchContext["sendNotice"];
   sendMessage: ChatRequestDispatchContext["sendMessage"];
+  sendFile: ChatRequestDispatchContext["sendFile"];
   startTypingHeartbeat: ChatRequestDispatchContext["startTypingHeartbeat"];
   handleProgress: ChatRequestDispatchContext["handleProgress"];
   finishProgress: ChatRequestDispatchContext["finishProgress"];
@@ -128,6 +144,11 @@ export function buildChatRequestDispatchContextFromRuntime(
     consumePendingStopRequest: input.consumePendingStopRequest,
     persistRuntimeMetricsSnapshot: input.persistRuntimeMetricsSnapshot,
     recordRequestMetrics: input.recordRequestMetrics,
+    captureArtifactSnapshot: (workdir) => runCaptureWorkspaceArtifactSnapshot(workdir),
+    recordArtifactBatch: (sessionKey, batch) =>
+      runRecordSessionArtifactBatch(input.sessionArtifactBatches, sessionKey, batch),
+    listRecentArtifactBatches: (sessionKey, workdir) =>
+      runListRecentSessionArtifactBatches(input.sessionArtifactBatches, sessionKey, workdir),
     recordCliCompatPrompt: (entry) => runRecordCliCompatPrompt(input.cliCompatRecorder, input.logger, entry),
     buildConversationBridgeContext: (sessionKey) =>
       runBuildConversationBridgeContext({
@@ -149,7 +170,15 @@ export function buildChatRequestDispatchContextFromRuntime(
         return null;
       }
     },
-    buildExecutionPrompt: (prompt, message, audioTranscripts, extractedDocuments, bridgeContext, autoDevRuntimeContext) =>
+    buildExecutionPrompt: (
+      prompt,
+      message,
+      audioTranscripts,
+      extractedDocuments,
+      bridgeContext,
+      autoDevRuntimeContext,
+      artifactDeliveryContext,
+    ) =>
       runBuildExecutionPrompt({
         prompt,
         message,
@@ -157,12 +186,14 @@ export function buildChatRequestDispatchContextFromRuntime(
         extractedDocuments,
         bridgeContext,
         autoDevRuntimeContext,
+        artifactDeliveryContext,
       }),
     recordRequestTraceStart: input.recordRequestTraceStart,
     recordRequestTraceProgress: input.recordRequestTraceProgress,
     recordRequestTraceFinish: input.recordRequestTraceFinish,
     sendNotice: input.sendNotice,
     sendMessage: input.sendMessage,
+    sendFile: input.sendFile,
     startTypingHeartbeat: input.startTypingHeartbeat,
     handleProgress: input.handleProgress,
     finishProgress: input.finishProgress,

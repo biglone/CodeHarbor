@@ -9,6 +9,7 @@ interface BuildExecutionPromptInput {
   extractedDocuments: DocumentContextItem[];
   bridgeContext: string | null;
   autoDevRuntimeContext: string | null;
+  artifactDeliveryContext: string | null;
 }
 
 export function buildExecutionPrompt(input: BuildExecutionPromptInput): string {
@@ -52,7 +53,10 @@ export function buildExecutionPrompt(input: BuildExecutionPromptInput): string {
     composed = sections.join("\n\n");
   }
 
-  const currentRequestBody = input.autoDevRuntimeContext ? `${input.autoDevRuntimeContext}\n\n${composed}` : composed;
+  const currentRequestSections = [input.autoDevRuntimeContext, input.artifactDeliveryContext, composed].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  const currentRequestBody = currentRequestSections.join("\n\n");
   if (!input.bridgeContext) {
     return currentRequestBody;
   }

@@ -168,6 +168,10 @@ import { sendBackendCommand as runSendBackendCommand } from "./orchestrator/back
 import { executeChatRequest } from "./orchestrator/chat-request";
 import { executeAgentRunRequest } from "./orchestrator/agent-run-request";
 import {
+  listRecentSessionArtifactBatches as runListRecentSessionArtifactBatches,
+  type RecentArtifactBatch,
+} from "./orchestrator/session-artifact-registry";
+import {
   prepareDocumentAttachments as runPrepareDocumentAttachments,
   prepareImageAttachments as runPrepareImageAttachments,
   transcribeAudioAttachments as runTranscribeAudioAttachments,
@@ -387,6 +391,7 @@ export class Orchestrator {
   private readonly matrixAdminUsers: Set<string>;
   private readonly workflowSnapshots = new Map<string, WorkflowRunSnapshot>();
   private readonly autoDevSnapshots = new Map<string, AutoDevRunSnapshot>();
+  private readonly sessionArtifactBatches = new Map<string, RecentArtifactBatch[]>();
   private readonly autoDevWorkdirOverrides = new Map<string, string>();
   private readonly autoDevFailureStreaks = new Map<string, number>();
   private readonly autoDevValidationFailureStreaks = new Map<string, { failureClass: string; streak: number }>();
@@ -693,6 +698,8 @@ export class Orchestrator {
       rateLimiter: this.rateLimiter,
       sendNotice: this.channel.sendNotice.bind(this.channel),
       sendFile: this.channel.sendFile ? this.channel.sendFile.bind(this.channel) : null,
+      listRecentArtifactBatches: (sessionKey, workdir) =>
+        runListRecentSessionArtifactBatches(this.sessionArtifactBatches, sessionKey, workdir),
       backendHandlers: {
         classifyBackendTaskType,
         resolveSessionBackendDecision: this.resolveSessionBackendDecision.bind(this),
@@ -1589,6 +1596,7 @@ export class Orchestrator {
       persistRuntimeMetricsSnapshot: () => this.persistRuntimeMetricsSnapshot(),
       recordRequestMetrics: (outcome, queueMs, execMs, sendMs) =>
         this.recordRequestMetrics(outcome, queueMs, execMs, sendMs),
+      sessionArtifactBatches: this.sessionArtifactBatches,
       cliCompatRecorder: this.cliCompatRecorder,
       contextBridgeHistoryLimit: this.contextBridgeHistoryLimit,
       contextBridgeMaxChars: this.contextBridgeMaxChars,
@@ -1606,6 +1614,7 @@ export class Orchestrator {
         this.recordRequestTraceFinish(requestId, status, error, reply, sessionId),
       sendNotice: (conversationId, text) => this.channel.sendNotice(conversationId, text),
       sendMessage: (conversationId, text, options) => this.channel.sendMessage(conversationId, text, options),
+      sendFile: this.channel.sendFile ? this.channel.sendFile.bind(this.channel) : null,
       startTypingHeartbeat: (conversationId) => this.startTypingHeartbeat(conversationId),
       handleProgress: (...args) => this.forwardChatRequestProgress(...args),
       finishProgress: (ctx, summary) => this.finishProgress(ctx, summary),

@@ -25,6 +25,7 @@ interface LockedMessageContextInput {
   tryAcquireRateLimit: LockedMessageDispatchContext["tryAcquireRateLimit"];
   sendNotice: LockedMessageDispatchContext["sendNotice"];
   sendFile: LockedMessageDispatchContext["sendFile"];
+  listRecentArtifactBatches: LockedMessageDispatchContext["listRecentArtifactBatches"];
   classifyBackendTaskType: LockedMessageDispatchContext["classifyBackendTaskType"];
   resolveSessionBackendDecision: LockedMessageDispatchContext["resolveSessionBackendDecision"];
   prepareBackendRuntimeForSession: LockedMessageDispatchContext["prepareBackendRuntimeForSession"];
@@ -61,6 +62,7 @@ export function buildLockedMessageDispatchContext(
     tryAcquireRateLimit: input.tryAcquireRateLimit,
     sendNotice: input.sendNotice,
     sendFile: input.sendFile,
+    listRecentArtifactBatches: input.listRecentArtifactBatches,
     classifyBackendTaskType: input.classifyBackendTaskType,
     resolveSessionBackendDecision: input.resolveSessionBackendDecision,
     prepareBackendRuntimeForSession: input.prepareBackendRuntimeForSession,
@@ -102,6 +104,7 @@ interface LockedMessageRuntimeContextInput {
   };
   sendNotice: LockedMessageDispatchContext["sendNotice"];
   sendFile: LockedMessageDispatchContext["sendFile"];
+  listRecentArtifactBatches: LockedMessageDispatchContext["listRecentArtifactBatches"];
   backendHandlers: Pick<
     LockedMessageDispatchContext,
     | "classifyBackendTaskType"
@@ -142,6 +145,7 @@ export function buildLockedMessageDispatchContextFromRuntime(
     tryAcquireRateLimit: (request) => input.rateLimiter.tryAcquire(request),
     sendNotice: input.sendNotice,
     sendFile: input.sendFile,
+    listRecentArtifactBatches: input.listRecentArtifactBatches,
     classifyBackendTaskType: input.backendHandlers.classifyBackendTaskType,
     resolveSessionBackendDecision: input.backendHandlers.resolveSessionBackendDecision,
     prepareBackendRuntimeForSession: input.backendHandlers.prepareBackendRuntimeForSession,
