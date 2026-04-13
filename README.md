@@ -671,7 +671,10 @@ If any check fails, it prints actionable fix commands (for example `codeharbor i
   - `/autodev skills [on|off|summary|progressive|full|status]` control role-skill injection and disclosure mode per session
 - Natural-language file delivery
   - supports intent-style requests such as `把生成的 result.mp4 文件发送给我`
-  - bot resolves matching local file under current room workdir and sends it back as Matrix file message
+  - for contextual requests such as `这四个视频发给我` or `把那一批都发给我`, bot prefers model-driven structured delivery actions over the latest session artifact batch
+  - for explicit file names/paths, bot still keeps direct rule-based fallback for safety and compatibility
+  - bot first resolves against the latest session artifact batch captured from recent AI-generated outputs, then falls back to matching local files under current room workdir
+  - supports batch requests such as `这四个视频文件以消息的形式发给我` or `把生成的视频都发给我`, and sends multiple matched attachments sequentially
   - if no file name is specified (for example `把生成的文件发送给我`), bot picks the most recently updated file in workdir (with size guardrail)
 
 Version update check controls:

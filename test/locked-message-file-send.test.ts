@@ -262,7 +262,55 @@ describe("executeLockedMessage semantic file send", () => {
     expect(String(spies.sendNotice.mock.calls.at(-1)?.[1] ?? "")).toContain("已发送 4 个文件");
   });
 
+  it("routes contextual file-delivery requests to chat runtime when recent artifact batches exist", async () => {
+    const workdir = await createTempWorkdir();
+    const batchFiles = [
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode7-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode8-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode9-v1-no-rightbars.mp4"),
+      path.join(workdir, "video-auto-pipeline", "agent-skill-episode10-v1-no-rightbars.mp4"),
+    ];
+    await fs.mkdir(path.dirname(batchFiles[0]!), { recursive: true });
+    for (const file of batchFiles) {
+      await fs.writeFile(file, path.basename(file));
+      await new Promise((resolve) => setTimeout(resolve, 12));
+    }
 
+    const recentArtifactBatches: RecentArtifactBatch[] = [
+      {
+        requestId: "req-batch",
+        workdir,
+        createdAt: Date.now(),
+        files: [
+          { absolutePath: batchFiles[3]!, relativePath: "video-auto-pipeline/agent-skill-episode10-v1-no-rightbars.mp4", sizeBytes: 38, mtimeMs: Date.now() - 1 },
+          { absolutePath: batchFiles[2]!, relativePath: "video-auto-pipeline/agent-skill-episode9-v1-no-rightbars.mp4", sizeBytes: 37, mtimeMs: Date.now() - 2 },
+          { absolutePath: batchFiles[1]!, relativePath: "video-auto-pipeline/agent-skill-episode8-v1-no-rightbars.mp4", sizeBytes: 37, mtimeMs: Date.now() - 3 },
+          { absolutePath: batchFiles[0]!, relativePath: "video-auto-pipeline/agent-skill-episode7-v1-no-rightbars.mp4", sizeBytes: 37, mtimeMs: Date.now() - 4 },
+        ],
+      },
+    ];
+
+    const message = createMessage("把这四个视频文件发给我");
+    const { deps, spies } = createDeps(workdir, recentArtifactBatches);
+
+    await executeLockedMessage(deps as never, {
+      message,
+      requestId: message.requestId,
+      sessionKey: "matrix:!room:example.com:@alice:example.com",
+      receivedAt: Date.now() - 20,
+      bypassQueue: false,
+      forcedPrompt: null,
+      deferFailureHandlingToQueue: false,
+    });
+
+    expect(spies.sendFile).not.toHaveBeenCalled();
+    expect(spies.executeChatRun).toHaveBeenCalledTimes(1);
+    const chatRunInput = spies.executeChatRun.mock.calls.at(0)?.at(0);
+    expect(chatRunInput).toMatchObject({
+      routePrompt: "把这四个视频文件发给我",
+      roomWorkdir: workdir,
+    });
+  });
 
   it("sends not-found notice when requested file is missing", async () => {
     const workdir = await createTempWorkdir();

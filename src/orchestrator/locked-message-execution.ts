@@ -249,8 +249,13 @@ export async function executeLockedMessage(
     return { deferAttachmentCleanup: false, queueDrainSessionKey: null };
   }
 
+  const recentArtifactBatches = deps.listRecentArtifactBatches(input.sessionKey, roomConfig.workdir);
   const fileSendIntent = parseFileSendIntent(route.prompt);
-  if (fileSendIntent) {
+  const shouldPreferModelFileDelivery =
+    Boolean(fileSendIntent) &&
+    recentArtifactBatches.length > 0 &&
+    (fileSendIntent?.requestedName === null || Boolean(fileSendIntent?.requestAll) || fileSendIntent?.requestedCount !== null);
+  if (fileSendIntent && !shouldPreferModelFileDelivery) {
     return await executeSemanticFileSendRequest(
       deps,
       {
