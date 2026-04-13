@@ -8,6 +8,13 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.101] - 2026-04-13
+
+- file delivery reliability: support recent artifact batch tracking plus structured model delivery actions so contextual requests like `把这四个视频文件发给我` can safely send the full generated batch instead of only one file.
+- fallback compatibility: keep explicit filename/path requests on the direct rule-based send path, while batch/count/all requests can resolve multiple files and send them sequentially with clear success summaries.
+- orchestration safety: validate model-requested attachments against recently registered artifacts only, preserving programmatic execution guardrails while letting the model understand user intent.
+- tests/docs: add regression coverage for artifact-batch registry, model delivery action parsing/execution, contextual-vs-explicit routing, and document the new natural-language file delivery behavior in README.
+
 ## [0.1.100] - 2026-04-11
 
 - matrix semantic file-send fix: avoid mis-parsing generic phrases like `生成好的视频` as literal filenames; keep them as generic media requests.
