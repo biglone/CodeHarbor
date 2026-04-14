@@ -12,7 +12,7 @@ On `push` to `main` and pull requests, CI runs:
 2. `npm run typecheck`
 3. `npm run lint`
 4. `npm test`
-5. `npm run test:coverage`
+5. `npm run test:coverage` (includes core-module coverage guard)
 6. `npm run test:e2e`
 7. `npm run build`
 8. `node dist/cli.js --help` (CLI smoke check)

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { StateStore } from "../src/store/state-store";
 
@@ -592,6 +592,191 @@ describe("StateStore", () => {
         retryAfterMs: null,
       }),
     );
+  });
+
+  it("lists task queue with status/source/room/time filters and pagination", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const nowSpy = vi.spyOn(Date, "now");
+    const sessionA = "matrix:!room-a:example.com:@alice:example.com";
+    const sessionB = "matrix:!room-b:example.com:@bob:example.com";
+
+    try {
+      nowSpy.mockReturnValue(1_000);
+      const taskApi = store.enqueueTask({
+        sessionKey: sessionA,
+        eventId: "$queue-api",
+        requestId: "req-queue-api",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-a:example.com",
+            senderId: "@alice:example.com",
+          },
+          externalContext: {
+            source: "api",
+          },
+        }),
+      }).task;
+
+      nowSpy.mockReturnValue(2_000);
+      const taskCi = store.enqueueTask({
+        sessionKey: sessionA,
+        eventId: "$queue-ci",
+        requestId: "req-queue-ci",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-a:example.com",
+            senderId: "@alice:example.com",
+          },
+          externalContext: {
+            source: "ci",
+          },
+        }),
+      }).task;
+
+      nowSpy.mockReturnValue(3_000);
+      const taskTicket = store.enqueueTask({
+        sessionKey: sessionB,
+        eventId: "$queue-ticket",
+        requestId: "req-queue-ticket",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-b:example.com",
+            senderId: "@bob:example.com",
+          },
+          externalContext: {
+            source: "ticket",
+          },
+        }),
+      }).task;
+
+      nowSpy.mockReturnValue(3_100);
+      store.claimNextTask(sessionA);
+      nowSpy.mockReturnValue(3_200);
+      store.failTask(taskApi.id, "boom");
+
+      const paged = store.listTaskQueue({ limit: 2, offset: 0 });
+      expect(paged.total).toBe(3);
+      expect(paged.items.map((item) => item.id)).toEqual([taskTicket.id, taskCi.id]);
+
+      const byStatus = store.listTaskQueue({ status: "pending", limit: 10 });
+      expect(byStatus.total).toBe(2);
+      expect(byStatus.items.every((item) => item.status === "pending")).toBe(true);
+
+      const bySource = store.listTaskQueue({ source: "ci", limit: 10 });
+      expect(bySource.total).toBe(1);
+      expect(bySource.items[0]).toEqual(
+        expect.objectContaining({
+          id: taskCi.id,
+          source: "ci",
+        }),
+      );
+
+      const byRoom = store.listTaskQueue({
+        roomId: "!room-a:example.com",
+        limit: 10,
+      });
+      expect(byRoom.total).toBe(2);
+      expect(byRoom.items.every((item) => item.roomId === "!room-a:example.com")).toBe(true);
+
+      const byTime = store.listTaskQueue({
+        from: 2_000,
+        to: 3_000,
+        limit: 10,
+      });
+      expect(byTime.total).toBe(2);
+      expect(byTime.items.map((item) => item.id)).toEqual([taskTicket.id, taskCi.id]);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("cancels pending task by id and keeps non-pending states unchanged", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const sessionKey = "matrix:!room-cancel:example.com:@alice:example.com";
+
+    const pending = store.enqueueTask({
+      sessionKey,
+      eventId: "$cancel-1",
+      requestId: "req-cancel-1",
+      payloadJson: '{"message":"cancel this task"}',
+    }).task;
+
+    const cancelled = store.cancelTaskById(pending.id, "cancelled by test");
+    expect(cancelled.changed).toBe(true);
+    expect(cancelled.task).toEqual(
+      expect.objectContaining({
+        id: pending.id,
+        status: "failed",
+        error: "cancelled by test",
+        lastError: "cancelled by test",
+      }),
+    );
+    expect(cancelled.task?.finishedAt).not.toBeNull();
+
+    const running = store.enqueueTask({
+      sessionKey,
+      eventId: "$cancel-2",
+      requestId: "req-cancel-2",
+      payloadJson: '{"message":"already running"}',
+    }).task;
+    store.claimNextTask(sessionKey);
+    const unchanged = store.cancelTaskById(running.id);
+    expect(unchanged.changed).toBe(false);
+    expect(unchanged.task?.status).toBe("running");
+
+    expect(store.cancelTaskById(999_999)).toEqual({
+      changed: false,
+      task: null,
+    });
+  });
+
+  it("retries failed task by id and keeps non-failed states unchanged", () => {
+    const { db, legacy } = createPaths();
+    const store = new StateStore(db, legacy, 10, 30, 100);
+    const sessionKey = "matrix:!room-retry-by-id:example.com:@alice:example.com";
+
+    const failed = store.enqueueTask({
+      sessionKey,
+      eventId: "$retry-by-id-1",
+      requestId: "req-retry-by-id-1",
+      payloadJson: '{"message":"fail then retry"}',
+    }).task;
+    store.claimNextTask(sessionKey);
+    store.failTask(failed.id, "temporary failure");
+
+    const retried = store.retryTaskById(failed.id);
+    expect(retried.changed).toBe(true);
+    expect(retried.task).toEqual(
+      expect.objectContaining({
+        id: failed.id,
+        status: "pending",
+        nextRetryAt: null,
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        lastError: "temporary failure",
+      }),
+    );
+
+    const pending = store.enqueueTask({
+      sessionKey,
+      eventId: "$retry-by-id-2",
+      requestId: "req-retry-by-id-2",
+      payloadJson: '{"message":"still pending"}',
+    }).task;
+    const unchanged = store.retryTaskById(pending.id);
+    expect(unchanged.changed).toBe(false);
+    expect(unchanged.task?.status).toBe("pending");
+
+    expect(store.retryTaskById(999_999)).toEqual({
+      changed: false,
+      task: null,
+    });
   });
 
   it("stores and reads runtime metrics snapshots", () => {

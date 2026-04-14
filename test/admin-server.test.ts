@@ -82,6 +82,14 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
       maxConcurrentPerUser: 1,
       maxConcurrentPerRoom: 4,
     },
+    sharedRateLimiter: {
+      mode: "local",
+      redisUrl: null,
+      redisKeyPrefix: "codeharbor:rate-limit:v1",
+      redisCommandTimeoutMs: 150,
+      redisConcurrencyTtlMs: 1_800_000,
+      fallbackToLocal: true,
+    },
     cliCompat: {
       enabled: false,
       passThroughEvents: false,
@@ -976,6 +984,51 @@ describe("AdminServer", () => {
           activeGlobal: 1,
           activeUsers: 1,
           activeRooms: 1,
+          sharedMode: "redis",
+          sharedBackendEnabled: true,
+          fallbackToLocal: true,
+          decisionsTotal: 12,
+          allowedTotal: 9,
+          deniedTotal: 3,
+          rejectionRate: 0.25,
+          decisionBreakdown: {
+            local: {
+              allowed: 4,
+              denied: 1,
+            },
+            shared: {
+              allowed: 3,
+              denied: 1,
+              errors: 2,
+            },
+            sharedFallback: {
+              allowed: 2,
+              denied: 1,
+            },
+          },
+          deniedByReason: {
+            user_requests_per_window: 1,
+            room_requests_per_window: 0,
+            global_concurrency: 1,
+            user_concurrency: 1,
+            room_concurrency: 0,
+          },
+          recovery: {
+            count: 2,
+            lastMs: 1200,
+            avgMs: 950,
+            pendingSinceIso: null,
+            pendingForMs: 0,
+          },
+          recent: [
+            {
+              at: "2026-03-18T00:00:08.000Z",
+              source: "shared",
+              outcome: "shared_error",
+              reason: "shared_backend_error",
+              retryAfterMs: null,
+            },
+          ],
         },
         autodev: {
           runs: {
@@ -1018,6 +1071,12 @@ describe("AdminServer", () => {
     expect(text).toContain("codeharbor_up 1");
     expect(text).toContain('codeharbor_requests_total{outcome="success"} 2');
     expect(text).toContain('codeharbor_rate_limiter_active{scope="global"} 1');
+    expect(text).toContain('codeharbor_rate_limiter_decisions_total{source="shared",outcome="denied"} 1');
+    expect(text).toContain('codeharbor_rate_limiter_denied_total{reason="user_requests_per_window"} 1');
+    expect(text).toContain("codeharbor_rate_limiter_rejection_ratio 0.25");
+    expect(text).toContain('codeharbor_rate_limiter_shared_mode{mode="redis"} 1');
+    expect(text).toContain("codeharbor_rate_limiter_shared_errors_total 2");
+    expect(text).toContain("codeharbor_rate_limiter_recovery_last_ms 1200");
     expect(text).toContain("codeharbor_request_execution_duration_ms_bucket");
     expect(text).toContain('codeharbor_upgrade_runs_total{status="running"} 1');
     expect(text).toContain('codeharbor_upgrade_runs_total{status="succeeded"} 1');

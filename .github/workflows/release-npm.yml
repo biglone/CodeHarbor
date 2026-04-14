@@ -100,7 +100,7 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm test
 
-      - name: Coverage checks
+      - name: Coverage checks (global + core guard)
         if: steps.intent.outputs.publish == 'true'
         run: npm run test:coverage
 

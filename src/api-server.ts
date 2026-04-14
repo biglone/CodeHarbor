@@ -13,6 +13,10 @@ import {
 } from "./auth/scope-matrix";
 import { Logger } from "./logger";
 import {
+  type ApiTaskActionResult,
+  type ApiTaskLifecycleEvent,
+  type ApiTaskListInput,
+  type ApiTaskListResult,
   type ApiTaskExternalContext,
   ApiTaskIdempotencyConflictError,
   type ApiTaskQueryResult,
@@ -23,6 +27,9 @@ import {
 const API_MAX_JSON_BODY_BYTES = 1_048_576;
 const IDEMPOTENCY_KEY_MAX_CHARS = 256;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 300;
+const TASK_LIST_QUERY_MAX_LIMIT = 500;
+const TASK_LIST_QUERY_DEFAULT_LIMIT = 20;
+const TASK_EVENTS_HEARTBEAT_MS = 15_000;
 
 type WebhookSource = "ci" | "ticket";
 
@@ -49,6 +56,7 @@ interface ApiServerOptions {
   webhookSecret?: string | null;
   webhookTimestampToleranceSeconds?: number;
   auditRecorder?: (event: ApiOperationAuditEvent) => void;
+  subscribeTaskLifecycle?: ApiTaskLifecycleSubscribeFn;
 }
 
 interface AddressInfo {
@@ -79,8 +87,16 @@ export interface ApiOperationAuditEvent {
 
 export interface TaskSubmissionService {
   submitApiTask(input: ApiTaskSubmitInput): ApiTaskSubmitResult;
+  listApiTasks(input: ApiTaskListInput): ApiTaskListResult;
   getApiTaskById(taskId: number): ApiTaskQueryResult | null;
+  cancelApiTask(taskId: number): ApiTaskActionResult | null;
+  retryApiTask(taskId: number): ApiTaskActionResult | null;
 }
+
+export type ApiTaskLifecycleSubscribeFn = (
+  taskId: number,
+  listener: (event: ApiTaskLifecycleEvent) => void,
+) => () => void;
 
 class HttpError extends Error {
   readonly statusCode: number;
@@ -101,6 +117,8 @@ export class ApiServer {
   private readonly webhookSecret: string | null;
   private readonly webhookTimestampToleranceSeconds: number;
   private readonly auditRecorder: ((event: ApiOperationAuditEvent) => void) | null;
+  private readonly subscribeTaskLifecycle: ApiTaskLifecycleSubscribeFn | null;
+  private readonly activeTaskEventStreams = new Set<() => void>();
   private server: http.Server | null = null;
   private address: AddressInfo | null = null;
 
@@ -120,6 +138,7 @@ export class ApiServer {
       options.webhookTimestampToleranceSeconds ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
     );
     this.auditRecorder = options.auditRecorder ?? null;
+    this.subscribeTaskLifecycle = options.subscribeTaskLifecycle ?? null;
   }
 
   getAddress(): AddressInfo | null {
@@ -161,6 +180,20 @@ export class ApiServer {
     if (!this.server) {
       return;
     }
+
+    if (this.activeTaskEventStreams.size > 0) {
+      for (const closeStream of [...this.activeTaskEventStreams]) {
+        try {
+          closeStream();
+        } catch (error) {
+          this.logger.warn("Failed to close API task event stream", {
+            error: formatError(error),
+          });
+        }
+      }
+      this.activeTaskEventStreams.clear();
+    }
+
     const server = this.server;
     this.server = null;
     this.address = null;
@@ -185,7 +218,9 @@ export class ApiServer {
       const url = new URL(req.url ?? "/", "http://localhost");
       const requestMethod = (req.method ?? "GET").toUpperCase();
       const taskDetailMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
-      const isTaskSubmitRoute = url.pathname === "/api/tasks";
+      const taskEventStreamMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(url.pathname);
+      const taskActionMatch = /^\/api\/tasks\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+      const isTaskCollectionRoute = url.pathname === "/api/tasks";
       const webhookMatch = /^\/api\/webhooks\/([^/]+)$/.exec(url.pathname);
       const mergeAuditMetadata = (metadata: Record<string, unknown>): Record<string, unknown> => ({
         ...(requestId ? { requestId } : {}),
@@ -198,7 +233,7 @@ export class ApiServer {
       );
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 
-      if (!isTaskSubmitRoute && !taskDetailMatch && !webhookMatch) {
+      if (!isTaskCollectionRoute && !taskDetailMatch && !taskEventStreamMatch && !taskActionMatch && !webhookMatch) {
         this.sendJson(res, 404, {
           ok: false,
           error: `Not found: ${requestMethod} ${url.pathname}`,
@@ -217,7 +252,7 @@ export class ApiServer {
         return;
       }
 
-      const scopeRequirement = resolveApiScopeRequirement(url.pathname);
+      const scopeRequirement = resolveApiScopeRequirement(requestMethod, url.pathname);
       const authIdentity = scopeRequirement ? this.resolveApiIdentity(req) : null;
       if (scopeRequirement) {
         auditBase = {
@@ -274,7 +309,120 @@ export class ApiServer {
         return;
       }
 
-      if (isTaskSubmitRoute) {
+      if (isTaskCollectionRoute) {
+        if (requestMethod === "POST") {
+          const idempotencyKey = readIdempotencyKey(req);
+          const body = await readJsonBody(req, API_MAX_JSON_BODY_BYTES);
+          const payload = parseTaskSubmitBody(body);
+          const result = this.taskService.submitApiTask({
+            ...payload,
+            idempotencyKey,
+          });
+          this.sendJson(res, result.created ? 202 : 200, {
+            ok: true,
+            data: formatTaskSubmitResponse(result),
+          });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              actor: authIdentity?.actor ?? null,
+              source: authIdentity?.source ?? "none",
+              grantedScopes: authIdentity?.scopes ?? [],
+              outcome: "allowed",
+              metadata: mergeAuditMetadata({
+                statusCode: result.created ? 202 : 200,
+                created: result.created,
+                taskId: result.task.id,
+              }),
+            });
+            auditWritten = true;
+          }
+          return;
+        }
+
+        if (requestMethod === "GET") {
+          const query = parseTaskListQuery(url.searchParams);
+          const result = this.taskService.listApiTasks(query);
+          this.sendJson(res, 200, {
+            ok: true,
+            data: formatTaskListResponse(result),
+          });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              actor: authIdentity?.actor ?? null,
+              source: authIdentity?.source ?? "none",
+              grantedScopes: authIdentity?.scopes ?? [],
+              outcome: "allowed",
+              metadata: mergeAuditMetadata({
+                statusCode: 200,
+                total: result.total,
+                returned: result.items.length,
+                filters: query,
+              }),
+            });
+            auditWritten = true;
+          }
+          return;
+        }
+
+        res.setHeader("Allow", "GET, POST, OPTIONS");
+        this.sendJson(res, 405, {
+          ok: false,
+          error: `Method not allowed: ${requestMethod}.`,
+        });
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            outcome: "denied",
+            reason: "method_not_allowed",
+            metadata: mergeAuditMetadata({ statusCode: 405 }),
+          });
+          auditWritten = true;
+        }
+        return;
+      }
+
+      if (taskEventStreamMatch) {
+        if (requestMethod !== "GET") {
+          res.setHeader("Allow", "GET, OPTIONS");
+          this.sendJson(res, 405, {
+            ok: false,
+            error: `Method not allowed: ${requestMethod}.`,
+          });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              outcome: "denied",
+              reason: "method_not_allowed",
+              metadata: mergeAuditMetadata({ statusCode: 405 }),
+            });
+            auditWritten = true;
+          }
+          return;
+        }
+
+        const taskId = parseTaskId(taskEventStreamMatch[1]);
+        this.openTaskEventStream(req, res, taskId);
+        if (auditBase) {
+          this.appendAuditEvent({
+            ...auditBase,
+            actor: authIdentity?.actor ?? null,
+            source: authIdentity?.source ?? "none",
+            grantedScopes: authIdentity?.scopes ?? [],
+            outcome: "allowed",
+            metadata: mergeAuditMetadata({
+              statusCode: 200,
+              taskId,
+              stream: "sse",
+            }),
+          });
+          auditWritten = true;
+        }
+        return;
+      }
+
+      if (taskActionMatch) {
         if (requestMethod !== "POST") {
           res.setHeader("Allow", "POST, OPTIONS");
           this.sendJson(res, 405, {
@@ -293,16 +441,58 @@ export class ApiServer {
           return;
         }
 
-        const idempotencyKey = readIdempotencyKey(req);
-        const body = await readJsonBody(req, API_MAX_JSON_BODY_BYTES);
-        const payload = parseTaskSubmitBody(body);
-        const result = this.taskService.submitApiTask({
-          ...payload,
-          idempotencyKey,
-        });
-        this.sendJson(res, result.created ? 202 : 200, {
+        const taskId = parseTaskId(taskActionMatch[1]);
+        const action = parseTaskAction(taskActionMatch[2]);
+        const result =
+          action === "cancel" ? this.taskService.cancelApiTask(taskId) : this.taskService.retryApiTask(taskId);
+        if (!result) {
+          this.sendJson(res, 404, {
+            ok: false,
+            error: `Task not found: ${taskId}.`,
+          });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              outcome: "denied",
+              reason: "not_found",
+              metadata: mergeAuditMetadata({
+                statusCode: 404,
+                taskId,
+                action,
+              }),
+            });
+            auditWritten = true;
+          }
+          return;
+        }
+        if (!result.updated) {
+          const expected = action === "cancel" ? "pending" : "failed";
+          this.sendJson(res, 409, {
+            ok: false,
+            error: `Task ${taskId} cannot ${action} from status ${result.status}. Expected ${expected}.`,
+            code: "TASK_STATE_CONFLICT",
+          });
+          if (auditBase) {
+            this.appendAuditEvent({
+              ...auditBase,
+              outcome: "denied",
+              reason: `task_state_conflict:${action}:${result.status}`,
+              metadata: mergeAuditMetadata({
+                statusCode: 409,
+                taskId,
+                action,
+                status: result.status,
+                expected,
+              }),
+            });
+            auditWritten = true;
+          }
+          return;
+        }
+
+        this.sendJson(res, 200, {
           ok: true,
-          data: formatTaskSubmitResponse(result),
+          data: formatTaskActionResponse(result),
         });
         if (auditBase) {
           this.appendAuditEvent({
@@ -312,9 +502,11 @@ export class ApiServer {
             grantedScopes: authIdentity?.scopes ?? [],
             outcome: "allowed",
             metadata: mergeAuditMetadata({
-              statusCode: result.created ? 202 : 200,
-              created: result.created,
-              taskId: result.task.id,
+              statusCode: 200,
+              taskId,
+              action,
+              previousStatus: result.previousStatus,
+              status: result.status,
             }),
           });
           auditWritten = true;
@@ -619,6 +811,89 @@ export class ApiServer {
     }
   }
 
+  private openTaskEventStream(req: http.IncomingMessage, res: http.ServerResponse, taskId: number): void {
+    const snapshot = this.taskService.getApiTaskById(taskId);
+    if (!snapshot) {
+      throw new HttpError(404, `Task not found: ${taskId}.`);
+    }
+    if (!this.subscribeTaskLifecycle) {
+      throw new HttpError(503, "Task events stream is unavailable.");
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    writeSseEvent(res, "snapshot", {
+      type: "snapshot",
+      taskId: snapshot.taskId,
+      status: snapshot.status,
+      stage: snapshot.stage,
+      errorSummary: snapshot.errorSummary,
+      emittedAt: Date.now(),
+    });
+
+    let closed = false;
+    const heartbeat = setInterval(() => {
+      if (closed || res.writableEnded) {
+        return;
+      }
+      try {
+        res.write(`: ping ${Date.now()}\n\n`);
+      } catch (error) {
+        this.logger.warn("Failed to emit API task event stream heartbeat", {
+          taskId,
+          error: formatError(error),
+        });
+      }
+    }, TASK_EVENTS_HEARTBEAT_MS);
+    heartbeat.unref?.();
+
+    const unsubscribe = this.subscribeTaskLifecycle(taskId, (event) => {
+      if (closed || res.writableEnded) {
+        return;
+      }
+      writeSseEvent(res, "lifecycle", {
+        type: "lifecycle",
+        ...event,
+        emittedAt: Date.now(),
+      });
+    });
+
+    const closeStream = (): void => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      clearInterval(heartbeat);
+      this.activeTaskEventStreams.delete(closeStream);
+      try {
+        unsubscribe();
+      } catch (error) {
+        this.logger.warn("Failed to unsubscribe API task event listener", {
+          taskId,
+          error: formatError(error),
+        });
+      }
+      if (!res.writableEnded) {
+        try {
+          res.end();
+        } catch {
+          // Ignore close failures while tearing down event streams.
+        }
+      }
+    };
+
+    this.activeTaskEventStreams.add(closeStream);
+    req.once("close", closeStream);
+    req.once("aborted", closeStream);
+    res.once("close", closeStream);
+    res.once("error", closeStream);
+  }
+
   private setSecurityHeaders(res: http.ServerResponse): void {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -669,6 +944,34 @@ function formatTaskQueryResponse(result: ApiTaskQueryResult): {
   };
 }
 
+function formatTaskListResponse(result: ApiTaskListResult): {
+  total: number;
+  items: ApiTaskListResult["items"];
+} {
+  return {
+    total: result.total,
+    items: result.items,
+  };
+}
+
+function formatTaskActionResponse(result: ApiTaskActionResult): ApiTaskActionResult {
+  return {
+    taskId: result.taskId,
+    action: result.action,
+    updated: result.updated,
+    previousStatus: result.previousStatus,
+    status: result.status,
+    stage: result.stage,
+    errorSummary: result.errorSummary,
+  };
+}
+
+function writeSseEvent(res: http.ServerResponse, eventType: string, payload: unknown): void {
+  const serialized = JSON.stringify(payload);
+  res.write(`event: ${eventType}\n`);
+  res.write(`data: ${serialized}\n\n`);
+}
+
 function readIdempotencyKey(req: http.IncomingMessage): string {
   const raw = req.headers["idempotency-key"];
   const value = normalizeHeaderValue(raw);
@@ -694,6 +997,109 @@ function parseTaskId(value: string | undefined): number {
     throw new HttpError(400, "taskId must be a positive integer.");
   }
   return taskId;
+}
+
+function parseTaskAction(value: string | undefined): "cancel" | "retry" {
+  if (!value) {
+    throw new HttpError(400, "task action is required.");
+  }
+  const decoded = decodePathParam(value, "action").toLowerCase();
+  if (decoded === "cancel" || decoded === "retry") {
+    return decoded;
+  }
+  throw new HttpError(404, `Task action not found: ${decoded}.`);
+}
+
+function parseTaskListQuery(searchParams: URLSearchParams): ApiTaskListInput {
+  const statusRaw = searchParams.get("status");
+  const sourceRaw = searchParams.get("source");
+  const roomIdRaw = searchParams.get("roomId");
+  const fromRaw = searchParams.get("from");
+  const toRaw = searchParams.get("to");
+  const limitRaw = searchParams.get("limit");
+  const offsetRaw = searchParams.get("offset");
+
+  const status = parseTaskListStatus(statusRaw);
+  const source = parseTaskListSource(sourceRaw);
+  const roomId = parseOptionalQueryString(roomIdRaw);
+  const from = parseOptionalQueryInteger(fromRaw, "from", { min: 0 });
+  const to = parseOptionalQueryInteger(toRaw, "to", { min: 0 });
+  const limit = parseOptionalQueryInteger(limitRaw, "limit", {
+    min: 1,
+    max: TASK_LIST_QUERY_MAX_LIMIT,
+    fallback: TASK_LIST_QUERY_DEFAULT_LIMIT,
+  });
+  const offset = parseOptionalQueryInteger(offsetRaw, "offset", {
+    min: 0,
+    fallback: 0,
+  });
+  if (from !== null && to !== null && from > to) {
+    throw new HttpError(400, "Invalid query parameter: from must be <= to.");
+  }
+  return {
+    status,
+    source,
+    roomId,
+    from,
+    to,
+    limit: limit ?? TASK_LIST_QUERY_DEFAULT_LIMIT,
+    offset: offset ?? 0,
+  };
+}
+
+function parseTaskListStatus(value: string | null): ApiTaskListInput["status"] {
+  const normalized = parseOptionalQueryString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "pending" || normalized === "running" || normalized === "succeeded" || normalized === "failed") {
+    return normalized;
+  }
+  throw new HttpError(400, "Invalid query parameter: status must be pending|running|succeeded|failed.");
+}
+
+function parseTaskListSource(value: string | null): ApiTaskListInput["source"] {
+  const normalized = parseOptionalQueryString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "api" || normalized === "ci" || normalized === "ticket") {
+    return normalized;
+  }
+  throw new HttpError(400, "Invalid query parameter: source must be api|ci|ticket.");
+}
+
+function parseOptionalQueryString(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseOptionalQueryInteger(
+  value: string | null,
+  fieldName: string,
+  options: { min: number; max?: number; fallback?: number },
+): number | null {
+  if (value === null || value.trim() === "") {
+    return options.fallback ?? null;
+  }
+  const normalized = value.trim();
+  if (!/^-?\d+$/.test(normalized)) {
+    throw new HttpError(400, `Invalid query parameter: ${fieldName} must be an integer.`);
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new HttpError(400, `Invalid query parameter: ${fieldName} must be an integer.`);
+  }
+  if (parsed < options.min) {
+    throw new HttpError(400, `Invalid query parameter: ${fieldName} must be >= ${options.min}.`);
+  }
+  if (typeof options.max === "number" && parsed > options.max) {
+    throw new HttpError(400, `Invalid query parameter: ${fieldName} must be <= ${options.max}.`);
+  }
+  return parsed;
 }
 
 function decodePathParam(value: string, fieldName: string): string {

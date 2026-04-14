@@ -1,4 +1,15 @@
+import type { RateLimitReason, RateLimiterDecisionRecord, RateLimiterSnapshot } from "./rate-limiter";
+
 const HISTOGRAM_INFINITY_LABEL = "+Inf";
+const RATE_LIMIT_DECISION_SOURCES = ["local", "shared", "shared_fallback"] as const;
+const RATE_LIMIT_REASON_VALUES = [
+  "user_requests_per_window",
+  "room_requests_per_window",
+  "global_concurrency",
+  "user_concurrency",
+  "room_concurrency",
+] as const;
+const SHARED_RATE_LIMIT_MODES = ["local", "redis"] as const;
 
 export const REQUEST_OUTCOME_VALUES = [
   "success",
@@ -47,11 +58,7 @@ export interface RuntimeRequestMetricsSnapshot {
   sendDurationMs: HistogramSnapshot;
 }
 
-export interface RuntimeLimiterMetricsSnapshot {
-  activeGlobal: number;
-  activeUsers: number;
-  activeRooms: number;
-}
+export type RuntimeLimiterMetricsSnapshot = RateLimiterSnapshot;
 
 export interface RuntimeAutoDevMetricsSnapshot {
   runs: Record<AutoDevRunOutcomeMetric, number>;
@@ -176,6 +183,7 @@ export function renderPrometheusMetrics(input: RenderPrometheusInput): string {
 }
 
 function appendRequestMetrics(lines: string[], snapshot: RuntimeMetricsSnapshot): void {
+  const limiter = normalizeRuntimeLimiterMetrics(snapshot.limiter);
   appendMetricMeta(lines, "codeharbor_requests_total", "counter", "Total request outcomes by status.");
   appendMetricMeta(
     lines,
@@ -190,6 +198,68 @@ function appendRequestMetrics(lines: string[], snapshot: RuntimeMetricsSnapshot)
     "gauge",
     "Active rate limiter usage by scope (global/users/rooms).",
   );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_decisions_total",
+    "counter",
+    "Rate limiter decisions grouped by source and outcome.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_denied_total",
+    "counter",
+    "Rate limiter denied decisions grouped by reason.",
+  );
+  appendMetricMeta(lines, "codeharbor_rate_limiter_rejection_ratio", "gauge", "Rate limiter rejection ratio (0-1).");
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_shared_mode",
+    "gauge",
+    "Shared limiter configured mode one-hot gauge (label=mode).",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_shared_backend_ready",
+    "gauge",
+    "Whether shared limiter backend is active on this instance.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_shared_fallback_enabled",
+    "gauge",
+    "Whether shared limiter fallback-to-local is enabled.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_shared_errors_total",
+    "counter",
+    "Shared limiter backend error count.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_shared_fallback_total",
+    "counter",
+    "Rate limiter decisions executed through shared fallback path.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_recoveries_total",
+    "counter",
+    "Total recovery incidents from limiter rejection to next allowed request.",
+  );
+  appendMetricMeta(lines, "codeharbor_rate_limiter_recovery_last_ms", "gauge", "Last limiter recovery duration in milliseconds.");
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_recovery_avg_ms",
+    "gauge",
+    "Average limiter recovery duration in milliseconds.",
+  );
+  appendMetricMeta(
+    lines,
+    "codeharbor_rate_limiter_recovery_pending_seconds",
+    "gauge",
+    "Seconds elapsed since latest unrecovered limiter rejection (0 when idle).",
+  );
 
   for (const outcome of REQUEST_OUTCOME_VALUES) {
     const value = snapshot.request.outcomes[outcome] ?? 0;
@@ -202,9 +272,61 @@ function appendRequestMetrics(lines: string[], snapshot: RuntimeMetricsSnapshot)
   }
 
   lines.push(`codeharbor_requests_active ${formatMetricValue(snapshot.activeExecutions)}`);
-  lines.push(`codeharbor_rate_limiter_active{scope="global"} ${formatMetricValue(snapshot.limiter.activeGlobal)}`);
-  lines.push(`codeharbor_rate_limiter_active{scope="users"} ${formatMetricValue(snapshot.limiter.activeUsers)}`);
-  lines.push(`codeharbor_rate_limiter_active{scope="rooms"} ${formatMetricValue(snapshot.limiter.activeRooms)}`);
+  lines.push(`codeharbor_rate_limiter_active{scope="global"} ${formatMetricValue(limiter.activeGlobal)}`);
+  lines.push(`codeharbor_rate_limiter_active{scope="users"} ${formatMetricValue(limiter.activeUsers)}`);
+  lines.push(`codeharbor_rate_limiter_active{scope="rooms"} ${formatMetricValue(limiter.activeRooms)}`);
+
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="local",outcome="allowed"} ${formatMetricValue(
+      limiter.decisionBreakdown.local.allowed,
+    )}`,
+  );
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="local",outcome="denied"} ${formatMetricValue(
+      limiter.decisionBreakdown.local.denied,
+    )}`,
+  );
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="shared",outcome="allowed"} ${formatMetricValue(
+      limiter.decisionBreakdown.shared.allowed,
+    )}`,
+  );
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="shared",outcome="denied"} ${formatMetricValue(
+      limiter.decisionBreakdown.shared.denied,
+    )}`,
+  );
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="shared_fallback",outcome="allowed"} ${formatMetricValue(
+      limiter.decisionBreakdown.sharedFallback.allowed,
+    )}`,
+  );
+  lines.push(
+    `codeharbor_rate_limiter_decisions_total{source="shared_fallback",outcome="denied"} ${formatMetricValue(
+      limiter.decisionBreakdown.sharedFallback.denied,
+    )}`,
+  );
+
+  for (const reason of RATE_LIMIT_REASON_VALUES) {
+    lines.push(`codeharbor_rate_limiter_denied_total{reason="${reason}"} ${formatMetricValue(limiter.deniedByReason[reason] ?? 0)}`);
+  }
+
+  lines.push(`codeharbor_rate_limiter_rejection_ratio ${formatMetricValue(limiter.rejectionRate)}`);
+  for (const mode of SHARED_RATE_LIMIT_MODES) {
+    lines.push(`codeharbor_rate_limiter_shared_mode{mode="${mode}"} ${mode === limiter.sharedMode ? "1" : "0"}`);
+  }
+  lines.push(`codeharbor_rate_limiter_shared_backend_ready ${limiter.sharedBackendEnabled ? "1" : "0"}`);
+  lines.push(`codeharbor_rate_limiter_shared_fallback_enabled ${limiter.fallbackToLocal ? "1" : "0"}`);
+  lines.push(`codeharbor_rate_limiter_shared_errors_total ${formatMetricValue(limiter.decisionBreakdown.shared.errors)}`);
+  lines.push(
+    `codeharbor_rate_limiter_shared_fallback_total ${formatMetricValue(
+      limiter.decisionBreakdown.sharedFallback.allowed + limiter.decisionBreakdown.sharedFallback.denied,
+    )}`,
+  );
+  lines.push(`codeharbor_rate_limiter_recoveries_total ${formatMetricValue(limiter.recovery.count)}`);
+  lines.push(`codeharbor_rate_limiter_recovery_last_ms ${formatMetricValue(limiter.recovery.lastMs)}`);
+  lines.push(`codeharbor_rate_limiter_recovery_avg_ms ${formatMetricValue(limiter.recovery.avgMs)}`);
+  lines.push(`codeharbor_rate_limiter_recovery_pending_seconds ${formatMetricValue(limiter.recovery.pendingForMs / 1_000)}`);
 
   appendHistogram(lines, "codeharbor_request_queue_duration_ms", "Request queue wait duration in milliseconds.", snapshot.request.queueDurationMs);
   appendHistogram(
@@ -229,9 +351,7 @@ function appendEmptyRequestMetrics(lines: string[]): void {
       sendDurationMs: createEmptyHistogram(),
     },
     limiter: {
-      activeGlobal: 0,
-      activeUsers: 0,
-      activeRooms: 0,
+      ...createEmptyLimiterMetrics(),
     },
     autodev: createEmptyAutoDevMetrics(),
   };
@@ -441,8 +561,194 @@ export function parseRuntimeMetricsSnapshot(raw: string): RuntimeMetricsSnapshot
   }
   return {
     ...(candidate as RuntimeMetricsSnapshot),
+    limiter: parseRuntimeLimiterMetrics((candidate as { limiter?: unknown }).limiter),
     autodev: parseRuntimeAutoDevMetrics((candidate as { autodev?: unknown }).autodev),
   };
+}
+
+function createEmptyLimiterMetrics(): RuntimeLimiterMetricsSnapshot {
+  return {
+    activeGlobal: 0,
+    activeUsers: 0,
+    activeRooms: 0,
+    sharedMode: "local",
+    sharedBackendEnabled: false,
+    fallbackToLocal: true,
+    decisionsTotal: 0,
+    allowedTotal: 0,
+    deniedTotal: 0,
+    rejectionRate: 0,
+    decisionBreakdown: {
+      local: {
+        allowed: 0,
+        denied: 0,
+      },
+      shared: {
+        allowed: 0,
+        denied: 0,
+        errors: 0,
+      },
+      sharedFallback: {
+        allowed: 0,
+        denied: 0,
+      },
+    },
+    deniedByReason: {
+      user_requests_per_window: 0,
+      room_requests_per_window: 0,
+      global_concurrency: 0,
+      user_concurrency: 0,
+      room_concurrency: 0,
+    },
+    recovery: {
+      count: 0,
+      lastMs: 0,
+      avgMs: 0,
+      pendingSinceIso: null,
+      pendingForMs: 0,
+    },
+    recent: [],
+  };
+}
+
+function normalizeRuntimeLimiterMetrics(raw: RuntimeLimiterMetricsSnapshot | null | undefined): RuntimeLimiterMetricsSnapshot {
+  const fallback = createEmptyLimiterMetrics();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return fallback;
+  }
+  const candidate = raw as Partial<RuntimeLimiterMetricsSnapshot> & {
+    decisionBreakdown?: {
+      local?: { allowed?: unknown; denied?: unknown };
+      shared?: { allowed?: unknown; denied?: unknown; errors?: unknown };
+      sharedFallback?: { allowed?: unknown; denied?: unknown };
+    };
+    deniedByReason?: Partial<Record<RateLimitReason, unknown>>;
+    recovery?: {
+      count?: unknown;
+      lastMs?: unknown;
+      avgMs?: unknown;
+      pendingSinceIso?: unknown;
+      pendingForMs?: unknown;
+    };
+    recent?: unknown;
+  };
+  const sharedMode = candidate.sharedMode === "redis" ? "redis" : "local";
+  const deniedByReason = (candidate.deniedByReason ?? {}) as Partial<Record<RateLimitReason, unknown>>;
+  const recovery = (candidate.recovery ?? {}) as {
+    count?: unknown;
+    lastMs?: unknown;
+    avgMs?: unknown;
+    pendingSinceIso?: unknown;
+    pendingForMs?: unknown;
+  };
+  const recent = parseLimiterDecisionRecords(candidate.recent);
+
+  const localAllowed = parseNonNegativeInt(candidate.decisionBreakdown?.local?.allowed);
+  const localDenied = parseNonNegativeInt(candidate.decisionBreakdown?.local?.denied);
+  const sharedAllowed = parseNonNegativeInt(candidate.decisionBreakdown?.shared?.allowed);
+  const sharedDenied = parseNonNegativeInt(candidate.decisionBreakdown?.shared?.denied);
+  const sharedErrors = parseNonNegativeInt(candidate.decisionBreakdown?.shared?.errors);
+  const fallbackAllowed = parseNonNegativeInt(candidate.decisionBreakdown?.sharedFallback?.allowed);
+  const fallbackDenied = parseNonNegativeInt(candidate.decisionBreakdown?.sharedFallback?.denied);
+  const allowedTotal =
+    parseNonNegativeInt(candidate.allowedTotal) || localAllowed + sharedAllowed + fallbackAllowed;
+  const deniedTotal =
+    parseNonNegativeInt(candidate.deniedTotal) || localDenied + sharedDenied + fallbackDenied;
+  const decisionsTotal =
+    parseNonNegativeInt(candidate.decisionsTotal) || Math.max(0, allowedTotal + deniedTotal);
+  const rejectionRate =
+    typeof candidate.rejectionRate === "number" && Number.isFinite(candidate.rejectionRate)
+      ? Math.max(0, Math.min(1, candidate.rejectionRate))
+      : decisionsTotal > 0
+        ? deniedTotal / decisionsTotal
+        : 0;
+
+  return {
+    activeGlobal: parseNonNegativeInt(candidate.activeGlobal),
+    activeUsers: parseNonNegativeInt(candidate.activeUsers),
+    activeRooms: parseNonNegativeInt(candidate.activeRooms),
+    sharedMode,
+    sharedBackendEnabled: Boolean(candidate.sharedBackendEnabled),
+    fallbackToLocal: candidate.fallbackToLocal !== false,
+    decisionsTotal,
+    allowedTotal,
+    deniedTotal,
+    rejectionRate,
+    decisionBreakdown: {
+      local: {
+        allowed: localAllowed,
+        denied: localDenied,
+      },
+      shared: {
+        allowed: sharedAllowed,
+        denied: sharedDenied,
+        errors: sharedErrors,
+      },
+      sharedFallback: {
+        allowed: fallbackAllowed,
+        denied: fallbackDenied,
+      },
+    },
+    deniedByReason: {
+      user_requests_per_window: parseNonNegativeInt(deniedByReason.user_requests_per_window),
+      room_requests_per_window: parseNonNegativeInt(deniedByReason.room_requests_per_window),
+      global_concurrency: parseNonNegativeInt(deniedByReason.global_concurrency),
+      user_concurrency: parseNonNegativeInt(deniedByReason.user_concurrency),
+      room_concurrency: parseNonNegativeInt(deniedByReason.room_concurrency),
+    },
+    recovery: {
+      count: parseNonNegativeInt(recovery.count),
+      lastMs: parseNonNegativeInt(recovery.lastMs),
+      avgMs: parseNonNegativeInt(recovery.avgMs),
+      pendingSinceIso: typeof recovery.pendingSinceIso === "string" ? recovery.pendingSinceIso : null,
+      pendingForMs: parseNonNegativeInt(recovery.pendingForMs),
+    },
+    recent,
+  };
+}
+
+function parseLimiterDecisionRecords(value: unknown): RateLimiterDecisionRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const records: RateLimiterDecisionRecord[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const candidate = entry as Partial<RateLimiterDecisionRecord>;
+    const source = RATE_LIMIT_DECISION_SOURCES.includes(candidate.source as (typeof RATE_LIMIT_DECISION_SOURCES)[number])
+      ? (candidate.source as (typeof RATE_LIMIT_DECISION_SOURCES)[number])
+      : "local";
+    const outcome =
+      candidate.outcome === "allowed" || candidate.outcome === "denied" || candidate.outcome === "shared_error"
+        ? candidate.outcome
+        : "denied";
+    const reason =
+      candidate.reason === "user_requests_per_window" ||
+      candidate.reason === "room_requests_per_window" ||
+      candidate.reason === "global_concurrency" ||
+      candidate.reason === "user_concurrency" ||
+      candidate.reason === "room_concurrency" ||
+      candidate.reason === "shared_backend_error"
+        ? candidate.reason
+        : null;
+    records.push({
+      at: typeof candidate.at === "string" ? candidate.at : new Date(0).toISOString(),
+      source,
+      outcome,
+      reason,
+      retryAfterMs: parseNullableNonNegativeInt(candidate.retryAfterMs),
+    });
+  }
+  return records;
+}
+
+function parseRuntimeLimiterMetrics(value: unknown): RuntimeLimiterMetricsSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return createEmptyLimiterMetrics();
+  }
+  return normalizeRuntimeLimiterMetrics(value as RuntimeLimiterMetricsSnapshot);
 }
 
 function parseRuntimeAutoDevMetrics(value: unknown): RuntimeAutoDevMetricsSnapshot {
@@ -476,6 +782,13 @@ function parseRuntimeAutoDevMetrics(value: unknown): RuntimeAutoDevMetricsSnapsh
 function parseNonNegativeInt(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return 0;
+  }
+  return Math.floor(value);
+}
+
+function parseNullableNonNegativeInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
   }
   return Math.floor(value);
 }

@@ -3,7 +3,7 @@ import type { CliCompatConfig, TriggerPolicy, RoomTriggerPolicyOverrides, Output
 import type { ConfigService } from "../config-service";
 import type { CodexExecutor } from "../executor/codex-executor";
 import type { PackageUpdateChecker } from "../package-update-checker";
-import type { RateLimiterOptions } from "../rate-limiter";
+import type { RateLimiterOptions, SharedRateLimiterOptions } from "../rate-limiter";
 import type { RetryPolicyInput } from "../reliability/retry-policy";
 import type { BackendModelRouteRule } from "../routing/backend-model-router";
 import type { WorkflowRole, WorkflowRoleSkillDisclosureMode } from "../workflow/role-skills";
@@ -29,6 +29,7 @@ export interface OrchestratorOptions {
   defaultGroupTriggerPolicy?: TriggerPolicy;
   roomTriggerPolicies?: RoomTriggerPolicyOverrides;
   rateLimiterOptions?: RateLimiterOptions;
+  sharedRateLimiterOptions?: SharedRateLimiterOptions;
   cliCompat?: CliCompatConfig;
   multiAgentWorkflow?: {
     enabled: boolean;

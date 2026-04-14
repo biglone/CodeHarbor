@@ -1,6 +1,7 @@
 import type { ConfigService } from "../config-service";
 import type { RoomTriggerPolicyOverrides, TriggerPolicy } from "../config";
-import { RateLimiter } from "../rate-limiter";
+import { createRedisSharedRateLimiterBackend } from "../rate-limiter-shared-redis";
+import { RateLimiter, type RateLimiterLike, type SharedRateLimiterOptions } from "../rate-limiter";
 import type { OrchestratorOptions } from "./orchestrator-config-types";
 
 export interface SessionRuntimeConfig {
@@ -12,11 +13,13 @@ export interface SessionRuntimeConfig {
   roomTriggerPolicies: RoomTriggerPolicyOverrides;
   configService: ConfigService | null;
   defaultCodexWorkdir: string;
-  rateLimiter: RateLimiter;
+  rateLimiter: RateLimiterLike;
 }
 
 export function resolveSessionRuntimeConfig(options?: OrchestratorOptions): SessionRuntimeConfig {
   const sessionActiveWindowMinutes = options?.sessionActiveWindowMinutes ?? 20;
+  const sharedRateLimiterOptions = normalizeSharedRateLimiterOptions(options?.sharedRateLimiterOptions);
+  const sharedBackend = createRedisSharedRateLimiterBackend(sharedRateLimiterOptions);
   return {
     commandPrefix: (options?.commandPrefix ?? "").trim(),
     matrixUserId: options?.matrixUserId ?? "",
@@ -40,6 +43,29 @@ export function resolveSessionRuntimeConfig(options?: OrchestratorOptions): Sess
         maxConcurrentPerUser: 1,
         maxConcurrentPerRoom: 4,
       },
+      {
+        sharedBackend,
+        fallbackToLocal: sharedRateLimiterOptions.fallbackToLocal,
+        sharedMode: sharedRateLimiterOptions.mode,
+      },
     ),
+  };
+}
+
+function normalizeSharedRateLimiterOptions(input: SharedRateLimiterOptions | undefined): SharedRateLimiterOptions {
+  const mode = input?.mode === "redis" ? "redis" : "local";
+  return {
+    mode,
+    redisUrl: input?.redisUrl?.trim() || null,
+    redisKeyPrefix: input?.redisKeyPrefix?.trim() || "codeharbor:rate-limit:v1",
+    redisCommandTimeoutMs:
+      typeof input?.redisCommandTimeoutMs === "number" && Number.isFinite(input.redisCommandTimeoutMs)
+        ? Math.max(50, Math.floor(input.redisCommandTimeoutMs))
+        : 150,
+    redisConcurrencyTtlMs:
+      typeof input?.redisConcurrencyTtlMs === "number" && Number.isFinite(input.redisConcurrencyTtlMs)
+        ? Math.max(1_000, Math.floor(input.redisConcurrencyTtlMs))
+        : 30 * 60 * 1_000,
+    fallbackToLocal: input?.fallbackToLocal ?? true,
   };
 }

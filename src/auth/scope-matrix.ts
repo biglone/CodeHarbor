@@ -249,6 +249,13 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
   },
   {
     surface: "api",
+    method: "GET",
+    path: "/api/tasks",
+    action: TOKEN_SCOPES.TASKS_READ_API,
+    requiredScopes: [TOKEN_SCOPES.TASKS_READ_API],
+  },
+  {
+    surface: "api",
     method: "POST",
     path: "/api/tasks",
     action: TOKEN_SCOPES.TASKS_SUBMIT_API,
@@ -260,6 +267,20 @@ export const AUTH_SCOPE_MATRIX: readonly ScopeMatrixEntry[] = [
     path: "/api/tasks/:taskId",
     action: TOKEN_SCOPES.TASKS_READ_API,
     requiredScopes: [TOKEN_SCOPES.TASKS_READ_API],
+  },
+  {
+    surface: "api",
+    method: "GET",
+    path: "/api/tasks/:taskId/events",
+    action: TOKEN_SCOPES.TASKS_READ_API,
+    requiredScopes: [TOKEN_SCOPES.TASKS_READ_API],
+  },
+  {
+    surface: "api",
+    method: "POST",
+    path: "/api/tasks/:taskId/cancel|/api/tasks/:taskId/retry",
+    action: TOKEN_SCOPES.TASKS_SUBMIT_API,
+    requiredScopes: [TOKEN_SCOPES.TASKS_SUBMIT_API],
   },
   {
     surface: "webhook",
@@ -350,8 +371,18 @@ export function resolveAdminScopeRequirement(method: string | undefined, pathnam
   return isReadMethod ? ADMIN_READ_REQUIREMENT : ADMIN_WRITE_REQUIREMENT;
 }
 
-export function resolveApiScopeRequirement(pathname: string): ScopeRequirement | null {
+export function resolveApiScopeRequirement(method: string | undefined, pathname: string): ScopeRequirement | null {
+  const normalizedMethod = (method ?? "GET").toUpperCase();
   if (pathname === "/api/tasks") {
+    if (normalizedMethod === "GET") {
+      return TASK_READ_API_REQUIREMENT;
+    }
+    return TASK_SUBMIT_API_REQUIREMENT;
+  }
+  if (/^\/api\/tasks\/[^/]+\/events$/.test(pathname)) {
+    return TASK_READ_API_REQUIREMENT;
+  }
+  if (/^\/api\/tasks\/[^/]+\/(?:cancel|retry)$/.test(pathname)) {
     return TASK_SUBMIT_API_REQUIREMENT;
   }
   if (/^\/api\/tasks\/[^/]+$/.test(pathname)) {

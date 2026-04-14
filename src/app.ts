@@ -11,7 +11,7 @@ import { CodexExecutor } from "./executor/codex-executor";
 import { ExternalTaskIntegrationDispatcher } from "./external-task-integration";
 import { HistoryService } from "./history-service";
 import { Logger } from "./logger";
-import { Orchestrator } from "./orchestrator";
+import { Orchestrator, type ApiTaskLifecycleEvent } from "./orchestrator";
 import { NpmRegistryUpdateChecker, resolvePackageVersion } from "./package-update-checker";
 import { resolveExecutorProxyEnv } from "./proxy-env";
 import { StateStore } from "./store/state-store";
@@ -88,6 +88,39 @@ export class CodeHarborApp {
           },
         })
       : null;
+    const apiTaskLifecycleListeners = new Map<number, Set<(event: ApiTaskLifecycleEvent) => void>>();
+    const subscribeTaskLifecycle = (
+      taskId: number,
+      listener: (event: ApiTaskLifecycleEvent) => void,
+    ): (() => void) => {
+      const listeners = apiTaskLifecycleListeners.get(taskId) ?? new Set<(event: ApiTaskLifecycleEvent) => void>();
+      listeners.add(listener);
+      apiTaskLifecycleListeners.set(taskId, listeners);
+      return () => {
+        const existing = apiTaskLifecycleListeners.get(taskId);
+        if (!existing) {
+          return;
+        }
+        existing.delete(listener);
+        if (existing.size === 0) {
+          apiTaskLifecycleListeners.delete(taskId);
+        }
+      };
+    };
+    const emitApiTaskLifecycle = (event: ApiTaskLifecycleEvent): void => {
+      this.externalTaskIntegrationDispatcher?.emitTaskLifecycle(event);
+      const listeners = apiTaskLifecycleListeners.get(event.taskId);
+      if (!listeners || listeners.size === 0) {
+        return;
+      }
+      for (const listener of [...listeners]) {
+        try {
+          listener(event);
+        } catch (error) {
+          this.logger.warn("API task lifecycle listener failed", error);
+        }
+      }
+    };
     const packageVersion = resolvePackageVersion();
     this.orchestrator = new Orchestrator(this.channel, executor, this.stateStore, this.logger, {
       progressUpdatesEnabled: config.matrixProgressUpdates,
@@ -102,6 +135,7 @@ export class CodeHarborApp {
       defaultGroupTriggerPolicy: config.defaultGroupTriggerPolicy,
       roomTriggerPolicies: config.roomTriggerPolicies,
       rateLimiterOptions: config.rateLimiter,
+      sharedRateLimiterOptions: config.sharedRateLimiter,
       cliCompat: config.cliCompat,
       multiAgentWorkflow: {
         ...config.agentWorkflow,
@@ -125,7 +159,7 @@ export class CodeHarborApp {
       matrixAdminUsers: config.matrixAdminUsers,
       upgradeAllowedUsers: config.matrixUpgradeAllowedUsers,
       executorFactory: buildExecutor,
-      onApiTaskLifecycleEvent: (event) => this.externalTaskIntegrationDispatcher?.emitTaskLifecycle(event),
+      onApiTaskLifecycleEvent: emitApiTaskLifecycle,
     });
     this.apiServer =
       config.apiEnabled && config.apiToken
@@ -136,6 +170,7 @@ export class CodeHarborApp {
             apiTokenScopes: config.apiTokenScopes,
             webhookSecret: config.apiWebhookSecret,
             webhookTimestampToleranceSeconds: config.apiWebhookTimestampToleranceSeconds,
+            subscribeTaskLifecycle,
             auditRecorder: (event) => {
               this.stateStore.appendOperationAuditLog({
                 actor: event.actor,

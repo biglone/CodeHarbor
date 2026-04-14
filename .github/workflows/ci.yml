@@ -31,7 +31,7 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Coverage checks
+      - name: Coverage checks (global + core guard)
         run: npm run test:coverage
 
       - name: Admin UI e2e tests

@@ -5,6 +5,7 @@ import type { BackendModelRouteProfile } from "../routing/backend-model-router";
 import type { UpgradeExecutionLockRecord, UpgradeRunRecord, UpgradeRunStats } from "../store/state-store";
 import type { InboundMessage } from "../types";
 import type { OutputLanguage } from "../config";
+import type { RateLimiterSnapshot } from "../rate-limiter";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import {
   parseDiagTarget,
@@ -14,6 +15,7 @@ import {
   describeBackendRouteReason,
   formatAutoDevGitCommitRecords,
   formatBackendRouteDiagRecords,
+  formatLimiterDiagRecords,
   formatQueueFailureArchive,
   formatQueuePendingSessions,
   isBackendRouteFallbackReason,
@@ -23,6 +25,7 @@ import {
 } from "./diagnostic-formatters";
 import {
   buildDiagAutoDevNotice,
+  buildDiagLimiterNotice,
   buildDiagMediaNotice,
   buildDiagQueueNotice,
   buildDiagQueueUnavailableNotice,
@@ -123,6 +126,7 @@ interface DiagCommandDeps {
   listBackendRouteDiagRecords: (limit: number, sessionKey: string) => BackendRouteDiagRecordLike[];
   getTaskQueueStateStore: () => QueueStoreLike | null;
   listTaskQueueFailureArchive: (limit: number) => QueueFailureArchiveRecordLike[];
+  getRateLimiterSnapshot: () => RateLimiterSnapshot;
   getRecentUpgradeRuns: (limit: number) => UpgradeRunRecord[];
   getUpgradeExecutionLockSnapshot: () => UpgradeExecutionLockRecord | null;
   getUpgradeRunStats: () => UpgradeRunStats;
@@ -154,6 +158,10 @@ export async function handleDiagCommand(deps: DiagCommandDeps, message: InboundM
   }
   if (target.kind === "queue") {
     await handleQueueDiag(deps, message.conversationId, target);
+    return;
+  }
+  if (target.kind === "limiter") {
+    await handleLimiterDiag(deps, message.conversationId, target);
     return;
   }
   await handleUpgradeDiag(deps, message.conversationId, target);
@@ -342,6 +350,60 @@ async function handleUpgradeDiag(
       lockText: formatUpgradeLockSummary(lock),
       stats,
       recordsText: formatUpgradeDiagRecords(runs),
+    }, deps.outputLanguage),
+  );
+}
+
+async function handleLimiterDiag(
+  deps: DiagCommandDeps,
+  conversationId: string,
+  target: Extract<DiagTarget, { kind: "limiter" }>,
+): Promise<void> {
+  const limiter = deps.getRateLimiterSnapshot();
+  const records = limiter.recent.slice(Math.max(0, limiter.recent.length - target.limit)).reverse();
+  const rejectionRatePercent = Math.round(limiter.rejectionRate * 10_000) / 100;
+  await deps.sendNotice(
+    conversationId,
+    buildDiagLimiterNotice({
+      botNoticePrefix: deps.botNoticePrefix,
+      mode: limiter.sharedMode,
+      sharedBackendEnabled: limiter.sharedBackendEnabled,
+      fallbackToLocal: limiter.fallbackToLocal,
+      active: {
+        global: limiter.activeGlobal,
+        users: limiter.activeUsers,
+        rooms: limiter.activeRooms,
+      },
+      totals: {
+        decisions: limiter.decisionsTotal,
+        allowed: limiter.allowedTotal,
+        denied: limiter.deniedTotal,
+        rejectionRatePercent,
+      },
+      decisionBreakdown: {
+        localAllowed: limiter.decisionBreakdown.local.allowed,
+        localDenied: limiter.decisionBreakdown.local.denied,
+        sharedAllowed: limiter.decisionBreakdown.shared.allowed,
+        sharedDenied: limiter.decisionBreakdown.shared.denied,
+        sharedErrors: limiter.decisionBreakdown.shared.errors,
+        fallbackAllowed: limiter.decisionBreakdown.sharedFallback.allowed,
+        fallbackDenied: limiter.decisionBreakdown.sharedFallback.denied,
+      },
+      deniedByReason: {
+        userRequests: limiter.deniedByReason.user_requests_per_window,
+        roomRequests: limiter.deniedByReason.room_requests_per_window,
+        globalConcurrency: limiter.deniedByReason.global_concurrency,
+        userConcurrency: limiter.deniedByReason.user_concurrency,
+        roomConcurrency: limiter.deniedByReason.room_concurrency,
+      },
+      recovery: {
+        count: limiter.recovery.count,
+        lastMs: limiter.recovery.lastMs,
+        avgMs: limiter.recovery.avgMs,
+        pendingSinceIso: limiter.recovery.pendingSinceIso,
+        pendingForMs: limiter.recovery.pendingForMs,
+      },
+      recordsText: formatLimiterDiagRecords(records),
     }, deps.outputLanguage),
   );
 }

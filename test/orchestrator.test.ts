@@ -669,6 +669,54 @@ function enqueueQueuedTask(store: StateStore, message: InboundMessage, prompt = 
   };
 }
 
+function enqueueApiQueuedTask(
+  store: StateStore,
+  input: {
+    eventId: string;
+    requestId: string;
+    conversationId: string;
+    senderId: string;
+    text: string;
+    source?: "api" | "ci" | "ticket";
+  },
+): { sessionKey: string; taskId: number } {
+  const message = makeInbound({
+    eventId: input.eventId,
+    requestId: input.requestId,
+    conversationId: input.conversationId,
+    senderId: input.senderId,
+    text: input.text,
+    isDirectMessage: true,
+  });
+  const sessionKey = buildSessionKey(message);
+  const result = store.enqueueTask({
+    sessionKey,
+    eventId: message.eventId,
+    requestId: message.requestId,
+    payloadJson: JSON.stringify({
+      apiTask: true,
+      message,
+      receivedAt: Date.now() - 500,
+      prompt: message.text,
+      externalContext: {
+        source: input.source ?? "api",
+        eventId: null,
+        workflowId: null,
+        externalRef: null,
+        matrixConversationId: message.conversationId,
+        matrixSenderId: message.senderId,
+        ci: null,
+        ticket: null,
+        metadata: {},
+      },
+    }),
+  });
+  return {
+    sessionKey,
+    taskId: result.task.id,
+  };
+}
+
 async function waitForCondition(check: () => boolean, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
@@ -1794,6 +1842,247 @@ describe("Orchestrator", () => {
         errorSummary: "executor crashed unexpectedly",
       });
     } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lists API tasks with filters, pagination, and mapped stage fields", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-list-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new ImmediateExecutor();
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+      });
+
+      const taskApi = store.enqueueTask({
+        sessionKey: "matrix:!room-a:example.com:@ci:example.com",
+        eventId: "$api-list-1",
+        requestId: "req-api-list-1",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-a:example.com",
+            senderId: "@ci:example.com",
+            eventId: "$api-list-1",
+            text: "run list 1",
+          },
+          externalContext: {
+            source: "api",
+          },
+        }),
+      }).task;
+      const taskCi = store.enqueueTask({
+        sessionKey: "matrix:!room-a:example.com:@ci:example.com",
+        eventId: "$api-list-2",
+        requestId: "req-api-list-2",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-a:example.com",
+            senderId: "@ci:example.com",
+            eventId: "$api-list-2",
+            text: "run list 2",
+          },
+          externalContext: {
+            source: "ci",
+          },
+        }),
+      }).task;
+      const taskTicket = store.enqueueTask({
+        sessionKey: "matrix:!room-b:example.com:@ticket:example.com",
+        eventId: "$api-list-3",
+        requestId: "req-api-list-3",
+        payloadJson: JSON.stringify({
+          message: {
+            channel: "matrix",
+            conversationId: "!room-b:example.com",
+            senderId: "@ticket:example.com",
+            eventId: "$api-list-3",
+            text: "run list 3",
+          },
+          externalContext: {
+            source: "ticket",
+          },
+        }),
+      }).task;
+
+      store.failTask(taskApi.id, "api list failed");
+      store.scheduleRetry(taskCi.id, {
+        nextRetryAt: Date.now() + 30_000,
+        error: "retry later",
+      });
+
+      const paged = orchestrator.listApiTasks({ limit: 2, offset: 0 });
+      expect(paged.total).toBe(3);
+      expect(paged.items.map((item) => item.taskId)).toEqual([taskTicket.id, taskCi.id]);
+      expect(paged.items[0]).toEqual(
+        expect.objectContaining({
+          taskId: taskTicket.id,
+          source: "ticket",
+          roomId: "!room-b:example.com",
+          stage: "queued",
+        }),
+      );
+      expect(paged.items[1]).toEqual(
+        expect.objectContaining({
+          taskId: taskCi.id,
+          source: "ci",
+          roomId: "!room-a:example.com",
+          stage: "retrying",
+          errorSummary: "retry later",
+        }),
+      );
+
+      const failed = orchestrator.listApiTasks({
+        status: "failed",
+        limit: 10,
+      });
+      expect(failed.total).toBe(1);
+      expect(failed.items[0]).toEqual(
+        expect.objectContaining({
+          taskId: taskApi.id,
+          stage: "failed",
+          errorSummary: "api list failed",
+        }),
+      );
+
+      const byRoomAndSource = orchestrator.listApiTasks({
+        roomId: "!room-a:example.com",
+        source: "ci",
+        limit: 10,
+      });
+      expect(byRoomAndSource.total).toBe(1);
+      expect(byRoomAndSource.items[0]?.taskId).toBe(taskCi.id);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels pending API task and emits failed lifecycle event", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-cancel-");
+    try {
+      const channel = new FakeChannel();
+      const executor = new DeferredExecutor();
+      const lifecycleEvents: ApiTaskLifecycleEvent[] = [];
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        onApiTaskLifecycleEvent: (event) => lifecycleEvents.push(event),
+      });
+
+      const queued = enqueueApiQueuedTask(store, {
+        eventId: "$api-cancel-1",
+        requestId: "req-api-cancel-1",
+        conversationId: "!api-cancel:example.com",
+        senderId: "@ci:example.com",
+        text: "cancel this api task",
+      });
+
+      const cancelled = orchestrator.cancelApiTask(queued.taskId);
+      expect(cancelled).toEqual({
+        taskId: queued.taskId,
+        action: "cancel",
+        updated: true,
+        previousStatus: "pending",
+        status: "failed",
+        stage: "failed",
+        errorSummary: "cancelled by api",
+      });
+      expect(store.getTaskById(queued.taskId)?.status).toBe("failed");
+      expect(lifecycleEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            stage: "failed",
+            taskId: queued.taskId,
+            status: "failed",
+            errorSummary: "cancelled by api",
+          }),
+        ]),
+      );
+
+      const conflict = orchestrator.cancelApiTask(queued.taskId);
+      expect(conflict).toEqual(
+        expect.objectContaining({
+          updated: false,
+          status: "failed",
+          stage: "failed",
+        }),
+      );
+      expect(orchestrator.cancelApiTask(999_999)).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries failed API task, emits queued lifecycle event, and triggers drain", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-api-retry-");
+    let startSessionQueueDrainSpy: { mockRestore: () => void } | null = null;
+    try {
+      const channel = new FakeChannel();
+      const executor = new DeferredExecutor();
+      const lifecycleEvents: ApiTaskLifecycleEvent[] = [];
+      const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+        commandPrefix: "!code",
+        matrixUserId: "@bot:example.com",
+        progressUpdatesEnabled: false,
+        onApiTaskLifecycleEvent: (event) => lifecycleEvents.push(event),
+      });
+      startSessionQueueDrainSpy = vi
+        .spyOn(
+          orchestrator as unknown as {
+            startSessionQueueDrain: (sessionKey: string) => void;
+          },
+          "startSessionQueueDrain",
+        )
+        .mockImplementation(() => {});
+
+      const queued = enqueueApiQueuedTask(store, {
+        eventId: "$api-retry-1",
+        requestId: "req-api-retry-1",
+        conversationId: "!api-retry:example.com",
+        senderId: "@ci:example.com",
+        text: "retry this api task",
+      });
+      store.claimNextTask(queued.sessionKey);
+      store.failTask(queued.taskId, "temporary gateway timeout");
+
+      const retried = orchestrator.retryApiTask(queued.taskId);
+      expect(retried).toEqual({
+        taskId: queued.taskId,
+        action: "retry",
+        updated: true,
+        previousStatus: "failed",
+        status: "pending",
+        stage: "queued",
+        errorSummary: null,
+      });
+      expect(startSessionQueueDrainSpy).toHaveBeenCalledWith(queued.sessionKey);
+      expect(lifecycleEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            stage: "queued",
+            taskId: queued.taskId,
+            status: "pending",
+            errorSummary: null,
+          }),
+        ]),
+      );
+
+      const conflict = orchestrator.retryApiTask(queued.taskId);
+      expect(conflict).toEqual(
+        expect.objectContaining({
+          updated: false,
+          status: "pending",
+          stage: "queued",
+        }),
+      );
+      expect(orchestrator.retryApiTask(999_999)).toBeNull();
+    } finally {
+      startSessionQueueDrainSpy?.mockRestore();
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -5902,6 +6191,54 @@ describe("Orchestrator", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("shows /diag limiter with shared/rejection/recovery diagnosis", async () => {
+    const channel = new FakeChannel();
+    const executor = new ImmediateExecutor();
+    const store = new FakeStateStore();
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      rateLimiterOptions: {
+        windowMs: 60_000,
+        maxRequestsPerUser: 1,
+        maxRequestsPerRoom: 100,
+        maxConcurrentGlobal: 10,
+        maxConcurrentPerUser: 10,
+        maxConcurrentPerRoom: 10,
+      },
+    });
+
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "first",
+        eventId: "$diag-limiter-1",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "second",
+        eventId: "$diag-limiter-2",
+      }),
+    );
+    await orchestrator.handleMessage(
+      makeInbound({
+        isDirectMessage: true,
+        text: "/diag limiter 5",
+        eventId: "$diag-limiter-view",
+      }),
+    );
+
+    const notice = channel.notices.find((entry) => entry.text.includes("诊断信息（limiter）"));
+    expect(notice).toBeDefined();
+    expect(notice?.text).toContain("mode: shared=local");
+    expect(notice?.text).toContain("rejection=");
+    expect(notice?.text).toContain("deniedByReason: user.window=1");
+    expect(notice?.text).toContain("records:");
   });
 
   it("runs multi-agent workflow when enabled", async () => {

@@ -16,7 +16,7 @@ import {
 import {
   type PackageUpdateChecker,
 } from "./package-update-checker";
-import { RateLimiter } from "./rate-limiter";
+import type { RateLimiterLike } from "./rate-limiter";
 import {
   BackendModelRouter,
   type BackendModelRouteProfile,
@@ -112,6 +112,7 @@ import {
   type SendProgressContext,
 } from "./orchestrator/progress-dispatch";
 import {
+  parseQueuedInboundPayload,
 } from "./orchestrator/queue-payload";
 import { pruneRunSnapshots as runPruneRunSnapshots } from "./orchestrator/snapshot-pruning";
 import { pruneSessionLocks as runPruneSessionLocks } from "./orchestrator/session-locks";
@@ -227,6 +228,9 @@ import {
   type WorkflowDiagStorePayload,
 } from "./orchestrator/workflow-diag";
 import type {
+  ApiTaskActionResult,
+  ApiTaskListInput,
+  ApiTaskListResult,
   ApiTaskLifecycleEvent,
   ApiTaskQueryResult,
   ApiTaskSubmitInput,
@@ -298,8 +302,13 @@ import {
 
 export { buildApiTaskEventId, buildSessionKey };
 export type {
+  ApiTaskAction,
+  ApiTaskActionResult,
   ApiTaskExternalContext,
   ApiTaskExternalSource,
+  ApiTaskListInput,
+  ApiTaskListItem,
+  ApiTaskListResult,
   ApiTaskLifecycleEvent,
   ApiTaskQueryResult,
   ApiTaskStage,
@@ -325,6 +334,9 @@ type TaskQueueStateStore = Pick<
   | "enqueueTask"
   | "claimNextTask"
   | "getTaskById"
+  | "listTaskQueue"
+  | "cancelTaskById"
+  | "retryTaskById"
   | "hasPendingTask"
   | "clearPendingTasks"
   | "listPendingTaskSessions"
@@ -371,7 +383,7 @@ export class Orchestrator {
   private readonly roomTriggerPolicies: RoomTriggerPolicyOverrides;
   private readonly configService: ConfigService | null;
   private readonly defaultCodexWorkdir: string;
-  private readonly rateLimiter: RateLimiter;
+  private readonly rateLimiter: RateLimiterLike;
   private readonly cliCompat: CliCompatConfig;
   private readonly cliCompatRecorder: CliCompatRecorder | null;
   private readonly audioTranscriber: AudioTranscriberLike;
@@ -577,6 +589,142 @@ export class Orchestrator {
       stage: mapApiTaskStage(task),
       errorSummary: buildApiTaskErrorSummary(task),
     };
+  }
+
+  cancelApiTask(taskId: number): ApiTaskActionResult | null {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      throw new Error("Task queue is unavailable.");
+    }
+
+    const result = queueStore.cancelTaskById(taskId);
+    if (!result.task) {
+      return null;
+    }
+    if (result.changed) {
+      this.emitApiTaskLifecycleFromTaskRecord("failed", result.task);
+    }
+    return {
+      taskId: result.task.id,
+      action: "cancel",
+      updated: result.changed,
+      previousStatus: result.changed ? "pending" : result.task.status,
+      status: result.task.status,
+      stage: mapApiTaskStage(result.task),
+      errorSummary: buildApiTaskErrorSummary(result.task),
+    };
+  }
+
+  retryApiTask(taskId: number): ApiTaskActionResult | null {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      throw new Error("Task queue is unavailable.");
+    }
+
+    const result = queueStore.retryTaskById(taskId);
+    if (!result.task) {
+      return null;
+    }
+    if (result.changed) {
+      this.emitApiTaskLifecycleFromTaskRecord("queued", result.task);
+      this.startSessionQueueDrain(result.task.sessionKey);
+    }
+    return {
+      taskId: result.task.id,
+      action: "retry",
+      updated: result.changed,
+      previousStatus: result.changed ? "failed" : result.task.status,
+      status: result.task.status,
+      stage: mapApiTaskStage(result.task),
+      errorSummary: buildApiTaskErrorSummary(result.task),
+    };
+  }
+
+  listApiTasks(input: ApiTaskListInput = {}): ApiTaskListResult {
+    const queueStore = this.getTaskQueueStateStore();
+    if (!queueStore) {
+      throw new Error("Task queue is unavailable.");
+    }
+
+    const result = queueStore.listTaskQueue({
+      status: input.status,
+      source: input.source,
+      roomId: input.roomId,
+      from: input.from,
+      to: input.to,
+      limit: input.limit,
+      offset: input.offset,
+    });
+
+    return {
+      total: result.total,
+      items: result.items.map((task) => ({
+        taskId: task.id,
+        sessionKey: task.sessionKey,
+        eventId: task.eventId,
+        requestId: task.requestId,
+        status: task.status,
+        stage: mapApiTaskStage(task),
+        errorSummary: buildApiTaskErrorSummary(task),
+        attempt: task.attempt,
+        enqueuedAt: task.enqueuedAt,
+        nextRetryAt: task.nextRetryAt,
+        startedAt: task.startedAt,
+        finishedAt: task.finishedAt,
+        source: task.source,
+        roomId: task.roomId,
+      })),
+    };
+  }
+
+  private emitApiTaskLifecycleFromTaskRecord(
+    stage: "queued" | "retrying" | "executing" | "completed" | "failed",
+    task: {
+      id: number;
+      sessionKey: string;
+      eventId: string;
+      requestId: string;
+      payloadJson: string;
+      status: "pending" | "running" | "succeeded" | "failed";
+      attempt: number;
+      enqueuedAt: number;
+      startedAt: number | null;
+      finishedAt: number | null;
+      nextRetryAt: number | null;
+      error: string | null;
+      lastError: string | null;
+    },
+  ): void {
+    if (!this.onApiTaskLifecycleEvent) {
+      return;
+    }
+    try {
+      const payload = parseQueuedInboundPayload(task.payloadJson);
+      if (!payload.apiTask) {
+        return;
+      }
+      this.emitApiTaskLifecycleEvent({
+        stage,
+        taskId: task.id,
+        sessionKey: task.sessionKey,
+        eventId: task.eventId,
+        requestId: task.requestId,
+        status: task.status,
+        attempt: task.attempt,
+        enqueuedAt: task.enqueuedAt,
+        startedAt: task.startedAt,
+        finishedAt: task.finishedAt,
+        nextRetryAt: task.nextRetryAt,
+        errorSummary: buildApiTaskErrorSummary(task),
+        externalContext: payload.externalContext,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to emit API lifecycle event for task mutation", {
+        taskId: task.id,
+        stage,
+        error: formatError(error),
+      });
+    }
   }
 
   async bootstrapTaskQueueRecovery(): Promise<void> {
@@ -2361,6 +2509,7 @@ export class Orchestrator {
       listBackendRouteDiagRecords: this.listBackendRouteDiagRecords.bind(this),
       getTaskQueueStateStore: this.getTaskQueueStateStore.bind(this),
       listTaskQueueFailureArchive: this.listTaskQueueFailureArchive.bind(this),
+      rateLimiter: this.rateLimiter,
       getRecentUpgradeRuns: this.getRecentUpgradeRuns.bind(this),
       getUpgradeExecutionLockSnapshot: this.getUpgradeExecutionLockSnapshot.bind(this),
       getUpgradeRunStats: this.getUpgradeRunStats.bind(this),

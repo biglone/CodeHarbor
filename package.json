@@ -1,6 +1,6 @@
 {
   "name": "codeharbor",
-  "version": "0.1.101",
+  "version": "0.1.102",
   "description": "Self-hosted Matrix AI assistant bridge for Codex, Claude Code, and Gemini CLI sessions",
   "author": "biglone <jjoyceu@gmail.com> (https://github.com/biglone)",
   "license": "MIT",
@@ -81,7 +81,8 @@
     "changelog:check": "bash ./scripts/check-changelog.sh",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test:coverage": "vitest run test --coverage"
+    "test:coverage": "vitest run test --coverage && npm run -s test:coverage:core",
+    "test:coverage:core": "node ./scripts/check-core-coverage-thresholds.mjs"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",

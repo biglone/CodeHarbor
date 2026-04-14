@@ -40,9 +40,9 @@ export function buildDiagVersionNotice(input: {
 
 export function buildDiagUsageNotice(outputLanguage: OutputLanguage = "zh"): string {
   if (outputLanguage === "en") {
-    return "[CodeHarbor] usage: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count]";
+    return "[CodeHarbor] usage: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count] | /diag limiter [count]";
   }
-  return "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count]";
+  return "[CodeHarbor] 用法: /diag version | /diag media [count] | /diag upgrade [count] | /diag route [count] | /diag autodev [count] | /diag queue [count] | /diag limiter [count]";
 }
 
 export function buildDiagMediaNotice(input: {
@@ -215,6 +215,69 @@ ${input.archiveText}`;
 ${input.sessionsText}
 - archive:
 ${input.archiveText}`;
+}
+
+export function buildDiagLimiterNotice(input: {
+  botNoticePrefix: string;
+  mode: "local" | "redis";
+  sharedBackendEnabled: boolean;
+  fallbackToLocal: boolean;
+  active: {
+    global: number;
+    users: number;
+    rooms: number;
+  };
+  totals: {
+    decisions: number;
+    allowed: number;
+    denied: number;
+    rejectionRatePercent: number;
+  };
+  decisionBreakdown: {
+    localAllowed: number;
+    localDenied: number;
+    sharedAllowed: number;
+    sharedDenied: number;
+    sharedErrors: number;
+    fallbackAllowed: number;
+    fallbackDenied: number;
+  };
+  deniedByReason: {
+    userRequests: number;
+    roomRequests: number;
+    globalConcurrency: number;
+    userConcurrency: number;
+    roomConcurrency: number;
+  };
+  recovery: {
+    count: number;
+    lastMs: number;
+    avgMs: number;
+    pendingSinceIso: string | null;
+    pendingForMs: number;
+  };
+  recordsText: string;
+}, outputLanguage: OutputLanguage = "zh"): string {
+  if (outputLanguage === "en") {
+    return `${input.botNoticePrefix} Diagnosis (limiter)
+- mode: shared=${input.mode}, backendReady=${input.sharedBackendEnabled ? "yes" : "no"}, fallbackToLocal=${input.fallbackToLocal ? "on" : "off"}
+- active: global=${input.active.global}, users=${input.active.users}, rooms=${input.active.rooms}
+- totals: decisions=${input.totals.decisions}, allowed=${input.totals.allowed}, denied=${input.totals.denied}, rejection=${input.totals.rejectionRatePercent}%
+- breakdown: local.allow=${input.decisionBreakdown.localAllowed}, local.deny=${input.decisionBreakdown.localDenied}, shared.allow=${input.decisionBreakdown.sharedAllowed}, shared.deny=${input.decisionBreakdown.sharedDenied}, shared.error=${input.decisionBreakdown.sharedErrors}, fallback.allow=${input.decisionBreakdown.fallbackAllowed}, fallback.deny=${input.decisionBreakdown.fallbackDenied}
+- deniedByReason: user.window=${input.deniedByReason.userRequests}, room.window=${input.deniedByReason.roomRequests}, global.conc=${input.deniedByReason.globalConcurrency}, user.conc=${input.deniedByReason.userConcurrency}, room.conc=${input.deniedByReason.roomConcurrency}
+- recovery: count=${input.recovery.count}, last=${input.recovery.lastMs}ms, avg=${input.recovery.avgMs}ms, pendingSince=${input.recovery.pendingSinceIso ?? "N/A"}, pendingFor=${input.recovery.pendingForMs}ms
+- records:
+${input.recordsText}`;
+  }
+  return `${input.botNoticePrefix} 诊断信息（limiter）
+- mode: shared=${input.mode}, backendReady=${input.sharedBackendEnabled ? "yes" : "no"}, fallbackToLocal=${input.fallbackToLocal ? "on" : "off"}
+- active: global=${input.active.global}, users=${input.active.users}, rooms=${input.active.rooms}
+- totals: decisions=${input.totals.decisions}, allowed=${input.totals.allowed}, denied=${input.totals.denied}, rejection=${input.totals.rejectionRatePercent}%
+- breakdown: local.allow=${input.decisionBreakdown.localAllowed}, local.deny=${input.decisionBreakdown.localDenied}, shared.allow=${input.decisionBreakdown.sharedAllowed}, shared.deny=${input.decisionBreakdown.sharedDenied}, shared.error=${input.decisionBreakdown.sharedErrors}, fallback.allow=${input.decisionBreakdown.fallbackAllowed}, fallback.deny=${input.decisionBreakdown.fallbackDenied}
+- deniedByReason: user.window=${input.deniedByReason.userRequests}, room.window=${input.deniedByReason.roomRequests}, global.conc=${input.deniedByReason.globalConcurrency}, user.conc=${input.deniedByReason.userConcurrency}, room.conc=${input.deniedByReason.roomConcurrency}
+- recovery: count=${input.recovery.count}, last=${input.recovery.lastMs}ms, avg=${input.recovery.avgMs}ms, pendingSince=${input.recovery.pendingSinceIso ?? "N/A"}, pendingFor=${input.recovery.pendingForMs}ms
+- records:
+${input.recordsText}`;
 }
 
 export function buildDiagUpgradeNotice(input: {

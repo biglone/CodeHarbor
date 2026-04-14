@@ -73,6 +73,50 @@ export interface ApiTaskQueryResult {
   errorSummary: string | null;
 }
 
+export interface ApiTaskListInput {
+  status?: TaskQueueRecord["status"] | null;
+  source?: ApiTaskExternalSource | null;
+  roomId?: string | null;
+  from?: number | null;
+  to?: number | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ApiTaskListItem {
+  taskId: number;
+  sessionKey: string;
+  eventId: string;
+  requestId: string;
+  status: TaskQueueRecord["status"];
+  stage: ApiTaskStage;
+  errorSummary: string | null;
+  attempt: number;
+  enqueuedAt: number;
+  nextRetryAt: number | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  source: ApiTaskExternalSource;
+  roomId: string | null;
+}
+
+export interface ApiTaskListResult {
+  total: number;
+  items: ApiTaskListItem[];
+}
+
+export type ApiTaskAction = "cancel" | "retry";
+
+export interface ApiTaskActionResult {
+  taskId: number;
+  action: ApiTaskAction;
+  updated: boolean;
+  previousStatus: TaskQueueRecord["status"];
+  status: TaskQueueRecord["status"];
+  stage: ApiTaskStage;
+  errorSummary: string | null;
+}
+
 export class ApiTaskIdempotencyConflictError extends Error {
   readonly sessionKey: string;
   readonly eventId: string;

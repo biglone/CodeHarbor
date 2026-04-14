@@ -8,6 +8,14 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.102] - 2026-04-14
+
+- API lifecycle completion: ship `/api/tasks` list pagination/filtering, task `cancel`/`retry`, and SSE lifecycle stream (`/api/tasks/:id/events`) with scope enforcement and audit-compatible action fields.
+- multi-instance governance: add shared limiter Redis adapter with local fallback, including shared-mode runtime config surface and safety behavior when backend unavailable.
+- observability and diagnostics: extend limiter metrics/diag output with shared limiter mode/error signals, denial reason split, rejection ratio, and recovery latency telemetry.
+- reliability regression coverage: add integration test that verifies queued API/Webhook tasks recover and complete after orchestrator restart.
+- quality gate hardening: add core-module coverage guard in `test:coverage` and CI/release workflows to block regressions in API/orchestrator/state-store/rate-limiter/metrics/recovery paths.
+
 ## [0.1.101] - 2026-04-13
 
 - file delivery reliability: support recent artifact batch tracking plus structured model delivery actions so contextual requests like `把这四个视频文件发给我` can safely send the full generated batch instead of only one file.

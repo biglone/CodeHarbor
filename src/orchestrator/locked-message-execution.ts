@@ -98,7 +98,7 @@ interface ExecuteLockedMessageDeps {
       payloadJson: string;
     }) => { created: boolean; task: { id: number } };
   } | null;
-  tryAcquireRateLimit: (input: { userId: string; roomId: string }) => RateLimitDecision;
+  tryAcquireRateLimit: (input: { userId: string; roomId: string }) => RateLimitDecision | Promise<RateLimitDecision>;
   sendNotice: (conversationId: string, text: string) => Promise<void>;
   sendFile: ((conversationId: string, filePath: string, options?: { fileName?: string; mimeType?: string | null }) => Promise<void>) | null;
   listRecentArtifactBatches: (sessionKey: string, workdir: string) => RecentArtifactBatch[];
@@ -302,7 +302,7 @@ export async function executeLockedMessage(
     return { deferAttachmentCleanup: true, queueDrainSessionKey: input.sessionKey };
   }
 
-  const rateDecision = deps.tryAcquireRateLimit({
+  const rateDecision = await deps.tryAcquireRateLimit({
     userId: input.message.senderId,
     roomId: input.message.conversationId,
   });
@@ -431,7 +431,7 @@ async function executeSemanticFileSendRequest(
     intent: FileSendIntentLike;
   },
 ): Promise<ExecuteLockedMessageResult> {
-  const rateDecision = deps.tryAcquireRateLimit({
+  const rateDecision = await deps.tryAcquireRateLimit({
     userId: input.message.senderId,
     roomId: input.message.conversationId,
   });

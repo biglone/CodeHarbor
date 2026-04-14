@@ -24,6 +24,7 @@ export type DiagTarget =
   | { kind: "route"; limit: number }
   | { kind: "autodev"; limit: number }
   | { kind: "queue"; limit: number }
+  | { kind: "limiter"; limit: number }
   | { kind: "help" };
 
 export type TraceTarget =
@@ -122,6 +123,9 @@ export function parseDiagTarget(text: string): DiagTarget | null {
   }
   if (value === "queue") {
     return parseDiagTargetWithLimit("queue", limitToken, 10, 50);
+  }
+  if (value === "limiter") {
+    return parseDiagTargetWithLimit("limiter", limitToken, 10, 80);
   }
   return null;
 }

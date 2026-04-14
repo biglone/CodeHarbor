@@ -8,6 +8,7 @@ import {
   normalizeTokenScopes,
   type TokenScopePattern,
 } from "./auth/scope-matrix";
+import type { SharedRateLimiterOptions } from "./rate-limiter";
 import type { BackendModelRouteRule, BackendModelRouteTaskType } from "./routing/backend-model-router";
 import type { WorkflowRole } from "./workflow/role-skills";
 
@@ -226,6 +227,23 @@ const configSchema = z
       .default("4")
       .transform((v) => Number.parseInt(v, 10))
       .pipe(z.number().int().nonnegative()),
+    RATE_LIMIT_SHARED_MODE: z.enum(["local", "redis"]).default("local"),
+    RATE_LIMIT_SHARED_REDIS_URL: z.string().default(""),
+    RATE_LIMIT_SHARED_REDIS_KEY_PREFIX: z.string().default("codeharbor:rate-limit:v1"),
+    RATE_LIMIT_SHARED_REDIS_COMMAND_TIMEOUT_MS: z
+      .string()
+      .default("150")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    RATE_LIMIT_SHARED_REDIS_CONCURRENCY_TTL_MS: z
+      .string()
+      .default("1800000")
+      .transform((v) => Number.parseInt(v, 10))
+      .pipe(z.number().int().positive()),
+    RATE_LIMIT_SHARED_FALLBACK_TO_LOCAL: z
+      .string()
+      .default("true")
+      .transform((v) => v.toLowerCase() === "true"),
     CLI_COMPAT_MODE: z
       .string()
       .default("false")
@@ -434,6 +452,14 @@ const configSchema = z
       maxConcurrentPerUser: v.RATE_LIMIT_MAX_CONCURRENT_PER_USER,
       maxConcurrentPerRoom: v.RATE_LIMIT_MAX_CONCURRENT_PER_ROOM,
     },
+    sharedRateLimiter: {
+      mode: v.RATE_LIMIT_SHARED_MODE,
+      redisUrl: parseOptionalRedisUrl(v.RATE_LIMIT_SHARED_REDIS_URL, "RATE_LIMIT_SHARED_REDIS_URL"),
+      redisKeyPrefix: v.RATE_LIMIT_SHARED_REDIS_KEY_PREFIX.trim() || "codeharbor:rate-limit:v1",
+      redisCommandTimeoutMs: v.RATE_LIMIT_SHARED_REDIS_COMMAND_TIMEOUT_MS,
+      redisConcurrencyTtlMs: v.RATE_LIMIT_SHARED_REDIS_CONCURRENCY_TTL_MS,
+      fallbackToLocal: v.RATE_LIMIT_SHARED_FALLBACK_TO_LOCAL,
+    } satisfies SharedRateLimiterOptions,
     cliCompat: {
       enabled: v.CLI_COMPAT_MODE,
       passThroughEvents: v.CLI_COMPAT_PASSTHROUGH_EVENTS,
@@ -516,6 +542,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.data.apiEnabled && !parsed.data.apiToken) {
     throw new Error("Invalid configuration: API_TOKEN is required when API_ENABLED=true.");
+  }
+  if (parsed.data.sharedRateLimiter.mode === "redis" && !parsed.data.sharedRateLimiter.redisUrl) {
+    throw new Error("Invalid configuration: RATE_LIMIT_SHARED_REDIS_URL is required when RATE_LIMIT_SHARED_MODE=redis.");
   }
   if (
     parsed.data.externalTaskIntegration.enabled &&
@@ -746,6 +775,18 @@ function parseOptionalUrl(raw: string, field: string): string | null {
   } catch {
     throw new Error(`${field} must be a valid URL.`);
   }
+}
+
+function parseOptionalRedisUrl(raw: string, field: string): string | null {
+  const normalized = parseOptionalUrl(raw, field);
+  if (!normalized) {
+    return null;
+  }
+  const protocol = new URL(normalized).protocol.toLowerCase();
+  if (protocol !== "redis:" && protocol !== "rediss:") {
+    throw new Error(`${field} must use redis:// or rediss://.`);
+  }
+  return normalized;
 }
 
 function parseOptionalStringList(value: unknown, field: string): string[] | undefined {

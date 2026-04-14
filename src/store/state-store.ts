@@ -254,6 +254,7 @@ export interface RuntimeConfigSnapshotRecord {
 }
 
 export type TaskQueueStatus = "pending" | "running" | "succeeded" | "failed";
+export type TaskQueueSource = "api" | "ci" | "ticket";
 
 export interface TaskQueueRecord {
   id: number;
@@ -269,6 +270,26 @@ export interface TaskQueueRecord {
   finishedAt: number | null;
   error: string | null;
   lastError: string | null;
+}
+
+export interface TaskQueueListInput {
+  status?: TaskQueueStatus | null;
+  source?: TaskQueueSource | null;
+  roomId?: string | null;
+  from?: number | null;
+  to?: number | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskQueueListRecord extends TaskQueueRecord {
+  source: TaskQueueSource;
+  roomId: string | null;
+}
+
+export interface TaskQueueListResult {
+  total: number;
+  items: TaskQueueListRecord[];
 }
 
 export interface TaskQueueEnqueueInput {
@@ -341,8 +362,14 @@ export interface TaskQueueCancelResult {
   cancelledPending: number;
 }
 
+export interface TaskQueueMutationResult {
+  changed: boolean;
+  task: TaskQueueRecord | null;
+}
+
 const MAX_CONVERSATION_MESSAGES_PER_SESSION = 200;
 const MAX_TASK_FAILURE_ARCHIVE_ROWS = 1_000;
+const MAX_TASK_QUEUE_QUERY_LIMIT = 500;
 const MAX_SESSION_HISTORY_QUERY_LIMIT = 200;
 const DEFAULT_HISTORY_RETENTION_DAYS = 30;
 const DEFAULT_HISTORY_CLEANUP_INTERVAL_MINUTES = 1_440;
@@ -1090,6 +1117,7 @@ export class StateStore {
 
   enqueueTask(input: TaskQueueEnqueueInput): TaskQueueEnqueueResult {
     const now = Date.now();
+    const source = parseTaskQueueSourceFromPayload(input.payloadJson);
     this.ensureSession(input.sessionKey);
     const sessionMetadata =
       parseSessionMetadataFromQueuedPayload(input.payloadJson) ?? parseSessionMetadataFromSessionKey(input.sessionKey);
@@ -1099,11 +1127,11 @@ export class StateStore {
     const result = this.db
       .prepare(
         `INSERT INTO task_queue
-          (session_key, event_id, request_id, payload_json, status, attempt, enqueued_at, next_retry_at, started_at, finished_at, error, last_error)
-         VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, NULL, NULL, NULL, NULL, NULL)
+          (session_key, event_id, request_id, payload_json, source, status, attempt, enqueued_at, next_retry_at, started_at, finished_at, error, last_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', 0, ?6, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT(session_key, event_id) DO NOTHING`,
       )
-      .run(input.sessionKey, input.eventId, input.requestId, input.payloadJson, now) as { changes?: number };
+      .run(input.sessionKey, input.eventId, input.requestId, input.payloadJson, source, now) as { changes?: number };
     const task = this.getTaskBySessionEvent(input.sessionKey, input.eventId);
     if (!task) {
       throw new Error("Failed to load queued task after enqueue.");
@@ -1347,6 +1375,104 @@ export class StateStore {
     };
   }
 
+  cancelTaskById(taskId: number, error = "cancelled by api"): TaskQueueMutationResult {
+    const normalized = error.trim() || "cancelled";
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT id, session_key, event_id, request_id, payload_json, status, attempt, enqueued_at, next_retry_at, started_at, finished_at, error, last_error
+           FROM task_queue
+           WHERE id = ?1
+           LIMIT 1`,
+        )
+        .get(taskId) as TaskQueueRow | undefined;
+      if (!row) {
+        this.db.exec("COMMIT");
+        return {
+          changed: false,
+          task: null,
+        };
+      }
+      if (row.status !== "pending") {
+        this.db.exec("COMMIT");
+        return {
+          changed: false,
+          task: mapTaskQueueRow(row),
+        };
+      }
+
+      const finishedAt = Date.now();
+      const nextError = normalized.slice(0, 2_000);
+      this.db
+        .prepare(
+          "UPDATE task_queue SET status = 'failed', next_retry_at = NULL, finished_at = ?2, error = ?3, last_error = ?3 WHERE id = ?1",
+        )
+        .run(taskId, finishedAt, nextError);
+      row.status = "failed";
+      row.next_retry_at = null;
+      row.started_at = null;
+      row.finished_at = finishedAt;
+      row.error = nextError;
+      row.last_error = nextError;
+      this.db.exec("COMMIT");
+      return {
+        changed: true,
+        task: mapTaskQueueRow(row),
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  retryTaskById(taskId: number): TaskQueueMutationResult {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT id, session_key, event_id, request_id, payload_json, status, attempt, enqueued_at, next_retry_at, started_at, finished_at, error, last_error
+           FROM task_queue
+           WHERE id = ?1
+           LIMIT 1`,
+        )
+        .get(taskId) as TaskQueueRow | undefined;
+      if (!row) {
+        this.db.exec("COMMIT");
+        return {
+          changed: false,
+          task: null,
+        };
+      }
+      if (row.status !== "failed") {
+        this.db.exec("COMMIT");
+        return {
+          changed: false,
+          task: mapTaskQueueRow(row),
+        };
+      }
+
+      this.db
+        .prepare(
+          "UPDATE task_queue SET status = 'pending', next_retry_at = NULL, started_at = NULL, finished_at = NULL, error = NULL WHERE id = ?1",
+        )
+        .run(taskId);
+      row.status = "pending";
+      row.next_retry_at = null;
+      row.started_at = null;
+      row.finished_at = null;
+      row.error = null;
+      this.db.exec("COMMIT");
+      return {
+        changed: true,
+        task: mapTaskQueueRow(row),
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   listPendingTaskSessions(limit = 200, afterTaskId = 0): TaskQueuePendingSessionRecord[] {
     const safeLimit = Math.max(1, Math.floor(limit));
     const safeAfterTaskId = Math.max(0, Math.floor(afterTaskId));
@@ -1364,6 +1490,89 @@ export class StateStore {
       sessionKey: row.session_key,
       firstTaskId: row.first_task_id,
     }));
+  }
+
+  listTaskQueue(input: TaskQueueListInput = {}): TaskQueueListResult {
+    this.ensureSessionIndexBackfill();
+
+    const safeLimit = clampInt(input.limit, 20, 1, MAX_TASK_QUEUE_QUERY_LIMIT);
+    const safeOffset = Math.max(0, Math.floor(input.offset ?? 0));
+    const status = normalizeOptionalTaskQueueStatus(input.status);
+    const source = normalizeOptionalTaskQueueSource(input.source);
+    const roomId = normalizeOptionalFilterValue(input.roomId);
+    const from = normalizeOptionalTimestampNumber(input.from);
+    const to = normalizeOptionalTimestampNumber(input.to);
+    if (from !== null && to !== null && from > to) {
+      throw new Error("Invalid task queue filter: from must be <= to.");
+    }
+
+    const whereClauses: string[] = [];
+    const whereArgs: Array<string | number> = [];
+    if (status) {
+      whereClauses.push("t.status = ?");
+      whereArgs.push(status);
+    }
+    if (source) {
+      whereClauses.push("t.source = ?");
+      whereArgs.push(source);
+    }
+    if (roomId) {
+      whereClauses.push("idx.room_id = ?");
+      whereArgs.push(roomId);
+    }
+    if (from !== null) {
+      whereClauses.push("t.enqueued_at >= ?");
+      whereArgs.push(from);
+    }
+    if (to !== null) {
+      whereClauses.push("t.enqueued_at <= ?");
+      whereArgs.push(to);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const baseFromSql = `
+      FROM task_queue AS t
+      LEFT JOIN session_index AS idx ON idx.session_key = t.session_key
+    `;
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS count ${baseFromSql} ${whereSql}`)
+      .get(...whereArgs) as { count: number } | undefined;
+
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            t.id,
+            t.session_key,
+            t.event_id,
+            t.request_id,
+            t.payload_json,
+            t.status,
+            t.attempt,
+            t.enqueued_at,
+            t.next_retry_at,
+            t.started_at,
+            t.finished_at,
+            t.error,
+            t.last_error,
+            t.source,
+            idx.room_id
+          ${baseFromSql}
+          ${whereSql}
+          ORDER BY t.id DESC
+          LIMIT ? OFFSET ?
+        `,
+      )
+      .all(...whereArgs, safeLimit, safeOffset) as TaskQueueListRow[];
+
+    return {
+      total: Number(countRow?.count ?? 0),
+      items: rows.map((row) => ({
+        ...mapTaskQueueRow(row),
+        source: normalizeTaskQueueSource(row.source),
+        roomId: row.room_id,
+      })),
+    };
   }
 
   listTasks(limit = 100, status?: TaskQueueStatus): TaskQueueRecord[] {
@@ -2234,6 +2443,7 @@ export class StateStore {
         event_id TEXT NOT NULL,
         request_id TEXT NOT NULL,
         payload_json TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'api',
         status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
         attempt INTEGER NOT NULL DEFAULT 0,
         enqueued_at INTEGER NOT NULL,
@@ -2250,6 +2460,7 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_id ON task_queue(session_key, status, id);
       CREATE INDEX IF NOT EXISTS idx_task_queue_status_retry_id ON task_queue(status, next_retry_at, id);
       CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_retry_id ON task_queue(session_key, status, next_retry_at, id);
+      CREATE INDEX IF NOT EXISTS idx_task_queue_source_status_id ON task_queue(source, status, id);
 
       CREATE TABLE IF NOT EXISTS task_failure_archive (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2360,6 +2571,7 @@ export class StateStore {
   private migrateTaskQueueSchema(): void {
     const columns = this.db.prepare("PRAGMA table_info(task_queue)").all() as Array<{ name: string }>;
     const columnNames = new Set(columns.map((column) => column.name));
+    const needsSourceBackfill = !columnNames.has("source");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (!columnNames.has("attempt")) {
@@ -2371,10 +2583,14 @@ export class StateStore {
       if (!columnNames.has("last_error")) {
         this.db.exec("ALTER TABLE task_queue ADD COLUMN last_error TEXT");
       }
+      if (needsSourceBackfill) {
+        this.db.exec("ALTER TABLE task_queue ADD COLUMN source TEXT NOT NULL DEFAULT 'api'");
+      }
 
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS idx_task_queue_status_retry_id ON task_queue(status, next_retry_at, id);
         CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_retry_id ON task_queue(session_key, status, next_retry_at, id);
+        CREATE INDEX IF NOT EXISTS idx_task_queue_source_status_id ON task_queue(source, status, id);
 
         CREATE TABLE IF NOT EXISTS task_failure_archive (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2425,6 +2641,9 @@ export class StateStore {
         SET last_error = error
         WHERE last_error IS NULL AND error IS NOT NULL;
       `);
+      if (needsSourceBackfill) {
+        this.backfillTaskQueueSourceUnsafe();
+      }
       this.db.exec(`
         UPDATE task_failure_archive
         SET retry_reason = 'unknown_error'
@@ -2440,6 +2659,25 @@ export class StateStore {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private backfillTaskQueueSourceUnsafe(): void {
+    const rows = this.db
+      .prepare("SELECT id, payload_json, source FROM task_queue")
+      .all() as Array<{ id: number; payload_json: string; source: string | null }>;
+    if (rows.length === 0) {
+      return;
+    }
+
+    const update = this.db.prepare("UPDATE task_queue SET source = ?2 WHERE id = ?1");
+    for (const row of rows) {
+      const nextSource = parseTaskQueueSourceFromPayload(row.payload_json);
+      const currentSource = normalizeTaskQueueSource(row.source);
+      if (nextSource === currentSource) {
+        continue;
+      }
+      update.run(row.id, nextSource);
     }
   }
 
@@ -2638,6 +2876,52 @@ function normalizeTaskFailureArchiveInput(input: TaskFailureArchiveInput | strin
     archiveReason,
     retryAfterMs,
   };
+}
+
+const TASK_QUEUE_STATUS_VALUES = new Set<TaskQueueStatus>(["pending", "running", "succeeded", "failed"]);
+const TASK_QUEUE_SOURCE_VALUES = new Set<TaskQueueSource>(["api", "ci", "ticket"]);
+
+function parseTaskQueueSourceFromPayload(payloadJson: string): TaskQueueSource {
+  try {
+    const parsed = JSON.parse(payloadJson) as {
+      externalContext?: {
+        source?: unknown;
+      };
+    };
+    return normalizeTaskQueueSource(parsed.externalContext?.source);
+  } catch {
+    return "api";
+  }
+}
+
+function normalizeTaskQueueSource(value: unknown): TaskQueueSource {
+  const normalized = normalizeOptionalFilterValue(value);
+  if (!normalized || !TASK_QUEUE_SOURCE_VALUES.has(normalized as TaskQueueSource)) {
+    return "api";
+  }
+  return normalized as TaskQueueSource;
+}
+
+function normalizeOptionalTaskQueueSource(value: unknown): TaskQueueSource | null {
+  const normalized = normalizeOptionalFilterValue(value);
+  if (!normalized) {
+    return null;
+  }
+  if (!TASK_QUEUE_SOURCE_VALUES.has(normalized as TaskQueueSource)) {
+    throw new Error("Invalid task queue filter: source must be one of api|ci|ticket.");
+  }
+  return normalized as TaskQueueSource;
+}
+
+function normalizeOptionalTaskQueueStatus(value: unknown): TaskQueueStatus | null {
+  const normalized = normalizeOptionalFilterValue(value);
+  if (!normalized) {
+    return null;
+  }
+  if (!TASK_QUEUE_STATUS_VALUES.has(normalized as TaskQueueStatus)) {
+    throw new Error("Invalid task queue filter: status must be one of pending|running|succeeded|failed.");
+  }
+  return normalized as TaskQueueStatus;
 }
 
 interface SessionIndexMetadata {
@@ -2850,6 +3134,11 @@ type TaskQueueRow = {
   finished_at: number | null;
   error: string | null;
   last_error: string | null;
+};
+
+type TaskQueueListRow = TaskQueueRow & {
+  source: string | null;
+  room_id: string | null;
 };
 
 function mapTaskQueueRow(row: TaskQueueRow): TaskQueueRecord {

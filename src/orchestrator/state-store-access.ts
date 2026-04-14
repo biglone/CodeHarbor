@@ -6,6 +6,9 @@ interface TaskQueueStateStoreLike {
   enqueueTask?: unknown;
   claimNextTask?: unknown;
   getTaskById?: unknown;
+  listTaskQueue?: unknown;
+  cancelTaskById?: unknown;
+  retryTaskById?: unknown;
   hasPendingTask?: unknown;
   clearPendingTasks?: unknown;
   listPendingTaskSessions?: unknown;
@@ -27,6 +30,9 @@ export function getTaskQueueStateStore(stateStore: StateStore): TaskQueueStateSt
     typeof maybeStore.enqueueTask !== "function" ||
     typeof maybeStore.claimNextTask !== "function" ||
     typeof maybeStore.getTaskById !== "function" ||
+    typeof maybeStore.listTaskQueue !== "function" ||
+    typeof maybeStore.cancelTaskById !== "function" ||
+    typeof maybeStore.retryTaskById !== "function" ||
     typeof maybeStore.hasPendingTask !== "function" ||
     typeof maybeStore.clearPendingTasks !== "function" ||
     typeof maybeStore.listPendingTaskSessions !== "function" ||

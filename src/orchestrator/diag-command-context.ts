@@ -1,4 +1,5 @@
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
+import type { RateLimiterSnapshot } from "../rate-limiter";
 import type { AutoDevRunSnapshot } from "./autodev-runner";
 import { sendDiagCommand as runSendDiagCommand } from "./diag-command-dispatch";
 import type { SessionBackendDecision, SessionBackendOverride } from "./orchestrator-types";
@@ -42,6 +43,7 @@ interface DiagCommandContextInput {
   listBackendRouteDiagRecords: DiagCommandDispatchContext["listBackendRouteDiagRecords"];
   getTaskQueueStateStore: DiagCommandDispatchContext["getTaskQueueStateStore"];
   listTaskQueueFailureArchive: DiagCommandDispatchContext["listTaskQueueFailureArchive"];
+  getRateLimiterSnapshot: () => RateLimiterSnapshot;
   getRecentUpgradeRuns: DiagCommandDispatchContext["getRecentUpgradeRuns"];
   getUpgradeExecutionLockSnapshot: DiagCommandDispatchContext["getUpgradeExecutionLockSnapshot"];
   getUpgradeRunStats: DiagCommandDispatchContext["getUpgradeRunStats"];
@@ -79,6 +81,7 @@ interface DiagCommandRuntimeContextInput {
   listBackendRouteDiagRecords: DiagCommandContextInput["listBackendRouteDiagRecords"];
   getTaskQueueStateStore: DiagCommandContextInput["getTaskQueueStateStore"];
   listTaskQueueFailureArchive: DiagCommandContextInput["listTaskQueueFailureArchive"];
+  rateLimiter: { snapshot: DiagCommandContextInput["getRateLimiterSnapshot"] };
   getRecentUpgradeRuns: DiagCommandContextInput["getRecentUpgradeRuns"];
   getUpgradeExecutionLockSnapshot: DiagCommandContextInput["getUpgradeExecutionLockSnapshot"];
   getUpgradeRunStats: DiagCommandContextInput["getUpgradeRunStats"];
@@ -115,6 +118,7 @@ export function buildDiagCommandDispatchContext(input: DiagCommandContextInput):
     listBackendRouteDiagRecords: (limit, sessionKey) => input.listBackendRouteDiagRecords(limit, sessionKey),
     getTaskQueueStateStore: () => input.getTaskQueueStateStore(),
     listTaskQueueFailureArchive: (limit) => input.listTaskQueueFailureArchive(limit),
+    getRateLimiterSnapshot: () => input.getRateLimiterSnapshot(),
     getRecentUpgradeRuns: (limit) => input.getRecentUpgradeRuns(limit),
     getUpgradeExecutionLockSnapshot: () => input.getUpgradeExecutionLockSnapshot(),
     getUpgradeRunStats: () => input.getUpgradeRunStats(),
@@ -154,6 +158,7 @@ export function buildDiagCommandDispatchContextFromRuntime(
     listBackendRouteDiagRecords: input.listBackendRouteDiagRecords,
     getTaskQueueStateStore: input.getTaskQueueStateStore,
     listTaskQueueFailureArchive: input.listTaskQueueFailureArchive,
+    getRateLimiterSnapshot: () => input.rateLimiter.snapshot(),
     getRecentUpgradeRuns: input.getRecentUpgradeRuns,
     getUpgradeExecutionLockSnapshot: input.getUpgradeExecutionLockSnapshot,
     getUpgradeRunStats: input.getUpgradeRunStats,

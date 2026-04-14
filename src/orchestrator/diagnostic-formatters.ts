@@ -1,3 +1,6 @@
+import type { OutputLanguage } from "../config";
+import type { RateLimiterDecisionRecord } from "../rate-limiter";
+
 export interface AutoDevGitCommitResultLike {
   kind: "committed" | "skipped" | "failed";
   commitHash?: string;
@@ -134,6 +137,19 @@ export function formatQueueFailureArchive(records: QueueFailureArchiveRecordLike
     .join("\n");
 }
 
+export function formatLimiterDiagRecords(records: RateLimiterDecisionRecord[]): string {
+  if (records.length === 0) {
+    return "- (empty)";
+  }
+  return records
+    .map((record) => {
+      const reason = record.reason ?? "none";
+      const retryAfterMs = record.retryAfterMs === null ? "N/A" : `${record.retryAfterMs}`;
+      return `- at=${record.at} source=${record.source} outcome=${record.outcome} reason=${reason} retryAfterMs=${retryAfterMs}`;
+    })
+    .join("\n");
+}
+
 export function formatAutoDevGitCommitResult(result: AutoDevGitCommitResultLike): string {
   if (result.kind === "committed") {
     return `committed ${result.commitHash ?? "unknown"} (${result.commitSubject ?? "unknown"})`;
@@ -170,4 +186,3 @@ export function formatAutoDevReleaseResult(result: AutoDevReleaseResultLike): st
   }
   return `failed (${result.error ?? "unknown"})`;
 }
-import type { OutputLanguage } from "../config";
