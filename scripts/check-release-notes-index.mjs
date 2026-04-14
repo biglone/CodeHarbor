@@ -97,6 +97,16 @@ function requirePathInText(pathText, text, label) {
   }
 }
 
+function extractLatestLinkPath(readmeText, headingLabel) {
+  const escapedLabel = headingLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lineRegex = new RegExp(`^\\s*[-*]\\s*${escapedLabel}:\\s*\\[[^\\]]+\\]\\(([^)]+)\\)\\s*$`, "im");
+  const match = readmeText.match(lineRegex);
+  if (!match) {
+    fail(`Release index check failed: missing README line for "${headingLabel}".`);
+  }
+  return match[1].trim();
+}
+
 const readme = readFile(README_PATH);
 const { releaseNotes, announcements } = readReleaseDocs(RELEASES_DIR);
 if (releaseNotes.length === 0) {
@@ -116,16 +126,38 @@ for (const fileName of announcements) {
 
 const latestReleaseNotesFile = releaseNotes[releaseNotes.length - 1];
 const latestAnnouncementFile = announcements[announcements.length - 1];
-requirePathInText(`docs/releases/${latestReleaseNotesFile}`, readme, "latest release notes");
-requirePathInText(`docs/releases/${latestAnnouncementFile}`, readme, "latest bilingual announcement");
+const expectedLatestReleaseNotesPath = `docs/releases/${latestReleaseNotesFile}`;
+const expectedLatestAnnouncementPath = `docs/releases/${latestAnnouncementFile}`;
+
+const latestReleaseNotesPath = extractLatestLinkPath(readme, "Latest release notes");
+if (latestReleaseNotesPath !== expectedLatestReleaseNotesPath) {
+  fail(
+    [
+      "Release index check failed: latest release notes link is outdated.",
+      `- expected: ${expectedLatestReleaseNotesPath}`,
+      `- actual: ${latestReleaseNotesPath}`,
+    ].join("\n"),
+  );
+}
+
+const latestAnnouncementPath = extractLatestLinkPath(readme, "Latest bilingual announcement");
+if (latestAnnouncementPath !== expectedLatestAnnouncementPath) {
+  fail(
+    [
+      "Release index check failed: latest bilingual announcement link is outdated.",
+      `- expected: ${expectedLatestAnnouncementPath}`,
+      `- actual: ${latestAnnouncementPath}`,
+    ].join("\n"),
+  );
+}
 
 process.stdout.write(
   [
     "Release notes index check passed.",
     `- indexed release notes files: ${releaseNotes.length}`,
     `- indexed announcement files: ${announcements.length}`,
-    `- latest release notes: docs/releases/${latestReleaseNotesFile}`,
-    `- latest bilingual announcement: docs/releases/${latestAnnouncementFile}`,
+    `- latest release notes: ${expectedLatestReleaseNotesPath}`,
+    `- latest bilingual announcement: ${expectedLatestAnnouncementPath}`,
   ].join("\n"),
 );
 process.stdout.write("\n");
