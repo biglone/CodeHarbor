@@ -143,14 +143,14 @@
 | T8.6 | v0.1.57 | `release: v0.1.57 [publish-npm]` | ✅ 已发布 |
 | T8.7 | v0.1.58 | `release: v0.1.58 [publish-npm]` | ⬜ 待发布 |
 | T8.8 | v0.1.59 | `release: v0.1.59 [publish-npm]` | ⬜ 待发布 |
-| T11.1 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布 |
-| T11.2 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.3 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.4 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.5 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.6 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.7 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
-| T11.8 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ⬜ 待发布（与 T11.1 同版本） |
+| T11.1 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布 |
+| T11.2 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.3 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.4 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.5 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.6 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.7 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
+| T11.8 | v0.1.102 | `release: v0.1.102 [publish-npm]` | ✅ 已发布（与 T11.1 同版本） |
 
 > 说明：若中途插入热修复版本，后续版本号顺延；默认保持“每个大功能独立一个可回滚发布版本”，允许相邻任务并版（如 T8.2/T8.3）。当前 T11.x 按 `v0.1.102` 单版本收敛执行。
 

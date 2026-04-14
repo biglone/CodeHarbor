@@ -28,6 +28,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Docs release-index check
+        run: npm run docs:check-release-index
+
       - name: Unit tests
         run: npm test
 

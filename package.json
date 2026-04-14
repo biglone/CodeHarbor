@@ -79,6 +79,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run changelog:check && npm run typecheck && npm run lint && npm run test:coverage && npm run build",
     "changelog:check": "bash ./scripts/check-changelog.sh",
+    "docs:check-release-index": "node ./scripts/check-release-notes-index.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:coverage": "vitest run test --coverage && npm run -s test:coverage:core",

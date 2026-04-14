@@ -313,9 +313,11 @@ test("renders audit records after config changes", async ({ page }) => {
 });
 
 test("viewer token cannot write global config (403)", async ({ page }) => {
+  test.setTimeout(60_000);
   const isolated = createPaths("codeharbor-admin-e2e-viewer-");
   fs.writeFileSync(path.join(isolated.dir, ".env.example"), "MATRIX_COMMAND_PREFIX=!code\n", "utf8");
   const config = createBaseConfig(isolated.dir, isolated.db, isolated.legacy);
+  config.updateCheck.enabled = false;
   config.adminTokens = [
     { token: "viewer-token", role: "viewer", actor: "ops-viewer" },
     { token: "admin-token", role: "admin", actor: "ops-admin" },
@@ -332,6 +334,17 @@ test("viewer token cannot write global config (403)", async ({ page }) => {
     cwd: isolated.dir,
     checkCodex: async () => ({ ok: true, version: "codex 1.0.0", error: null }),
     checkMatrix: async () => ({ ok: true, status: 200, versions: ["v1.10"], error: null }),
+    packageUpdateChecker: {
+      getStatus: async () => ({
+        packageName: "codeharbor",
+        currentVersion: "0.1.102",
+        latestVersion: "0.1.102",
+        state: "up_to_date",
+        checkedAt: new Date().toISOString(),
+        error: null,
+        upgradeCommand: "npm install -g codeharbor@latest",
+      }),
+    },
   });
 
   await isolatedServer.start();
@@ -351,7 +364,7 @@ test("viewer token cannot write global config (403)", async ({ page }) => {
     await page.click('.submenu .tab-sub[data-route="#/settings/global/basic"]');
     await page.fill("#global-matrix-prefix", "!viewer");
     await page.click("#global-save-btn");
-    await expect(page.locator("#notice")).toContainText(/(admin write permission|admin\.write)/i);
+    await expect(page.locator("#notice")).toContainText(/(admin write permission|admin\.write)/i, { timeout: 15_000 });
   } finally {
     await isolatedServer.stop();
     await store.flush();

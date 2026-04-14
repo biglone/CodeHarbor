@@ -96,6 +96,10 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm run lint
 
+      - name: Docs release-index check
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run docs:check-release-index
+
       - name: Unit tests
         if: steps.intent.outputs.publish == 'true'
         run: npm test
