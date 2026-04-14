@@ -40,6 +40,57 @@ describe("StateStore", () => {
     expect(store.hasProcessedEvent("s1", "e1")).toBe(true);
   });
 
+  it("migrates legacy task_queue schema before creating source-dependent indexes", () => {
+    const { db, legacy } = createPaths();
+    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: any };
+    const seed = new DatabaseSync(db);
+
+    seed.exec(`
+      CREATE TABLE sessions (
+        session_key TEXT PRIMARY KEY,
+        codex_session_id TEXT,
+        active_until INTEGER,
+        updated_at INTEGER NOT NULL
+      );
+    `);
+    seed.exec(`
+      CREATE TABLE task_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_key TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+        attempt INTEGER NOT NULL DEFAULT 0,
+        enqueued_at INTEGER NOT NULL,
+        next_retry_at INTEGER,
+        started_at INTEGER,
+        finished_at INTEGER,
+        error TEXT,
+        last_error TEXT,
+        UNIQUE(session_key, event_id),
+        FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_queue_status_id ON task_queue(status, id);
+      CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_id ON task_queue(session_key, status, id);
+    `);
+    seed.close();
+
+    expect(() => new StateStore(db, legacy, 10, 30, 100)).not.toThrow();
+
+    const verify = new DatabaseSync(db);
+    const columns = new Set(
+      (verify.prepare("PRAGMA table_info(task_queue)").all() as Array<{ name: string }>).map((row) => row.name),
+    );
+    expect(columns.has("source")).toBe(true);
+
+    const indexNames = (verify
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'task_queue'")
+      .all() as Array<{ name: string }>).map((row) => row.name);
+    expect(indexNames).toContain("idx_task_queue_source_status_id");
+    verify.close();
+  });
+
   it("imports legacy state.json into sqlite on first boot", () => {
     const { db, legacy } = createPaths();
 

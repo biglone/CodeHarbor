@@ -2458,9 +2458,6 @@ export class StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_task_queue_status_id ON task_queue(status, id);
       CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_id ON task_queue(session_key, status, id);
-      CREATE INDEX IF NOT EXISTS idx_task_queue_status_retry_id ON task_queue(status, next_retry_at, id);
-      CREATE INDEX IF NOT EXISTS idx_task_queue_session_status_retry_id ON task_queue(session_key, status, next_retry_at, id);
-      CREATE INDEX IF NOT EXISTS idx_task_queue_source_status_id ON task_queue(source, status, id);
 
       CREATE TABLE IF NOT EXISTS task_failure_archive (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

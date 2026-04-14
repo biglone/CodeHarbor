@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.103] - 2026-04-15
+
+- startup hotfix: prevent startup crash on upgraded legacy SQLite databases where `task_queue.source` is still missing (`ERR_SQLITE_ERROR: no such column: source`).
+- migration ordering fix: move `task_queue` indexes that depend on newly introduced columns (`source`, `next_retry_at`) into schema migration flow so column backfill always runs first.
+- regression coverage: add state-store test that seeds a legacy `task_queue` schema without `source` and verifies upgrade bootstrap + index creation complete successfully.
+
 ## [0.1.102] - 2026-04-14
 
 - API lifecycle completion: ship `/api/tasks` list pagination/filtering, task `cancel`/`retry`, and SSE lifecycle stream (`/api/tasks/:id/events`) with scope enforcement and audit-compatible action fields.
