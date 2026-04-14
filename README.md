@@ -15,6 +15,8 @@ Quick feedback:
 - Feature request: <https://github.com/biglone/CodeHarbor/issues/new?template=feature_request.yml>
 - Release announcements (EN/中文 in one thread): <https://github.com/biglone/CodeHarbor/discussions/3>
 - Roadmap poll (EN/中文 in one thread): <https://github.com/biglone/CodeHarbor/discussions/4>
+- Latest release notes: [docs/releases/v0.1.102-release-notes.md](docs/releases/v0.1.102-release-notes.md)
+- Latest bilingual announcement: [docs/releases/v0.1.102-announcement-bilingual.md](docs/releases/v0.1.102-announcement-bilingual.md)
 
 ## What It Does
 
