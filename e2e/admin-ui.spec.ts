@@ -86,6 +86,14 @@ function createBaseConfig(cwd: string, dbPath: string, legacyPath: string): AppC
       maxConcurrentPerUser: 1,
       maxConcurrentPerRoom: 4,
     },
+    sharedRateLimiter: {
+      mode: "local",
+      redisUrl: null,
+      redisKeyPrefix: "codeharbor:rate-limiter",
+      redisCommandTimeoutMs: 1000,
+      redisConcurrencyTtlMs: 600_000,
+      fallbackToLocal: true,
+    },
     cliCompat: {
       enabled: false,
       passThroughEvents: false,
