@@ -90,9 +90,20 @@ The workflow will automatically prefer token mode when this secret exists.
 10. Generate release notes from the bilingual template:
    - `ANNOUNCEMENT_URL=<link> POLL_URL=<link> ./scripts/render-release-notes.sh`
    - replace highlight bullets with the release summary
-11. Publish community notes:
+11. Update release notes links in `README.md`:
+   - update `Latest release notes` and `Latest bilingual announcement`
+   - append the new version entries under `Release Notes Index`
+12. Publish community notes:
    - create GitHub Release notes (auto-generated + hand edits)
    - open/update a Discussions `Announcements` post and link feedback channels
+
+## Release Notes Index Convention
+
+When adding a new release under `docs/releases/`, keep `README.md` in sync in the same PR/commit:
+
+1. Update `Latest release notes` link to current version.
+2. Update `Latest bilingual announcement` link to current version.
+3. Append both links to `Release Notes Index` (do not remove historical entries).
 
 ### AutoDev big-feature release flow
 
