@@ -18,6 +18,13 @@ Quick feedback:
 - Latest release notes: [docs/releases/v0.1.102-release-notes.md](docs/releases/v0.1.102-release-notes.md)
 - Latest bilingual announcement: [docs/releases/v0.1.102-announcement-bilingual.md](docs/releases/v0.1.102-announcement-bilingual.md)
 
+## Release Notes Index
+
+- v0.1.102 notes: [docs/releases/v0.1.102-release-notes.md](docs/releases/v0.1.102-release-notes.md)
+- v0.1.102 announcement (EN/中文): [docs/releases/v0.1.102-announcement-bilingual.md](docs/releases/v0.1.102-announcement-bilingual.md)
+- v0.1.69 notes: [docs/releases/v0.1.69-release-notes.md](docs/releases/v0.1.69-release-notes.md)
+- v0.1.69 announcement (EN/中文): [docs/releases/v0.1.69-announcement-bilingual.md](docs/releases/v0.1.69-announcement-bilingual.md)
+
 ## What It Does
 
 - Matrix channel adapter (receive + reply)
