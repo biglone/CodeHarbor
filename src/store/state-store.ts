@@ -422,6 +422,15 @@ export class StateStore {
     return row?.codex_session_id ?? null;
   }
 
+  getCodexSessionWorkdir(sessionKey: string): string | null {
+    this.maybePruneExpiredSessions();
+    const row = this.db
+      .prepare("SELECT codex_workdir FROM sessions WHERE session_key = ?1")
+      .get(sessionKey) as { codex_workdir: string | null } | undefined;
+    const value = row?.codex_workdir?.trim() ?? "";
+    return value.length > 0 ? value : null;
+  }
+
   getAutoDevWorkdirOverride(sessionKey: string): string | null {
     this.maybePruneExpiredSessions();
     const row = this.db
@@ -454,9 +463,18 @@ export class StateStore {
       .run(sessionKey, Date.now());
   }
 
-  setCodexSessionId(sessionKey: string, codexSessionId: string): void {
+  setCodexSessionId(sessionKey: string, codexSessionId: string, workdir?: string | null): void {
     this.maybePruneExpiredSessions();
     this.ensureSession(sessionKey);
+    const normalizedWorkdir = workdir?.trim() ?? "";
+    if (normalizedWorkdir) {
+      this.db
+        .prepare(
+          "UPDATE sessions SET codex_session_id = ?2, codex_workdir = ?3, updated_at = ?4 WHERE session_key = ?1",
+        )
+        .run(sessionKey, codexSessionId, normalizedWorkdir, Date.now());
+      return;
+    }
     this.db
       .prepare(
         "UPDATE sessions SET codex_session_id = ?2, updated_at = ?3 WHERE session_key = ?1",
@@ -468,7 +486,7 @@ export class StateStore {
     this.maybePruneExpiredSessions();
     this.ensureSession(sessionKey);
     this.db
-      .prepare("UPDATE sessions SET codex_session_id = NULL, updated_at = ?2 WHERE session_key = ?1")
+      .prepare("UPDATE sessions SET codex_session_id = NULL, codex_workdir = NULL, updated_at = ?2 WHERE session_key = ?1")
       .run(sessionKey, Date.now());
   }
 
@@ -537,7 +555,7 @@ export class StateStore {
     this.insertProcessedEventAndTrim(sessionKey, eventId, Date.now());
   }
 
-  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string): void {
+  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string, workdir?: string | null): void {
     this.maybePruneExpiredSessions();
     const now = Date.now();
     this.ensureSession(sessionKey);
@@ -545,11 +563,20 @@ export class StateStore {
     if (sessionMetadata) {
       this.upsertSessionIndex(sessionKey, sessionMetadata, now);
     }
+    const normalizedWorkdir = workdir?.trim() ?? "";
     this.db.exec("BEGIN");
     try {
-      this.db
-        .prepare("UPDATE sessions SET codex_session_id = ?2, updated_at = ?3 WHERE session_key = ?1")
-        .run(sessionKey, codexSessionId, now);
+      if (normalizedWorkdir) {
+        this.db
+          .prepare(
+            "UPDATE sessions SET codex_session_id = ?2, codex_workdir = ?3, updated_at = ?4 WHERE session_key = ?1",
+          )
+          .run(sessionKey, codexSessionId, normalizedWorkdir, now);
+      } else {
+        this.db
+          .prepare("UPDATE sessions SET codex_session_id = ?2, updated_at = ?3 WHERE session_key = ?1")
+          .run(sessionKey, codexSessionId, now);
+      }
       this.insertProcessedEventAndTrim(sessionKey, eventId, now);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -2354,6 +2381,7 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS sessions (
         session_key TEXT PRIMARY KEY,
         codex_session_id TEXT,
+        codex_workdir TEXT,
         autodev_workdir_override TEXT,
         active_until INTEGER,
         updated_at INTEGER NOT NULL
@@ -2560,6 +2588,9 @@ export class StateStore {
 
     const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
     const sessionColumnNames = new Set(sessionColumns.map((column) => column.name));
+    if (!sessionColumnNames.has("codex_workdir")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN codex_workdir TEXT");
+    }
     if (!sessionColumnNames.has("autodev_workdir_override")) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN autodev_workdir_override TEXT");
     }

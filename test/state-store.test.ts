@@ -25,6 +25,24 @@ describe("StateStore", () => {
     expect(store.getCodexSessionId("s1")).toBe("thread-1");
   });
 
+  it("persists codex session workdir across restarts and clears with reset", () => {
+    const { db, legacy, dir } = createPaths();
+    const workdir = path.join(dir, "workspace");
+    fs.mkdirSync(workdir, { recursive: true });
+    const store = new StateStore(db, legacy, 5, 30, 100);
+
+    expect(store.getCodexSessionWorkdir("s1")).toBeNull();
+    store.setCodexSessionId("s1", "thread-1", workdir);
+    expect(store.getCodexSessionWorkdir("s1")).toBe(workdir);
+
+    const reopened = new StateStore(db, legacy, 5, 30, 100);
+    expect(reopened.getCodexSessionId("s1")).toBe("thread-1");
+    expect(reopened.getCodexSessionWorkdir("s1")).toBe(workdir);
+    reopened.clearCodexSessionId("s1");
+    expect(reopened.getCodexSessionId("s1")).toBeNull();
+    expect(reopened.getCodexSessionWorkdir("s1")).toBeNull();
+  });
+
   it("tracks processed events and trims history", () => {
     const { db, legacy } = createPaths();
     const store = new StateStore(db, legacy, 2, 30, 100);

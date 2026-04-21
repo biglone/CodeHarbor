@@ -54,13 +54,14 @@ interface RunningExecutionLike {
 interface StateStoreLike {
   activateSession: (sessionKey: string, activeWindowMs: number) => void;
   getCodexSessionId: (sessionKey: string) => string | null;
+  getCodexSessionWorkdir?: (sessionKey: string) => string | null;
   appendConversationMessage: (
     sessionKey: string,
     role: "user" | "assistant",
     provider: "codex" | "claude" | "gemini",
     content: string,
   ) => void;
-  commitExecutionSuccess: (sessionKey: string, eventId: string, sessionId: string) => void;
+  commitExecutionSuccess: (sessionKey: string, eventId: string, sessionId: string, workdir?: string) => void;
   commitExecutionHandled: (sessionKey: string, eventId: string) => void;
 }
 
@@ -182,17 +183,22 @@ export async function executeChatRequest(
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
   const previousCodexSessionId = deps.stateStore.getCodexSessionId(input.sessionKey);
+  const previousCodexSessionWorkdir =
+    previousCodexSessionId !== null
+      ? (deps.stateStore.getCodexSessionWorkdir?.(input.sessionKey)?.trim() || null)
+      : null;
+  const executionWorkdir = previousCodexSessionWorkdir ?? input.roomWorkdir;
   const allowBridgeContext =
     previousCodexSessionId === null && !deps.skipBridgeForNextPrompt.delete(input.sessionKey);
   const bridgeContext = allowBridgeContext ? deps.buildConversationBridgeContext(input.sessionKey) : null;
   let autoDevRuntimeContext: string | null = null;
   try {
-    autoDevRuntimeContext = await deps.resolveAutoDevRuntimeContext(input.sessionKey, input.roomWorkdir);
+    autoDevRuntimeContext = await deps.resolveAutoDevRuntimeContext(input.sessionKey, executionWorkdir);
   } catch (error) {
     deps.logger.debug("Failed to resolve AutoDev runtime context for chat prompt", {
       requestId: input.requestId,
       sessionKey: input.sessionKey,
-      workdir: input.roomWorkdir,
+      workdir: executionWorkdir,
       error: formatError(error),
     });
   }
@@ -210,7 +216,7 @@ export async function executeChatRequest(
   if (documentSummary.notice) {
     await deps.sendNotice(input.message.conversationId, documentSummary.notice);
   }
-  const recentArtifactBatches = deps.listRecentArtifactBatches(input.sessionKey, input.roomWorkdir);
+  const recentArtifactBatches = deps.listRecentArtifactBatches(input.sessionKey, executionWorkdir);
   const executionPrompt = deps.buildExecutionPrompt(
     input.routePrompt,
     input.message,
@@ -229,7 +235,7 @@ export async function executeChatRequest(
   let executionDurationMs = 0;
   let sendDurationMs = 0;
   const requestStartedAt = Date.now();
-  const artifactSnapshotBeforeRun = await deps.captureArtifactSnapshot(input.roomWorkdir);
+  const artifactSnapshotBeforeRun = await deps.captureArtifactSnapshot(executionWorkdir);
   let cancelRequested = deps.consumePendingStopRequest(input.sessionKey);
 
   deps.runningExecutions.set(input.sessionKey, {
@@ -270,7 +276,9 @@ export async function executeChatRequest(
     backendRouteRuleId: input.backendRouteRuleId,
     queueWaitMs: input.queueWaitMs,
     attachmentCount: input.message.attachments.length,
-    workdir: input.roomWorkdir,
+    workdir: executionWorkdir,
+    roomWorkdir: input.roomWorkdir,
+    sessionWorkdirSource: previousCodexSessionWorkdir ? "session" : "room",
     roomConfigSource: input.roomConfigSource,
     isDirectMessage: input.message.isDirectMessage,
     mentionsBot: input.message.mentionsBot,
@@ -319,7 +327,7 @@ export async function executeChatRequest(
         {
           passThroughRawEvents: deps.cliCompat.enabled && deps.cliCompat.passThroughEvents,
           imagePaths: attemptImagePaths,
-          workdir: input.roomWorkdir,
+          workdir: executionWorkdir,
         },
       );
       const running = deps.runningExecutions.get(input.sessionKey);
@@ -432,12 +440,12 @@ export async function executeChatRequest(
         sentFiles: resolvedAction?.files ?? [],
       }),
     );
-    const artifactSnapshotAfterRun = await deps.captureArtifactSnapshot(input.roomWorkdir);
+    const artifactSnapshotAfterRun = await deps.captureArtifactSnapshot(executionWorkdir);
     deps.recordArtifactBatch(
       input.sessionKey,
       buildArtifactBatchFromSnapshots({
         requestId: input.requestId,
-        workdir: input.roomWorkdir,
+        workdir: executionWorkdir,
         before: artifactSnapshotBeforeRun,
         after: artifactSnapshotAfterRun,
         replyText: result.reply,
@@ -459,7 +467,7 @@ export async function executeChatRequest(
     );
     sendDurationMs = Date.now() - sendStartedAt;
 
-    deps.stateStore.commitExecutionSuccess(input.sessionKey, input.message.eventId, result.sessionId);
+    deps.stateStore.commitExecutionSuccess(input.sessionKey, input.message.eventId, result.sessionId, executionWorkdir);
     deps.recordRequestTraceFinish(input.requestId, "succeeded", null, result.reply, result.sessionId);
     deps.recordRequestMetrics("success", input.queueWaitMs, executionDurationMs, sendDurationMs);
     deps.logger.info("Request completed", {

@@ -3088,6 +3088,66 @@ describe("Orchestrator", () => {
     }
   });
 
+  it("keeps chat workdir pinned after orchestrator restart", async () => {
+    const { dir, store } = await createSqliteStateStore("codeharbor-orch-chat-workdir-");
+    const originalWorkdir = path.join(dir, "workspace-original");
+    const fallbackWorkdir = path.join(dir, "workspace-fallback");
+    await fs.mkdir(originalWorkdir, { recursive: true });
+    await fs.mkdir(fallbackWorkdir, { recursive: true });
+
+    const options = {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      outputLanguage: "en" as const,
+      progressUpdatesEnabled: false,
+      multiAgentWorkflow: {
+        enabled: true,
+        autoRepairMaxRounds: 1,
+      },
+    };
+
+    try {
+      const firstChannel = new FakeChannel();
+      const firstExecutor = new ImmediateExecutor();
+      const first = new Orchestrator(firstChannel, firstExecutor as never, store as never, logger as never, {
+        ...options,
+        defaultCodexWorkdir: originalWorkdir,
+      });
+
+      await first.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "first chat request",
+          eventId: "$chat-workdir-first",
+        }),
+      );
+      await waitForCondition(() => firstExecutor.calls.length === 1, 8_000);
+      expect(firstExecutor.calls[0]?.workdir).toBe(path.resolve(originalWorkdir));
+
+      const secondChannel = new FakeChannel();
+      const secondExecutor = new ImmediateExecutor();
+      const second = new Orchestrator(secondChannel, secondExecutor as never, store as never, logger as never, {
+        ...options,
+        defaultCodexWorkdir: fallbackWorkdir,
+      });
+
+      await second.handleMessage(
+        makeInbound({
+          isDirectMessage: true,
+          text: "second chat request",
+          eventId: "$chat-workdir-second",
+        }),
+      );
+      await waitForCondition(() => secondExecutor.calls.length === 1, 8_000);
+
+      expect(secondExecutor.calls).toHaveLength(1);
+      expect(secondExecutor.calls[0]?.sessionId).toBe("thread-1");
+      expect(secondExecutor.calls[0]?.workdir).toBe(path.resolve(originalWorkdir));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs /autodev and marks selected task completed when approved", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codeharbor-orch-autodev-"));
     const requirementsPath = path.join(tempRoot, "REQUIREMENTS.md");

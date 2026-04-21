@@ -1524,7 +1524,7 @@ export class Orchestrator {
       workdir: input.workdir,
       timeoutMs: this.autoDevInitEnhancementTimeoutMs,
     });
-    this.stateStore.setCodexSessionId(input.sessionKey, executionResult.sessionId);
+    this.stateStore.setCodexSessionId(input.sessionKey, executionResult.sessionId, input.workdir);
     return this.parseAutoDevInitEnhancementResult(executionResult.reply);
   }
 
