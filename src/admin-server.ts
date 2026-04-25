@@ -3561,6 +3561,7 @@ function formatSessionHistoryEntry(entry: SessionHistoryRecord): {
   roomId: string | null;
   userId: string | null;
   codexSessionId: string | null;
+  codexWorkdir: string | null;
   activeUntil: number | null;
   activeUntilIso: string | null;
   updatedAt: number;
@@ -3575,6 +3576,7 @@ function formatSessionHistoryEntry(entry: SessionHistoryRecord): {
     roomId: entry.roomId,
     userId: entry.userId,
     codexSessionId: entry.codexSessionId,
+    codexWorkdir: entry.codexWorkdir,
     activeUntil: entry.activeUntil,
     activeUntilIso: entry.activeUntil === null ? null : new Date(entry.activeUntil).toISOString(),
     updatedAt: entry.updatedAt,
@@ -3611,6 +3613,7 @@ function formatSessionExportEntry(entry: SessionHistoryRecord & { messages?: Ses
   roomId: string | null;
   userId: string | null;
   codexSessionId: string | null;
+  codexWorkdir: string | null;
   activeUntil: number | null;
   activeUntilIso: string | null;
   updatedAt: number;

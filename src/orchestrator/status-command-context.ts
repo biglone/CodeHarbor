@@ -48,6 +48,7 @@ interface StatusCommandContextInput {
       activeUntil: string | null;
       hasCodexSession: boolean;
     };
+    getCodexSessionWorkdir?: (sessionKey: string) => string | null;
   };
   resolveRoomRuntimeConfig: (conversationId: string) => {
     source: "default" | "room";
@@ -200,6 +201,9 @@ export function buildStatusCommandDispatchContext(input: StatusCommandContextInp
     autoDevInitEnhancementTimeoutMs: input.autoDevInitEnhancementTimeoutMs,
     autoDevInitEnhancementMaxChars: input.autoDevInitEnhancementMaxChars,
     getSessionStatus: (sessionKey: string) => input.stateStore.getSessionStatus(sessionKey),
+    getCodexSessionWorkdir: input.stateStore.getCodexSessionWorkdir
+      ? (sessionKey: string) => input.stateStore.getCodexSessionWorkdir?.(sessionKey) ?? null
+      : undefined,
     resolveRoomRuntimeConfig: (conversationId: string) => input.resolveRoomRuntimeConfig(conversationId),
     getRuntimeMetricsSnapshot: () => input.getRuntimeMetricsSnapshot(),
     getRateLimiterSnapshot: () => input.getRateLimiterSnapshot(),

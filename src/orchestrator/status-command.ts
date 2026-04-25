@@ -75,6 +75,7 @@ interface StatusCommandDeps {
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
   getSessionStatus: (sessionKey: string) => SessionStatusLike;
+  getCodexSessionWorkdir?: (sessionKey: string) => string | null;
   resolveRoomRuntimeConfig: (conversationId: string) => {
     source: "default" | "room";
     enabled: boolean;
@@ -141,6 +142,9 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       ? "single-bot planner->executor->reviewer (same session)"
       : "单机器人 planner->executor->reviewer（同一会话）";
   const activeUntil = status.activeUntil ?? localize("未激活", "inactive");
+  const persistedSessionWorkdir = deps.getCodexSessionWorkdir?.(input.sessionKey)?.trim() || null;
+  const effectiveWorkdir = persistedSessionWorkdir ?? roomConfig.workdir;
+  const workdirSource = persistedSessionWorkdir ? "session" : "room";
   const metrics = deps.getRuntimeMetricsSnapshot();
   const limiter = deps.getRateLimiterSnapshot();
   const runtime = deps.getBackendRuntimeStats();
@@ -213,7 +217,9 @@ export async function handleStatusCommand(deps: StatusCommandDeps, input: Status
       isActive: status.isActive,
       activeUntil,
       hasCodexSession: status.hasCodexSession,
-      workdir: roomConfig.workdir,
+      workdir: effectiveWorkdir,
+      workdirSource,
+      roomWorkdir: roomConfig.workdir,
       backendLabel: deps.formatBackendToolLabel(backendProfile),
       backendRouteMode,
       backendRouteReason,

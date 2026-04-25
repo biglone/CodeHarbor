@@ -11,16 +11,18 @@ On `push` to `main` and pull requests, CI runs:
 1. `npm ci`
 2. `npm run typecheck`
 3. `npm run lint`
-4. `npm test`
-5. `npm run test:coverage` (includes core-module coverage guard)
-6. `npm run test:e2e`
-7. `npm run build`
-8. `node dist/cli.js --help` (CLI smoke check)
-9. `npm pack --dry-run` (package integrity check)
+4. `npm run docs:check-release-index`
+5. `npm run docs:check-consistency`
+6. `npm test`
+7. `npm run test:coverage` (includes core-module coverage guard)
+8. `npm run test:e2e`
+9. `npm run build`
+10. `node dist/cli.js --help` (CLI smoke check)
+11. `npm pack --dry-run` (package integrity check)
 
 On publish-intent runs, release workflow additionally enforces:
 
-10. `npm run changelog:check` (must contain changelog notes for current package version)
+12. `npm run changelog:check` (must contain changelog notes for current package version)
 
 ## npm Publish Triggers
 
@@ -80,8 +82,8 @@ The workflow will automatically prefer token mode when this secret exists.
 4. Update `CHANGELOG.md` with a new section for target version and notable bullet points.
 5. Bump version:
    - `npm version patch` or `npm version minor` or `npm version major`
-6. Validate changelog entry:
-   - `npm run changelog:check`
+6. Run release verification:
+   - `npm run release:verify`
 7. Push commit to `main` with a publish-trigger message.
 8. Wait for `Release NPM` workflow to finish.
 9. Verify:
@@ -96,6 +98,8 @@ The workflow will automatically prefer token mode when this secret exists.
 12. Publish community notes:
    - create GitHub Release notes (auto-generated + hand edits)
    - open/update a Discussions `Announcements` post and link feedback channels
+
+If your machine has no system Chrome, run `npm run e2e:install` once before `npm run release:verify`.
 
 ## Release Notes Index Convention
 

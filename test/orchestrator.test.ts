@@ -57,6 +57,7 @@ class NoticeFailingChannel extends FakeChannel {
 
 interface FakeSessionState {
   codexSessionId: string | null;
+  codexWorkdir: string | null;
   processedEventIds: Set<string>;
   activeUntil: string | null;
 }
@@ -84,12 +85,20 @@ class FakeStateStore {
     return this.sessions.get(sessionKey)?.codexSessionId ?? null;
   }
 
-  setCodexSessionId(sessionKey: string, value: string): void {
-    this.ensureSession(sessionKey).codexSessionId = value;
+  getCodexSessionWorkdir(sessionKey: string): string | null {
+    return this.sessions.get(sessionKey)?.codexWorkdir ?? null;
+  }
+
+  setCodexSessionId(sessionKey: string, value: string, workdir?: string | null): void {
+    const session = this.ensureSession(sessionKey);
+    session.codexSessionId = value;
+    session.codexWorkdir = workdir?.trim() || null;
   }
 
   clearCodexSessionId(sessionKey: string): void {
-    this.ensureSession(sessionKey).codexSessionId = null;
+    const session = this.ensureSession(sessionKey);
+    session.codexSessionId = null;
+    session.codexWorkdir = null;
   }
 
   hasProcessedEvent(sessionKey: string, eventId: string): boolean {
@@ -100,9 +109,10 @@ class FakeStateStore {
     this.ensureSession(sessionKey).processedEventIds.add(eventId);
   }
 
-  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string): void {
+  commitExecutionSuccess(sessionKey: string, eventId: string, codexSessionId: string, workdir?: string | null): void {
     const session = this.ensureSession(sessionKey);
     session.codexSessionId = codexSessionId;
+    session.codexWorkdir = workdir?.trim() || session.codexWorkdir;
     session.processedEventIds.add(eventId);
   }
 
@@ -202,6 +212,7 @@ class FakeStateStore {
     }
     const created: FakeSessionState = {
       codexSessionId: null,
+      codexWorkdir: null,
       processedEventIds: new Set<string>(),
       activeUntil: null,
     };
@@ -912,6 +923,36 @@ describe("Orchestrator", () => {
     expect(codexExecutor.callCount).toBe(1);
     expect(channel.sent.some((entry) => entry.text.includes("codex:please ask anthropic model"))).toBe(true);
     expect(channel.notices.some((entry) => entry.text.includes("backend route: mode=auto, reason=factory_unavailable, rule=prefer-claude-chat"))).toBe(true);
+  });
+
+  it("shows effective session workdir and room default in /status", async () => {
+    const channel = new FakeChannel();
+    const executor = new TaggedExecutor("codex");
+    const store = new FakeStateStore();
+    const roomWorkdir = "/workspace/default-room";
+    const sessionWorkdir = "/workspace/persisted-session";
+    const orchestrator = new Orchestrator(channel, executor as never, store as never, logger as never, {
+      commandPrefix: "!code",
+      matrixUserId: "@bot:example.com",
+      progressUpdatesEnabled: false,
+      outputLanguage: "en",
+      defaultCodexWorkdir: roomWorkdir,
+    });
+
+    const message = makeInbound({
+      isDirectMessage: true,
+      text: "/status",
+      eventId: "$status-workdir-visibility",
+    });
+    const sessionKey = buildSessionKey(message);
+    store.setCodexSessionId(sessionKey, "thread-1", sessionWorkdir);
+
+    await orchestrator.handleMessage(message);
+
+    const statusNotice = channel.notices.find((entry) => entry.text.includes("Current status"))?.text ?? "";
+    expect(statusNotice).toContain(`workdir: ${sessionWorkdir}`);
+    expect(statusNotice).toContain("workdirSource: session");
+    expect(statusNotice).toContain(`roomWorkdir: ${roomWorkdir}`);
   });
 
   it("shows /diag route with rule hit and fallback reason details", async () => {

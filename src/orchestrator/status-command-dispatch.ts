@@ -58,6 +58,7 @@ interface StatusCommandDispatchContext {
   workflowOutputContextMaxChars: number | null;
   workflowFeedbackContextMaxChars: number | null;
   getSessionStatus: (sessionKey: string) => SessionStatusLike;
+  getCodexSessionWorkdir?: (sessionKey: string) => string | null;
   resolveRoomRuntimeConfig: (conversationId: string) => {
     source: "default" | "room";
     enabled: boolean;
@@ -140,6 +141,9 @@ export async function sendStatusCommand(
       workflowOutputContextMaxChars: context.workflowOutputContextMaxChars,
       workflowFeedbackContextMaxChars: context.workflowFeedbackContextMaxChars,
       getSessionStatus: (sessionKey) => context.getSessionStatus(sessionKey),
+      getCodexSessionWorkdir: context.getCodexSessionWorkdir
+        ? (sessionKey) => context.getCodexSessionWorkdir?.(sessionKey) ?? null
+        : undefined,
       resolveRoomRuntimeConfig: (conversationId) => context.resolveRoomRuntimeConfig(conversationId),
       getRuntimeMetricsSnapshot: () => context.getRuntimeMetricsSnapshot(),
       getRateLimiterSnapshot: () => context.getRateLimiterSnapshot(),

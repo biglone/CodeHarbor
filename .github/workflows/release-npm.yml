@@ -100,6 +100,10 @@ jobs:
         if: steps.intent.outputs.publish == 'true'
         run: npm run docs:check-release-index
 
+      - name: Docs consistency check
+        if: steps.intent.outputs.publish == 'true'
+        run: npm run docs:check-consistency
+
       - name: Unit tests
         if: steps.intent.outputs.publish == 'true'
         run: npm test

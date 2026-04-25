@@ -248,7 +248,7 @@ Trigger rules:
   - examples: `release v0.1.1`, `chore: release 0.1.2`
 - `workflow_dispatch` -> manual publish from GitHub Actions UI
 
-The workflow runs `typecheck`, `test`, `test:e2e` (Admin UI Playwright), `build`, `node dist/cli.js --help`, `npm pack --dry-run`, then publishes with:
+The workflow runs the same checks as `npm run release:verify` (changelog + docs guards, typecheck, lint, unit tests, coverage, Admin UI Playwright, build, CLI smoke, package dry-run), then publishes with:
 
 ```bash
 npm publish --provenance --access public
@@ -265,8 +265,8 @@ Release checklist (recommended):
 
 1. Update `CHANGELOG.md` with a new version section and bullet-point release notes.
 2. Update version in `package.json` (`npm version patch|minor|major`).
-3. Validate changelog entry:
-   - `npm run changelog:check`
+3. Run release verification:
+   - `npm run release:verify`
 4. Push to `main` with `[publish-npm]` or `release vX.Y.Z` in commit message.
 5. Verify workflow status in GitHub Actions.
 6. Verify package on npm:
@@ -284,11 +284,11 @@ Run e2e locally:
 npm run test:e2e
 ```
 
-If your machine has no system Chrome, run:
+If your machine has no system Chrome, install Playwright Chromium once. The test config will then automatically fall back to the bundled browser:
 
 ```bash
-PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run e2e:install
-PLAYWRIGHT_USE_SYSTEM_CHROME=false npm run test:e2e
+npm run e2e:install
+npm run test:e2e
 ```
 
 ## Planning Docs
@@ -374,11 +374,13 @@ It documents:
 - `codeharbor config export`: export current config snapshot as JSON
 - `codeharbor config import <file>`: import config snapshot JSON (supports `--dry-run`)
 - `npm run changelog:check`: validate `CHANGELOG.md` has notes for current package version
+- `npm run docs:check-consistency`: validate README/REQUIREMENTS/TASK_LIST version and Node requirement sync
+- `npm run release:verify`: run release-grade local verification before publish
 - `scripts/install-linux.sh`: Linux bootstrap installer (creates runtime dir + installs npm package)
 - `scripts/install-linux-easy.sh`: one-shot Linux install + config + systemd auto-start
 - `scripts/backup-config.sh`: export timestamped snapshot and keep latest N backups
 - `scripts/install-backup-timer.sh`: install/update user-level systemd timer for automatic backups
-- `npm run test:e2e`: run Admin UI end-to-end tests (Playwright)
+- `npm run test:e2e`: run Admin UI end-to-end tests (Playwright; auto-uses system Chrome when available, otherwise bundled Chromium)
 
 ## Community and Feedback
 

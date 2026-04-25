@@ -961,6 +961,7 @@ describe("StateStore", () => {
 
     store.appendConversationMessage(sessionA, "user", "codex", "hello from alice");
     store.appendConversationMessage(sessionC, "assistant", "codex", "hello from room-b");
+    store.setCodexSessionId(sessionA, "thread-a", "/workspace/alice");
 
     const all = store.listSessionHistory({ limit: 10, offset: 0 });
     expect(all.total).toBe(3);
@@ -985,6 +986,8 @@ describe("StateStore", () => {
       expect.objectContaining({
         roomId: "!room-a:example.com",
         userId: "@alice:example.com",
+        codexSessionId: "thread-a",
+        codexWorkdir: "/workspace/alice",
         messageCount: 1,
       }),
     );

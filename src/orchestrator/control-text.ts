@@ -87,6 +87,8 @@ export function buildStatusNotice(input: {
   activeUntil: string;
   hasCodexSession: boolean;
   workdir: string;
+  workdirSource: "session" | "room";
+  roomWorkdir: string;
   backendLabel: string;
   backendRouteMode: string;
   backendRouteReason: string;
@@ -161,6 +163,8 @@ export function buildStatusNotice(input: {
   const active = byOutputLanguage(input.outputLanguage, "激活中", "active");
   const bound = byOutputLanguage(input.outputLanguage, "已绑定会话", "sessionBound");
   const cwd = byOutputLanguage(input.outputLanguage, "当前工作目录", "workdir");
+  const workdirSourceLabel = byOutputLanguage(input.outputLanguage, "工作目录来源", "workdirSource");
+  const roomWorkdirLabel = byOutputLanguage(input.outputLanguage, "房间默认工作目录", "roomWorkdir");
   const currentVersion = byOutputLanguage(input.outputLanguage, "当前版本", "currentVersion");
   const updateCheck = byOutputLanguage(input.outputLanguage, "更新检查", "updateHint");
   const checkedAt = byOutputLanguage(input.outputLanguage, "更新检查时间", "checkedAt");
@@ -175,6 +179,10 @@ export function buildStatusNotice(input: {
   const limiter = byOutputLanguage(input.outputLanguage, "限流并发", "limiter");
   const autoDevStage = byOutputLanguage(input.outputLanguage, "AutoDev 阶段", "AutoDev stage");
   const autoDevStageDetail = byOutputLanguage(input.outputLanguage, "AutoDev 阶段详情", "AutoDev stage detail");
+  const workdirSourceValue =
+    input.workdirSource === "session"
+      ? byOutputLanguage(input.outputLanguage, "会话恢复", "session")
+      : byOutputLanguage(input.outputLanguage, "房间默认", "room");
 
   return `${input.botNoticePrefix} ${title}
 - ${sessionType}: ${input.scope}
@@ -188,6 +196,8 @@ export function buildStatusNotice(input: {
 - activeUntil: ${input.activeUntil}
 - ${bound}: ${sessionText}
 - ${cwd}: ${input.workdir}
+- ${workdirSourceLabel}: ${workdirSourceValue}
+- ${roomWorkdirLabel}: ${input.roomWorkdir}
 - AI CLI: ${input.backendLabel}
 - backend route: mode=${input.backendRouteMode}, reason=${input.backendRouteReason}, rule=${input.backendRouteRuleId}
 - backend route detail: desc=${input.backendRouteReasonDesc}, fallback=${input.backendRouteFallback}

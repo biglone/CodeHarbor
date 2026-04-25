@@ -123,6 +123,7 @@ export interface SessionHistoryRecord {
   roomId: string | null;
   userId: string | null;
   codexSessionId: string | null;
+  codexWorkdir: string | null;
   activeUntil: number | null;
   updatedAt: number;
   messageCount: number;
@@ -1842,6 +1843,7 @@ export class StateStore {
           SELECT
             s.session_key,
             s.codex_session_id,
+            s.codex_workdir,
             s.active_until,
             s.updated_at,
             idx.channel,
@@ -1863,6 +1865,7 @@ export class StateStore {
       .all(...whereArgs, safeLimit, safeOffset) as Array<{
       session_key: string;
       codex_session_id: string | null;
+      codex_workdir: string | null;
       active_until: number | null;
       updated_at: number;
       channel: string | null;
@@ -1880,6 +1883,7 @@ export class StateStore {
         roomId: row.room_id,
         userId: row.user_id,
         codexSessionId: row.codex_session_id,
+        codexWorkdir: row.codex_workdir?.trim() || null,
         activeUntil: row.active_until,
         updatedAt: row.updated_at,
         messageCount: Number(row.message_count ?? 0),

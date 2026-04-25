@@ -160,7 +160,7 @@ Admin UI -> Config Service -> SQLite(config tables) + runtime config cache
 - 性能要求：单实例默认支持 >= 8 并发执行，可通过配置扩展到更高并发。
 - 安全要求：敏感配置脱敏展示，不记录 access token 明文日志。
 - 可用性要求：配置保存错误必须可读可定位；关键检查项需在 UI 和 CLI 双通道可见。
-- 兼容性要求：Linux/macOS 运行；Node.js >= 20。
+- 兼容性要求：Linux/macOS 运行；Node.js >= 22。
 
 ---
 生成时间：2026-03-21 20:20:00 CST

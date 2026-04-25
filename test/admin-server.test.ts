@@ -772,6 +772,8 @@ describe("AdminServer", () => {
     const logger = new Logger("info");
 
     const sessionKey = "matrix:!room-history:example.com:@alice:example.com";
+    const sessionWorkdir = path.join(dir, "history-project");
+    fs.mkdirSync(sessionWorkdir, { recursive: true });
     stateStore.enqueueTask({
       sessionKey,
       eventId: "$history-1",
@@ -784,6 +786,7 @@ describe("AdminServer", () => {
         },
       }),
     });
+    stateStore.setCodexSessionId(sessionKey, "thread-history", sessionWorkdir);
     stateStore.appendConversationMessage(sessionKey, "user", "codex", "hello history");
     stateStore.appendConversationMessage(sessionKey, "assistant", "codex", "history reply");
 
@@ -805,6 +808,8 @@ describe("AdminServer", () => {
     );
     expect(sessions.status).toBe(200);
     expect(JSON.stringify(sessions.body)).toContain(sessionKey);
+    expect(JSON.stringify(sessions.body)).toContain('"codexSessionId":"thread-history"');
+    expect(JSON.stringify(sessions.body)).toContain(`"codexWorkdir":"${sessionWorkdir.replace(/\\/g, "\\\\")}"`);
     expect(JSON.stringify(sessions.body)).toContain('"messageCount":2');
     expect(JSON.stringify(sessions.body)).toContain("updatedAtIso");
 
@@ -843,6 +848,8 @@ describe("AdminServer", () => {
     const logger = new Logger("info");
 
     const exportSessionKey = "matrix:!room-export:example.com:@alice:example.com";
+    const exportWorkdir = path.join(dir, "export-project");
+    fs.mkdirSync(exportWorkdir, { recursive: true });
     stateStore.enqueueTask({
       sessionKey: exportSessionKey,
       eventId: "$export-1",
@@ -855,6 +862,7 @@ describe("AdminServer", () => {
         },
       }),
     });
+    stateStore.setCodexSessionId(exportSessionKey, "thread-export", exportWorkdir);
     stateStore.appendConversationMessage(exportSessionKey, "user", "codex", "export me");
 
     const server = new AdminServer(config, logger, stateStore, configService, {
@@ -875,6 +883,8 @@ describe("AdminServer", () => {
     );
     expect(exported.status).toBe(200);
     expect(JSON.stringify(exported.body)).toContain(exportSessionKey);
+    expect(JSON.stringify(exported.body)).toContain('"codexSessionId":"thread-export"');
+    expect(JSON.stringify(exported.body)).toContain(`"codexWorkdir":"${exportWorkdir.replace(/\\/g, "\\\\")}"`);
     expect(JSON.stringify(exported.body)).toContain("export me");
     expect(JSON.stringify(exported.body)).toContain("exportedAtIso");
 

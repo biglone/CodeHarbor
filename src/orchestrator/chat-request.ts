@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+
 import type { Logger } from "../logger";
 import type { RequestOutcomeMetric } from "../metrics";
 import type { BackendModelRouteProfile } from "../routing/backend-model-router";
@@ -176,20 +178,101 @@ interface ExecuteChatRequestInput {
   releaseRateLimit: () => void;
 }
 
+type ExecutionWorkdirSource = "session" | "room";
+type SessionWorkdirFallbackReason = "missing" | "not_directory" | "unavailable";
+
+interface ResolvedExecutionWorkdir {
+  workdir: string;
+  workdirSource: ExecutionWorkdirSource;
+  resumeSessionId: string | null;
+  fallbackReason: SessionWorkdirFallbackReason | null;
+}
+
+async function validatePersistedSessionWorkdir(
+  workdir: string,
+): Promise<{ valid: true } | { valid: false; reason: SessionWorkdirFallbackReason }> {
+  try {
+    const stats = await stat(workdir);
+    if (!stats.isDirectory()) {
+      return {
+        valid: false,
+        reason: "not_directory",
+      };
+    }
+    return { valid: true };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") {
+      return {
+        valid: false,
+        reason: "missing",
+      };
+    }
+    if (code === "ENOTDIR") {
+      return {
+        valid: false,
+        reason: "not_directory",
+      };
+    }
+    return {
+      valid: false,
+      reason: "unavailable",
+    };
+  }
+}
+
 export async function executeChatRequest(
   deps: ExecuteChatRequestDeps,
   input: ExecuteChatRequestInput,
 ): Promise<void> {
   const localize = (zh: string, en: string): string => byOutputLanguage(deps.outputLanguage, zh, en);
   deps.stateStore.activateSession(input.sessionKey, deps.sessionActiveWindowMs);
-  const previousCodexSessionId = deps.stateStore.getCodexSessionId(input.sessionKey);
+  const storedCodexSessionId = deps.stateStore.getCodexSessionId(input.sessionKey);
   const previousCodexSessionWorkdir =
-    previousCodexSessionId !== null
+    storedCodexSessionId !== null
       ? (deps.stateStore.getCodexSessionWorkdir?.(input.sessionKey)?.trim() || null)
       : null;
-  const executionWorkdir = previousCodexSessionWorkdir ?? input.roomWorkdir;
+  let resolvedWorkdir: ResolvedExecutionWorkdir = {
+    workdir: previousCodexSessionWorkdir ?? input.roomWorkdir,
+    workdirSource: previousCodexSessionWorkdir ? "session" : "room",
+    resumeSessionId: storedCodexSessionId,
+    fallbackReason: null,
+  };
+  if (previousCodexSessionWorkdir) {
+    const validation = await validatePersistedSessionWorkdir(previousCodexSessionWorkdir);
+    if (!validation.valid) {
+      resolvedWorkdir = {
+        workdir: input.roomWorkdir,
+        workdirSource: "room",
+        resumeSessionId: null,
+        fallbackReason: validation.reason,
+      };
+      const fallbackReasonText =
+        validation.reason === "missing"
+          ? localize("目录不存在", "directory_missing")
+          : validation.reason === "not_directory"
+            ? localize("路径不是目录", "path_not_directory")
+            : localize("目录不可访问", "directory_unavailable");
+      await deps.sendNotice(
+        input.message.conversationId,
+        localize(
+          `[CodeHarbor] 检测到当前会话记录的工作目录不可用，已回退到房间默认目录并重新建立会话。\n- sessionWorkdir: ${previousCodexSessionWorkdir}\n- fallbackWorkdir: ${input.roomWorkdir}\n- reason: ${fallbackReasonText}`,
+          `[CodeHarbor] Stored session workdir is unavailable. Falling back to the room default workdir and starting a new session.\n- sessionWorkdir: ${previousCodexSessionWorkdir}\n- fallbackWorkdir: ${input.roomWorkdir}\n- reason: ${fallbackReasonText}`,
+        ),
+      );
+      deps.logger.warn("Stored Codex session workdir unavailable, falling back to room workdir", {
+        requestId: input.requestId,
+        sessionKey: input.sessionKey,
+        storedCodexSessionId,
+        sessionWorkdir: previousCodexSessionWorkdir,
+        fallbackWorkdir: input.roomWorkdir,
+        sessionWorkdirFallback: validation.reason,
+      });
+    }
+  }
+  const executionWorkdir = resolvedWorkdir.workdir;
   const allowBridgeContext =
-    previousCodexSessionId === null && !deps.skipBridgeForNextPrompt.delete(input.sessionKey);
+    resolvedWorkdir.resumeSessionId === null && !deps.skipBridgeForNextPrompt.delete(input.sessionKey);
   const bridgeContext = allowBridgeContext ? deps.buildConversationBridgeContext(input.sessionKey) : null;
   let autoDevRuntimeContext: string | null = null;
   try {
@@ -269,7 +352,8 @@ export async function executeChatRequest(
   deps.logger.info("Processing message", {
     requestId: input.requestId,
     sessionKey: input.sessionKey,
-    hasCodexSession: Boolean(previousCodexSessionId),
+    hasCodexSession: Boolean(storedCodexSessionId),
+    resumedCodexSession: Boolean(resolvedWorkdir.resumeSessionId),
     backend: deps.formatBackendToolLabel(input.backendProfile),
     backendRouteSource: input.backendRouteSource,
     backendRouteReason: input.backendRouteReason,
@@ -277,8 +361,11 @@ export async function executeChatRequest(
     queueWaitMs: input.queueWaitMs,
     attachmentCount: input.message.attachments.length,
     workdir: executionWorkdir,
+    effectiveWorkdir: executionWorkdir,
     roomWorkdir: input.roomWorkdir,
-    sessionWorkdirSource: previousCodexSessionWorkdir ? "session" : "room",
+    sessionWorkdir: previousCodexSessionWorkdir,
+    sessionWorkdirSource: resolvedWorkdir.workdirSource,
+    sessionWorkdirFallback: resolvedWorkdir.fallbackReason ?? "none",
     roomConfigSource: input.roomConfigSource,
     isDirectMessage: input.message.isDirectMessage,
     mentionsBot: input.message.mentionsBot,
@@ -293,7 +380,7 @@ export async function executeChatRequest(
       executionHandle = input.sessionRuntime.startExecution(
         input.sessionKey,
         executionPrompt,
-        previousCodexSessionId,
+        resolvedWorkdir.resumeSessionId,
         (progress) => {
           const progressText = summarizeSingleLine(
             `${progress.stage}${progress.message ? `: ${progress.message}` : ""}`,

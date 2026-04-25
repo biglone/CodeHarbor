@@ -31,6 +31,9 @@ jobs:
       - name: Docs release-index check
         run: npm run docs:check-release-index
 
+      - name: Docs consistency check
+        run: npm run docs:check-consistency
+
       - name: Unit tests
         run: npm test
 

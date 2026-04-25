@@ -80,10 +80,12 @@
     "prepublishOnly": "npm run changelog:check && npm run typecheck && npm run lint && npm run test:coverage && npm run build",
     "changelog:check": "bash ./scripts/check-changelog.sh",
     "docs:check-release-index": "node ./scripts/check-release-notes-index.mjs",
+    "docs:check-consistency": "node ./scripts/check-doc-consistency.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:coverage": "vitest run test --coverage && npm run -s test:coverage:core",
-    "test:coverage:core": "node ./scripts/check-core-coverage-thresholds.mjs"
+    "test:coverage:core": "node ./scripts/check-core-coverage-thresholds.mjs",
+    "release:verify": "npm run changelog:check && npm run docs:check-release-index && npm run docs:check-consistency && npm run typecheck && npm run lint && npm test && npm run test:coverage && npm run test:e2e && npm run build && node dist/cli.js --help > /dev/null && npm pack --dry-run"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",
