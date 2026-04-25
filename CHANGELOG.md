@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.104] - 2026-04-25
+
+- Matrix session continuity: persist the effective workdir alongside the backend session so the same Matrix room/user session keeps its original workspace after service restart.
+- restart-safe recovery: resumed chat requests now prefer the persisted session workdir over the current room default, preventing post-restart context drift into the fallback directory.
+- state migration and regression coverage: add backward-compatible `sessions.codex_workdir` migration plus restart-focused tests for state-store and orchestrator recovery.
+
 ## [0.1.103] - 2026-04-15
 
 - startup hotfix: prevent startup crash on upgraded legacy SQLite databases where `task_queue.source` is still missing (`ERR_SQLITE_ERROR: no such column: source`).
