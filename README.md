@@ -15,11 +15,13 @@ Quick feedback:
 - Feature request: <https://github.com/biglone/CodeHarbor/issues/new?template=feature_request.yml>
 - Release announcements (EN/中文 in one thread): <https://github.com/biglone/CodeHarbor/discussions/3>
 - Roadmap poll (EN/中文 in one thread): <https://github.com/biglone/CodeHarbor/discussions/4>
-- Latest release notes: [docs/releases/v0.1.104-release-notes.md](docs/releases/v0.1.104-release-notes.md)
-- Latest bilingual announcement: [docs/releases/v0.1.104-announcement-bilingual.md](docs/releases/v0.1.104-announcement-bilingual.md)
+- Latest release notes: [docs/releases/v0.1.105-release-notes.md](docs/releases/v0.1.105-release-notes.md)
+- Latest bilingual announcement: [docs/releases/v0.1.105-announcement-bilingual.md](docs/releases/v0.1.105-announcement-bilingual.md)
 
 ## Release Notes Index
 
+- v0.1.105 notes: [docs/releases/v0.1.105-release-notes.md](docs/releases/v0.1.105-release-notes.md)
+- v0.1.105 announcement (EN/中文): [docs/releases/v0.1.105-announcement-bilingual.md](docs/releases/v0.1.105-announcement-bilingual.md)
 - v0.1.104 notes: [docs/releases/v0.1.104-release-notes.md](docs/releases/v0.1.104-release-notes.md)
 - v0.1.104 announcement (EN/中文): [docs/releases/v0.1.104-announcement-bilingual.md](docs/releases/v0.1.104-announcement-bilingual.md)
 - v0.1.103 notes: [docs/releases/v0.1.103-release-notes.md](docs/releases/v0.1.103-release-notes.md)

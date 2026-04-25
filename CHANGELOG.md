@@ -8,6 +8,12 @@ The format is based on Keep a Changelog and follows semantic versioning.
 
 - none.
 
+## [0.1.105] - 2026-04-26
+
+- workdir recovery hardening: validate persisted Matrix session workdirs before reuse, fall back to the room default when the stored path is missing or invalid, and rebind the resumed conversation safely.
+- runtime visibility: `/status` now reports the effective workdir, its source (`session` vs `room`), and session history/admin export now includes the persisted Codex workdir for diagnostics.
+- release/test reliability: Playwright e2e now auto-falls back to bundled Chromium when system Chrome is unavailable, and `release:verify` plus docs consistency guards keep local release validation aligned with CI.
+
 ## [0.1.104] - 2026-04-25
 
 - Matrix session continuity: persist the effective workdir alongside the backend session so the same Matrix room/user session keeps its original workspace after service restart.
